@@ -39,13 +39,13 @@ cargo check
 Install dependencies:
 
 ```bash
-npm install
+pnpm install
 ```
 
 Start the dev server:
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 The frontend expects the backend to be running on port `8080` at the same hostname as the frontend, for example `http://127.0.0.1:8080`. On startup it prompts for an operator callsign, uppercases it, then loads contest settings and contacts. If loading fails, it shows an alert.
@@ -53,14 +53,14 @@ The frontend expects the backend to be running on port `8080` at the same hostna
 Build for production:
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 Useful frontend checks:
 
 ```bash
-npm run lint
-npm run build
+pnpm run lint
+pnpm run build
 ```
 
 ## Current contest module
