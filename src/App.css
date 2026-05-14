@@ -3,9 +3,9 @@
 .app-container {
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
-  height: 100vh;
+  min-height: 100vh;
   background-color: #f0f0f0;
   font-family: 'Arial', sans-serif;
   font-size: 12px;
@@ -53,35 +53,41 @@
 
 .entry-fields {
   display: flex;
+  align-items: flex-end;
   justify-content: flex-start;
+  gap: 6px;
   padding: 10px;
+  overflow-x: auto;
+}
+
+.entry-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+.entry-field span {
+  font-size: 11px;
 }
 
 .entry-fields input {
   border: 1px solid #000;
   background-color: white;
-  margin-right: 5px;
   padding: 2px;
   text-align: center;
   font-size: 24px;
+  text-transform: uppercase;
 }
 
-.entry-fields input::placeholder {
-  font-size: 16px;
-  color: #808080;
-  opacity: 1;
+.entry-fields input:read-only {
+  background-color: #e8e8e8;
+  color: #333;
 }
 
 .callsign {
-  width: 120px;
-}
-
-.report {
-  width: 60px;
-}
-
-.power {
-  width: 180px;
+  width: 12ch;
 }
 
 .function-keys {
@@ -199,6 +205,14 @@
 
 .log-table td {
   color: #000;
+}
+
+.log-table .empty-log {
+  height: 190px;
+  text-align: center;
+  vertical-align: middle;
+  color: #555;
+  font-style: italic;
 }
 
 .log-table tbody tr:nth-child(odd) {

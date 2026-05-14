@@ -1,104 +1,48 @@
 import React from 'react';
 import './App.css';
 
-function LogWindow() {
-  // Sample data mimicking the N1MM+ log window
-  const logData = [
-    {
-      time: '12:00',
-      freq: '14025',
-      call: 'W1AW',
-      rstSent: '59',
-      rstRcvd: '59',
-      nr: '001',
-      mult1: 'CT',
-      mult2: '',
-      pts: '2',
-      op: 'K1ZZ',
-    },
-    {
-      time: '12:02',
-      freq: '14027',
-      call: 'K3LR',
-      rstSent: '59',
-      rstRcvd: '59',
-      nr: '002',
-      mult1: 'PA',
-      mult2: '',
-      pts: '2',
-      op: 'K1ZZ',
-    },
-    {
-      time: '12:05',
-      freq: '14030',
-      call: 'N2IC',
-      rstSent: '59',
-      rstRcvd: '59',
-      nr: '003',
-      mult1: 'NM',
-      mult2: '',
-      pts: '2',
-      op: 'K1ZZ',
-    },
-    {
-      time: '12:07',
-      freq: '14028',
-      call: 'VE3EJ',
-      rstSent: '59',
-      rstRcvd: '59',
-      nr: '004',
-      mult1: 'ON',
-      mult2: '',
-      pts: '4',
-      op: 'K1ZZ',
-    },
-    {
-      time: '12:10',
-      freq: '14026',
-      call: 'W4AN',
-      rstSent: '59',
-      rstRcvd: '59',
-      nr: '005',
-      mult1: 'GA',
-      mult2: '',
-      pts: '2',
-      op: 'K1ZZ',
-    },
-  ];
+function formatCell(column, value) {
+  if (column === 'Time' && typeof value === 'number') {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(new Date(value * 1000));
+  }
+
+  return value ?? '';
+}
+
+function LogWindow({ settings, contacts }) {
+  const columns = settings?.qso_columns ?? [];
 
   return (
     <div className="log-window">
-      <div className="log-title-bar">Log: CQ WW SSB</div>
+      <div className="log-title-bar">Log: {settings?.contest ?? 'Loading contest...'}</div>
       <table className="log-table">
         <thead>
           <tr>
-            <th>Time</th>
-            <th>Freq</th>
-            <th>Call</th>
-            <th>RST S</th>
-            <th>RST R</th>
-            <th>Nr</th>
-            <th>Mult1</th>
-            <th>Mult2</th>
-            <th>Pts</th>
-            <th>Op</th>
+            {columns.map((column) => (
+              <th key={column}>{column}</th>
+            ))}
           </tr>
         </thead>
         <tbody>
-          {logData.map((entry, index) => (
-            <tr key={index}>
-              <td>{entry.time}</td>
-              <td>{entry.freq}</td>
-              <td>{entry.call}</td>
-              <td>{entry.rstSent}</td>
-              <td>{entry.rstRcvd}</td>
-              <td>{entry.nr}</td>
-              <td>{entry.mult1}</td>
-              <td>{entry.mult2}</td>
-              <td>{entry.pts}</td>
-              <td>{entry.op}</td>
+          {contacts.map((entry, index) => (
+            <tr key={`${entry.Time ?? 'row'}-${entry.Call ?? index}`}>
+              {columns.map((column) => (
+                <td key={column}>{formatCell(column, entry[column])}</td>
+              ))}
             </tr>
           ))}
+          {contacts.length === 0 && (
+            <tr>
+              <td colSpan={Math.max(columns.length, 1)} className="empty-log">
+                No contacts loaded.
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
