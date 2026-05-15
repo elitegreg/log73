@@ -93,7 +93,6 @@ fn ssb_mode_for_frequency(frequency_hz: u64) -> rigctld::Mode {
 
     match band_for_frequency(frequency).map(|band| band.meters) {
         Some(meters) if meters >= 40 => rigctld::Mode::LSB,
-        Some(meters) if meters <= 20 => rigctld::Mode::USB,
         _ => rigctld::Mode::USB,
     }
 }
