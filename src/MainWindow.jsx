@@ -3,6 +3,20 @@ import './App.css';
 
 export const STATION_CALLSIGN = 'NG4M';
 const MODE_OPTIONS = ['CW', 'SSB', 'FM', 'AM'];
+const AMATEUR_BANDS = [
+  { meters: 160, name: '160m', lowerHz: 1800000, upperHz: 2000000 },
+  { meters: 80, name: '80m', lowerHz: 3500000, upperHz: 4000000 },
+  { meters: 60, name: '60m', lowerHz: 5330500, upperHz: 5406500 },
+  { meters: 40, name: '40m', lowerHz: 7000000, upperHz: 7300000 },
+  { meters: 30, name: '30m', lowerHz: 10100000, upperHz: 10150000 },
+  { meters: 20, name: '20m', lowerHz: 14000000, upperHz: 14350000 },
+  { meters: 17, name: '17m', lowerHz: 18068000, upperHz: 18168000 },
+  { meters: 15, name: '15m', lowerHz: 21000000, upperHz: 21450000 },
+  { meters: 12, name: '12m', lowerHz: 24890000, upperHz: 24990000 },
+  { meters: 10, name: '10m', lowerHz: 28000000, upperHz: 29700000 },
+  { meters: 6, name: '6m', lowerHz: 50000000, upperHz: 54000000 },
+  { meters: 2, name: '2m', lowerHz: 144000000, upperHz: 148000000 },
+];
 
 function parseFieldType(type = '', radioMode = 'CW') {
   const [rawKind = 'STRING', length = '8'] = type.split(':');
@@ -46,6 +60,16 @@ function isFrequencyInput(value) {
   return /^\d+(\.\d+)?$/.test(value.trim());
 }
 
+function bandForFrequency(frequencyHz) {
+  return AMATEUR_BANDS.find(
+    (band) => frequencyHz >= band.lowerHz && frequencyHz <= band.upperHz,
+  );
+}
+
+function bandByMeters(meters) {
+  return AMATEUR_BANDS.find((band) => band.meters === meters);
+}
+
 function MainWindow({
   settings,
   operatorCallsign,
@@ -58,6 +82,19 @@ function MainWindow({
   const callSignRef = useRef(null);
   const radioMode = radioState?.mode ?? 'CW';
   const radioFrequencyHz = radioState?.frequency_hz ?? 14025000;
+  const allowedBands = settings?.allowed_bands ?? [];
+  const currentBand = bandForFrequency(radioFrequencyHz);
+  const currentBandValue = currentBand ? String(currentBand.meters) : 'unknown';
+  const currentBandAllowed = currentBand
+    ? allowedBands.includes(currentBand.meters)
+    : false;
+  const bandOptions = allowedBands
+    .map(bandByMeters)
+    .filter(Boolean);
+
+  if (currentBand && !bandOptions.some((band) => band.meters === currentBand.meters)) {
+    bandOptions.push(currentBand);
+  }
 
   useEffect(() => {
     if (!settings?.exchange) {
@@ -99,6 +136,14 @@ function MainWindow({
     }
   }
 
+  function handleBandChange(event) {
+    const selectedBand = bandByMeters(Number.parseInt(event.target.value, 10));
+
+    if (selectedBand) {
+      onSetRadioFrequency?.(selectedBand.lowerHz);
+    }
+  }
+
   function handleExchangeKeyDown(event, index) {
     const editableFields = settings.exchange.filter((field) => field.fixed !== true);
     const lastEditableField = editableFields[editableFields.length - 1];
@@ -119,11 +164,20 @@ function MainWindow({
         Mode: {radioMode}, Freq: {formatFrequency(radioFrequencyHz)} -{' '}
         {settings?.contest ?? 'Loading...'}
       </div>
-      <div className="menu-bar">
-        <span>File</span>
-        <span>Edit</span>
-        <label className="mode-menu">
-          Mode
+      <div className="radio-controls">
+        <label className={currentBandAllowed ? 'radio-control' : 'radio-control unsupported'}>
+          Band:
+          <select value={currentBandValue} onChange={handleBandChange}>
+            {bandOptions.map((band) => (
+              <option key={band.meters} value={band.meters}>
+                {band.name}
+              </option>
+            ))}
+            {!currentBand && <option value="unknown">Unknown</option>}
+          </select>
+        </label>
+        <label className="radio-control">
+          Mode:
           <select value={radioMode} onChange={(event) => onSetRadioMode?.(event.target.value)}>
             {MODE_OPTIONS.map((mode) => (
               <option key={mode} value={mode}>
@@ -132,11 +186,6 @@ function MainWindow({
             ))}
           </select>
         </label>
-        <span>View</span>
-        <span>Tools</span>
-        <span>Config</span>
-        <span>Window</span>
-        <span>Help</span>
       </div>
       <div className="entry-fields">
         <label className="entry-field">
@@ -204,7 +253,6 @@ function MainWindow({
         <button className="cmd-btn">Spot It</button>
         <button className="cmd-btn">QRZ</button>
       </div>
-      <div className="history">Call history appears here when enabled.</div>
       <div className="status-bar">
         <span>
           {STATION_CALLSIGN} / Op: {operatorCallsign}

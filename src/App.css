@@ -41,20 +41,25 @@
   font-size: 10px;
 }
 
-.menu-bar {
+.radio-controls {
   background-color: #d3d3d3;
   padding: 2px 5px;
+  display: flex;
+  gap: 15px;
 }
 
-.menu-bar span,
-.mode-menu {
-  margin-right: 15px;
+.radio-control {
   cursor: pointer;
+  font-weight: bold;
 }
 
-.mode-menu select {
+.radio-control select {
   margin-left: 4px;
   font-size: 12px;
+}
+
+.radio-control.unsupported {
+  color: #ff0000;
 }
 
 .entry-fields {
@@ -135,12 +140,6 @@
   cursor: pointer;
   min-width: 60px;
   text-align: center;
-}
-
-.history {
-  padding: 5px 10px;
-  color: #000;
-  font-style: italic;
 }
 
 .status-bar {

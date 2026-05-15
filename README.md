@@ -135,7 +135,7 @@ QSO table columns:
 - Station callsign is currently static: `NG4M`.
 - Radio mode and frequency come from backend websocket radio state, with fallback defaults of `CW` and `14025` kHz before the first update.
 - Title bar format is `Mode: RADIO_MODE, Freq: RADIO_FREQ - CONTEST_NAME`.
-- The Mode menu between Edit and View offers `CW`, `SSB`, `FM`, and `AM`; selecting one sends a websocket command to the backend.
+- The old text menu has been replaced with radio controls. `Band` lists the contest's allowed bands and follows the radio's current band; if the radio is on a non-contest or unknown band, the Band control is shown in red. Selecting a band tunes to that band's lower edge. `Mode` offers `CW`, `SSB`, `FM`, and `AM`; selecting one sends a websocket command to the backend.
 - Callsigns are uppercased and limited to 12 characters.
 - If the callsign field contains only a number or decimal number and Enter is pressed, it is treated as a frequency in kHz, converted to Hz, sent to the backend, and the field is cleared. For example, `14025` sends `14025000` Hz and `14025.5` sends `14025500` Hz.
 - Operator callsign is prompted on startup, uppercased, and shown in the status line.
