@@ -2,23 +2,22 @@ import React, { useEffect, useRef, useState } from 'react';
 import './App.css';
 
 export const STATION_CALLSIGN = 'NG4M';
-const RADIO_MODE = 'CW';
-const RADIO_FREQ = 14025;
+const MODE_OPTIONS = ['CW', 'SSB', 'FM', 'AM'];
 
-function parseFieldType(type = '') {
+function parseFieldType(type = '', radioMode = 'CW') {
   const [rawKind = 'STRING', length = '8'] = type.split(':');
   const kind = rawKind.toUpperCase();
   const maxLength =
     kind === 'RST'
-      ? RADIO_MODE === 'CW'
+      ? radioMode === 'CW'
         ? 3
         : 2
       : Number.parseInt(length, 10) || 8;
   return { kind, maxLength };
 }
 
-function sanitizeRST(value) {
-  const maxLength = RADIO_MODE === 'CW' ? 3 : 2;
+function sanitizeRST(value, radioMode = 'CW') {
+  const maxLength = radioMode === 'CW' ? 3 : 2;
   let nextValue = value.replace(/[^1-9]/g, '').slice(0, maxLength);
 
   while (nextValue.length > 0 && !/^[1-5]$/.test(nextValue[0])) {
@@ -28,19 +27,37 @@ function sanitizeRST(value) {
   return nextValue;
 }
 
-function fieldDefault(field) {
+function fieldDefault(field, radioMode) {
   if (field.default === undefined || field.default === null) {
     return '';
   }
 
   const value = String(field.default);
-  return parseFieldType(field.type).kind === 'RST' ? sanitizeRST(value) : value;
+  return parseFieldType(field.type, radioMode).kind === 'RST'
+    ? sanitizeRST(value, radioMode)
+    : value;
 }
 
-function MainWindow({ settings, operatorCallsign }) {
+function formatFrequency(frequencyHz) {
+  return Math.round(frequencyHz / 1000);
+}
+
+function isFrequencyInput(value) {
+  return /^\d+(\.\d+)?$/.test(value.trim());
+}
+
+function MainWindow({
+  settings,
+  operatorCallsign,
+  radioState,
+  onSetRadioFrequency,
+  onSetRadioMode,
+}) {
   const [callSign, setCallSign] = useState('');
   const [exchangeValues, setExchangeValues] = useState({});
   const callSignRef = useRef(null);
+  const radioMode = radioState?.mode ?? 'CW';
+  const radioFrequencyHz = radioState?.frequency_hz ?? 14025000;
 
   useEffect(() => {
     if (!settings?.exchange) {
@@ -48,17 +65,17 @@ function MainWindow({ settings, operatorCallsign }) {
     }
 
     const defaults = Object.fromEntries(
-      settings.exchange.map((field) => [field.name, fieldDefault(field)]),
+      settings.exchange.map((field) => [field.name, fieldDefault(field, radioMode)]),
     );
     setExchangeValues(defaults);
-  }, [settings]);
+  }, [settings, radioMode]);
 
   function updateExchangeField(field, value) {
-    const { kind, maxLength } = parseFieldType(field.type);
+    const { kind, maxLength } = parseFieldType(field.type, radioMode);
     let nextValue = value.slice(0, maxLength);
 
     if (kind === 'RST') {
-      nextValue = sanitizeRST(nextValue);
+      nextValue = sanitizeRST(nextValue, radioMode);
     } else if (kind === 'NUMERIC') {
       nextValue = nextValue.replace(/\D/g, '');
     } else {
@@ -66,6 +83,20 @@ function MainWindow({ settings, operatorCallsign }) {
     }
 
     setExchangeValues((current) => ({ ...current, [field.name]: nextValue }));
+  }
+
+  function handleCallsignChange(event) {
+    setCallSign(event.target.value.toUpperCase().slice(0, 12));
+  }
+
+  function handleCallsignKeyDown(event) {
+    const value = callSign.trim();
+
+    if (event.key === 'Enter' && isFrequencyInput(value)) {
+      event.preventDefault();
+      onSetRadioFrequency?.(Math.round(Number.parseFloat(value) * 1000));
+      setCallSign('');
+    }
   }
 
   function handleExchangeKeyDown(event, index) {
@@ -85,12 +116,22 @@ function MainWindow({ settings, operatorCallsign }) {
   return (
     <div className="window">
       <div className="title-bar">
-        Mode: {RADIO_MODE}, Freq: {RADIO_FREQ} -{' '}
+        Mode: {radioMode}, Freq: {formatFrequency(radioFrequencyHz)} -{' '}
         {settings?.contest ?? 'Loading...'}
       </div>
       <div className="menu-bar">
         <span>File</span>
         <span>Edit</span>
+        <label className="mode-menu">
+          Mode
+          <select value={radioMode} onChange={(event) => onSetRadioMode?.(event.target.value)}>
+            {MODE_OPTIONS.map((mode) => (
+              <option key={mode} value={mode}>
+                {mode}
+              </option>
+            ))}
+          </select>
+        </label>
         <span>View</span>
         <span>Tools</span>
         <span>Config</span>
@@ -104,16 +145,15 @@ function MainWindow({ settings, operatorCallsign }) {
             ref={callSignRef}
             type="text"
             value={callSign}
-            onChange={(event) =>
-              setCallSign(event.target.value.toUpperCase().slice(0, 12))
-            }
+            onChange={handleCallsignChange}
+            onKeyDown={handleCallsignKeyDown}
             className="callsign"
             maxLength={12}
           />
         </label>
         {settings?.exchange?.map((field, index) => {
-          const { kind, maxLength } = parseFieldType(field.type);
-          const value = exchangeValues[field.name] ?? fieldDefault(field);
+          const { kind, maxLength } = parseFieldType(field.type, radioMode);
+          const value = exchangeValues[field.name] ?? fieldDefault(field, radioMode);
           const width = `${Math.max(maxLength + 1, 4)}ch`;
 
           return (

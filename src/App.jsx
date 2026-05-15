@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import LogWindow from './LogWindow';
 import MainWindow, { STATION_CALLSIGN } from './MainWindow';
 import './App.css';
 
-const API_BASE_URL = `http://${window.location.hostname || '127.0.0.1'}:8080`;
+const BACKEND_HOST = window.location.hostname || '127.0.0.1';
+const API_BASE_URL = `http://${BACKEND_HOST}:8080`;
+const WS_BASE_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${BACKEND_HOST}:8080`;
 
 let promptedOperatorCallsign;
 
@@ -26,6 +28,8 @@ function App() {
   const [settings, setSettings] = useState(null);
   const [contacts, setContacts] = useState([]);
   const [operatorCallsign, setOperatorCallsign] = useState(getOperatorCallsign);
+  const [radioState, setRadioState] = useState({ mode: 'CW', frequency_hz: 14025000 });
+  const radioSocketRef = useRef(null);
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -37,6 +41,40 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  useEffect(() => {
+    const socket = new WebSocket(`${WS_BASE_URL}/ws`);
+    radioSocketRef.current = socket;
+
+    socket.addEventListener('message', (event) => {
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'radio_state') {
+          setRadioState({
+            frequency_hz: message.frequency_hz,
+            mode: message.mode,
+          });
+        }
+      } catch (error) {
+        console.error('Unable to process radio websocket message', error);
+      }
+    });
+
+    socket.addEventListener('close', () => {
+      if (radioSocketRef.current === socket) {
+        radioSocketRef.current = null;
+      }
+    });
+
+    socket.addEventListener('error', (error) => {
+      console.error('Radio websocket error', error);
+    });
+
+    return () => {
+      radioSocketRef.current = null;
+      socket.close();
+    };
   }, []);
 
   useEffect(() => {
@@ -70,9 +108,30 @@ function App() {
     loadContest();
   }, []);
 
+  function sendRadioMessage(message) {
+    const socket = radioSocketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(message));
+    }
+  }
+
+  function setRadioFrequency(frequencyHz) {
+    sendRadioMessage({ type: 'set_frequency', frequency_hz: frequencyHz });
+  }
+
+  function setRadioMode(mode) {
+    sendRadioMessage({ type: 'set_mode', mode });
+  }
+
   return (
     <div className="app-container">
-      <MainWindow settings={settings} operatorCallsign={operatorCallsign} />
+      <MainWindow
+        settings={settings}
+        operatorCallsign={operatorCallsign}
+        radioState={radioState}
+        onSetRadioFrequency={setRadioFrequency}
+        onSetRadioMode={setRadioMode}
+      />
       <LogWindow settings={settings} contacts={contacts} />
     </div>
   );

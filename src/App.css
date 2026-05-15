@@ -46,9 +46,15 @@
   padding: 2px 5px;
 }
 
-.menu-bar span {
+.menu-bar span,
+.mode-menu {
   margin-right: 15px;
   cursor: pointer;
+}
+
+.mode-menu select {
+  margin-left: 4px;
+  font-size: 12px;
 }
 
 .entry-fields {

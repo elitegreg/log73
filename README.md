@@ -2,7 +2,7 @@
 
 log73 is an amateur radio contest logger prototype. It is designed as a client/server application with a JavaScript/React frontend and a Rust backend.
 
-The current version demonstrates dynamic contest configuration loading. The backend serves contest rules for the SC QSO Party in-state module, and the frontend uses those rules to build exchange entry fields and the QSO table.
+The current version demonstrates dynamic contest configuration loading and basic radio control. The backend serves contest rules for the SC QSO Party in-state module, connects to an existing `rigctld` instance, polls radio frequency/mode, and publishes radio state to the frontend over a websocket. The frontend uses contest rules to build exchange entry fields and the QSO table, while the title bar and mode controls reflect the live radio state.
 
 ## Project layout
 
@@ -14,16 +14,42 @@ The current version demonstrates dynamic contest configuration loading. The back
 
 ## Backend
 
-The backend runs on `http://127.0.0.1:8080` and currently provides static JSON endpoints:
+The backend runs on `http://127.0.0.1:8080`, provides contest/contact JSON endpoints, and exposes a radio websocket:
 
 - `GET /contest-settings/get` - contest name, allowed bands, allowed modes, exchange field definitions, and QSO table columns
 - `GET /contacts/get` - currently returns an empty contact list
+- `GET /ws` - websocket for radio state updates and radio set commands
 
 Run it with:
 
 ```bash
 cd backend
 cargo run
+```
+
+By default the backend connects to an already-running `rigctld` at `127.0.0.1:4532` and polls every `0.25` seconds. It does not start `rigctld` itself. Runtime options:
+
+```bash
+cd backend
+cargo run -- \
+  --rigctld-host 127.0.0.1 \
+  --rigctld-port 4532 \
+  --poll-frequency 0.25
+```
+
+Radio state is modeled in the backend as frequency in Hz plus a normalized mode string. `USB` and `LSB` from rigctld are published to the frontend as `SSB`. Frontend `SSB` set commands are converted back to `LSB` on 160m through 40m and `USB` on 20m and shorter bands.
+
+The websocket sends server messages like:
+
+```json
+{ "type": "radio_state", "frequency_hz": 14025000, "mode": "CW" }
+```
+
+The frontend sends radio commands like:
+
+```json
+{ "type": "set_frequency", "frequency_hz": 14025000 }
+{ "type": "set_mode", "mode": "SSB" }
 ```
 
 Useful backend checks:
@@ -48,7 +74,7 @@ Start the dev server:
 pnpm run dev
 ```
 
-The frontend expects the backend to be running on port `8080` at the same hostname as the frontend, for example `http://127.0.0.1:8080`. On startup it prompts for an operator callsign, uppercases it, then loads contest settings and contacts. If loading fails, it shows an alert.
+The frontend expects the backend to be running on port `8080` at the same hostname as the frontend, for example `http://127.0.0.1:8080`. On startup it prompts for an operator callsign, uppercases it, opens `/ws` for radio state, then loads contest settings and contacts. If loading fails, it shows an alert.
 
 Build for production:
 
@@ -107,10 +133,11 @@ QSO table columns:
 ## Current UI behavior
 
 - Station callsign is currently static: `NG4M`.
-- Radio mode is currently static: `CW`.
-- Radio frequency is currently static: `14025`.
+- Radio mode and frequency come from backend websocket radio state, with fallback defaults of `CW` and `14025` kHz before the first update.
 - Title bar format is `Mode: RADIO_MODE, Freq: RADIO_FREQ - CONTEST_NAME`.
+- The Mode menu between Edit and View offers `CW`, `SSB`, `FM`, and `AM`; selecting one sends a websocket command to the backend.
 - Callsigns are uppercased and limited to 12 characters.
+- If the callsign field contains only a number or decimal number and Enter is pressed, it is treated as a frequency in kHz, converted to Hz, sent to the backend, and the field is cleared. For example, `14025` sends `14025000` Hz and `14025.5` sends `14025500` Hz.
 - Operator callsign is prompted on startup, uppercased, and shown in the status line.
 - Exchange fields are rendered from backend contest settings.
 - Fixed exchange fields are prefilled, read-only, and skipped during tab navigation.
