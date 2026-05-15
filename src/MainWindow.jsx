@@ -52,8 +52,21 @@ function fieldDefault(field, radioMode) {
     : value;
 }
 
+function exchangeDefaults(settings, radioMode) {
+  return Object.fromEntries(
+    (settings?.exchange ?? []).map((field) => [field.name, fieldDefault(field, radioMode)]),
+  );
+}
+
 function formatFrequency(frequencyHz) {
   return Math.round(frequencyHz / 1000);
+}
+
+function formatAdifFrequency(frequencyHz) {
+  return (frequencyHz / 1000000)
+    .toFixed(6)
+    .replace(/0+$/, '')
+    .replace(/\.$/, '');
 }
 
 function isFrequencyInput(value) {
@@ -70,16 +83,40 @@ function bandByMeters(meters) {
   return AMATEUR_BANDS.find((band) => band.meters === meters);
 }
 
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+function formatUtcDate(date) {
+  return `${date.getUTCFullYear()}${pad2(date.getUTCMonth() + 1)}${pad2(date.getUTCDate())}`;
+}
+
+function formatUtcTime(date) {
+  return `${pad2(date.getUTCHours())}${pad2(date.getUTCMinutes())}${pad2(date.getUTCSeconds())}`;
+}
+
+function createContactId(date, callSign) {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+
+  return `${date.getTime()}-${callSign}-${Math.random().toString(36).slice(2)}`;
+}
+
 function MainWindow({
   settings,
   operatorCallsign,
   radioState,
+  backendSocketConnected,
   onSetRadioFrequency,
   onSetRadioMode,
+  onLogContact,
 }) {
   const [callSign, setCallSign] = useState('');
   const [exchangeValues, setExchangeValues] = useState({});
   const callSignRef = useRef(null);
+  const exchangeInputRefs = useRef({});
+  const callSignEditedAtRef = useRef(new Date());
   const radioMode = radioState?.mode ?? 'CW';
   const radioFrequencyHz = radioState?.frequency_hz ?? 14025000;
   const allowedBands = settings?.allowed_bands ?? [];
@@ -97,14 +134,7 @@ function MainWindow({
   }
 
   useEffect(() => {
-    if (!settings?.exchange) {
-      return;
-    }
-
-    const defaults = Object.fromEntries(
-      settings.exchange.map((field) => [field.name, fieldDefault(field, radioMode)]),
-    );
-    setExchangeValues(defaults);
+    setExchangeValues(exchangeDefaults(settings, radioMode));
   }, [settings, radioMode]);
 
   function updateExchangeField(field, value) {
@@ -124,15 +154,106 @@ function MainWindow({
 
   function handleCallsignChange(event) {
     setCallSign(event.target.value.toUpperCase().slice(0, 12));
+    callSignEditedAtRef.current = new Date();
+  }
+
+  function allRequiredFieldsFilled() {
+    return (
+      Boolean(settings?.exchange) &&
+      callSign.trim() !== '' &&
+      settings.exchange.every((field) => String(exchangeValues[field.name] ?? '').trim() !== '')
+    );
+  }
+
+  function resetEntryFields() {
+    setCallSign('');
+    setExchangeValues(exchangeDefaults(settings, radioMode));
+    callSignEditedAtRef.current = new Date();
+    callSignRef.current?.focus();
+  }
+
+  function logContact() {
+    if (!allRequiredFieldsFilled()) {
+      return false;
+    }
+
+    const timeOn = callSignEditedAtRef.current;
+    const normalizedCallSign = callSign.trim().toUpperCase();
+    const contact = {
+      QSO_DATE: formatUtcDate(timeOn),
+      TIME_ON: formatUtcTime(timeOn),
+      STATION_CALLSIGN,
+      OPERATOR: operatorCallsign,
+      CONTEST_ID: settings.contest,
+      CALL: normalizedCallSign,
+      BAND: currentBand?.name ?? '',
+      FREQ: formatAdifFrequency(radioFrequencyHz),
+      MODE: radioMode,
+      _status: 'Pending',
+      _id: createContactId(timeOn, normalizedCallSign),
+      _time_on_epoch: Math.floor(timeOn.getTime() / 1000),
+    };
+
+    for (const field of settings.exchange) {
+      contact[field.adif] = String(exchangeValues[field.name] ?? '').trim().toUpperCase();
+    }
+
+    onLogContact?.(contact);
+    resetEntryFields();
+    return true;
+  }
+
+  function focusNextEmptyField(currentFieldName) {
+    const fields = [
+      { name: 'CALL', value: callSign, ref: callSignRef, editable: true },
+      ...(settings?.exchange ?? []).map((field) => ({
+        name: field.name,
+        value: exchangeValues[field.name] ?? '',
+        ref: { current: exchangeInputRefs.current[field.name] },
+        editable: field.fixed !== true,
+      })),
+    ];
+    const currentIndex = fields.findIndex((field) => field.name === currentFieldName);
+    const nextEmptyField = fields
+      .slice(currentIndex + 1)
+      .find((field) => field.editable && String(field.value).trim() === '');
+
+    if (!nextEmptyField) {
+      return false;
+    }
+
+    nextEmptyField.ref.current?.focus();
+    return true;
+  }
+
+  function handleFieldTab(event, currentFieldName) {
+    if (event.key !== 'Tab' || event.shiftKey) {
+      return;
+    }
+
+    if (focusNextEmptyField(currentFieldName)) {
+      event.preventDefault();
+    }
   }
 
   function handleCallsignKeyDown(event) {
     const value = callSign.trim();
 
+    if (event.key === 'Tab') {
+      handleFieldTab(event, 'CALL');
+      return;
+    }
+
     if (event.key === 'Enter' && isFrequencyInput(value)) {
       event.preventDefault();
       onSetRadioFrequency?.(Math.round(Number.parseFloat(value) * 1000));
       setCallSign('');
+      return;
+    }
+
+    if (event.key === 'Enter' && allRequiredFieldsFilled()) {
+      event.preventDefault();
+      logContact();
     }
   }
 
@@ -145,17 +266,13 @@ function MainWindow({
   }
 
   function handleExchangeKeyDown(event, index) {
-    const editableFields = settings.exchange.filter((field) => field.fixed !== true);
-    const lastEditableField = editableFields[editableFields.length - 1];
-
-    if (
-      event.key === 'Tab' &&
-      !event.shiftKey &&
-      settings.exchange[index]?.name === lastEditableField?.name
-    ) {
+    if (event.key === 'Enter' && allRequiredFieldsFilled()) {
       event.preventDefault();
-      callSignRef.current?.focus();
+      logContact();
+      return;
     }
+
+    handleFieldTab(event, settings.exchange[index]?.name);
   }
 
   return (
@@ -186,6 +303,13 @@ function MainWindow({
             ))}
           </select>
         </label>
+        <div className="backend-socket-status" title={backendSocketConnected ? 'Server connected' : 'Server disconnected'}>
+          <span
+            className={`backend-socket-light ${backendSocketConnected ? 'connected' : 'disconnected'}`}
+            aria-hidden="true"
+          />
+          Server
+        </div>
       </div>
       <div className="entry-fields">
         <label className="entry-field">
@@ -209,6 +333,13 @@ function MainWindow({
             <label className="entry-field" key={field.name}>
               <span>{field.name}</span>
               <input
+                ref={(element) => {
+                  if (element) {
+                    exchangeInputRefs.current[field.name] = element;
+                  } else {
+                    delete exchangeInputRefs.current[field.name];
+                  }
+                }}
                 type="text"
                 inputMode={kind === 'NUMERIC' || kind === 'RST' ? 'numeric' : 'text'}
                 value={value}
@@ -246,7 +377,7 @@ function MainWindow({
         <button className="cmd-btn">Call Esc Stop</button>
         <button className="cmd-btn">Wipe</button>
         <button className="cmd-btn">UserText</button>
-        <button className="cmd-btn">Log it</button>
+        <button className="cmd-btn" onClick={logContact}>Log it</button>
         <button className="cmd-btn">Edit</button>
         <button className="cmd-btn">Mark</button>
         <button className="cmd-btn">Store</button>

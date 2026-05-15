@@ -2,7 +2,7 @@
 
 log73 is an amateur radio contest logger prototype. It is designed as a client/server application with a JavaScript/React frontend and a Rust backend.
 
-The current version demonstrates dynamic contest configuration loading and basic radio control. The backend serves contest rules for the SC QSO Party in-state module, connects to an existing `rigctld` instance, polls radio frequency/mode, and publishes radio state to the frontend over a websocket. The frontend uses contest rules to build exchange entry fields and the QSO table, while the title bar and mode controls reflect the live radio state.
+The current version demonstrates dynamic contest configuration loading and basic radio control. The backend serves contest rules for the SC QSO Party in-state module, connects to an existing `rigctld` instance, polls radio frequency/mode, and publishes realtime state to the frontend over the backend websocket. The frontend uses contest rules to build exchange entry fields and the QSO table, while the title bar and mode controls reflect the live radio state.
 
 ## Project layout
 
@@ -14,11 +14,11 @@ The current version demonstrates dynamic contest configuration loading and basic
 
 ## Backend
 
-The backend runs on `http://127.0.0.1:8080`, provides contest/contact JSON endpoints, and exposes a radio websocket:
+The backend runs on `http://127.0.0.1:8080`, provides contest/contact JSON endpoints, and exposes a backend websocket:
 
 - `GET /contest-settings/get` - contest name, allowed bands, allowed modes, exchange field definitions, and QSO table columns
 - `GET /contacts/get` - currently returns an empty contact list
-- `GET /ws` - websocket for radio state updates and radio set commands
+- `GET /ws` - backend websocket for realtime updates and commands, including radio state updates and radio set commands
 
 Run it with:
 
@@ -39,7 +39,7 @@ cargo run -- \
 
 Radio state is modeled in the backend as frequency in Hz plus a normalized mode string. `USB` and `LSB` from rigctld are published to the frontend as `SSB`. Frontend `SSB` set commands are converted back to `LSB` on 160m through 40m and `USB` on 20m and shorter bands.
 
-The websocket sends server messages like:
+The backend websocket sends server messages like:
 
 ```json
 { "type": "radio_state", "frequency_hz": 14025000, "mode": "CW" }
@@ -133,7 +133,7 @@ QSO table columns:
 ## Current UI behavior
 
 - Station callsign is currently static: `NG4M`.
-- Radio mode and frequency come from backend websocket radio state, with fallback defaults of `CW` and `14025` kHz before the first update.
+- Radio mode and frequency come from radio state messages on the backend websocket, with fallback defaults of `CW` and `14025` kHz before the first update.
 - Title bar format is `Mode: RADIO_MODE, Freq: RADIO_FREQ - CONTEST_NAME`.
 - The old text menu has been replaced with radio controls. `Band` lists the contest's allowed bands and follows the radio's current band; if the radio is on a non-contest or unknown band, the Band control is shown in red. Selecting a band tunes to that band's lower edge. `Mode` offers `CW`, `SSB`, `FM`, and `AM`; selecting one sends a websocket command to the backend.
 - Callsigns are uppercased and limited to 12 characters.

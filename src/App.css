@@ -45,6 +45,7 @@
   background-color: #d3d3d3;
   padding: 2px 5px;
   display: flex;
+  align-items: center;
   gap: 15px;
 }
 
@@ -60,6 +61,30 @@
 
 .radio-control.unsupported {
   color: #ff0000;
+}
+
+.backend-socket-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  font-weight: bold;
+}
+
+.backend-socket-light {
+  width: 11px;
+  height: 11px;
+  border: 1px solid #404040;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.backend-socket-light.connected {
+  background-color: #00a000;
+}
+
+.backend-socket-light.disconnected {
+  background-color: #d00000;
 }
 
 .entry-fields {
@@ -226,4 +251,8 @@
 
 .log-table tbody tr:nth-child(even) {
   background-color: white;
+}
+
+.log-table tbody tr.uncommitted-contact {
+  background-color: #fff8c6;
 }

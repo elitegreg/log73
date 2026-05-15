@@ -44,7 +44,7 @@ async fn main() {
 
     let app = Router::new()
         .route("/contest-settings/get", get(contest_settings))
-        .route("/contacts/get", get(contacts))
+        .route("/contacts", get(contacts).post(commit_contact))
         .route("/ws", get(ws_handler))
         .with_state(radio_state)
         .layer(CorsLayer::permissive());
@@ -168,4 +168,12 @@ async fn contest_settings() -> Json<ContestRules> {
 
 async fn contacts() -> Json<Vec<Contact>> {
     Json(Vec::new())
+}
+
+async fn commit_contact(Json(contact): Json<Contact>) -> Json<serde_json::Value> {
+    println!(
+        "received contact: {}",
+        serde_json::to_string_pretty(&contact).expect("contact should serialize")
+    );
+    Json(serde_json::json!({ "ok": true }))
 }
