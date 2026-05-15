@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './App.css';
 
-const STATION_CALLSIGN = 'NG4M';
+export const STATION_CALLSIGN = 'NG4M';
 const RADIO_MODE = 'CW';
 const RADIO_FREQ = 14025;
 

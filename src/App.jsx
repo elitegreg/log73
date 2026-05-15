@@ -1,16 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import LogWindow from './LogWindow';
-import MainWindow from './MainWindow';
+import MainWindow, { STATION_CALLSIGN } from './MainWindow';
 import './App.css';
 
 const API_BASE_URL = `http://${window.location.hostname || '127.0.0.1'}:8080`;
 
 let promptedOperatorCallsign;
 
+function promptForOperatorCallsign() {
+  const defaultCallsign = promptedOperatorCallsign ?? STATION_CALLSIGN;
+  const enteredCallsign = window.prompt('Operator Callsign', defaultCallsign) ?? '';
+  promptedOperatorCallsign = enteredCallsign.toUpperCase();
+  return promptedOperatorCallsign;
+}
+
 function getOperatorCallsign() {
   if (promptedOperatorCallsign === undefined) {
-    const enteredCallsign = window.prompt('Operator Callsign') ?? '';
-    promptedOperatorCallsign = enteredCallsign.toUpperCase();
+    return promptForOperatorCallsign();
   }
 
   return promptedOperatorCallsign;
@@ -19,7 +25,19 @@ function getOperatorCallsign() {
 function App() {
   const [settings, setSettings] = useState(null);
   const [contacts, setContacts] = useState([]);
-  const [operatorCallsign] = useState(getOperatorCallsign);
+  const [operatorCallsign, setOperatorCallsign] = useState(getOperatorCallsign);
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'o') {
+        event.preventDefault();
+        setOperatorCallsign(promptForOperatorCallsign());
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     async function loadContest() {
