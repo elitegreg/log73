@@ -45,12 +45,22 @@ The backend websocket sends server messages like:
 { "type": "radio_state", "frequency_hz": 14025000, "mode": "CW" }
 ```
 
+The frontend connects to the backend websocket with a session id query parameter, for example `/ws?session_id=<uuid>`. The session id is stored in browser local storage and is included on locally logged contacts as `_session_id`.
+
 The frontend sends radio commands like:
 
 ```json
 { "type": "set_frequency", "frequency_hz": 14025000 }
 { "type": "set_mode", "mode": "SSB" }
 ```
+
+When a contact is posted to `POST /contacts`, the backend marks it with `_status: "Committed"`, returns the committed contact, and broadcasts it to other backend websocket sessions as:
+
+```json
+{ "type": "log_entry", "contact": { "_session_id": "...", "_status": "Committed" } }
+```
+
+The backend does not echo a `log_entry` to websocket clients with the same session id as the posted contact. Clients that receive a `log_entry` from another session add it to their contacts list.
 
 Useful backend checks:
 

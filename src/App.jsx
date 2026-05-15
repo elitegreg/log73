@@ -7,6 +7,7 @@ const BACKEND_HOST = window.location.hostname || '127.0.0.1';
 const API_BASE_URL = `http://${BACKEND_HOST}:8080`;
 const WS_BASE_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${BACKEND_HOST}:8080`;
 const CONTACTS_STORAGE_KEY = 'log73.contacts';
+const SESSION_STORAGE_KEY = 'log73.session_id';
 const BACKEND_WS_INITIAL_RECONNECT_DELAY_MS = 2000;
 const BACKEND_WS_MAX_RECONNECT_DELAY_MS = 16000;
 const CONTACTS_LOAD_INITIAL_RETRY_DELAY_MS = 2000;
@@ -70,12 +71,49 @@ function committedBackendContact(contact) {
   return { ...contact, _status: contact._status ?? 'Committed' };
 }
 
+function createSessionId() {
+  if (window.crypto?.randomUUID) {
+    return window.crypto.randomUUID();
+  }
+
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function getSessionId() {
+  const existingSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
+
+  if (existingSessionId) {
+    return existingSessionId;
+  }
+
+  const sessionId = createSessionId();
+  localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+  return sessionId;
+}
+
+function mergeContact(contacts, contact) {
+  const committedContact = committedBackendContact(contact);
+  const index = contacts.findIndex(
+    (currentContact) =>
+      currentContact._id && committedContact._id && currentContact._id === committedContact._id,
+  );
+
+  if (index === -1) {
+    return sortContacts([...contacts, committedContact]);
+  }
+
+  const nextContacts = [...contacts];
+  nextContacts[index] = { ...nextContacts[index], ...committedContact };
+  return sortContacts(nextContacts);
+}
+
 function App() {
   const [settings, setSettings] = useState(null);
   const [contacts, setContacts] = useState(loadLocalContacts);
   const [operatorCallsign, setOperatorCallsign] = useState(getOperatorCallsign);
+  const [sessionId] = useState(getSessionId);
   const [radioState, setRadioState] = useState({ mode: 'CW', frequency_hz: 14025000 });
-  const [backendSocketConnected, setBackendSocketConnected] = useState(false);
+  const [backendSocketStatus, setBackendSocketStatus] = useState('disconnected');
   const backendSocketRef = useRef(null);
   const committingContactIdsRef = useRef(new Set());
 
@@ -117,7 +155,10 @@ function App() {
         return;
       }
 
-      const socket = new WebSocket(`${WS_BASE_URL}/ws`);
+      const websocketUrl = `${WS_BASE_URL}/ws?session_id=${encodeURIComponent(sessionId)}`;
+      console.info('Connecting backend websocket', websocketUrl);
+      setBackendSocketStatus('connecting');
+      const socket = new WebSocket(websocketUrl);
       backendSocketRef.current = socket;
 
       socket.addEventListener('open', () => {
@@ -126,7 +167,7 @@ function App() {
         }
 
         reconnectDelayMs = BACKEND_WS_INITIAL_RECONNECT_DELAY_MS;
-        setBackendSocketConnected(true);
+        setBackendSocketStatus('connected');
       });
 
       socket.addEventListener('message', (event) => {
@@ -141,16 +182,24 @@ function App() {
               frequency_hz: message.frequency_hz,
               mode: message.mode,
             });
+          } else if (message.type === 'log_entry') {
+            setContacts((currentContacts) => mergeContact(currentContacts, message.contact));
           }
         } catch (error) {
           console.error('Unable to process backend websocket message', error);
         }
       });
 
-      socket.addEventListener('close', () => {
+      socket.addEventListener('close', (event) => {
+        console.info('Backend websocket closed', {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean,
+        });
+
         if (backendSocketRef.current === socket) {
           backendSocketRef.current = null;
-          setBackendSocketConnected(false);
+          setBackendSocketStatus('disconnected');
           scheduleReconnect();
         }
       });
@@ -161,7 +210,7 @@ function App() {
         }
 
         console.error('Backend websocket error', error);
-        setBackendSocketConnected(false);
+        setBackendSocketStatus('disconnected');
         socket.close();
       });
     }
@@ -177,7 +226,7 @@ function App() {
       backendSocketRef.current = null;
       socket?.close();
     };
-  }, []);
+  }, [sessionId]);
 
   useEffect(() => {
     let shouldRetryContactsLoad = true;
@@ -275,15 +324,10 @@ function App() {
           throw new Error(`commit failed: ${response.status}`);
         }
 
-        setContacts((currentContacts) =>
-          sortContacts(
-            currentContacts.map((currentContact) =>
-              currentContact._id === contact._id
-                ? { ...currentContact, _status: 'Committed' }
-                : currentContact,
-            ),
-          ),
-        );
+        const responseBody = await response.json();
+        if (responseBody.contact) {
+          setContacts((currentContacts) => mergeContact(currentContacts, responseBody.contact));
+        }
       } catch (error) {
         console.error('Unable to commit contact', error);
         window.setTimeout(() => {
@@ -322,7 +366,8 @@ function App() {
         settings={settings}
         operatorCallsign={operatorCallsign}
         radioState={radioState}
-        backendSocketConnected={backendSocketConnected}
+        backendSocketStatus={backendSocketStatus}
+        sessionId={sessionId}
         onSetRadioFrequency={setRadioFrequency}
         onSetRadioMode={setRadioMode}
         onLogContact={addContact}

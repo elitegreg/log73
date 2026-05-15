@@ -107,7 +107,8 @@ function MainWindow({
   settings,
   operatorCallsign,
   radioState,
-  backendSocketConnected,
+  backendSocketStatus,
+  sessionId,
   onSetRadioFrequency,
   onSetRadioMode,
   onLogContact,
@@ -190,6 +191,7 @@ function MainWindow({
       FREQ: formatAdifFrequency(radioFrequencyHz),
       MODE: radioMode,
       _status: 'Pending',
+      _session_id: sessionId,
       _id: createContactId(timeOn, normalizedCallSign),
       _time_on_epoch: Math.floor(timeOn.getTime() / 1000),
     };
@@ -303,9 +305,9 @@ function MainWindow({
             ))}
           </select>
         </label>
-        <div className="backend-socket-status" title={backendSocketConnected ? 'Server connected' : 'Server disconnected'}>
+        <div className="backend-socket-status" title={`Server ${backendSocketStatus}`}>
           <span
-            className={`backend-socket-light ${backendSocketConnected ? 'connected' : 'disconnected'}`}
+            className={`backend-socket-light ${backendSocketStatus === 'connected' ? 'connected' : 'disconnected'}`}
             aria-hidden="true"
           />
           Server

@@ -9,6 +9,9 @@ use tokio::sync::{RwLock, broadcast, mpsc};
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
     RadioState(RadioState),
+    LogEntry {
+        contact: serde_json::Map<String, serde_json::Value>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
