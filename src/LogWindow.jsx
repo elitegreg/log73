@@ -30,6 +30,31 @@ function epochFromQsoDateTime(entry) {
   );
 }
 
+function formatDate(entry) {
+  const qsoDate = String(entry.QSO_DATE ?? '');
+
+  if (/^\d{8}$/.test(qsoDate)) {
+    return `${qsoDate.slice(0, 4)}-${qsoDate.slice(4, 6)}-${qsoDate.slice(6, 8)}`;
+  }
+
+  const epoch = typeof entry._time_on_epoch === 'number'
+    ? entry._time_on_epoch
+    : typeof entry.Time === 'number'
+      ? entry.Time
+      : null;
+
+  if (epoch === null) {
+    return '';
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: 'UTC',
+  }).format(new Date(epoch * 1000));
+}
+
 function formatTime(entry) {
   const epoch = typeof entry._time_on_epoch === 'number'
     ? entry._time_on_epoch
@@ -49,6 +74,10 @@ function formatTime(entry) {
 }
 
 function formatCell(column, entry) {
+  if (column === 'Date') {
+    return formatDate(entry);
+  }
+
   if (column === 'Time') {
     return typeof entry.Time === 'number'
       ? new Intl.DateTimeFormat(undefined, {

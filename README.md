@@ -130,6 +130,7 @@ Exchange fields:
 
 QSO table columns:
 
+- `Date`
 - `Time`
 - `Freq`
 - `Mode`
@@ -157,3 +158,4 @@ QSO table columns:
 - In non-CW modes, `RST` fields are two characters, from `11` through `59`; out-of-range defaults such as `599` are trimmed.
 - The status line shows `STATION_CALLSIGN / Op: OPERATOR_CALLSIGN`.
 - The QSO table columns are rendered from backend `qso_columns`.
+- The log table is sorted with the most recent contact first.

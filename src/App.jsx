@@ -50,7 +50,7 @@ function contactSortValue(contact) {
 }
 
 function sortContacts(contacts) {
-  return [...contacts].sort((a, b) => contactSortValue(a) - contactSortValue(b));
+  return [...contacts].sort((a, b) => contactSortValue(b) - contactSortValue(a));
 }
 
 function loadLocalContacts() {
