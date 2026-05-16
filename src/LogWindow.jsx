@@ -10,7 +10,7 @@ const COLUMN_FIELD_MAP = {
   Op: 'OPERATOR',
 };
 
-function epochFromQsoDateTime(entry) {
+function epochFromLegacyQsoDateTime(entry) {
   const date = String(entry.QSO_DATE ?? '');
   const time = String(entry.TIME_ON ?? '');
 
@@ -30,64 +30,67 @@ function epochFromQsoDateTime(entry) {
   );
 }
 
-function formatDate(entry) {
-  const qsoDate = String(entry.QSO_DATE ?? '');
-
-  if (/^\d{8}$/.test(qsoDate)) {
-    return `${qsoDate.slice(0, 4)}-${qsoDate.slice(4, 6)}-${qsoDate.slice(6, 8)}`;
+function qsoEpoch(entry) {
+  if (typeof entry.QSO_DATE_TIME_ON === 'number') {
+    return entry.QSO_DATE_TIME_ON;
   }
 
-  const epoch = typeof entry._time_on_epoch === 'number'
-    ? entry._time_on_epoch
-    : typeof entry.Time === 'number'
-      ? entry.Time
-      : null;
-
-  if (epoch === null) {
-    return '';
+  if (typeof entry._time_on_epoch === 'number') {
+    return entry._time_on_epoch;
   }
 
-  return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    timeZone: 'UTC',
-  }).format(new Date(epoch * 1000));
+  if (typeof entry.Time === 'number') {
+    return entry.Time;
+  }
+
+  return epochFromLegacyQsoDateTime(entry);
 }
 
-function formatTime(entry) {
-  const epoch = typeof entry._time_on_epoch === 'number'
-    ? entry._time_on_epoch
-    : epochFromQsoDateTime(entry);
+function formatDateTime(entry) {
+  const epoch = qsoEpoch(entry);
 
   if (epoch === null) {
     return '';
   }
 
-  return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-    timeZone: 'UTC',
-  }).format(new Date(epoch * 1000));
+  const date = new Date(epoch * 1000);
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  const hour = String(date.getUTCHours()).padStart(2, '0');
+  const minute = String(date.getUTCMinutes()).padStart(2, '0');
+  const second = String(date.getUTCSeconds()).padStart(2, '0');
+
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+}
+
+function formatFrequency(entry) {
+  const frequency = entry.FREQ ?? entry.Freq;
+  const parsedFrequency = typeof frequency === 'number'
+    ? frequency
+    : Number.parseFloat(String(frequency));
+
+  if (!Number.isFinite(parsedFrequency)) {
+    return '';
+  }
+
+  const frequencyHz = Math.abs(parsedFrequency) < 1000000
+    ? parsedFrequency * 1000000
+    : parsedFrequency;
+
+  return (frequencyHz / 1000000)
+    .toFixed(6)
+    .replace(/0+$/, '')
+    .replace(/\.$/, '');
 }
 
 function formatCell(column, entry) {
-  if (column === 'Date') {
-    return formatDate(entry);
+  if (column === 'Date/Time (UTC)') {
+    return formatDateTime(entry);
   }
 
-  if (column === 'Time') {
-    return typeof entry.Time === 'number'
-      ? new Intl.DateTimeFormat(undefined, {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: false,
-          timeZone: 'UTC',
-        }).format(new Date(entry.Time * 1000))
-      : formatTime(entry);
+  if (column === 'Freq') {
+    return formatFrequency(entry);
   }
 
   if (column === 'Mult' || column === 'Pts') {
@@ -98,10 +101,6 @@ function formatCell(column, entry) {
   return entry[adifField] ?? entry[column] ?? '';
 }
 
-function headerLabel(column) {
-  return column === 'Time' ? 'Time (UTC)' : column;
-}
-
 function LogWindow({ settings, contacts }) {
   const columns = settings?.qso_columns ?? [];
 
@@ -109,17 +108,25 @@ function LogWindow({ settings, contacts }) {
     <div className="log-window">
       <div className="log-title-bar">Log: {settings?.contest ?? 'Loading contest...'}</div>
       <table className="log-table">
+        <colgroup>
+          {columns.map((column) => (
+            <col
+              key={column}
+              className={column === 'Date/Time (UTC)' ? 'date-time-column' : undefined}
+            />
+          ))}
+        </colgroup>
         <thead>
           <tr>
             {columns.map((column) => (
-              <th key={column}>{headerLabel(column)}</th>
+              <th key={column}>{column}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {contacts.map((entry, index) => (
             <tr
-              key={entry._id ?? `${entry.TIME_ON ?? entry.Time ?? 'row'}-${entry.CALL ?? entry.Call ?? index}`}
+              key={entry._id ?? entry._client_id ?? `${entry.QSO_DATE_TIME_ON ?? entry.TIME_ON ?? entry.Time ?? 'row'}-${entry.CALL ?? entry.Call ?? index}`}
               className={entry._status !== 'Committed' ? 'uncommitted-contact' : undefined}
             >
               {columns.map((column) => (

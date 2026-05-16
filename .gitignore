@@ -1,3 +1,5 @@
 backend/target
 dist
+log73.db
+backend/log73.db
 node_modules

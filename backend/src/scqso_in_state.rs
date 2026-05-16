@@ -58,7 +58,15 @@ impl ContestRules {
                 },
             ],
             qso_columns: vec![
-                "Date", "Time", "Freq", "Mode", "Call", "RST(s)", "RST(r)", "Mult", "Pts", "Op",
+                "Date/Time (UTC)",
+                "Freq",
+                "Mode",
+                "Call",
+                "RST(s)",
+                "RST(r)",
+                "Mult",
+                "Pts",
+                "Op",
             ],
         }
     }

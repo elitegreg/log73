@@ -205,6 +205,10 @@
   text-align: left;
 }
 
+.log-table .date-time-column {
+  width: 18%;
+}
+
 .log-table th {
   background-color: #d3d3d3; /* Grey header background */
   font-weight: bold;

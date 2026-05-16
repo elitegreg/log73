@@ -11,13 +11,17 @@ The current version demonstrates dynamic contest configuration loading and basic
 - `backend/src/frequency.rs` - frequency type and `khz!` / `mhz!` macros
 - `backend/src/bands.rs` - USA amateur band definitions and band lookup helpers
 - `backend/src/scqso_in_state.rs` - SC QSO Party in-state contest rules
+- `backend/src/db.rs` - SQLite schema setup and contact JSON/SQL mapping
 
 ## Backend
 
 The backend runs on `http://127.0.0.1:8080`, provides contest/contact JSON endpoints, and exposes a backend websocket:
 
 - `GET /contest-settings/get` - contest name, allowed bands, allowed modes, exchange field definitions, and QSO table columns
-- `GET /contacts/get` - currently returns an empty contact list
+- `GET /contacts` - returns committed contacts
+- `GET /contacts?id=ID` - returns one committed contact if found
+- `POST /contacts` - accepts one contact object or a list of contact objects and inserts/updates them; returns `contact` for the first committed contact and `contacts` for all committed contacts
+- `DELETE /contacts?id=ID` - deletes one contact
 - `GET /ws` - backend websocket for realtime updates and commands, including radio state updates and radio set commands
 
 Run it with:
@@ -45,7 +49,7 @@ The backend websocket sends server messages like:
 { "type": "radio_state", "frequency_hz": 14025000, "mode": "CW" }
 ```
 
-The frontend connects to the backend websocket with a session id query parameter, for example `/ws?session_id=<uuid>`. The session id is stored in browser local storage and is included on locally logged contacts as `_session_id`.
+The frontend connects to the backend websocket with a session id query parameter, for example `/ws?session_id=<uuid>`. The session id is stored in browser local storage and is included on locally logged contacts as `_session_id`. The backend uses it to avoid echoing a session's own committed contacts back to that same websocket.
 
 The frontend sends radio commands like:
 
@@ -53,6 +57,10 @@ The frontend sends radio commands like:
 { "type": "set_frequency", "frequency_hz": 14025000 }
 { "type": "set_mode", "mode": "SSB" }
 ```
+
+Contacts are stored in `log73.db`, a SQLite database created in the backend working directory and ignored by git. The backend initializes strict `config`, `logs`, and `qsos` tables with foreign keys enabled. It sets `config.version = 1` and creates a dummy log with `ID = 1`, `NAME = testing`, and `CONTEST_ID = SC-QSO-PARTY`.
+
+Contact JSON uses `QSO_DATE_TIME_ON` as seconds since the UTC epoch. `FREQ` is stored in Hz in JSON and SQLite, and displayed in the frontend as decimal MHz. Contact `_log_id` maps to SQLite `LOG_ID`; returned contacts include `_id`, `_log_id`, and `_status: "Committed"`. Fields that do not map to QSO table columns are serialized to the QSO `JSON` column, except fields whose names start with `_`, which are treated as private/transient and are not persisted there. `_session_id` is reattached only to POST responses and websocket broadcasts for echo suppression. `_client_id` is frontend-only for pending contacts; when the backend returns the first committed DB `_id`, the frontend uses `_client_id` only to replace the pending row and then removes it from the committed contact.
 
 When a contact is posted to `POST /contacts`, the backend marks it with `_status: "Committed"`, returns the committed contact, and broadcasts it to other backend websocket sessions as:
 
@@ -75,28 +83,28 @@ cargo check
 Install dependencies:
 
 ```bash
-pnpm install
+npm install
 ```
 
 Start the dev server:
 
 ```bash
-pnpm run dev
+npm run dev
 ```
 
-The frontend expects the backend to be running on port `8080` at the same hostname as the frontend, for example `http://127.0.0.1:8080`. On startup it prompts for an operator callsign, uppercases it, opens `/ws` for radio state, then loads contest settings and contacts. If loading fails, it shows an alert.
+The frontend expects the backend to be running on port `8080` at the same hostname as the frontend, for example `http://127.0.0.1:8080`. On startup it prompts for an operator callsign, uppercases it, opens `/ws` for backend realtime messages, then loads contest settings and contacts. Canceling the operator prompt keeps the previous/default callsign. If contest settings loading fails, it shows an alert. If contact loading fails, it keeps local contacts and retries. After the backend websocket reconnects, the frontend refreshes `/contacts`.
 
 Build for production:
 
 ```bash
-pnpm run build
+npm run build
 ```
 
 Useful frontend checks:
 
 ```bash
-pnpm run lint
-pnpm run build
+npm run lint
+npm run build
 ```
 
 ## Current contest module
@@ -130,8 +138,7 @@ Exchange fields:
 
 QSO table columns:
 
-- `Date`
-- `Time`
+- `Date/Time (UTC)`
 - `Freq`
 - `Mode`
 - `Call`
@@ -145,6 +152,7 @@ QSO table columns:
 
 - Station callsign is currently static: `NG4M`.
 - Radio mode and frequency come from radio state messages on the backend websocket, with fallback defaults of `CW` and `14025` kHz before the first update.
+- The Server indicator shows backend websocket connection status.
 - Title bar format is `Mode: RADIO_MODE, Freq: RADIO_FREQ - CONTEST_NAME`.
 - The old text menu has been replaced with radio controls. `Band` lists the contest's allowed bands and follows the radio's current band; if the radio is on a non-contest or unknown band, the Band control is shown in red. Selecting a band tunes to that band's lower edge. `Mode` offers `CW`, `SSB`, `FM`, and `AM`; selecting one sends a websocket command to the backend.
 - Callsigns are uppercased and limited to 12 characters.
@@ -157,5 +165,9 @@ QSO table columns:
 - In CW mode, `RST` fields are three characters, from `111` through `599`.
 - In non-CW modes, `RST` fields are two characters, from `11` through `59`; out-of-range defaults such as `599` are trimmed.
 - The status line shows `STATION_CALLSIGN / Op: OPERATOR_CALLSIGN`.
-- The QSO table columns are rendered from backend `qso_columns`.
+- The QSO table columns are rendered from backend `qso_columns`; the current first column is `Date/Time (UTC)`.
 - The log table is sorted with the most recent contact first.
+- Pending/uncommitted contacts are highlighted until the backend returns a committed contact.
+- Browser local storage is used only as an offline/outbox cache for `Pending` and future `Updating` contacts; committed contacts are loaded from the backend database.
+- Contact date/time is tracked as `QSO_DATE_TIME_ON` seconds since the UTC epoch.
+- Contact `FREQ` is stored as Hz and displayed as decimal MHz.

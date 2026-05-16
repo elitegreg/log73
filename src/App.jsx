@@ -17,7 +17,12 @@ let promptedOperatorCallsign;
 
 function promptForOperatorCallsign() {
   const defaultCallsign = promptedOperatorCallsign ?? STATION_CALLSIGN;
-  const enteredCallsign = window.prompt('Operator Callsign', defaultCallsign) ?? '';
+  const enteredCallsign = window.prompt('Operator Callsign', defaultCallsign);
+
+  if (enteredCallsign === null) {
+    return defaultCallsign;
+  }
+
   promptedOperatorCallsign = enteredCallsign.toUpperCase();
   return promptedOperatorCallsign;
 }
@@ -31,6 +36,10 @@ function getOperatorCallsign() {
 }
 
 function contactSortValue(contact) {
+  if (typeof contact.QSO_DATE_TIME_ON === 'number') {
+    return contact.QSO_DATE_TIME_ON;
+  }
+
   if (typeof contact._time_on_epoch === 'number') {
     return contact._time_on_epoch;
   }
@@ -53,10 +62,44 @@ function sortContacts(contacts) {
   return [...contacts].sort((a, b) => contactSortValue(b) - contactSortValue(a));
 }
 
+function normalizeContact(contact) {
+  const nextContact = { ...contact };
+
+  if (nextContact._status === 'Committed') {
+    delete nextContact._client_id;
+  }
+
+  if (typeof nextContact.QSO_DATE_TIME_ON !== 'number') {
+    const epoch = contactSortValue(nextContact);
+    if (epoch > 0) {
+      nextContact.QSO_DATE_TIME_ON = epoch;
+    }
+  }
+
+  if (nextContact.FREQ !== undefined) {
+    const frequency = Number.parseFloat(String(nextContact.FREQ));
+    if (Number.isFinite(frequency)) {
+      nextContact.FREQ = Math.round(Math.abs(frequency) < 1000000 ? frequency * 1000000 : frequency);
+    }
+  }
+
+  delete nextContact.QSO_DATE;
+  delete nextContact.TIME_ON;
+  delete nextContact._time_on_epoch;
+
+  return nextContact;
+}
+
+function shouldPersistLocally(contact) {
+  return contact._status === 'Pending' || contact._status === 'Updating';
+}
+
 function loadLocalContacts() {
   try {
     const parsed = JSON.parse(localStorage.getItem(CONTACTS_STORAGE_KEY) ?? '[]');
-    return Array.isArray(parsed) ? sortContacts(parsed) : [];
+    return Array.isArray(parsed)
+      ? sortContacts(parsed.map(normalizeContact).filter(shouldPersistLocally))
+      : [];
   } catch (error) {
     console.error('Unable to load locally stored contacts', error);
     return [];
@@ -64,11 +107,14 @@ function loadLocalContacts() {
 }
 
 function saveLocalContacts(contacts) {
-  localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(contacts));
+  localStorage.setItem(
+    CONTACTS_STORAGE_KEY,
+    JSON.stringify(contacts.filter(shouldPersistLocally)),
+  );
 }
 
 function committedBackendContact(contact) {
-  return { ...contact, _status: contact._status ?? 'Committed' };
+  return normalizeContact({ ...contact, _status: contact._status ?? 'Committed' });
 }
 
 function createSessionId() {
@@ -91,12 +137,21 @@ function getSessionId() {
   return sessionId;
 }
 
+function contactMatches(left, right) {
+  if (left._id !== undefined && right._id !== undefined) {
+    return String(left._id) === String(right._id);
+  }
+
+  if (left._status === 'Pending' && left._client_id && right._client_id) {
+    return left._client_id === right._client_id;
+  }
+
+  return false;
+}
+
 function mergeContact(contacts, contact) {
   const committedContact = committedBackendContact(contact);
-  const index = contacts.findIndex(
-    (currentContact) =>
-      currentContact._id && committedContact._id && currentContact._id === committedContact._id,
-  );
+  const index = contacts.findIndex((currentContact) => contactMatches(currentContact, contact));
 
   if (index === -1) {
     return sortContacts([...contacts, committedContact]);
@@ -116,6 +171,7 @@ function App() {
   const [backendSocketStatus, setBackendSocketStatus] = useState('disconnected');
   const backendSocketRef = useRef(null);
   const committingContactIdsRef = useRef(new Set());
+  const refreshContactsRef = useRef(() => {});
 
   useEffect(() => {
     saveLocalContacts(contacts);
@@ -168,6 +224,7 @@ function App() {
 
         reconnectDelayMs = BACKEND_WS_INITIAL_RECONNECT_DELAY_MS;
         setBackendSocketStatus('connected');
+        refreshContactsRef.current();
       });
 
       socket.addEventListener('message', (event) => {
@@ -182,7 +239,10 @@ function App() {
               frequency_hz: message.frequency_hz,
               mode: message.mode,
             });
-          } else if (message.type === 'log_entry') {
+          } else if (
+            message.type === 'log_entry' &&
+            message.contact?._session_id !== sessionId
+          ) {
             setContacts((currentContacts) => mergeContact(currentContacts, message.contact));
           }
         } catch (error) {
@@ -287,10 +347,12 @@ function App() {
       }
     }
 
+    refreshContactsRef.current = loadContacts;
     loadContestSettings();
     loadContacts();
 
     return () => {
+      refreshContactsRef.current = () => {};
       shouldRetryContactsLoad = false;
       if (contactsLoadRetryTimerId !== undefined) {
         window.clearTimeout(contactsLoadRetryTimerId);
@@ -299,25 +361,36 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const pendingContact = contacts.find(
-      (contact) =>
-        contact._status === 'Pending' &&
-        contact._id &&
-        !committingContactIdsRef.current.has(contact._id),
-    );
+    const pendingContact = contacts.find((contact) => {
+      if (contact._status === 'Pending') {
+        return (
+          contact._client_id &&
+          !committingContactIdsRef.current.has(contact._client_id)
+        );
+      }
+
+      if (contact._status === 'Updating') {
+        return contact._id && !committingContactIdsRef.current.has(contact._id);
+      }
+
+      return false;
+    });
 
     if (!pendingContact) {
       return;
     }
 
-    committingContactIdsRef.current.add(pendingContact._id);
+    const commitKey = pendingContact._status === 'Pending'
+      ? pendingContact._client_id
+      : pendingContact._id;
+    committingContactIdsRef.current.add(commitKey);
 
     async function commitContact(contact) {
       try {
         const response = await fetch(`${API_BASE_URL}/contacts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(contact),
+          body: JSON.stringify({ ...contact, _log_id: contact._log_id ?? 1 }),
         });
 
         if (!response.ok) {
@@ -326,7 +399,12 @@ function App() {
 
         const responseBody = await response.json();
         if (responseBody.contact) {
-          setContacts((currentContacts) => mergeContact(currentContacts, responseBody.contact));
+          setContacts((currentContacts) =>
+            mergeContact(currentContacts, {
+              ...responseBody.contact,
+              _client_id: contact._client_id,
+            }),
+          );
         }
       } catch (error) {
         console.error('Unable to commit contact', error);
@@ -334,7 +412,7 @@ function App() {
           setContacts((currentContacts) => sortContacts(currentContacts));
         }, 5000);
       } finally {
-        committingContactIdsRef.current.delete(contact._id);
+        committingContactIdsRef.current.delete(commitKey);
       }
     }
 

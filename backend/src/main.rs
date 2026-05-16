@@ -1,4 +1,5 @@
 mod bands;
+mod db;
 mod frequency;
 mod radio;
 mod scqso_in_state;
@@ -12,6 +13,7 @@ use axum::{
     response::IntoResponse,
     routing::get,
 };
+use db::{Contact, Database};
 use futures_util::{SinkExt, StreamExt};
 use radio::{ClientMessage, RadioCommand, RadioSharedState, ServerMessage};
 use scqso_in_state::ContestRules;
@@ -19,12 +21,11 @@ use std::{collections::HashMap, env, time::Duration};
 use tokio::sync::{broadcast, mpsc};
 use tower_http::cors::CorsLayer;
 
-type Contact = serde_json::Map<String, serde_json::Value>;
-
 #[derive(Clone)]
 struct AppState {
     radio: RadioSharedState,
     log_entries: broadcast::Sender<Contact>,
+    db: Database,
 }
 
 #[derive(Debug)]
@@ -40,9 +41,11 @@ async fn main() {
     let (command_tx, command_rx) = mpsc::channel(32);
     let radio_state = RadioSharedState::new(command_tx);
     let (log_entries, _) = broadcast::channel(128);
+    let db = Database::open("log73.db").expect("failed to open log73.db");
     let app_state = AppState {
         radio: radio_state.clone(),
         log_entries,
+        db,
     };
 
     tokio::spawn(radio::run_radio_task(
@@ -55,7 +58,10 @@ async fn main() {
 
     let app = Router::new()
         .route("/contest-settings/get", get(contest_settings))
-        .route("/contacts", get(contacts).post(commit_contact))
+        .route(
+            "/contacts",
+            get(contacts).post(commit_contact).delete(delete_contact),
+        )
         .route("/ws", get(ws_handler))
         .with_state(app_state)
         .layer(CorsLayer::permissive());
@@ -213,24 +219,90 @@ async fn contest_settings() -> Json<ContestRules> {
     Json(ContestRules::new())
 }
 
-async fn contacts() -> Json<Vec<Contact>> {
-    Json(Vec::new())
+async fn contacts(
+    State(app_state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Json<Vec<Contact>> {
+    let id = params.get("id").and_then(|id| id.parse::<i64>().ok());
+
+    match app_state.db.contacts(id) {
+        Ok(contacts) => Json(contacts),
+        Err(error) => {
+            eprintln!("failed to load contacts: {error}");
+            Json(Vec::new())
+        }
+    }
 }
 
 async fn commit_contact(
     State(app_state): State<AppState>,
-    Json(mut contact): Json<Contact>,
+    Json(payload): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    contact.insert(
-        "_status".to_string(),
-        serde_json::Value::String("Committed".to_string()),
-    );
+    let input_contacts = match contacts_from_payload(payload) {
+        Ok(contacts) => contacts,
+        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
+    };
+    let session_ids = input_contacts
+        .iter()
+        .map(contact_session_id)
+        .collect::<Vec<_>>();
 
-    println!(
-        "received contact: {}",
-        serde_json::to_string_pretty(&contact).expect("contact should serialize")
-    );
+    match app_state.db.upsert_contacts(input_contacts) {
+        Ok(mut contacts) => {
+            for (contact, session_id) in contacts.iter_mut().zip(session_ids) {
+                if let Some(session_id) = session_id {
+                    contact.insert(
+                        "_session_id".to_string(),
+                        serde_json::Value::String(session_id),
+                    );
+                }
+                let _ = app_state.log_entries.send(contact.clone());
+            }
 
-    let _ = app_state.log_entries.send(contact.clone());
-    Json(serde_json::json!({ "ok": true, "contact": contact }))
+            let contact = contacts.first().cloned();
+            Json(serde_json::json!({ "ok": true, "contact": contact, "contacts": contacts }))
+        }
+        Err(error) => {
+            eprintln!("failed to commit contacts: {error}");
+            Json(serde_json::json!({ "ok": false, "error": error.to_string() }))
+        }
+    }
+}
+
+async fn delete_contact(
+    State(app_state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Json<serde_json::Value> {
+    let Some(id) = params.get("id").and_then(|id| id.parse::<i64>().ok()) else {
+        return Json(serde_json::json!({ "ok": false, "error": "missing id" }));
+    };
+
+    match app_state.db.delete_contact(id) {
+        Ok(deleted) => Json(serde_json::json!({ "ok": true, "deleted": deleted })),
+        Err(error) => {
+            eprintln!("failed to delete contact {id}: {error}");
+            Json(serde_json::json!({ "ok": false, "error": error.to_string() }))
+        }
+    }
+}
+
+fn contact_session_id(contact: &Contact) -> Option<String> {
+    contact
+        .get("_session_id")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+}
+
+fn contacts_from_payload(payload: serde_json::Value) -> Result<Vec<Contact>, String> {
+    match payload {
+        serde_json::Value::Array(values) => values
+            .into_iter()
+            .map(|value| match value {
+                serde_json::Value::Object(contact) => Ok(contact),
+                _ => Err("contact list must contain objects".to_string()),
+            })
+            .collect(),
+        serde_json::Value::Object(contact) => Ok(vec![contact]),
+        _ => Err("contacts payload must be an object or list of objects".to_string()),
+    }
 }

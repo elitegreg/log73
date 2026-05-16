@@ -62,13 +62,6 @@ function formatFrequency(frequencyHz) {
   return Math.round(frequencyHz / 1000);
 }
 
-function formatAdifFrequency(frequencyHz) {
-  return (frequencyHz / 1000000)
-    .toFixed(6)
-    .replace(/0+$/, '')
-    .replace(/\.$/, '');
-}
-
 function isFrequencyInput(value) {
   return /^\d+(\.\d+)?$/.test(value.trim());
 }
@@ -81,18 +74,6 @@ function bandForFrequency(frequencyHz) {
 
 function bandByMeters(meters) {
   return AMATEUR_BANDS.find((band) => band.meters === meters);
-}
-
-function pad2(value) {
-  return String(value).padStart(2, '0');
-}
-
-function formatUtcDate(date) {
-  return `${date.getUTCFullYear()}${pad2(date.getUTCMonth() + 1)}${pad2(date.getUTCDate())}`;
-}
-
-function formatUtcTime(date) {
-  return `${pad2(date.getUTCHours())}${pad2(date.getUTCMinutes())}${pad2(date.getUTCSeconds())}`;
 }
 
 function createContactId(date, callSign) {
@@ -181,19 +162,18 @@ function MainWindow({
     const timeOn = callSignEditedAtRef.current;
     const normalizedCallSign = callSign.trim().toUpperCase();
     const contact = {
-      QSO_DATE: formatUtcDate(timeOn),
-      TIME_ON: formatUtcTime(timeOn),
+      QSO_DATE_TIME_ON: Math.floor(timeOn.getTime() / 1000),
       STATION_CALLSIGN,
       OPERATOR: operatorCallsign,
       CONTEST_ID: settings.contest,
       CALL: normalizedCallSign,
       BAND: currentBand?.name ?? '',
-      FREQ: formatAdifFrequency(radioFrequencyHz),
+      FREQ: radioFrequencyHz,
       MODE: radioMode,
       _status: 'Pending',
       _session_id: sessionId,
-      _id: createContactId(timeOn, normalizedCallSign),
-      _time_on_epoch: Math.floor(timeOn.getTime() / 1000),
+      _log_id: 1,
+      _client_id: createContactId(timeOn, normalizedCallSign),
     };
 
     for (const field of settings.exchange) {
