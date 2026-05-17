@@ -72,8 +72,8 @@ function formatFrequency(entry, field = 'FREQ') {
     ? parsedFrequency * 1000000
     : parsedFrequency;
 
-  return (frequencyHz / 1000000)
-    .toFixed(6)
+  return (frequencyHz / 1000)
+    .toFixed(3)
     .replace(/0+$/, '')
     .replace(/\.$/, '');
 }
@@ -173,7 +173,7 @@ function parseUpdateValue(settings, column, value, radioMode) {
 
     return {
       ok: true,
-      value: Math.round(Math.abs(parsedFrequency) < 1000000 ? parsedFrequency * 1000000 : parsedFrequency),
+      value: Math.round(parsedFrequency * 1000),
     };
   }
 
