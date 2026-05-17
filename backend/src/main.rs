@@ -73,6 +73,9 @@ fn pretty_json<T: serde::Serialize>(value: &T) -> String {
 #[derive(Debug, Parser)]
 #[command(version, about = "Log73 contest logger backend")]
 struct Cli {
+    #[arg(long, default_value = "127.0.0.1:7300")]
+    bind: String,
+
     #[arg(long, default_value = "info")]
     log_level: String,
 
@@ -143,12 +146,12 @@ async fn main() {
         .layer(request_trace_layer)
         .layer(CorsLayer::permissive());
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
+    let listener = tokio::net::TcpListener::bind(&cli.bind)
         .await
-        .expect("failed to bind backend to 0.0.0.0:8080");
+        .unwrap_or_else(|error| panic!("failed to bind backend to {}: {error}", cli.bind));
 
     info!(
-        address = "0.0.0.0:8080",
+        address = %cli.bind,
         "log73 backend listening; radio connections are lazy"
     );
     axum::serve(listener, app).await.expect("server failed");

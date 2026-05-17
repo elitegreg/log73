@@ -80,11 +80,24 @@ cd backend
 cargo run
 ```
 
+By default, the backend binds to:
+
+```text
+127.0.0.1:7300
+```
+
+Use `--bind` to choose a different listen address:
+
+```bash
+cargo run -- --bind 0.0.0.0:7300
+cargo run -- --bind 127.0.0.1:8080
+```
+
 Backend logging defaults to `info` on stdout. You can change the level or write to a file. At `debug` level, incoming request details and pretty-printed POST JSON bodies are logged, with sensitive HTTP headers redacted:
 
 ```bash
 cargo run -- --log-level debug
-cargo run -- --log-level info --log-file log73.log
+cargo run -- --bind 0.0.0.0:7300 --log-level info --log-file log73.log
 ```
 
 Start the frontend dev server in another terminal:
@@ -93,7 +106,7 @@ Start the frontend dev server in another terminal:
 npm run dev
 ```
 
-In development, Rsbuild proxies `/api` and `/ws` to the backend on port `8080`.
+In development, Rsbuild proxies `/api` and `/ws` to the backend on port `7300`.
 
 Open the app, authenticate with the Basic Auth credentials above, then:
 
@@ -129,8 +142,8 @@ cd backend
 Production logging options are the same:
 
 ```bash
-./target/release/log73-backend --log-level debug
-./target/release/log73-backend --log-level info --log-file log73.log
+./target/release/log73-backend --bind 127.0.0.1:7300 --log-level debug
+./target/release/log73-backend --bind 0.0.0.0:7300 --log-level info --log-file log73.log
 ```
 
 ## Development checks
@@ -148,8 +161,8 @@ Backend:
 cd backend
 cargo fmt
 cargo check
-cargo run -- --log-level debug
-cargo run -- --log-level info --log-file /tmp/log73.log
+cargo run -- --bind 127.0.0.1:7300 --log-level debug
+cargo run -- --bind 127.0.0.1:7300 --log-level info --log-file /tmp/log73.log
 ```
 
 ## Project layout
