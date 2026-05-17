@@ -101,6 +101,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
   font-weight: bold;
   white-space: nowrap;
 }
@@ -110,6 +111,8 @@
 }
 
 .entry-fields input {
+  box-sizing: border-box;
+  width: 100%;
   border: 1px solid #000;
   background-color: white;
   padding: 2px;
@@ -121,10 +124,6 @@
 .entry-fields input:read-only {
   background-color: #e8e8e8;
   color: #333;
-}
-
-.callsign {
-  width: 12ch;
 }
 
 .cw-wpm-control input {

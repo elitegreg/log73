@@ -3,6 +3,7 @@ import { fieldDefault, parseFieldType, sanitizeCallsign, sanitizeExchangeValue }
 import './App.css';
 
 const MODE_OPTIONS = ['CW', 'SSB', 'FM', 'AM'];
+const CALLSIGN_FIELD_WIDTH_CHARS = 13;
 const AMATEUR_BANDS = [
   { meters: 160, name: '160m', lowerHz: 1800000, upperHz: 2000000 },
   { meters: 80, name: '80m', lowerHz: 3500000, upperHz: 4000000 },
@@ -287,7 +288,10 @@ function MainWindow({
         </div>
       </div>
       <div className="entry-fields">
-        <label className="entry-field">
+        <label
+          className="entry-field"
+          style={{ flex: `${CALLSIGN_FIELD_WIDTH_CHARS} 1 ${CALLSIGN_FIELD_WIDTH_CHARS}em` }}
+        >
           <span>Callsign</span>
           <input
             ref={callSignRef}
@@ -302,10 +306,14 @@ function MainWindow({
         {settings?.exchange?.map((field, index) => {
           const { kind, maxLength } = parseFieldType(field.type, radioMode);
           const value = exchangeValues[field.name] ?? fieldDefault(field, radioMode);
-          const width = `${Math.max(maxLength + 1, 4)}ch`;
+          const fieldWidthChars = Math.max(maxLength + 1, 4);
 
           return (
-            <label className="entry-field" key={field.name}>
+            <label
+              className="entry-field"
+              key={field.name}
+              style={{ flex: `${fieldWidthChars} 1 ${fieldWidthChars}em` }}
+            >
               <span>{field.name}</span>
               <input
                 ref={(element) => {
@@ -324,7 +332,6 @@ function MainWindow({
                 tabIndex={field.fixed === true ? -1 : undefined}
                 className={field.fixed === true ? 'fixed-field' : ''}
                 maxLength={maxLength}
-                style={{ width }}
               />
             </label>
           );
