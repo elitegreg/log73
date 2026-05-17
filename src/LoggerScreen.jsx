@@ -84,8 +84,14 @@ function getSessionId() {
 
 function contactMatches(left, right) {
   if (left._id !== undefined && right._id !== undefined) return String(left._id) === String(right._id);
-  if (left._status === 'Pending' && left._client_id && right._client_id) return left._client_id === right._client_id;
+  if (left._client_id && right._client_id) return left._client_id === right._client_id;
   return false;
+}
+
+function contactIdentifier(contact) {
+  if (contact._id !== undefined) return `id:${contact._id}`;
+  if (contact._client_id) return `client:${contact._client_id}`;
+  return null;
 }
 
 function mergeContact(contacts, contact) {
@@ -178,6 +184,8 @@ function LoggerScreen() {
             setRadioState({ frequency_hz: message.frequency_hz, mode: message.mode });
           } else if (message.type === 'log_entry' && message.contact?._session_id !== sessionId && Number(message.contact?._log_id) === numericLogId) {
             setContacts((currentContacts) => mergeContact(currentContacts, message.contact));
+          } else if (message.type === 'contact_deleted' && Number(message.log_id) === numericLogId) {
+            setContacts((currentContacts) => currentContacts.filter((contact) => String(contact._id) !== String(message.id)));
           }
         } catch (error) {
           console.error('Unable to process backend websocket message', error);
@@ -245,12 +253,15 @@ function LoggerScreen() {
   useEffect(() => {
     const pendingContact = contacts.find((contact) => {
       if (contact._status === 'Pending') return contact._client_id && !committingContactIdsRef.current.has(contact._client_id);
-      if (contact._status === 'Updating') return contact._id && !committingContactIdsRef.current.has(contact._id);
+      if (contact._status === 'Updating') {
+        const updateKey = contact._id ?? contact._client_id;
+        return updateKey && !committingContactIdsRef.current.has(updateKey);
+      }
       return false;
     });
     if (!pendingContact) return;
 
-    const commitKey = pendingContact._status === 'Pending' ? pendingContact._client_id : pendingContact._id;
+    const commitKey = pendingContact._status === 'Pending' ? pendingContact._client_id : pendingContact._id ?? pendingContact._client_id;
     committingContactIdsRef.current.add(commitKey);
 
     async function commitContact(contact) {
@@ -278,6 +289,56 @@ function LoggerScreen() {
     if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
   }
 
+  async function deleteContacts(contactsToDelete) {
+    if (contactsToDelete.length === 0) return;
+
+    const qsoLabel = contactsToDelete.length === 1 ? '1 QSO' : `${contactsToDelete.length} QSOs`;
+    if (!window.confirm(`Are you sure you want to delete ${qsoLabel}?`)) return;
+
+    const committedContacts = contactsToDelete.filter((contact) => contact._id !== undefined);
+    const localContactIdentifiers = contactsToDelete
+      .filter((contact) => contact._id === undefined)
+      .map(contactIdentifier)
+      .filter(Boolean);
+    const successfullyDeletedIds = [];
+    const results = await Promise.allSettled(
+      committedContacts.map(async (contact) => {
+        const result = await apiJson(`/contacts/${contact._id}`, { method: 'DELETE' });
+        if (!result.ok) throw new Error(result.error ?? 'Unable to delete contact');
+        if (result.deleted) successfullyDeletedIds.push(String(contact._id));
+      }),
+    );
+    const failureCount = results.filter((result) => result.status === 'rejected').length;
+    const deletedIdentifiers = new Set([
+      ...successfullyDeletedIds.map((id) => `id:${id}`),
+      ...localContactIdentifiers,
+    ]);
+
+    setContacts((currentContacts) => currentContacts.filter((contact) => {
+      const identifier = contactIdentifier(contact);
+      return !identifier || !deletedIdentifiers.has(identifier);
+    }));
+
+    if (failureCount > 0) {
+      window.alert(`Unable to delete ${failureCount === 1 ? '1 QSO' : `${failureCount} QSOs`}.`);
+    }
+  }
+
+  function updateContacts(contactsToUpdate, field, value) {
+    const identifiers = new Set(contactsToUpdate.map(contactIdentifier).filter(Boolean));
+    if (identifiers.size === 0) return;
+
+    setContacts((currentContacts) => sortContacts(currentContacts.map((contact) => {
+      const identifier = contactIdentifier(contact);
+      if (!identifier || !identifiers.has(identifier)) return contact;
+      return {
+        ...contact,
+        [field]: value,
+        _status: contact._status === 'Pending' ? 'Pending' : 'Updating',
+      };
+    })));
+  }
+
   function exitLogger() { navigate('/ui/open_log'); }
 
   return (
@@ -297,7 +358,14 @@ function LoggerScreen() {
         onLogContact={(contact) => setContacts((currentContacts) => sortContacts([...currentContacts, contact]))}
         onExit={exitLogger}
       />
-      <LogWindow settings={settings} contacts={contacts} log={log} />
+      <LogWindow
+        settings={settings}
+        contacts={contacts}
+        log={log}
+        radioMode={radioState?.mode ?? 'CW'}
+        onDeleteContacts={deleteContacts}
+        onUpdateContacts={updateContacts}
+      />
     </div>
   );
 }

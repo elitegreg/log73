@@ -9,6 +9,10 @@ pub enum ServerMessage {
     LogEntry {
         contact: serde_json::Map<String, serde_json::Value>,
     },
+    ContactDeleted {
+        id: i64,
+        log_id: i64,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

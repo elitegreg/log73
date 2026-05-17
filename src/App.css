@@ -235,6 +235,7 @@
 
 .log-table tbody tr {
   width: 100%; /* Ensure rows match adjusted width */
+  user-select: none;
 }
 
 .log-table td {
@@ -259,6 +260,58 @@
 
 .log-table tbody tr.uncommitted-contact {
   background-color: #fff8c6;
+}
+
+.log-table tbody tr.selected-contact,
+.log-table tbody tr.selected-contact:nth-child(odd),
+.log-table tbody tr.selected-contact:nth-child(even),
+.log-table tbody tr.selected-contact.uncommitted-contact {
+  background-color: #2f6fd6;
+}
+
+.log-table tbody tr.selected-contact td {
+  color: white;
+}
+
+.log-cell-editor {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid #0000ff;
+  padding: 1px 3px;
+  font: inherit;
+  user-select: text;
+}
+
+.log-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 170px;
+  border: 1px solid #404040;
+  background-color: white;
+  box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.35);
+  padding: 2px;
+}
+
+.log-context-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 4px 8px;
+  color: #000;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.log-context-menu button:hover:not(:disabled) {
+  background-color: #2f6fd6;
+  color: white;
+}
+
+.log-context-menu button:disabled {
+  color: #777;
+  cursor: default;
 }
 
 .selection-window,

@@ -205,9 +205,22 @@ impl Database {
         Ok(committed)
     }
 
-    pub fn delete_contact(&self, id: i64) -> rusqlite::Result<bool> {
+    pub fn delete_contact(&self, id: i64) -> rusqlite::Result<Option<i64>> {
         let connection = self.connection.lock().expect("database mutex poisoned");
-        Ok(connection.execute("DELETE FROM qsos WHERE ID = ?1", params![id])? > 0)
+        let log_id = connection
+            .query_row(
+                "SELECT LOG_ID FROM qsos WHERE ID = ?1",
+                params![id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?;
+
+        let Some(log_id) = log_id else {
+            return Ok(None);
+        };
+
+        let deleted = connection.execute("DELETE FROM qsos WHERE ID = ?1", params![id])? > 0;
+        Ok(deleted.then_some(log_id))
     }
 }
 

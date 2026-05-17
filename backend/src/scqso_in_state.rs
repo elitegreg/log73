@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::BTreeMap;
 
 #[derive(Serialize, Clone)]
 pub struct ExchangeField {
@@ -19,44 +20,57 @@ pub struct ContestRules {
     pub allowed_modes: &'static [&'static str],
     pub exchange: Vec<ExchangeField>,
     pub qso_columns: Vec<&'static str>,
+    pub qso_column_fields: BTreeMap<&'static str, &'static str>,
 }
 
 impl ContestRules {
     pub fn new() -> Self {
+        let exchange = vec![
+            ExchangeField {
+                name: "RST(s)",
+                field_type: "RST",
+                adif: "RST_SENT",
+                fixed: None,
+                default: Some(serde_json::json!(599)),
+            },
+            ExchangeField {
+                name: "County",
+                field_type: "String:4",
+                adif: "STX_STRING",
+                fixed: Some(true),
+                default: Some(serde_json::json!("BERK")),
+            },
+            ExchangeField {
+                name: "RST(r)",
+                field_type: "RST",
+                adif: "RST_RCVD",
+                fixed: None,
+                default: None,
+            },
+            ExchangeField {
+                name: "State",
+                field_type: "String:4",
+                adif: "SRX_STRING",
+                fixed: None,
+                default: None,
+            },
+        ];
+        let mut qso_column_fields = BTreeMap::from([
+            ("Freq", "FREQ"),
+            ("Mode", "MODE"),
+            ("Call", "CALL"),
+            ("Op", "OPERATOR"),
+        ]);
+
+        for field in &exchange {
+            qso_column_fields.insert(field.name, field.adif);
+        }
+
         Self {
             contest: "SC-QSO-PARTY",
             allowed_bands: &[160, 80, 40, 20, 15, 10, 6, 2],
             allowed_modes: &["SSB", "FM", "AM", "CW"],
-            exchange: vec![
-                ExchangeField {
-                    name: "RST(s)",
-                    field_type: "RST",
-                    adif: "RST_SENT",
-                    fixed: None,
-                    default: Some(serde_json::json!(599)),
-                },
-                ExchangeField {
-                    name: "County",
-                    field_type: "String:4",
-                    adif: "STX_STRING",
-                    fixed: Some(true),
-                    default: Some(serde_json::json!("BERK")),
-                },
-                ExchangeField {
-                    name: "RST(r)",
-                    field_type: "RST",
-                    adif: "RST_RCVD",
-                    fixed: None,
-                    default: None,
-                },
-                ExchangeField {
-                    name: "State",
-                    field_type: "String:4",
-                    adif: "SRX_STRING",
-                    fixed: None,
-                    default: None,
-                },
-            ],
+            exchange,
             qso_columns: vec![
                 "Date/Time (UTC)",
                 "Freq",
@@ -68,6 +82,7 @@ impl ContestRules {
                 "Pts",
                 "Op",
             ],
+            qso_column_fields,
         }
     }
 }

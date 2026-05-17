@@ -33,7 +33,7 @@ use tracing_subscriber::{EnvFilter, fmt};
 #[derive(Clone)]
 struct AppState {
     radio_manager: RadioManager,
-    log_entries: broadcast::Sender<Contact>,
+    log_events: broadcast::Sender<ServerMessage>,
     db: Database,
 }
 
@@ -88,12 +88,12 @@ async fn main() {
     let cli = Cli::parse();
     let _log_guard = init_tracing(&cli).expect("failed to initialize logging");
 
-    let (log_entries, _) = broadcast::channel(128);
+    let (log_events, _) = broadcast::channel(128);
     let db = Database::open("log73.db").expect("failed to open log73.db");
     let radio_manager = RadioManager::new(db.clone());
     let app_state = AppState {
         radio_manager,
-        log_entries,
+        log_events,
         db,
     };
 
@@ -207,7 +207,7 @@ async fn handle_socket(
     }
 
     let mut radio_updates = radio_handle.subscribe();
-    let mut log_entries = app_state.log_entries.subscribe();
+    let mut log_events = app_state.log_events.subscribe();
     let outbound_session_id = session_id.clone();
     let outbound = tokio::spawn(async move {
         loop {
@@ -217,12 +217,13 @@ async fn handle_socket(
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
-                contact = log_entries.recv() => match contact {
-                    Ok(contact) => {
+                event = log_events.recv() => match event {
+                    Ok(ServerMessage::LogEntry { contact }) => {
                         let contact_session_id = contact.get("_session_id").and_then(serde_json::Value::as_str);
                         if contact_session_id == Some(outbound_session_id.as_str()) { continue; }
                         serde_json::to_string(&ServerMessage::LogEntry { contact }).expect("log entry should serialize")
                     }
+                    Ok(event) => serde_json::to_string(&event).expect("log event should serialize"),
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 }
@@ -383,7 +384,9 @@ async fn commit_contact(
                         serde_json::Value::String(session_id),
                     );
                 }
-                let _ = app_state.log_entries.send(contact.clone());
+                let _ = app_state.log_events.send(ServerMessage::LogEntry {
+                    contact: contact.clone(),
+                });
             }
             let contact = contacts.first().cloned();
             Json(serde_json::json!({ "ok": true, "contact": contact, "contacts": contacts }))
@@ -400,7 +403,13 @@ async fn delete_contact(
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
     match app_state.db.delete_contact(id) {
-        Ok(deleted) => Json(serde_json::json!({ "ok": true, "deleted": deleted })),
+        Ok(Some(log_id)) => {
+            let _ = app_state
+                .log_events
+                .send(ServerMessage::ContactDeleted { id, log_id });
+            Json(serde_json::json!({ "ok": true, "deleted": true }))
+        }
+        Ok(None) => Json(serde_json::json!({ "ok": true, "deleted": false })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
 }

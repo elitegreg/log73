@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { fieldDefault, parseFieldType, sanitizeCallsign, sanitizeExchangeValue } from './contactFields';
 import './App.css';
 
 const MODE_OPTIONS = ['CW', 'SSB', 'FM', 'AM'];
@@ -16,40 +17,6 @@ const AMATEUR_BANDS = [
   { meters: 6, name: '6m', lowerHz: 50000000, upperHz: 54000000 },
   { meters: 2, name: '2m', lowerHz: 144000000, upperHz: 148000000 },
 ];
-
-function parseFieldType(type = '', radioMode = 'CW') {
-  const [rawKind = 'STRING', length = '8'] = type.split(':');
-  const kind = rawKind.toUpperCase();
-  const maxLength =
-    kind === 'RST'
-      ? radioMode === 'CW'
-        ? 3
-        : 2
-      : Number.parseInt(length, 10) || 8;
-  return { kind, maxLength };
-}
-
-function sanitizeRST(value, radioMode = 'CW') {
-  const maxLength = radioMode === 'CW' ? 3 : 2;
-  let nextValue = value.replace(/[^1-9]/g, '').slice(0, maxLength);
-
-  while (nextValue.length > 0 && !/^[1-5]$/.test(nextValue[0])) {
-    nextValue = nextValue.slice(1);
-  }
-
-  return nextValue;
-}
-
-function fieldDefault(field, radioMode) {
-  if (field.default === undefined || field.default === null) {
-    return '';
-  }
-
-  const value = String(field.default);
-  return parseFieldType(field.type, radioMode).kind === 'RST'
-    ? sanitizeRST(value, radioMode)
-    : value;
-}
 
 function exchangeDefaults(settings, radioMode) {
   return Object.fromEntries(
@@ -124,22 +91,14 @@ function MainWindow({
   }, [settings, radioMode]);
 
   function updateExchangeField(field, value) {
-    const { kind, maxLength } = parseFieldType(field.type, radioMode);
-    let nextValue = value.slice(0, maxLength);
-
-    if (kind === 'RST') {
-      nextValue = sanitizeRST(nextValue, radioMode);
-    } else if (kind === 'NUMERIC') {
-      nextValue = nextValue.replace(/\D/g, '');
-    } else {
-      nextValue = nextValue.toUpperCase();
-    }
-
-    setExchangeValues((current) => ({ ...current, [field.name]: nextValue }));
+    setExchangeValues((current) => ({
+      ...current,
+      [field.name]: sanitizeExchangeValue(field, value, radioMode),
+    }));
   }
 
   function handleCallsignChange(event) {
-    setCallSign(event.target.value.toUpperCase().slice(0, 12));
+    setCallSign(sanitizeCallsign(event.target.value));
     callSignEditedAtRef.current = new Date();
   }
 
