@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }
 base64 = "0.22.1"
+clap = { version = "4.6.1", features = ["derive"] }
 futures-util = "0.3"
 mime_guess = "2.0.5"
 rigctld = "0.1.0"
@@ -14,4 +15,7 @@ rust-embed = "8.11.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

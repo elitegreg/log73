@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
+use tracing::{debug, error, info, warn};
 
 #[derive(Clone)]
 pub struct RadioManager {
@@ -41,6 +42,11 @@ impl RadioManager {
 
         if let Some(radio) = radios.get_mut(&radio_id) {
             radio.refcount += 1;
+            debug!(
+                radio_id,
+                refcount = radio.refcount,
+                "acquired existing managed radio"
+            );
             return Ok(RadioHandle {
                 current: radio.current.clone(),
                 updates: radio.updates.clone(),
@@ -53,6 +59,14 @@ impl RadioManager {
             .radio(radio_id)
             .map_err(|error| error.to_string())?
             .ok_or_else(|| format!("radio not found: {radio_id}"))?;
+        debug!(
+            radio_id,
+            host = %config.rigctld_host,
+            port = config.rigctld_port,
+            poll_frequency = config.poll_frequency,
+            rigctld_timeout = config.rigctld_timeout,
+            "starting managed radio"
+        );
         let current = Arc::new(RwLock::new(None));
         let (updates, _) = broadcast::channel(32);
         let (commands, command_rx) = mpsc::channel(32);
@@ -95,6 +109,10 @@ impl RadioManager {
         }
 
         if let Some(mut radio) = removed {
+            debug!(
+                radio_id,
+                "releasing final radio reference; shutting down managed radio"
+            );
             if let Some(shutdown) = radio.shutdown.take() {
                 let _ = shutdown.send(());
             }
@@ -145,16 +163,24 @@ async fn run_managed_radio(
             _ = &mut shutdown => return,
             result = rig.connect() => {
                 if let Err(error) = result {
-                    eprintln!("failed to connect to rigctld for radio {} at {}:{}: {error}", config.id, config.rigctld_host, config.rigctld_port);
+                    warn!(
+                        radio_id = config.id,
+                        host = %config.rigctld_host,
+                        port = config.rigctld_port,
+                        %error,
+                        "failed to connect to rigctld"
+                    );
                     tokio::time::sleep(poll_interval).await;
                     continue;
                 }
             }
         }
 
-        println!(
-            "connected radio {} to rigctld at {}:{}",
-            config.id, config.rigctld_host, config.rigctld_port
+        info!(
+            radio_id = config.id,
+            host = %config.rigctld_host,
+            port = config.rigctld_port,
+            "connected to rigctld"
         );
         let mut interval = tokio::time::interval(poll_interval);
         let mut last_frequency_hz = current
@@ -178,7 +204,7 @@ async fn run_managed_radio(
                             let _ = updates.send(state);
                         }
                         Err(error) => {
-                            eprintln!("failed to poll rigctld for radio {}: {error}", config.id);
+                            warn!(radio_id = config.id, %error, "failed to poll rigctld");
                             rig.disconnect();
                             break;
                         }
@@ -186,8 +212,9 @@ async fn run_managed_radio(
                 }
                 command = commands.recv() => {
                     let Some(command) = command else { return; };
+                    debug!(radio_id = config.id, ?command, "applying radio command");
                     if let Err(error) = apply_command(&mut rig, command, last_frequency_hz).await {
-                        eprintln!("failed to apply radio command for radio {}: {error}", config.id);
+                        error!(radio_id = config.id, %error, "failed to apply radio command");
                         rig.disconnect();
                         break;
                     }
@@ -224,7 +251,7 @@ async fn apply_command(
             match mode_for_request(&mode, frequency_hz) {
                 Some(rig_mode) => rig.set_mode(rig_mode, 0).await,
                 None => {
-                    eprintln!("ignoring unsupported radio mode: {mode}");
+                    warn!(mode, "ignoring unsupported radio mode");
                     Ok(())
                 }
             }

@@ -15,7 +15,7 @@ pub struct Log {
     pub station_callsign: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct NewLog {
     pub name: String,
     pub contest_id: String,
@@ -32,7 +32,7 @@ pub struct RadioConfig {
     pub rigctld_timeout: f64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct NewRadio {
     pub name: String,
     pub rigctld_host: String,

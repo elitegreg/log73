@@ -3,6 +3,7 @@ use axum::http::{Request, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use base64::Engine;
+use tracing::debug;
 
 const USERNAME: &str = "log73";
 const PASSWORD: &str = "hamradio";
@@ -11,6 +12,8 @@ pub async fn basic_auth(request: Request<Body>, next: Next) -> Response {
     if authorized(&request) {
         return next.run(request).await;
     }
+
+    debug!(method = %request.method(), uri = %request.uri(), "request failed basic authentication");
 
     (
         StatusCode::UNAUTHORIZED,

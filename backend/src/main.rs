@@ -13,18 +13,22 @@ use axum::{
         Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
+    http::{HeaderMap, Request, header},
     middleware,
     response::IntoResponse,
     routing::{delete, get},
 };
+use clap::Parser;
 use db::{Contact, Database, NewLog, NewRadio};
 use futures_util::{SinkExt, StreamExt};
 use radio::{ClientMessage, RadioCommand, ServerMessage};
 use radio_manager::RadioManager;
 use scqso_in_state::ContestRules;
-use std::collections::HashMap;
+use std::{collections::HashMap, fs::OpenOptions, path::PathBuf, time::Duration};
 use tokio::sync::broadcast;
-use tower_http::cors::CorsLayer;
+use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tracing::{Span, debug, error, info, warn};
+use tracing_subscriber::{EnvFilter, fmt};
 
 #[derive(Clone)]
 struct AppState {
@@ -33,8 +37,54 @@ struct AppState {
     db: Database,
 }
 
+fn init_tracing(cli: &Cli) -> std::io::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
+    let filter = EnvFilter::try_new(&cli.log_level).unwrap_or_else(|_| EnvFilter::new("info"));
+
+    if let Some(path) = &cli.log_file {
+        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        let (writer, guard) = tracing_appender::non_blocking(file);
+        fmt().with_env_filter(filter).with_writer(writer).init();
+        return Ok(Some(guard));
+    }
+
+    fmt().with_env_filter(filter).init();
+    Ok(None)
+}
+
+fn redacted_headers(headers: &HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .map(|(name, value)| {
+            let value = if name == header::AUTHORIZATION || name == header::COOKIE {
+                "<redacted>".to_string()
+            } else {
+                value.to_str().unwrap_or("<non-utf8>").to_string()
+            };
+            (name.to_string(), value)
+        })
+        .collect()
+}
+
+fn pretty_json<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string_pretty(value)
+        .unwrap_or_else(|error| format!("<unable to serialize json: {error}>"))
+}
+
+#[derive(Debug, Parser)]
+#[command(version, about = "Log73 contest logger backend")]
+struct Cli {
+    #[arg(long, default_value = "info")]
+    log_level: String,
+
+    #[arg(long)]
+    log_file: Option<PathBuf>,
+}
+
 #[tokio::main]
 async fn main() {
+    let cli = Cli::parse();
+    let _log_guard = init_tracing(&cli).expect("failed to initialize logging");
+
     let (log_entries, _) = broadcast::channel(128);
     let db = Database::open("log73.db").expect("failed to open log73.db");
     let radio_manager = RadioManager::new(db.clone());
@@ -43,6 +93,34 @@ async fn main() {
         log_entries,
         db,
     };
+
+    let request_trace_layer = TraceLayer::new_for_http()
+        .make_span_with(|request: &Request<axum::body::Body>| {
+            tracing::debug_span!(
+                "http_request",
+                method = %request.method(),
+                uri = %request.uri(),
+                version = ?request.version()
+            )
+        })
+        .on_request(|request: &Request<axum::body::Body>, _span: &Span| {
+            debug!(
+                method = %request.method(),
+                uri = %request.uri(),
+                version = ?request.version(),
+                headers = ?redacted_headers(request.headers()),
+                "incoming request"
+            );
+        })
+        .on_response(
+            |response: &axum::response::Response, latency: Duration, _span: &Span| {
+                info!(
+                    status = response.status().as_u16(),
+                    latency_ms = latency.as_secs_f64() * 1000.0,
+                    "request completed"
+                );
+            },
+        );
 
     let api = Router::new()
         .route("/contest-settings", get(contest_settings))
@@ -62,13 +140,17 @@ async fn main() {
         .fallback(static_assets::static_handler)
         .with_state(app_state)
         .layer(middleware::from_fn(auth::basic_auth))
+        .layer(request_trace_layer)
         .layer(CorsLayer::permissive());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await
         .expect("failed to bind backend to 0.0.0.0:8080");
 
-    println!("log73 backend listening on http://0.0.0.0:8080; radio connections are lazy");
+    info!(
+        address = "0.0.0.0:8080",
+        "log73 backend listening; radio connections are lazy"
+    );
     axum::serve(listener, app).await.expect("server failed");
 }
 
@@ -91,18 +173,19 @@ async fn handle_socket(
     radio_id: Option<i64>,
 ) {
     let Some(radio_id) = radio_id else {
-        eprintln!("backend websocket missing radio_id: session_id={session_id}");
+        warn!(session_id, "backend websocket missing radio_id");
         return;
     };
 
     let Ok(radio_handle) = app_state.radio_manager.acquire(radio_id).await else {
-        eprintln!(
-            "backend websocket requested unavailable radio_id={radio_id}: session_id={session_id}"
+        warn!(
+            session_id,
+            radio_id, "backend websocket requested unavailable radio"
         );
         return;
     };
 
-    println!("backend websocket connected: session_id={session_id}, radio_id={radio_id}");
+    info!(session_id, radio_id, "backend websocket connected");
     let (mut sender, mut receiver) = socket.split();
 
     if let Some(current) = radio_handle.current_message().await {
@@ -154,20 +237,28 @@ async fn handle_socket(
         };
         match serde_json::from_str::<ClientMessage>(&text) {
             Ok(ClientMessage::SetFrequency { frequency_hz }) => {
+                debug!(
+                    session_id,
+                    radio_id, frequency_hz, "websocket set_frequency command received"
+                );
                 let _ = radio_handle
                     .send_command(RadioCommand::SetFrequency(frequency_hz))
                     .await;
             }
             Ok(ClientMessage::SetMode { mode }) => {
+                debug!(
+                    session_id,
+                    radio_id, mode, "websocket set_mode command received"
+                );
                 let _ = radio_handle.send_command(RadioCommand::SetMode(mode)).await;
             }
-            Err(error) => eprintln!("invalid websocket message: {error}"),
+            Err(error) => warn!(session_id, radio_id, %error, "invalid websocket message"),
         }
     }
 
     outbound.abort();
     app_state.radio_manager.release(radio_id).await;
-    println!("backend websocket disconnected: session_id={session_id}, radio_id={radio_id}");
+    info!(session_id, radio_id, "backend websocket disconnected");
 }
 
 async fn contest_settings() -> Json<ContestRules> {
@@ -176,7 +267,7 @@ async fn contest_settings() -> Json<ContestRules> {
 
 async fn logs(State(app_state): State<AppState>) -> Json<Vec<db::Log>> {
     Json(app_state.db.logs().unwrap_or_else(|error| {
-        eprintln!("failed to load logs: {error}");
+        error!(%error, "failed to load logs");
         Vec::new()
     }))
 }
@@ -193,6 +284,7 @@ async fn create_log(
     State(app_state): State<AppState>,
     Json(payload): Json<NewLog>,
 ) -> Json<serde_json::Value> {
+    debug!(payload = %pretty_json(&payload), "create log POST body");
     match app_state.db.create_log(payload) {
         Ok(log) => Json(serde_json::json!({ "ok": true, "log": log })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
@@ -213,7 +305,7 @@ async fn delete_log(
 
 async fn radios(State(app_state): State<AppState>) -> Json<Vec<db::RadioConfig>> {
     Json(app_state.db.radios().unwrap_or_else(|error| {
-        eprintln!("failed to load radios: {error}");
+        error!(%error, "failed to load radios");
         Vec::new()
     }))
 }
@@ -230,6 +322,7 @@ async fn create_radio(
     State(app_state): State<AppState>,
     Json(payload): Json<NewRadio>,
 ) -> Json<serde_json::Value> {
+    debug!(payload = %pretty_json(&payload), "create radio POST body");
     match app_state.db.create_radio(payload) {
         Ok(radio) => Json(serde_json::json!({ "ok": true, "radio": radio })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
@@ -257,7 +350,7 @@ async fn contacts(
     match app_state.db.contacts(log_id) {
         Ok(contacts) => Json(contacts),
         Err(error) => {
-            eprintln!("failed to load contacts: {error}");
+            error!(log_id, %error, "failed to load contacts");
             Json(Vec::new())
         }
     }
@@ -268,6 +361,7 @@ async fn commit_contact(
     Path(log_id): Path<i64>,
     Json(payload): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
+    debug!(log_id, payload = %pretty_json(&payload), "commit contact POST body");
     let input_contacts = match contacts_from_payload(payload) {
         Ok(contacts) => contacts,
         Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
@@ -292,7 +386,7 @@ async fn commit_contact(
             Json(serde_json::json!({ "ok": true, "contact": contact, "contacts": contacts }))
         }
         Err(error) => {
-            eprintln!("failed to commit contacts: {error}");
+            error!(log_id, %error, "failed to commit contacts");
             Json(serde_json::json!({ "ok": false, "error": error.to_string() }))
         }
     }

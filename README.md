@@ -19,6 +19,7 @@ Log73 is under active development. The current contest module is `SC-QSO-PARTY`.
 ## Features
 
 - HTTP Basic Auth for the whole app.
+- Structured backend logging with `tracing`, configurable by CLI.
 - Browser UI served by the Rust backend in production.
 - Separate frontend/backend development mode with Rsbuild proxying `/api` and `/ws`.
 - Multi-log selection and creation.
@@ -79,6 +80,13 @@ cd backend
 cargo run
 ```
 
+Backend logging defaults to `info` on stdout. You can change the level or write to a file. At `debug` level, incoming request details and pretty-printed POST JSON bodies are logged, with sensitive HTTP headers redacted:
+
+```bash
+cargo run -- --log-level debug
+cargo run -- --log-level info --log-file log73.log
+```
+
 Start the frontend dev server in another terminal:
 
 ```bash
@@ -118,6 +126,13 @@ cd backend
 ./target/release/log73-backend
 ```
 
+Production logging options are the same:
+
+```bash
+./target/release/log73-backend --log-level debug
+./target/release/log73-backend --log-level info --log-file log73.log
+```
+
 ## Development checks
 
 Frontend:
@@ -133,6 +148,8 @@ Backend:
 cd backend
 cargo fmt
 cargo check
+cargo run -- --log-level debug
+cargo run -- --log-level info --log-file /tmp/log73.log
 ```
 
 ## Project layout
