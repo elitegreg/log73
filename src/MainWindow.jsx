@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import './App.css';
 
-export const STATION_CALLSIGN = 'NG4M';
 const MODE_OPTIONS = ['CW', 'SSB', 'FM', 'AM'];
 const AMATEUR_BANDS = [
   { meters: 160, name: '160m', lowerHz: 1800000, upperHz: 2000000 },
@@ -86,13 +85,18 @@ function createContactId(date, callSign) {
 
 function MainWindow({
   settings,
+  log,
+  radio,
+  stationCallsign,
   operatorCallsign,
   radioState,
   backendSocketStatus,
   sessionId,
+  logId,
   onSetRadioFrequency,
   onSetRadioMode,
   onLogContact,
+  onExit,
 }) {
   const [callSign, setCallSign] = useState('');
   const [exchangeValues, setExchangeValues] = useState({});
@@ -163,7 +167,7 @@ function MainWindow({
     const normalizedCallSign = callSign.trim().toUpperCase();
     const contact = {
       QSO_DATE_TIME_ON: Math.floor(timeOn.getTime() / 1000),
-      STATION_CALLSIGN,
+      STATION_CALLSIGN: stationCallsign,
       OPERATOR: operatorCallsign,
       CONTEST_ID: settings.contest,
       CALL: normalizedCallSign,
@@ -172,7 +176,7 @@ function MainWindow({
       MODE: radioMode,
       _status: 'Pending',
       _session_id: sessionId,
-      _log_id: 1,
+      _log_id: logId,
       _client_id: createContactId(timeOn, normalizedCallSign),
     };
 
@@ -244,6 +248,7 @@ function MainWindow({
 
     if (selectedBand) {
       onSetRadioFrequency?.(selectedBand.lowerHz);
+      onSetRadioMode?.(radioMode);
     }
   }
 
@@ -259,9 +264,11 @@ function MainWindow({
 
   return (
     <div className="window">
-      <div className="title-bar">
-        Mode: {radioMode}, Freq: {formatFrequency(radioFrequencyHz)} -{' '}
-        {settings?.contest ?? 'Loading...'}
+      <div className="title-bar logger-title-bar">
+        <span>
+          Log73 | Log: {log?.name ?? 'Loading...'} | Radio: {radio?.name ?? 'Loading...'} | Contest: {settings?.contest ?? 'Loading...'} | Mode: {radioMode}, Freq: {formatFrequency(radioFrequencyHz)}
+        </span>
+        <button className="title-button" onClick={onExit}>Exit Logger</button>
       </div>
       <div className="radio-controls">
         <label className={currentBandAllowed ? 'radio-control' : 'radio-control unsupported'}>
@@ -368,7 +375,7 @@ function MainWindow({
       </div>
       <div className="status-bar">
         <span>
-          {STATION_CALLSIGN} / Op: {operatorCallsign}
+          {stationCallsign} / Op: {operatorCallsign}
         </span>
       </div>
     </div>

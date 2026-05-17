@@ -101,12 +101,12 @@ function formatCell(column, entry) {
   return entry[adifField] ?? entry[column] ?? '';
 }
 
-function LogWindow({ settings, contacts }) {
+function LogWindow({ settings, contacts, log }) {
   const columns = settings?.qso_columns ?? [];
 
   return (
     <div className="log-window">
-      <div className="log-title-bar">Log: {settings?.contest ?? 'Loading contest...'}</div>
+      <div className="log-title-bar">Log: {log?.name ?? 'Loading log...'} - {settings?.contest ?? 'Loading contest...'}</div>
       <table className="log-table">
         <colgroup>
           {columns.map((column) => (

@@ -1,76 +1,133 @@
-# log73
+# Log73
 
-log73 is an amateur radio contest logger prototype. It is designed as a client/server application with a JavaScript/React frontend and a Rust backend.
+Log73 is an amateur radio contest logger prototype. It uses a React/Rsbuild browser frontend and a Rust/Axum backend in a single deployable application.
 
-The current version demonstrates dynamic contest configuration loading and basic radio control. The backend serves contest rules for the SC QSO Party in-state module, connects to an existing `rigctld` instance, polls radio frequency/mode, and publishes realtime state to the frontend over the backend websocket. The frontend uses contest rules to build exchange entry fields and the QSO table, while the title bar and mode controls reflect the live radio state.
+The current architecture supports multiple logs, multiple radios, browser clients, SQLite storage, and lazy connections to one or more existing `rigctld` instances.
 
-## Project layout
+```text
+Browser UI
+  -> Rust backend
+  -> SQLite database
+  -> rigctld instances
+  -> radios
+```
 
-- `src/` - React/Rsbuild frontend
-- `backend/` - Rust HTTP backend
-- `backend/src/frequency.rs` - frequency type and `khz!` / `mhz!` macros
-- `backend/src/bands.rs` - USA amateur band definitions and band lookup helpers
-- `backend/src/scqso_in_state.rs` - SC QSO Party in-state contest rules
-- `backend/src/db.rs` - SQLite schema setup and contact JSON/SQL mapping
+## Current status
 
-## Backend
+Log73 is under active development. The current contest module is `SC-QSO-PARTY`. Database migrations are not implemented yet; if the development schema changes, delete the local development database and let the backend recreate it.
 
-The backend runs on `http://127.0.0.1:8080`, provides contest/contact JSON endpoints, and exposes a backend websocket:
+## Features
 
-- `GET /contest-settings/get` - contest name, allowed bands, allowed modes, exchange field definitions, and QSO table columns
-- `GET /contacts` - returns committed contacts
-- `GET /contacts?id=ID` - returns one committed contact if found
-- `POST /contacts` - accepts one contact object or a list of contact objects and inserts/updates them; returns `contact` for the first committed contact and `contacts` for all committed contacts
-- `DELETE /contacts?id=ID` - deletes one contact
-- `GET /ws` - backend websocket for realtime updates and commands, including radio state updates and radio set commands
+- HTTP Basic Auth for the whole app.
+- Browser UI served by the Rust backend in production.
+- Separate frontend/backend development mode with Rsbuild proxying `/api` and `/ws`.
+- Multi-log selection and creation.
+- Multi-radio selection and creation.
+- Per-radio `rigctld` settings:
+  - host
+  - port
+  - poll frequency
+  - rigctld communication timeout
+- Lazy radio connections: a `rigctld` connection opens only when a logger websocket uses that radio.
+- Reference-counted radio use: when the last logger websocket for a radio closes, the backend disconnects that radio.
+- Per-radio serialized CAT command queue.
+- Realtime radio state updates over websocket.
+- SQLite-backed QSO storage.
+- Offline/pending contact cache in browser local storage.
 
-Run it with:
+## Authentication
+
+The app uses HTTP Basic Auth.
+
+Development credentials:
+
+```text
+username: log73
+password: hamradio
+```
+
+Authentication protects the frontend, `/api/*`, and `/ws`.
+
+## Prerequisites
+
+- Node.js / npm
+- Rust toolchain
+- One or more externally running `rigctld` instances
+
+The backend does **not** start `rigctld`.
+
+Example `rigctld` setup:
+
+```bash
+rigctld -m <MODEL> -r <DEVICE> -t 4532
+```
+
+For multiple radios, run multiple `rigctld` instances on different ports.
+
+## Quick start: development
+
+Install frontend dependencies:
+
+```bash
+npm install
+```
+
+Start the backend:
 
 ```bash
 cd backend
 cargo run
 ```
 
-By default the backend connects to an already-running `rigctld` at `127.0.0.1:4532` and polls every `0.25` seconds. It does not start `rigctld` itself. Runtime options:
+Start the frontend dev server in another terminal:
+
+```bash
+npm run dev
+```
+
+In development, Rsbuild proxies `/api` and `/ws` to the backend on port `8080`.
+
+Open the app, authenticate with the Basic Auth credentials above, then:
+
+1. Open `/ui/open_log`.
+2. Create or select a log.
+3. Create or select a radio.
+4. Open the logger.
+
+## Production build
+
+Build frontend assets:
+
+```bash
+npm run build
+```
+
+Build the backend:
 
 ```bash
 cd backend
-cargo run -- \
-  --rigctld-host 127.0.0.1 \
-  --rigctld-port 4532 \
-  --poll-frequency 0.25
+cargo build --release
 ```
 
-Radio state is modeled in the backend as frequency in Hz plus a normalized mode string. `USB` and `LSB` from rigctld are published to the frontend as `SSB`. Frontend `SSB` set commands are converted back to `LSB` on 160m through 40m and `USB` on 20m and shorter bands.
+The backend embeds and serves the built frontend assets from `dist/`.
 
-The backend websocket sends server messages like:
+Run the production backend:
 
-```json
-{ "type": "radio_state", "frequency_hz": 14025000, "mode": "CW" }
+```bash
+cd backend
+./target/release/log73-backend
 ```
 
-The frontend connects to the backend websocket with a session id query parameter, for example `/ws?session_id=<uuid>`. The session id is stored in browser local storage and is included on locally logged contacts as `_session_id`. The backend uses it to avoid echoing a session's own committed contacts back to that same websocket.
+## Development checks
 
-The frontend sends radio commands like:
+Frontend:
 
-```json
-{ "type": "set_frequency", "frequency_hz": 14025000 }
-{ "type": "set_mode", "mode": "SSB" }
+```bash
+npm run lint
+npm run build
 ```
 
-Contacts are stored in `log73.db`, a SQLite database created in the backend working directory and ignored by git. The backend initializes strict `config`, `logs`, and `qsos` tables with foreign keys enabled. It sets `config.version = 1` and creates a dummy log with `ID = 1`, `NAME = testing`, and `CONTEST_ID = SC-QSO-PARTY`.
-
-Contact JSON uses `QSO_DATE_TIME_ON` as seconds since the UTC epoch. `FREQ` is stored in Hz in JSON and SQLite, and displayed in the frontend as decimal MHz. Contact `_log_id` maps to SQLite `LOG_ID`; returned contacts include `_id`, `_log_id`, and `_status: "Committed"`. Fields that do not map to QSO table columns are serialized to the QSO `JSON` column, except fields whose names start with `_`, which are treated as private/transient and are not persisted there. `_session_id` is reattached only to POST responses and websocket broadcasts for echo suppression. `_client_id` is frontend-only for pending contacts; when the backend returns the first committed DB `_id`, the frontend uses `_client_id` only to replace the pending row and then removes it from the committed contact.
-
-When a contact is posted to `POST /contacts`, the backend marks it with `_status: "Committed"`, returns the committed contact, and broadcasts it to other backend websocket sessions as:
-
-```json
-{ "type": "log_entry", "contact": { "_session_id": "...", "_status": "Committed" } }
-```
-
-The backend does not echo a `log_entry` to websocket clients with the same session id as the posted contact. Clients that receive a `log_entry` from another session add it to their contacts list.
-
-Useful backend checks:
+Backend:
 
 ```bash
 cd backend
@@ -78,96 +135,283 @@ cargo fmt
 cargo check
 ```
 
-## Frontend
+## Project layout
 
-Install dependencies:
+```text
+src/                         React/Rsbuild frontend
+src/App.jsx                  frontend routes
+src/OpenLogScreen.jsx        log/radio selection screen
+src/CreateLogScreen.jsx      create log screen
+src/CreateRadioScreen.jsx    create radio screen
+src/LoggerScreen.jsx         logger state, websocket, contact commit flow
+src/MainWindow.jsx           main logger entry/radio-control UI
+src/LogWindow.jsx            QSO table
 
-```bash
-npm install
+backend/                     Rust backend
+backend/src/main.rs          Axum routes, websocket handling, API handlers
+backend/src/auth.rs          HTTP Basic Auth middleware
+backend/src/db.rs            SQLite schema and data mapping
+backend/src/radio.rs         radio messages, mode conversion helpers
+backend/src/radio_manager.rs lazy/refcounted multi-radio manager
+backend/src/static_assets.rs embedded frontend asset serving
+backend/src/scqso_in_state.rs SC QSO Party contest rules
+backend/src/bands.rs         USA amateur band helpers
+backend/src/frequency.rs     frequency type and macros
 ```
 
-Start the dev server:
+## UI routes
 
-```bash
-npm run dev
+```text
+/                         redirects to /ui/open_log
+/ui/open_log              select/create/delete logs and radios
+/ui/create_log            create a log
+/ui/create_radio          create a radio
+/ui/logger/:logId/:radioId logger for selected log and radio
 ```
 
-The frontend expects the backend to be running on port `8080` at the same hostname as the frontend, for example `http://127.0.0.1:8080`. On startup it prompts for an operator callsign, uppercases it, opens `/ws` for backend realtime messages, then loads contest settings and contacts. Canceling the operator prompt keeps the previous/default callsign. If contest settings loading fails, it shows an alert. If contact loading fails, it keeps local contacts and retries. After the backend websocket reconnects, the frontend refreshes `/contacts`.
+Logger context includes:
 
-Build for production:
-
-```bash
-npm run build
+```text
+log_id
+radio_id
+log name
+radio name
+contest id
+station callsign
+operator callsign
 ```
 
-Useful frontend checks:
+Operator callsign is contest/QSO metadata, not an authentication identity.
 
-```bash
-npm run lint
-npm run build
+## Backend API
+
+All JSON API routes are under `/api`.
+
+```text
+GET    /api/contest-settings
+
+GET    /api/logs
+POST   /api/logs
+GET    /api/logs/:id
+DELETE /api/logs/:id
+
+GET    /api/logs/:log_id/contacts
+POST   /api/logs/:log_id/contacts
+DELETE /api/contacts/:id
+
+GET    /api/radios
+POST   /api/radios
+GET    /api/radios/:id
+DELETE /api/radios/:id
 ```
+
+Deletion rules:
+
+- Logs with QSOs cannot be deleted.
+- Radios currently used by an active logger websocket cannot be deleted.
+
+## Websocket API
+
+Logger websocket:
+
+```text
+/ws?session_id=<uuid>&radio_id=<radio_id>
+```
+
+The frontend stores `session_id` in browser local storage and includes it on locally logged contacts as `_session_id`. The backend uses it to avoid echoing the same committed contact back to the originating websocket.
+
+Server radio state message:
+
+```json
+{ "type": "radio_state", "frequency_hz": 14025000, "mode": "CW" }
+```
+
+Server log entry message:
+
+```json
+{ "type": "log_entry", "contact": { "_status": "Committed" } }
+```
+
+Client radio commands:
+
+```json
+{ "type": "set_frequency", "frequency_hz": 14025000 }
+{ "type": "set_mode", "mode": "SSB" }
+```
+
+## Database
+
+SQLite database file:
+
+```text
+backend/log73.db
+```
+
+The database is created automatically in the backend working directory.
+
+Tables:
+
+```text
+config
+logs
+radios
+qsos
+```
+
+Important schema notes:
+
+- `logs` stores log name, contest id, and station callsign.
+- `radios` stores rigctld host, port, poll frequency, and rigctld timeout.
+- `qsos.LOG_ID` references `logs.ID`.
+- `idx_qsos_log_id` indexes `qsos(LOG_ID)`.
+- Foreign keys are enabled.
+- Tables are SQLite `STRICT` tables.
+
+There are no migrations yet. If schema changes during development, remove `backend/log73.db` manually and restart the backend.
+
+## Radio configuration
+
+Each radio row contains:
+
+```text
+name
+rigctld_host
+rigctld_port
+poll_frequency
+rigctld_timeout
+```
+
+Create-radio defaults:
+
+```text
+rigctld_host: 127.0.0.1
+rigctld_port: 4532 + existing_radio_count
+poll_frequency: 0.25
+rigctld_timeout: 2
+```
+
+`poll_frequency` controls how often the backend polls frequency/mode.
+
+`rigctld_timeout` controls the communication timeout for individual rigctld commands. This should usually be larger than `poll_frequency`; `2` seconds is the default.
+
+Radio connections are lazy. Opening a logger with `radio_id=X` starts or reuses that radio's managed connection. Closing the logger releases it. When the reference count reaches zero, the backend disconnects and removes the managed radio.
+
+Each radio has one async command queue, so CAT commands for that radio are serialized.
+
+## Radio behavior
+
+Radio state is represented as:
+
+```text
+frequency_hz
+mode
+```
+
+`USB` and `LSB` from rigctld are normalized to frontend mode `SSB`.
+
+When the frontend asks for `SSB`, the backend chooses:
+
+- `LSB` on 160m, 80m, and 40m
+- `USB` on 20m and shorter bands
+
+Band selection from the logger sends both:
+
+1. set frequency to the selected band's lower edge
+2. set mode to the currently selected logger mode
+
+This is intentional because many radios restore a per-band last-used mode when changing bands.
+
+## Contact data
+
+Contacts use ADIF-like JSON fields.
+
+Important fields:
+
+```text
+QSO_DATE_TIME_ON  seconds since UTC epoch
+STATION_CALLSIGN  selected log's station callsign
+OPERATOR          prompted operator callsign
+CONTEST_ID        contest id
+CALL              worked station
+BAND              band name
+FREQ              frequency in Hz
+MODE              normalized mode
+_log_id           database log id
+_id               database QSO id
+_status           Pending, Updating, or Committed
+_session_id       frontend websocket session id
+_client_id        temporary frontend id for pending rows
+```
+
+Fields mapped to database columns are stored directly in `qsos`. Extra non-private fields are serialized into the `JSON` column. Fields beginning with `_` are private/transient and are not stored in `JSON`.
+
+Committed contacts are loaded from the backend. Pending/updating contacts are cached in browser local storage as an offline/outbox cache.
 
 ## Current contest module
 
-The active contest is `SC-QSO-PARTY`.
+Current contest:
 
-Configured allowed bands, in meters:
+```text
+SC-QSO-PARTY
+```
 
-- 160
-- 80
-- 40
-- 20
-- 15
-- 10
-- 6
-- 2
+Allowed bands, in meters:
 
-Configured allowed modes:
+```text
+160, 80, 40, 20, 15, 10, 6, 2
+```
 
-- SSB
-- FM
-- AM
-- CW
+Allowed modes:
+
+```text
+SSB, FM, AM, CW
+```
 
 Exchange fields:
 
-- `RST(s)` - type `RST`, ADIF `RST_SENT`, default `599`
-- `County` - type `String:4`, ADIF `STX_STRING`, default `BERK`, fixed
-- `RST(r)` - type `RST`, ADIF `RST_RCVD`
-- `State` - type `String:4`, ADIF `SRX_STRING`
+| Label | Type | ADIF field | Default | Fixed |
+| --- | --- | --- | --- | --- |
+| RST(s) | RST | RST_SENT | 599 | no |
+| County | String:4 | STX_STRING | BERK | yes |
+| RST(r) | RST | RST_RCVD | | no |
+| State | String:4 | SRX_STRING | | no |
 
 QSO table columns:
 
-- `Date/Time (UTC)`
-- `Freq`
-- `Mode`
-- `Call`
-- `RST(s)`
-- `RST(r)`
-- `Mult`
-- `Pts`
-- `Op`
+```text
+Date/Time (UTC)
+Freq
+Mode
+Call
+RST(s)
+RST(r)
+Mult
+Pts
+Op
+```
 
-## Current UI behavior
+## Logger UI behavior
 
-- Station callsign is currently static: `NG4M`.
-- Radio mode and frequency come from radio state messages on the backend websocket, with fallback defaults of `CW` and `14025` kHz before the first update.
-- The Server indicator shows backend websocket connection status.
-- Title bar format is `Mode: RADIO_MODE, Freq: RADIO_FREQ - CONTEST_NAME`.
-- The old text menu has been replaced with radio controls. `Band` lists the contest's allowed bands and follows the radio's current band; if the radio is on a non-contest or unknown band, the Band control is shown in red. Selecting a band tunes to that band's lower edge. `Mode` offers `CW`, `SSB`, `FM`, and `AM`; selecting one sends a websocket command to the backend.
+- Station callsign comes from the selected log.
+- Operator callsign is prompted when opening the logger and can be changed with Ctrl+O.
 - Callsigns are uppercased and limited to 12 characters.
-- If the callsign field contains only a number or decimal number and Enter is pressed, it is treated as a frequency in kHz, converted to Hz, sent to the backend, and the field is cleared. For example, `14025` sends `14025000` Hz and `14025.5` sends `14025500` Hz.
-- Operator callsign is prompted on startup, uppercased, and shown in the status line.
-- Exchange fields are rendered from backend contest settings.
-- Fixed exchange fields are prefilled, read-only, and skipped during tab navigation.
-- The last editable exchange field tabs back to the callsign field.
-- `RST` fields accept only digits `1` through `9`; the first digit must be `1` through `5`.
-- In CW mode, `RST` fields are three characters, from `111` through `599`.
-- In non-CW modes, `RST` fields are two characters, from `11` through `59`; out-of-range defaults such as `599` are trimmed.
-- The status line shows `STATION_CALLSIGN / Op: OPERATOR_CALLSIGN`.
-- The QSO table columns are rendered from backend `qso_columns`; the current first column is `Date/Time (UTC)`.
-- The log table is sorted with the most recent contact first.
-- Pending/uncommitted contacts are highlighted until the backend returns a committed contact.
-- Browser local storage is used only as an offline/outbox cache for `Pending` and future `Updating` contacts; committed contacts are loaded from the backend database.
-- Contact date/time is tracked as `QSO_DATE_TIME_ON` seconds since the UTC epoch.
-- Contact `FREQ` is stored as Hz and displayed as decimal MHz.
+- If the callsign field contains a number and Enter is pressed, it is treated as a frequency in kHz and sent to the radio.
+- Radio mode/frequency come from backend websocket radio state.
+- The server indicator shows websocket connection status.
+- The title bar shows log, radio, contest, mode, and frequency.
+- Exit Logger returns to the log/radio selection screen.
+- Fixed exchange fields are read-only and skipped during tab navigation.
+- RST validation depends on mode:
+  - CW: three digits, `111` through `599`
+  - non-CW: two digits, `11` through `59`
+- The QSO table is sorted newest first.
+- Pending/uncommitted contacts are highlighted until committed by the backend.
+
+## Limitations / future work
+
+- Only `SC-QSO-PARTY` is currently implemented.
+- Basic Auth credentials are static development credentials.
+- No database migrations yet.
+- Backend does not start or supervise `rigctld`.
+- No hamlib rig model configuration yet.
+- No cluster, band map, SO2R, or multi-transmitter rule enforcement yet.

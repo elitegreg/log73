@@ -1,125 +1,75 @@
+mod auth;
 mod bands;
 mod db;
 mod frequency;
 mod radio;
+mod radio_manager;
 mod scqso_in_state;
+mod static_assets;
 
 use axum::{
     Json, Router,
     extract::{
-        Query, State,
+        Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
+    middleware,
     response::IntoResponse,
-    routing::get,
+    routing::{delete, get},
 };
-use db::{Contact, Database};
+use db::{Contact, Database, NewLog, NewRadio};
 use futures_util::{SinkExt, StreamExt};
-use radio::{ClientMessage, RadioCommand, RadioSharedState, ServerMessage};
+use radio::{ClientMessage, RadioCommand, ServerMessage};
+use radio_manager::RadioManager;
 use scqso_in_state::ContestRules;
-use std::{collections::HashMap, env, time::Duration};
-use tokio::sync::{broadcast, mpsc};
+use std::collections::HashMap;
+use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 
 #[derive(Clone)]
 struct AppState {
-    radio: RadioSharedState,
+    radio_manager: RadioManager,
     log_entries: broadcast::Sender<Contact>,
     db: Database,
 }
 
-#[derive(Debug)]
-struct Config {
-    rigctld_host: String,
-    rigctld_port: u16,
-    poll_interval: Duration,
-}
-
 #[tokio::main]
 async fn main() {
-    let config = Config::from_args();
-    let (command_tx, command_rx) = mpsc::channel(32);
-    let radio_state = RadioSharedState::new(command_tx);
     let (log_entries, _) = broadcast::channel(128);
     let db = Database::open("log73.db").expect("failed to open log73.db");
+    let radio_manager = RadioManager::new(db.clone());
     let app_state = AppState {
-        radio: radio_state.clone(),
+        radio_manager,
         log_entries,
         db,
     };
 
-    tokio::spawn(radio::run_radio_task(
-        config.rigctld_host.clone(),
-        config.rigctld_port,
-        config.poll_interval,
-        radio_state,
-        command_rx,
-    ));
+    let api = Router::new()
+        .route("/contest-settings", get(contest_settings))
+        .route("/logs", get(logs).post(create_log))
+        .route("/logs/{id}", get(log).delete(delete_log))
+        .route(
+            "/logs/{log_id}/contacts",
+            get(contacts).post(commit_contact),
+        )
+        .route("/contacts/{id}", delete(delete_contact))
+        .route("/radios", get(radios).post(create_radio))
+        .route("/radios/{id}", get(radio).delete(delete_radio));
 
     let app = Router::new()
-        .route("/contest-settings/get", get(contest_settings))
-        .route(
-            "/contacts",
-            get(contacts).post(commit_contact).delete(delete_contact),
-        )
+        .nest("/api", api)
         .route("/ws", get(ws_handler))
+        .fallback(static_assets::static_handler)
         .with_state(app_state)
+        .layer(middleware::from_fn(auth::basic_auth))
         .layer(CorsLayer::permissive());
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080")
         .await
         .expect("failed to bind backend to 0.0.0.0:8080");
 
-    println!(
-        "log73 backend listening on http://0.0.0.0:8080; rigctld at {}:{}; poll interval {:?}",
-        config.rigctld_host, config.rigctld_port, config.poll_interval
-    );
+    println!("log73 backend listening on http://0.0.0.0:8080; radio connections are lazy");
     axum::serve(listener, app).await.expect("server failed");
-}
-
-impl Config {
-    fn from_args() -> Self {
-        let mut rigctld_host = "127.0.0.1".to_string();
-        let mut rigctld_port = 4532;
-        let mut poll_interval = Duration::from_millis(250);
-        let mut args = env::args().skip(1);
-
-        while let Some(arg) = args.next() {
-            match arg.as_str() {
-                "--rigctld-host" => {
-                    rigctld_host = args.next().expect("--rigctld-host requires a host value");
-                }
-                "--rigctld-port" => {
-                    rigctld_port = args
-                        .next()
-                        .expect("--rigctld-port requires a port value")
-                        .parse()
-                        .expect("--rigctld-port must be a number");
-                }
-                "--poll-frequency" | "--poll-interval" => {
-                    let seconds: f64 = args
-                        .next()
-                        .expect("--poll-frequency requires a seconds value")
-                        .parse()
-                        .expect("--poll-frequency must be a number of seconds");
-                    poll_interval = Duration::from_secs_f64(seconds);
-                }
-                "--help" | "-h" => {
-                    println!(
-                        "Usage: log73-backend [--rigctld-host HOST] [--rigctld-port PORT] [--poll-frequency SECONDS]"
-                    );
-                    std::process::exit(0);
-                }
-                _ => panic!("unknown argument: {arg}"),
-            }
-        }
-
-        Self {
-            rigctld_host,
-            rigctld_port,
-            poll_interval,
-        }
-    }
 }
 
 async fn ws_handler(
@@ -128,58 +78,67 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     let session_id = params.get("session_id").cloned().unwrap_or_default();
-    ws.on_upgrade(move |socket| handle_socket(socket, app_state, session_id))
+    let radio_id = params
+        .get("radio_id")
+        .and_then(|value| value.parse::<i64>().ok());
+    ws.on_upgrade(move |socket| handle_socket(socket, app_state, session_id, radio_id))
 }
 
-async fn handle_socket(socket: WebSocket, app_state: AppState, session_id: String) {
-    println!("backend websocket connected: session_id={session_id}");
+async fn handle_socket(
+    socket: WebSocket,
+    app_state: AppState,
+    session_id: String,
+    radio_id: Option<i64>,
+) {
+    let Some(radio_id) = radio_id else {
+        eprintln!("backend websocket missing radio_id: session_id={session_id}");
+        return;
+    };
+
+    let Ok(radio_handle) = app_state.radio_manager.acquire(radio_id).await else {
+        eprintln!(
+            "backend websocket requested unavailable radio_id={radio_id}: session_id={session_id}"
+        );
+        return;
+    };
+
+    println!("backend websocket connected: session_id={session_id}, radio_id={radio_id}");
     let (mut sender, mut receiver) = socket.split();
 
-    if let Some(current) = app_state.radio.current().await {
+    if let Some(current) = radio_handle.current_message().await {
         if sender
             .send(Message::Text(
-                serde_json::to_string(&ServerMessage::RadioState(current))
+                serde_json::to_string(&current)
                     .expect("radio state should serialize")
                     .into(),
             ))
             .await
             .is_err()
         {
+            app_state.radio_manager.release(radio_id).await;
             return;
         }
     }
 
-    let mut radio_updates = app_state.radio.subscribe();
+    let mut radio_updates = radio_handle.subscribe();
     let mut log_entries = app_state.log_entries.subscribe();
     let outbound_session_id = session_id.clone();
     let outbound = tokio::spawn(async move {
         loop {
             let message = tokio::select! {
-                update = radio_updates.recv() => {
-                    match update {
-                        Ok(update) => serde_json::to_string(&ServerMessage::RadioState(update))
-                            .expect("radio state should serialize"),
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => break,
+                update = radio_updates.recv() => match update {
+                    Ok(update) => serde_json::to_string(&ServerMessage::RadioState(update)).expect("radio state should serialize"),
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+                contact = log_entries.recv() => match contact {
+                    Ok(contact) => {
+                        let contact_session_id = contact.get("_session_id").and_then(serde_json::Value::as_str);
+                        if contact_session_id == Some(outbound_session_id.as_str()) { continue; }
+                        serde_json::to_string(&ServerMessage::LogEntry { contact }).expect("log entry should serialize")
                     }
-                }
-                contact = log_entries.recv() => {
-                    match contact {
-                        Ok(contact) => {
-                            let contact_session_id = contact
-                                .get("_session_id")
-                                .and_then(serde_json::Value::as_str);
-
-                            if contact_session_id == Some(outbound_session_id.as_str()) {
-                                continue;
-                            }
-
-                            serde_json::to_string(&ServerMessage::LogEntry { contact })
-                                .expect("log entry should serialize")
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
             };
 
@@ -193,39 +152,109 @@ async fn handle_socket(socket: WebSocket, app_state: AppState, session_id: Strin
         let Message::Text(text) = message else {
             continue;
         };
-
         match serde_json::from_str::<ClientMessage>(&text) {
             Ok(ClientMessage::SetFrequency { frequency_hz }) => {
-                let _ = app_state
-                    .radio
+                let _ = radio_handle
                     .send_command(RadioCommand::SetFrequency(frequency_hz))
                     .await;
             }
             Ok(ClientMessage::SetMode { mode }) => {
-                let _ = app_state
-                    .radio
-                    .send_command(RadioCommand::SetMode(mode))
-                    .await;
+                let _ = radio_handle.send_command(RadioCommand::SetMode(mode)).await;
             }
             Err(error) => eprintln!("invalid websocket message: {error}"),
         }
     }
 
     outbound.abort();
-    println!("backend websocket disconnected: session_id={session_id}");
+    app_state.radio_manager.release(radio_id).await;
+    println!("backend websocket disconnected: session_id={session_id}, radio_id={radio_id}");
 }
 
 async fn contest_settings() -> Json<ContestRules> {
     Json(ContestRules::new())
 }
 
+async fn logs(State(app_state): State<AppState>) -> Json<Vec<db::Log>> {
+    Json(app_state.db.logs().unwrap_or_else(|error| {
+        eprintln!("failed to load logs: {error}");
+        Vec::new()
+    }))
+}
+
+async fn log(State(app_state): State<AppState>, Path(id): Path<i64>) -> Json<serde_json::Value> {
+    match app_state.db.log(id) {
+        Ok(Some(log)) => Json(serde_json::json!({ "ok": true, "log": log })),
+        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn create_log(
+    State(app_state): State<AppState>,
+    Json(payload): Json<NewLog>,
+) -> Json<serde_json::Value> {
+    match app_state.db.create_log(payload) {
+        Ok(log) => Json(serde_json::json!({ "ok": true, "log": log })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn delete_log(
+    State(app_state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<serde_json::Value> {
+    match app_state.db.delete_log(id) {
+        Ok(deleted) => Json(serde_json::json!({ "ok": true, "deleted": deleted })),
+        Err(_) => {
+            Json(serde_json::json!({ "ok": false, "error": "cannot delete a log that has QSOs" }))
+        }
+    }
+}
+
+async fn radios(State(app_state): State<AppState>) -> Json<Vec<db::RadioConfig>> {
+    Json(app_state.db.radios().unwrap_or_else(|error| {
+        eprintln!("failed to load radios: {error}");
+        Vec::new()
+    }))
+}
+
+async fn radio(State(app_state): State<AppState>, Path(id): Path<i64>) -> Json<serde_json::Value> {
+    match app_state.db.radio(id) {
+        Ok(Some(radio)) => Json(serde_json::json!({ "ok": true, "radio": radio })),
+        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn create_radio(
+    State(app_state): State<AppState>,
+    Json(payload): Json<NewRadio>,
+) -> Json<serde_json::Value> {
+    match app_state.db.create_radio(payload) {
+        Ok(radio) => Json(serde_json::json!({ "ok": true, "radio": radio })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn delete_radio(
+    State(app_state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<serde_json::Value> {
+    if app_state.radio_manager.is_active(id).await {
+        return Json(serde_json::json!({ "ok": false, "error": "cannot delete an active radio" }));
+    }
+
+    match app_state.db.delete_radio(id) {
+        Ok(deleted) => Json(serde_json::json!({ "ok": true, "deleted": deleted })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
 async fn contacts(
     State(app_state): State<AppState>,
-    Query(params): Query<HashMap<String, String>>,
+    Path(log_id): Path<i64>,
 ) -> Json<Vec<Contact>> {
-    let id = params.get("id").and_then(|id| id.parse::<i64>().ok());
-
-    match app_state.db.contacts(id) {
+    match app_state.db.contacts(log_id) {
         Ok(contacts) => Json(contacts),
         Err(error) => {
             eprintln!("failed to load contacts: {error}");
@@ -236,6 +265,7 @@ async fn contacts(
 
 async fn commit_contact(
     State(app_state): State<AppState>,
+    Path(log_id): Path<i64>,
     Json(payload): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
     let input_contacts = match contacts_from_payload(payload) {
@@ -247,7 +277,7 @@ async fn commit_contact(
         .map(contact_session_id)
         .collect::<Vec<_>>();
 
-    match app_state.db.upsert_contacts(input_contacts) {
+    match app_state.db.upsert_contacts(log_id, input_contacts) {
         Ok(mut contacts) => {
             for (contact, session_id) in contacts.iter_mut().zip(session_ids) {
                 if let Some(session_id) = session_id {
@@ -258,7 +288,6 @@ async fn commit_contact(
                 }
                 let _ = app_state.log_entries.send(contact.clone());
             }
-
             let contact = contacts.first().cloned();
             Json(serde_json::json!({ "ok": true, "contact": contact, "contacts": contacts }))
         }
@@ -271,18 +300,11 @@ async fn commit_contact(
 
 async fn delete_contact(
     State(app_state): State<AppState>,
-    Query(params): Query<HashMap<String, String>>,
+    Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    let Some(id) = params.get("id").and_then(|id| id.parse::<i64>().ok()) else {
-        return Json(serde_json::json!({ "ok": false, "error": "missing id" }));
-    };
-
     match app_state.db.delete_contact(id) {
         Ok(deleted) => Json(serde_json::json!({ "ok": true, "deleted": deleted })),
-        Err(error) => {
-            eprintln!("failed to delete contact {id}: {error}");
-            Json(serde_json::json!({ "ok": false, "error": error.to_string() }))
-        }
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
 }
 

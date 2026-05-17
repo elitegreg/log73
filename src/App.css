@@ -260,3 +260,92 @@
 .log-table tbody tr.uncommitted-contact {
   background-color: #fff8c6;
 }
+
+.selection-window,
+.form-window {
+  width: 800px;
+  border: 1px solid #000;
+  background-color: #add8e6;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.selection-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 12px;
+}
+
+.selection-grid h2 {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
+
+.selection-list {
+  width: 100%;
+  font-size: 12px;
+}
+
+.selection-buttons,
+.selection-actions {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.selection-actions {
+  justify-content: flex-end;
+  padding: 10px 12px;
+}
+
+.form-window {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.form-window label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 0 12px;
+  font-weight: bold;
+}
+
+.form-window input,
+.form-window select {
+  font-size: 16px;
+  padding: 4px;
+}
+
+.error-message {
+  margin: 8px 12px 0;
+  padding: 6px;
+  border: 1px solid #a00000;
+  background: #ffd6d6;
+  color: #700000;
+  font-weight: bold;
+}
+
+.cmd-btn.primary {
+  font-weight: bold;
+}
+
+.cmd-btn:link,
+.cmd-btn:visited {
+  color: #000;
+  text-decoration: none;
+}
+
+.logger-title-bar {
+  gap: 8px;
+}
+
+.title-button {
+  background-color: #c0c0c0;
+  border: 1px solid #808080;
+  padding: 1px 6px;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}

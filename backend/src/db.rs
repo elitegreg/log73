@@ -1,10 +1,45 @@
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 pub type Contact = Map<String, Value>;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Log {
+    pub id: i64,
+    pub name: String,
+    pub contest_id: String,
+    pub station_callsign: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NewLog {
+    pub name: String,
+    pub contest_id: String,
+    pub station_callsign: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RadioConfig {
+    pub id: i64,
+    pub name: String,
+    pub rigctld_host: String,
+    pub rigctld_port: u16,
+    pub poll_frequency: f64,
+    pub rigctld_timeout: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NewRadio {
+    pub name: String,
+    pub rigctld_host: String,
+    pub rigctld_port: u16,
+    pub poll_frequency: f64,
+    pub rigctld_timeout: f64,
+}
 
 const QSO_COLUMNS: &[&str] = &[
     "LOG_ID",
@@ -65,26 +100,101 @@ impl Database {
         })
     }
 
-    pub fn contacts(&self, id: Option<i64>) -> rusqlite::Result<Vec<Contact>> {
+    pub fn logs(&self) -> rusqlite::Result<Vec<Log>> {
         let connection = self.connection.lock().expect("database mutex poisoned");
-
-        if let Some(id) = id {
-            let contact = select_contact(&connection, id)?;
-            Ok(contact.into_iter().collect())
-        } else {
-            let mut statement =
-                connection.prepare("SELECT * FROM qsos ORDER BY QSO_DATE_TIME_ON DESC, ID DESC")?;
-            let rows = statement.query_map([], row_to_contact)?;
-            rows.collect()
-        }
+        let mut statement = connection
+            .prepare("SELECT ID, NAME, CONTEST_ID, STATION_CALLSIGN FROM logs ORDER BY NAME, ID")?;
+        let rows = statement.query_map([], row_to_log)?;
+        rows.collect()
     }
 
-    pub fn upsert_contacts(&self, contacts: Vec<Contact>) -> rusqlite::Result<Vec<Contact>> {
+    pub fn log(&self, id: i64) -> rusqlite::Result<Option<Log>> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        select_log(&connection, id)
+    }
+
+    pub fn create_log(&self, log: NewLog) -> rusqlite::Result<Log> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        connection.execute(
+            "INSERT INTO logs (NAME, CONTEST_ID, STATION_CALLSIGN) VALUES (?1, ?2, ?3)",
+            params![
+                log.name.trim(),
+                log.contest_id.trim(),
+                log.station_callsign.trim().to_uppercase()
+            ],
+        )?;
+        select_log(&connection, connection.last_insert_rowid())?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn delete_log(&self, id: i64) -> rusqlite::Result<bool> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        let qso_count: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM qsos WHERE LOG_ID = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        if qso_count > 0 {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        Ok(connection.execute("DELETE FROM logs WHERE ID = ?1", params![id])? > 0)
+    }
+
+    pub fn radios(&self) -> rusqlite::Result<Vec<RadioConfig>> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        let mut statement = connection.prepare(
+            "SELECT ID, NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT FROM radios ORDER BY ID",
+        )?;
+        let rows = statement.query_map([], row_to_radio)?;
+        rows.collect()
+    }
+
+    pub fn radio(&self, id: i64) -> rusqlite::Result<Option<RadioConfig>> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        select_radio(&connection, id)
+    }
+
+    pub fn create_radio(&self, radio: NewRadio) -> rusqlite::Result<RadioConfig> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        connection.execute(
+            "INSERT INTO radios (NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                radio.name.trim(),
+                radio.rigctld_host.trim(),
+                radio.rigctld_port,
+                radio.poll_frequency,
+                radio.rigctld_timeout
+            ],
+        )?;
+        select_radio(&connection, connection.last_insert_rowid())?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn delete_radio(&self, id: i64) -> rusqlite::Result<bool> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        Ok(connection.execute("DELETE FROM radios WHERE ID = ?1", params![id])? > 0)
+    }
+
+    pub fn contacts(&self, log_id: i64) -> rusqlite::Result<Vec<Contact>> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        let mut statement = connection.prepare(
+            "SELECT * FROM qsos WHERE LOG_ID = ?1 ORDER BY QSO_DATE_TIME_ON DESC, ID DESC",
+        )?;
+        let rows = statement.query_map(params![log_id], row_to_contact)?;
+        rows.collect()
+    }
+
+    pub fn upsert_contacts(
+        &self,
+        log_id: i64,
+        contacts: Vec<Contact>,
+    ) -> rusqlite::Result<Vec<Contact>> {
         let mut connection = self.connection.lock().expect("database mutex poisoned");
         let transaction = connection.transaction()?;
         let mut committed = Vec::with_capacity(contacts.len());
 
-        for contact in contacts {
+        for mut contact in contacts {
+            contact.insert("_log_id".to_string(), Value::Number(log_id.into()));
             let id = upsert_contact(&transaction, contact)?;
             if let Some(saved) = select_contact(&transaction, id)? {
                 committed.push(saved);
@@ -97,8 +207,7 @@ impl Database {
 
     pub fn delete_contact(&self, id: i64) -> rusqlite::Result<bool> {
         let connection = self.connection.lock().expect("database mutex poisoned");
-        let deleted = connection.execute("DELETE FROM qsos WHERE ID = ?1", params![id])?;
-        Ok(deleted > 0)
+        Ok(connection.execute("DELETE FROM qsos WHERE ID = ?1", params![id])? > 0)
     }
 }
 
@@ -112,7 +221,17 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS logs (
             ID INTEGER PRIMARY KEY,
             NAME TEXT NOT NULL,
-            CONTEST_ID TEXT NOT NULL
+            CONTEST_ID TEXT NOT NULL,
+            STATION_CALLSIGN TEXT NOT NULL
+        ) STRICT;
+
+        CREATE TABLE IF NOT EXISTS radios (
+            ID INTEGER PRIMARY KEY,
+            NAME TEXT NOT NULL,
+            RIGCTLD_HOST TEXT NOT NULL,
+            RIGCTLD_PORT INTEGER NOT NULL CHECK (RIGCTLD_PORT >= 0 AND RIGCTLD_PORT <= 65535),
+            POLL_FREQUENCY REAL NOT NULL DEFAULT 0.25 CHECK (POLL_FREQUENCY > 0),
+            RIGCTLD_TIMEOUT REAL NOT NULL DEFAULT 2.0 CHECK (RIGCTLD_TIMEOUT > 0)
         ) STRICT;
 
         CREATE TABLE IF NOT EXISTS qsos (
@@ -144,6 +263,8 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
             TX_PWR INTEGER,
             JSON TEXT
         ) STRICT;
+
+        CREATE INDEX IF NOT EXISTS idx_qsos_log_id ON qsos(LOG_ID);
         "#,
     )?;
 
@@ -155,12 +276,48 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
         connection.execute("UPDATE config SET version = 1", [])?;
     }
 
-    connection.execute(
-        "INSERT OR IGNORE INTO logs (ID, NAME, CONTEST_ID) VALUES (1, 'testing', 'SC-QSO-PARTY')",
-        [],
-    )?;
-
     Ok(())
+}
+
+fn select_log(connection: &Connection, id: i64) -> rusqlite::Result<Option<Log>> {
+    connection
+        .query_row(
+            "SELECT ID, NAME, CONTEST_ID, STATION_CALLSIGN FROM logs WHERE ID = ?1",
+            params![id],
+            row_to_log,
+        )
+        .optional()
+}
+
+fn row_to_log(row: &rusqlite::Row<'_>) -> rusqlite::Result<Log> {
+    Ok(Log {
+        id: row.get("ID")?,
+        name: row.get("NAME")?,
+        contest_id: row.get("CONTEST_ID")?,
+        station_callsign: row.get("STATION_CALLSIGN")?,
+    })
+}
+
+fn select_radio(connection: &Connection, id: i64) -> rusqlite::Result<Option<RadioConfig>> {
+    connection
+        .query_row(
+            "SELECT ID, NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT FROM radios WHERE ID = ?1",
+            params![id],
+            row_to_radio,
+        )
+        .optional()
+}
+
+fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioConfig> {
+    let port: i64 = row.get("RIGCTLD_PORT")?;
+    Ok(RadioConfig {
+        id: row.get("ID")?,
+        name: row.get("NAME")?,
+        rigctld_host: row.get("RIGCTLD_HOST")?,
+        rigctld_port: port as u16,
+        poll_frequency: row.get("POLL_FREQUENCY")?,
+        rigctld_timeout: row.get("RIGCTLD_TIMEOUT")?,
+    })
 }
 
 fn select_contact(connection: &Connection, id: i64) -> rusqlite::Result<Option<Contact>> {
@@ -202,7 +359,7 @@ fn upsert_contact(connection: &Connection, contact: Contact) -> rusqlite::Result
         format!(
             "INSERT INTO qsos ({}) VALUES ({})",
             QSO_COLUMNS.join(", "),
-            placeholders,
+            placeholders
         )
     };
 
@@ -217,18 +374,15 @@ fn contact_to_sql_values(contact: &Contact) -> Vec<SqlValue> {
             if *column == "JSON" {
                 return SqlValue::Text(extra_json(contact));
             }
-
             if *column == "LOG_ID" {
                 return SqlValue::Integer(json_i64(contact.get("_log_id")).unwrap_or(1));
             }
-
             if *column == "QSO_DATE_TIME_ON" {
                 return json_i64(contact.get("QSO_DATE_TIME_ON"))
                     .or_else(|| legacy_epoch(contact))
                     .map(SqlValue::Integer)
                     .unwrap_or(SqlValue::Null);
             }
-
             if *column == "FREQ" {
                 return frequency_hz(contact.get("FREQ"))
                     .map(SqlValue::Integer)
@@ -236,7 +390,6 @@ fn contact_to_sql_values(contact: &Contact) -> Vec<SqlValue> {
             }
 
             let value = contact.get(*column);
-
             if INTEGER_COLUMNS.contains(column) {
                 json_i64(value)
                     .map(SqlValue::Integer)
@@ -257,7 +410,6 @@ fn extra_json(contact: &Contact) -> String {
         .filter(|(key, _)| !key.starts_with('_') && !mapped_keys.contains(key.as_str()))
         .map(|(key, value)| (key.clone(), value.clone()))
         .collect::<Map<_, _>>();
-
     Value::Object(extra).to_string()
 }
 
@@ -294,7 +446,6 @@ fn row_to_contact(row: &rusqlite::Row<'_>) -> rusqlite::Result<Contact> {
         if *column == "JSON" || *column == "LOG_ID" {
             continue;
         }
-
         if INTEGER_COLUMNS.contains(column) {
             let value: Option<i64> = row.get(*column)?;
             if let Some(value) = value {
@@ -324,18 +475,15 @@ fn json_i64(value: Option<&Value>) -> Option<i64> {
 fn legacy_epoch(contact: &Contact) -> Option<i64> {
     let date = contact.get("QSO_DATE")?.as_str()?;
     let time = contact.get("TIME_ON")?.as_str()?;
-
     if date.len() != 8 || time.len() != 6 {
         return None;
     }
-
     let year = date[0..4].parse::<i32>().ok()?;
     let month = date[4..6].parse::<u32>().ok()?;
     let day = date[6..8].parse::<u32>().ok()?;
     let hour = time[0..2].parse::<u32>().ok()?;
     let minute = time[2..4].parse::<u32>().ok()?;
     let second = time[4..6].parse::<u32>().ok()?;
-
     let days = days_from_civil(year, month, day)?;
     Some(days * 86_400 + i64::from(hour * 3_600 + minute * 60 + second))
 }
@@ -344,7 +492,6 @@ fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
-
     let year = year - i32::from(month <= 2);
     let era = if year >= 0 { year } else { year - 399 } / 400;
     let yoe = year - era * 400;
@@ -357,13 +504,9 @@ fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
 
 fn frequency_hz(value: Option<&Value>) -> Option<i64> {
     match value? {
-        Value::Number(number) => {
-            if let Some(value) = number.as_i64() {
-                Some(value)
-            } else {
-                number.as_f64().map(decimal_frequency_to_hz)
-            }
-        }
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_f64().map(decimal_frequency_to_hz)),
         Value::String(string) => {
             if string.contains('.') {
                 string.parse::<f64>().ok().map(decimal_frequency_to_hz)
