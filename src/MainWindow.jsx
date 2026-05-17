@@ -67,6 +67,8 @@ function MainWindow({
 }) {
   const [callSign, setCallSign] = useState('');
   const [exchangeValues, setExchangeValues] = useState({});
+  const [operatingMode, setOperatingMode] = useState('S&P');
+  const [cwWpm, setCwWpm] = useState(20);
   const callSignRef = useRef(null);
   const exchangeInputRefs = useRef({});
   const callSignEditedAtRef = useRef(new Date());
@@ -221,6 +223,11 @@ function MainWindow({
     handleFieldTab(event, settings.exchange[index]?.name);
   }
 
+  function handleCwWpmChange(event) {
+    const wpm = Number.parseInt(event.target.value, 10);
+    setCwWpm(Number.isFinite(wpm) ? wpm : 20);
+  }
+
   return (
     <div className="window">
       <div className="title-bar logger-title-bar">
@@ -230,6 +237,13 @@ function MainWindow({
         <button className="title-button" onClick={onExit}>Exit Logger</button>
       </div>
       <div className="radio-controls">
+        <label className="radio-control">
+          Run Mode:
+          <select value={operatingMode} onChange={(event) => setOperatingMode(event.target.value)}>
+            <option value="S&P">S&amp;P</option>
+            <option value="Run">Run</option>
+          </select>
+        </label>
         <label className={currentBandAllowed ? 'radio-control' : 'radio-control unsupported'}>
           Band:
           <select value={currentBandValue} onChange={handleBandChange}>
@@ -251,6 +265,19 @@ function MainWindow({
             ))}
           </select>
         </label>
+        {radioMode === 'CW' && (
+          <label className="radio-control cw-wpm-control">
+            CW WPM:
+            <input
+              type="number"
+              min="5"
+              max="60"
+              step="1"
+              value={cwWpm}
+              onChange={handleCwWpmChange}
+            />
+          </label>
+        )}
         <div className="backend-socket-status" title={`Server ${backendSocketStatus}`}>
           <span
             className={`backend-socket-light ${backendSocketStatus === 'connected' ? 'connected' : 'disconnected'}`}
