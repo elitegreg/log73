@@ -1,0 +1,145 @@
+contests:
+  - id: 'ARRL-FD'
+    display_name: 'ARRL Field Day'
+    allowed_bands: [160, 80, 40, 20, 15, 10, 6, 2]
+    allowed_modes: ['SSB', 'FM', 'AM', 'CW']
+    define:
+      - name: 'Sections'
+        values:
+          - AL
+          - AK
+          - AB
+          - AR
+          - AZ
+          - BC
+          - CO
+          - CT
+          - DE
+          - EB
+          - EMA
+          - ENY
+          - EPA
+          - EWA
+          - GA
+          - GH
+          - ID
+          - IL
+          - IN
+          - IA
+          - KS
+          - KY
+          - LAX
+          - LA
+          - ME
+          - MB
+          - MDC
+          - MI
+          - MN
+          - MS
+          - MO
+          - MT
+          - NE
+          - NV
+          - NB
+          - NH
+          - NM
+          - NLI
+          - NL
+          - NC
+          - ND
+          - NTX
+          - NFL
+          - NNJ
+          - NNY
+          - NS
+          - OH
+          - OK
+          - ONE
+          - ONN
+          - ONS
+          - ORG
+          - OR
+          - PAC
+          - PE
+          - PR
+          - QC
+          - RI
+          - SV
+          - SDG
+          - SF
+          - SJV
+          - SB
+          - SCV
+          - SK
+          - SC
+          - SD
+          - STX
+          - SFL
+          - SNJ
+          - TN
+          - TER
+          - VI
+          - UT
+          - VT
+          - VA
+          - WCF
+          - WTX
+          - WV
+          - WMA
+          - WNY
+          - WPA
+          - WWA
+          - WI
+          - WY
+    log_params:
+      - name: 'Class'
+        label: 'Class'
+        type: 'String:3'
+        required: true
+      - name: 'Section'
+        label: 'Section'
+        type: 'String:3'
+        required: true
+        in_sets: ['Sections']
+    exchange:
+      - name: 'Class(s)'
+        type: 'String:3'
+        adif: 'STX_STRING'
+        fixed: true
+        source_param: 'Class'
+        is_sent: true
+      - name: 'Section(s)'
+        type: 'String:3'
+        adif: 'MY_ARRL_SECT'
+        fixed: true
+        source_param: 'Section'
+        is_sent: true
+        in_sets: ['Sections']
+      - name: 'Class'
+        type: 'String:3'
+        adif: 'SRX_STRING'
+        is_sent: false
+      - name: 'Section'
+        type: 'String:3'
+        adif: 'ARRL_SECT'
+        is_sent: false
+        in_sets: ['Sections']
+    qso_columns:
+      - 'Date/Time (UTC)'
+      - 'Freq'
+      - 'Mode'
+      - 'Call'
+      - 'Class'
+      - 'Section'
+      - 'Mult'
+      - 'Pts'
+      - 'Op'
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'Class(s)': 'STX_STRING'
+      'Section(s)': 'MY_ARRL_SECT'
+      Class: 'SRX_STRING'
+      Section: 'ARRL_SECT'
