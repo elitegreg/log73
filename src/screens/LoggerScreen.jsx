@@ -126,14 +126,14 @@ function LoggerScreen() {
 
   useEffect(() => {
     async function loadContext() {
-      const [contestSettings, logResult, radioResult, cwLabelsResult] = await Promise.all([
-        apiJson('/contest-settings'),
+      const [logResult, radioResult, cwLabelsResult] = await Promise.all([
         apiJson(`/logs/${numericLogId}`),
         apiJson(`/radios/${numericRadioId}`),
         apiJson(`/radios/${numericRadioId}/cw-labels`),
       ]);
       if (!logResult.ok) throw new Error(logResult.error ?? 'Log not found');
       if (!radioResult.ok) throw new Error(radioResult.error ?? 'Radio not found');
+      const contestSettings = await apiJson(`/contest-settings?contest_id=${encodeURIComponent(logResult.log.contest_id)}`);
       setSettings(contestSettings);
       setLog(logResult.log);
       setRadio(radioResult.radio);

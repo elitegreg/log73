@@ -1,0 +1,222 @@
+contests:
+  - id: 'SC-QSO-PARTY (In State)'
+    display_name: 'SC QSO Party (In State)'
+    allowed_bands: [160, 80, 40, 20, 15, 10, 6, 2]
+    allowed_modes: ['SSB', 'FM', 'AM', 'CW']
+    define:
+      - name: 'DX'
+        values:
+          - DX
+      - name: 'Counties'
+        values:
+          - ABBE
+          - AIKE
+          - ALLE
+          - ANDE
+          - BAMB
+          - BARN
+          - BEAU
+          - BERK
+          - CALH
+          - CHAR
+          - CHER
+          - CHES
+          - CHESF
+          - CLAR
+          - COLL
+          - DARL
+          - DILL
+          - DORC
+          - EDGE
+          - FAIR
+          - FLORE
+          - GEOR
+          - GREEN
+          - GREENV
+          - HAMPT
+          - HORR
+          - JASP
+          - KERS
+          - LANC
+          - LAUR
+          - LEE
+          - LEXI
+          - MCCO
+          - MARI
+          - MARLB
+          - NEWB
+          - OCONE
+          - ORAN
+          - PICK
+          - RICH
+          - SALU
+          - SPAR
+          - SUMT
+          - UNIO
+          - WILL
+          - YORK
+      - name: 'States'
+        values:
+          - AL
+          - AK
+          - AZ
+          - AR
+          - CA
+          - CO
+          - CT
+          - DE
+          - FL
+          - GA
+          - HI
+          - ID
+          - IL
+          - IN
+          - IA
+          - KS
+          - KY
+          - LA
+          - ME
+          - MD
+          - MA
+          - MI
+          - MN
+          - MS
+          - MO
+          - MT
+          - NE
+          - NV
+          - NH
+          - NJ
+          - NM
+          - NY
+          - NC
+          - ND
+          - OH
+          - OK
+          - OR
+          - PA
+          - RI
+          - SC
+          - SD
+          - TN
+          - TX
+          - UT
+          - VT
+          - VA
+          - WA
+          - WV
+          - WI
+          - WY
+          - DC
+          - AB
+          - BC
+          - MB
+          - NB
+          - NL
+          - NS
+          - NT
+          - NU
+          - ON
+          - PE
+          - QC
+          - SK
+          - YT
+    log_params:
+      - name: 'County'
+        label: 'County'
+        type: 'String:6'
+        required: true
+        in_sets: ['Counties']
+    exchange:
+      - name: 'RST(s)'
+        type: 'RST'
+        adif: 'RST_SENT'
+        default: 599
+        is_sent: true
+      - name: 'County'
+        type: 'String:6'
+        adif: 'STX_STRING'
+        fixed: true
+        source_param: 'County'
+        is_sent: true
+        in_sets: ['Counties']
+      - name: 'RST(r)'
+        type: 'RST'
+        adif: 'RST_RCVD'
+        is_sent: false
+      - name: 'State'
+        type: 'String:4'
+        adif: 'SRX_STRING'
+        is_sent: false
+        in_sets: ['States', 'DX']
+    qso_columns:
+      - 'Date/Time (UTC)'
+      - 'Freq'
+      - 'Mode'
+      - 'Call'
+      - 'RST(s)'
+      - 'RST(r)'
+      - 'State'
+      - 'Mult'
+      - 'Pts'
+      - 'Op'
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'RST(s)': 'RST_SENT'
+      County: 'STX_STRING'
+      'RST(r)': 'RST_RCVD'
+      State: 'SRX_STRING'
+
+  - id: 'SC-QSO-PARTY'
+    extends: 'SC-QSO-PARTY (In State)'
+    display_name: 'SC QSO Party'
+    log_params:
+      - name: 'State'
+        label: 'State'
+        type: 'String:4'
+        required: true
+    exchange:
+      - name: 'RST(s)'
+        type: 'RST'
+        adif: 'RST_SENT'
+        default: 599
+        is_sent: true
+      - name: 'State'
+        type: 'String:4'
+        adif: 'STX_STRING'
+        fixed: true
+        source_param: 'State'
+        is_sent: true
+        in_sets: ['States', 'DX']
+      - name: 'RST(r)'
+        type: 'RST'
+        adif: 'RST_RCVD'
+        is_sent: false
+      - name: 'County'
+        type: 'String:6'
+        adif: 'SRX_STRING'
+        is_sent: false
+        in_sets: ['Counties']
+    qso_columns:
+      - 'Date/Time (UTC)'
+      - 'Freq'
+      - 'Mode'
+      - 'Call'
+      - 'RST(s)'
+      - 'RST(r)'
+      - 'County'
+      - 'Mult'
+      - 'Pts'
+      - 'Op'
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'RST(s)': 'RST_SENT'
+      State: 'STX_STRING'
+      'RST(r)': 'RST_RCVD'
+      County: 'SRX_STRING'

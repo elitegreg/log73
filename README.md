@@ -14,7 +14,7 @@ Browser UI
 
 ## Current status
 
-Log73 is under active development. The current contest module is `SC-QSO-PARTY`. Database migrations are not implemented yet; if the development schema changes, delete the local development database and let the backend recreate it.
+Log73 is under active development. Contest definitions are loaded from YAML rule files. Database migrations are not implemented yet; if the development schema changes, delete the local development database and let the backend recreate it.
 
 ## Features
 
@@ -101,6 +101,7 @@ Backend logging defaults to `info` on stdout. You can change the level or write 
 ```bash
 cargo run -- --log-level debug
 cargo run -- --bind 0.0.0.0:7300 --log-level info --log-file log73.log
+cargo run -- --contest-rules-dir ../contest-rules
 ```
 
 Start the frontend dev server in another terminal:
@@ -227,7 +228,8 @@ Operator callsign is contest/QSO metadata, not an authentication identity.
 All JSON API routes are under `/api`.
 
 ```text
-GET    /api/contest-settings
+GET    /api/contest-rules
+GET    /api/contest-settings?contest_id=<contest_id>
 
 GET    /api/logs
 POST   /api/logs
@@ -315,7 +317,7 @@ qsos
 
 Important schema notes:
 
-- `logs` stores log name, contest id, and station callsign.
+- `logs` stores log name, contest id, station callsign, and contest parameter JSON.
 - `radios` stores rigctld host, port, poll frequency, rigctld timeout, Winkeyer settings, and CW message text.
 - `qsos.LOG_ID` references `logs.ID`.
 - `idx_qsos_log_id` indexes `qsos(LOG_ID)`.
@@ -408,48 +410,25 @@ Fields mapped to database columns are stored directly in `qsos`. Extra non-priva
 
 Committed contacts are loaded from the backend. Pending/updating contacts are cached in browser local storage as an offline/outbox cache.
 
-## Current contest module
+## Contest rules
 
-Current contest:
+Contest rules are loaded from YAML files in `contest-rules/` by default. The backend option `--contest-rules-dir` can point at another directory.
 
-```text
-SC-QSO-PARTY
-```
-
-Allowed bands, in meters:
+Current SC QSO Party rule IDs:
 
 ```text
-160, 80, 40, 20, 15, 10, 6, 2
+SC-QSO-PARTY             out-of-state
+SC-QSO-PARTY (In State)  in-state
 ```
 
-Allowed modes:
+Both variants use bands `160, 80, 40, 20, 15, 10, 6, 2` and modes `SSB, FM, AM, CW`.
 
-```text
-SSB, FM, AM, CW
-```
+Log creation dynamically requests required rule parameters:
 
-Exchange fields:
+- `SC-QSO-PARTY`: `State`
+- `SC-QSO-PARTY (In State)`: `County`
 
-| Label | Type | ADIF field | Default | Fixed |
-| --- | --- | --- | --- | --- |
-| RST(s) | RST | RST_SENT | 599 | no |
-| County | String:4 | STX_STRING | BERK | yes |
-| RST(r) | RST | RST_RCVD | | no |
-| State | String:4 | SRX_STRING | | no |
-
-QSO table columns:
-
-```text
-Date/Time (UTC)
-Freq
-Mode
-Call
-RST(s)
-RST(r)
-Mult
-Pts
-Op
-```
+Those values populate fixed sent exchange fields in the logger. The previous `BERK` default is no longer used.
 
 ## UI themes
 
@@ -491,7 +470,7 @@ High Contrast
 
 ## Limitations / future work
 
-- Only `SC-QSO-PARTY` is currently implemented.
+- Contest scoring and validation are still incomplete; YAML metadata is loaded for future validation work.
 - Basic Auth credentials are static development credentials.
 - No database migrations yet.
 - Backend does not start or supervise `rigctld`.

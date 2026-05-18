@@ -40,13 +40,16 @@ export function sanitizeExchangeValue(field, value, radioMode = 'CW') {
   return nextValue;
 }
 
-export function fieldDefault(field, radioMode) {
-  if (field.default === undefined || field.default === null) {
+export function fieldDefault(field, radioMode, contestParams = {}) {
+  const sourceParam = field?.source_param;
+  const rawValue = sourceParam ? contestParams?.[sourceParam] : field?.default;
+
+  if (rawValue === undefined || rawValue === null) {
     return '';
   }
 
-  const value = String(field.default);
+  const value = String(rawValue);
   return parseFieldType(field.type, radioMode).kind === 'RST'
     ? sanitizeRST(value, radioMode)
-    : value;
+    : value.toUpperCase();
 }

@@ -1,11 +1,11 @@
 mod auth;
 mod bands;
+mod contest_rules;
 mod cw;
 mod db;
 mod frequency;
 mod radio;
 mod radio_manager;
-mod scqso_in_state;
 mod static_assets;
 
 use axum::{
@@ -20,11 +20,11 @@ use axum::{
     routing::{delete, get},
 };
 use clap::Parser;
+use contest_rules::{ContestRules, ContestRulesStore};
 use db::{Contact, Database, NewLog, NewRadio, UpdateLog};
 use futures_util::{SinkExt, StreamExt};
 use radio::{ClientMessage, RadioCommand, ServerMessage};
 use radio_manager::RadioManager;
-use scqso_in_state::ContestRules;
 use std::{collections::HashMap, fs::OpenOptions, path::PathBuf, time::Duration};
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -36,6 +36,7 @@ struct AppState {
     radio_manager: RadioManager,
     log_events: broadcast::Sender<ServerMessage>,
     db: Database,
+    contest_rules: ContestRulesStore,
 }
 
 fn init_tracing(cli: &Cli) -> std::io::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
@@ -82,6 +83,9 @@ struct Cli {
 
     #[arg(long)]
     log_file: Option<PathBuf>,
+
+    #[arg(long, default_value = "../contest-rules")]
+    contest_rules_dir: PathBuf,
 }
 
 #[tokio::main]
@@ -90,12 +94,15 @@ async fn main() {
     let _log_guard = init_tracing(&cli).expect("failed to initialize logging");
 
     let (log_events, _) = broadcast::channel(128);
+    let contest_rules = ContestRulesStore::load_dir(&cli.contest_rules_dir)
+        .unwrap_or_else(|error| panic!("failed to load contest rules: {error}"));
     let db = Database::open("log73.db").expect("failed to open log73.db");
     let radio_manager = RadioManager::new(db.clone());
     let app_state = AppState {
         radio_manager,
         log_events,
         db,
+        contest_rules,
     };
 
     let request_trace_layer = TraceLayer::new_for_http()
@@ -127,6 +134,7 @@ async fn main() {
         );
 
     let api = Router::new()
+        .route("/contest-rules", get(list_contest_rules))
         .route("/contest-settings", get(contest_settings))
         .route("/logs", get(logs).post(create_log))
         .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
@@ -357,8 +365,29 @@ async fn handle_socket(
     info!(session_id, radio_id, "backend websocket disconnected");
 }
 
-async fn contest_settings() -> Json<ContestRules> {
-    Json(ContestRules::new())
+#[derive(Debug, serde::Deserialize)]
+struct ContestSettingsQuery {
+    contest_id: Option<String>,
+}
+
+async fn list_contest_rules(
+    State(app_state): State<AppState>,
+) -> Json<Vec<contest_rules::ContestSummary>> {
+    Json(app_state.contest_rules.summaries())
+}
+
+async fn contest_settings(
+    State(app_state): State<AppState>,
+    Query(query): Query<ContestSettingsQuery>,
+) -> Json<ContestRules> {
+    let rules = query
+        .contest_id
+        .as_deref()
+        .and_then(|contest_id| app_state.contest_rules.get(contest_id))
+        .or_else(|| app_state.contest_rules.default_contest())
+        .expect("contest rules store should not be empty")
+        .clone();
+    Json(rules)
 }
 
 async fn logs(State(app_state): State<AppState>) -> Json<Vec<db::Log>> {
@@ -381,10 +410,46 @@ async fn create_log(
     Json(payload): Json<NewLog>,
 ) -> Json<serde_json::Value> {
     debug!(payload = %pretty_json(&payload), "create log POST body");
+    if let Err(error) = validate_log_params(&app_state.contest_rules, &payload) {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
     match app_state.db.create_log(payload) {
         Ok(log) => Json(serde_json::json!({ "ok": true, "log": log })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
+}
+
+fn validate_log_params(contest_rules: &ContestRulesStore, payload: &NewLog) -> Result<(), String> {
+    let rules = contest_rules
+        .get(&payload.contest_id)
+        .ok_or_else(|| format!("unknown contest: {}", payload.contest_id))?;
+    for param in &rules.log_params {
+        if param.required == Some(false) {
+            continue;
+        }
+        let value = payload
+            .contest_params
+            .get(&param.name)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if value.is_empty() {
+            return Err(format!("{} is required", param.label));
+        }
+        if !param.valid_values.is_empty()
+            && !param
+                .valid_values
+                .iter()
+                .any(|valid_value| valid_value.eq_ignore_ascii_case(value))
+        {
+            return Err(format!(
+                "{} must be one of: {}",
+                param.label,
+                param.valid_values.join(", ")
+            ));
+        }
+    }
+    Ok(())
 }
 
 async fn update_log(

@@ -14,6 +14,7 @@ pub struct Log {
     pub name: String,
     pub contest_id: String,
     pub station_callsign: String,
+    pub contest_params: Value,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -21,6 +22,8 @@ pub struct NewLog {
     pub name: String,
     pub contest_id: String,
     pub station_callsign: String,
+    #[serde(default)]
+    pub contest_params: Value,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -115,7 +118,7 @@ impl Database {
     pub fn logs(&self) -> rusqlite::Result<Vec<Log>> {
         let connection = self.connection.lock().expect("database mutex poisoned");
         let mut statement = connection
-            .prepare("SELECT ID, NAME, CONTEST_ID, STATION_CALLSIGN FROM logs ORDER BY NAME, ID")?;
+            .prepare("SELECT ID, NAME, CONTEST_ID, STATION_CALLSIGN, CONTEST_PARAMS_JSON FROM logs ORDER BY NAME, ID")?;
         let rows = statement.query_map([], row_to_log)?;
         rows.collect()
     }
@@ -128,11 +131,12 @@ impl Database {
     pub fn create_log(&self, log: NewLog) -> rusqlite::Result<Log> {
         let connection = self.connection.lock().expect("database mutex poisoned");
         connection.execute(
-            "INSERT INTO logs (NAME, CONTEST_ID, STATION_CALLSIGN) VALUES (?1, ?2, ?3)",
+            "INSERT INTO logs (NAME, CONTEST_ID, STATION_CALLSIGN, CONTEST_PARAMS_JSON) VALUES (?1, ?2, ?3, ?4)",
             params![
                 log.name.trim(),
                 log.contest_id.trim(),
-                log.station_callsign.trim().to_uppercase()
+                log.station_callsign.trim().to_uppercase(),
+                log.contest_params.to_string()
             ],
         )?;
         select_log(&connection, connection.last_insert_rowid())?
@@ -287,7 +291,8 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
             ID INTEGER PRIMARY KEY,
             NAME TEXT NOT NULL,
             CONTEST_ID TEXT NOT NULL,
-            STATION_CALLSIGN TEXT NOT NULL
+            STATION_CALLSIGN TEXT NOT NULL,
+            CONTEST_PARAMS_JSON TEXT NOT NULL
         ) STRICT;
 
         CREATE TABLE IF NOT EXISTS radios (
@@ -350,7 +355,7 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
 fn select_log(connection: &Connection, id: i64) -> rusqlite::Result<Option<Log>> {
     connection
         .query_row(
-            "SELECT ID, NAME, CONTEST_ID, STATION_CALLSIGN FROM logs WHERE ID = ?1",
+            "SELECT ID, NAME, CONTEST_ID, STATION_CALLSIGN, CONTEST_PARAMS_JSON FROM logs WHERE ID = ?1",
             params![id],
             row_to_log,
         )
@@ -358,11 +363,16 @@ fn select_log(connection: &Connection, id: i64) -> rusqlite::Result<Option<Log>>
 }
 
 fn row_to_log(row: &rusqlite::Row<'_>) -> rusqlite::Result<Log> {
+    let contest_params_json: String = row.get("CONTEST_PARAMS_JSON")?;
+    let contest_params =
+        serde_json::from_str(&contest_params_json).unwrap_or(Value::Object(Map::new()));
+
     Ok(Log {
         id: row.get("ID")?,
         name: row.get("NAME")?,
         contest_id: row.get("CONTEST_ID")?,
         station_callsign: row.get("STATION_CALLSIGN")?,
+        contest_params,
     })
 }
 

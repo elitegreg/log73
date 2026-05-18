@@ -24,9 +24,9 @@ const AMATEUR_BANDS = [
   { meters: 2, name: '2m', lowerHz: 144000000, upperHz: 148000000 },
 ];
 
-function exchangeDefaults(settings, radioMode) {
+function exchangeDefaults(settings, radioMode, contestParams = {}) {
   return Object.fromEntries(
-    (settings?.exchange ?? []).map((field) => [field.name, fieldDefault(field, radioMode)]),
+    (settings?.exchange ?? []).map((field) => [field.name, fieldDefault(field, radioMode, contestParams)]),
   );
 }
 
@@ -126,8 +126,8 @@ function MainWindow({
   }
 
   useEffect(() => {
-    setExchangeValues(exchangeDefaults(settings, radioMode));
-  }, [settings, radioMode]);
+    setExchangeValues(exchangeDefaults(settings, radioMode, log?.contest_params ?? {}));
+  }, [settings, radioMode, log]);
 
   useEffect(() => {
     setCwWpmRef.current = onSetCwWpm;
@@ -154,7 +154,7 @@ function MainWindow({
     };
 
     for (const field of settings?.exchange ?? []) {
-      fields[field.adif] = String(exchangeValues[field.name] ?? fieldDefault(field, radioMode)).trim().toUpperCase();
+      fields[field.adif] = String(exchangeValues[field.name] ?? fieldDefault(field, radioMode, log?.contest_params ?? {})).trim().toUpperCase();
     }
 
     return fields;
@@ -298,7 +298,7 @@ function MainWindow({
 
   function resetEntryFields() {
     setCallSign('');
-    setExchangeValues(exchangeDefaults(settings, radioMode));
+    setExchangeValues(exchangeDefaults(settings, radioMode, log?.contest_params ?? {}));
     callSignEditedAtRef.current = new Date();
     callSignRef.current?.focus();
   }
@@ -492,7 +492,7 @@ function MainWindow({
         </label>
         {settings?.exchange?.map((field, index) => {
           const { kind, maxLength } = parseFieldType(field.type, radioMode);
-          const value = exchangeValues[field.name] ?? fieldDefault(field, radioMode);
+          const value = exchangeValues[field.name] ?? fieldDefault(field, radioMode, log?.contest_params ?? {});
           const fieldWidthChars = Math.max(maxLength + 1, 4);
 
           return (
