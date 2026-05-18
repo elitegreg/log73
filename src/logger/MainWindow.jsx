@@ -416,6 +416,15 @@ function MainWindow({
     setCwWpm(Math.min(Math.max(wpm, 5), 60));
   }
 
+  function handleQrzClick() {
+    const normalizedCallsign = callSign.trim().toUpperCase();
+    const qrzUrl = normalizedCallsign
+      ? `https://www.qrz.com/db/${normalizedCallsign}`
+      : 'https://www.qrz.com';
+
+    window.open(qrzUrl, '_blank', 'noopener,noreferrer');
+  }
+
   return (
     <div className="window">
       <div className="title-bar logger-title-bar">
@@ -558,7 +567,7 @@ function MainWindow({
         <button className="cmd-btn">Mark</button>
         <button className="cmd-btn">Store</button>
         <button className="cmd-btn">Spot It</button>
-        <button className="cmd-btn">QRZ</button>
+        <button className="cmd-btn" type="button" onClick={handleQrzClick}>QRZ</button>
       </div>
       <div className="status-bar">
         <span>
