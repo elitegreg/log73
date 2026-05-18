@@ -404,9 +404,8 @@ impl CwController {
             return Err(error.to_string());
         }
         debug!(radio_id, mode, key, "cw text queued to winkeyer");
-        // WK status may not report busy immediately after queueing text, so give the
-        // keyer a short moment to start before waiting for idle/completion.
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        debug!(radio_id, mode, key, "waiting for winkeyer to become busy");
+        self.wait_until_busy_or_stopped(commands).await?;
         debug!(radio_id, mode, key, "waiting for winkeyer idle");
         let result = self.wait_until_idle_or_stopped(commands).await;
         debug!(
@@ -417,6 +416,61 @@ impl CwController {
             "finished waiting for winkeyer idle"
         );
         result
+    }
+
+    async fn wait_until_busy_or_stopped(
+        &mut self,
+        commands: &mut mpsc::Receiver<CwTaskCommand>,
+    ) -> Result<(), String> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+        loop {
+            tokio::select! {
+                command = commands.recv() => {
+                    match command {
+                        Some(CwTaskCommand::Stop) => {
+                            debug!(radio_id = self.radio_id, "stop command interrupting cw busy wait");
+                            self.stop().await;
+                            return Ok(());
+                        }
+                        Some(CwTaskCommand::SetWpm(wpm)) => {
+                            debug!(radio_id = self.radio_id, wpm, "set_wpm command received during cw busy wait");
+                            self.set_wpm(wpm).await;
+                        }
+                        Some(CwTaskCommand::Shutdown) | None => {
+                            debug!(radio_id = self.radio_id, "shutdown interrupting cw busy wait");
+                            self.stop().await;
+                            return Err("cw shutdown".to_string());
+                        }
+                        Some(CwTaskCommand::Send { completed, .. }) => {
+                            debug!(radio_id = self.radio_id, "rejecting cw send command while busy");
+                            let _ = completed.send(Err("cw busy".to_string()));
+                        }
+                    }
+                }
+                _ = tokio::time::sleep_until(deadline) => {
+                    warn!(radio_id = self.radio_id, "timed out waiting for winkeyer to become busy");
+                    return Err("winkeyer did not become busy".to_string());
+                }
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                    let radio_id = self.radio_id;
+                    let Some(winkeyer) = self.ensure_connected().await else {
+                        return Err("winkeyer unavailable".to_string());
+                    };
+                    match winkeyer.status().await {
+                        Ok(status) if status.busy || status.wait || status.key_down => {
+                            debug!(radio_id = self.radio_id, "winkeyer is busy");
+                            return Ok(());
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            warn!(radio_id, %error, "failed waiting for winkeyer busy");
+                            self.winkeyer = None;
+                            return Err(error.to_string());
+                        }
+                    }
+                }
+            }
+        }
     }
 
     async fn wait_until_idle_or_stopped(
