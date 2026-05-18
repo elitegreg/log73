@@ -29,6 +29,9 @@ Log73 is under active development. The current contest module is `SC-QSO-PARTY`.
   - port
   - poll frequency
   - rigctld communication timeout
+- Optional per-radio Winkeyer CW keying settings.
+- Run and S&P CW function-key labels/messages.
+- Selectable UI themes, persisted in browser local storage.
 - Lazy radio connections: a `rigctld` connection opens only when a logger websocket uses that radio.
 - Reference-counted radio use: when the last logger websocket for a radio closes, the backend disconnects that radio.
 - Per-radio serialized CAT command queue.
@@ -168,25 +171,31 @@ cargo run -- --bind 127.0.0.1:7300 --log-level info --log-file /tmp/log73.log
 ## Project layout
 
 ```text
-src/                         React/Rsbuild frontend
-src/App.jsx                  frontend routes
-src/OpenLogScreen.jsx        log/radio selection screen
-src/CreateLogScreen.jsx      create log screen
-src/CreateRadioScreen.jsx    create radio screen
-src/LoggerScreen.jsx         logger state, websocket, contact commit flow
-src/MainWindow.jsx           main logger entry/radio-control UI
-src/LogWindow.jsx            QSO table
+src/                                  React/Rsbuild frontend
+src/index.jsx                         frontend entry point
+src/app/App.jsx                       frontend routes and theme application
+src/screens/OpenLogScreen.jsx         log/radio selection screen and theme picker
+src/screens/CreateLogScreen.jsx       create log screen
+src/screens/CreateRadioScreen.jsx     create radio screen, rigctld, and Winkeyer settings
+src/screens/LoggerScreen.jsx          logger state, websocket, contact commit flow
+src/logger/MainWindow.jsx             main logger entry/radio/CW-control UI
+src/logger/LogWindow.jsx              QSO table
+src/lib/api.js                        API and websocket URL helpers
+src/domain/contactFields.js           contact field helpers
+src/themes/themes.js                  theme metadata and persistence helpers
+src/styles/*.css                      base styles and theme overrides
 
-backend/                     Rust backend
-backend/src/main.rs          Axum routes, websocket handling, API handlers
-backend/src/auth.rs          HTTP Basic Auth middleware
-backend/src/db.rs            SQLite schema and data mapping
-backend/src/radio.rs         radio messages, mode conversion helpers
-backend/src/radio_manager.rs lazy/refcounted multi-radio manager
-backend/src/static_assets.rs embedded frontend asset serving
-backend/src/scqso_in_state.rs SC QSO Party contest rules
-backend/src/bands.rs         USA amateur band helpers
-backend/src/frequency.rs     frequency type and macros
+backend/                              Rust backend
+backend/src/main.rs                   Axum routes, websocket handling, API handlers
+backend/src/auth.rs                   HTTP Basic Auth middleware
+backend/src/db.rs                     SQLite schema and data mapping
+backend/src/radio.rs                  radio/CW websocket messages, mode conversion helpers
+backend/src/radio_manager.rs          lazy/refcounted multi-radio manager and CW task
+backend/src/cw.rs                     CW message parsing, labels, and template rendering
+backend/src/static_assets.rs          embedded frontend asset serving
+backend/src/scqso_in_state.rs         SC QSO Party contest rules
+backend/src/bands.rs                  USA amateur band helpers
+backend/src/frequency.rs              frequency type and macros
 ```
 
 ## UI routes
@@ -233,6 +242,7 @@ GET    /api/radios
 POST   /api/radios
 GET    /api/radios/:id
 DELETE /api/radios/:id
+GET    /api/radios/:id/cw-labels
 ```
 
 Deletion rules:
@@ -256,10 +266,17 @@ Server radio state message:
 { "type": "radio_state", "frequency_hz": 14025000, "mode": "CW" }
 ```
 
-Server log entry message:
+Server log/contact messages:
 
 ```json
 { "type": "log_entry", "contact": { "_status": "Committed" } }
+{ "type": "contact_deleted", "id": 123, "log_id": 1 }
+```
+
+Server CW completion message:
+
+```json
+{ "type": "cw_sent", "request_id": "uuid-or-client-id" }
 ```
 
 Client radio commands:
@@ -267,6 +284,14 @@ Client radio commands:
 ```json
 { "type": "set_frequency", "frequency_hz": 14025000 }
 { "type": "set_mode", "mode": "SSB" }
+```
+
+Client CW commands:
+
+```json
+{ "type": "send_cw", "request_id": "uuid-or-client-id", "mode": "run", "key": "F1", "fields": { "CALL": "K1ABC" } }
+{ "type": "stop_cw" }
+{ "type": "set_wpm", "wpm": 25 }
 ```
 
 ## Database
@@ -291,7 +316,7 @@ qsos
 Important schema notes:
 
 - `logs` stores log name, contest id, and station callsign.
-- `radios` stores rigctld host, port, poll frequency, and rigctld timeout.
+- `radios` stores rigctld host, port, poll frequency, rigctld timeout, Winkeyer settings, and CW message text.
 - `qsos.LOG_ID` references `logs.ID`.
 - `idx_qsos_log_id` indexes `qsos(LOG_ID)`.
 - Foreign keys are enabled.
@@ -309,6 +334,9 @@ rigctld_host
 rigctld_port
 poll_frequency
 rigctld_timeout
+winkeyer_enabled
+winkeyer_serial_port
+cw_messages
 ```
 
 Create-radio defaults:
@@ -318,6 +346,9 @@ rigctld_host: 127.0.0.1
 rigctld_port: 4532 + existing_radio_count
 poll_frequency: 0.25
 rigctld_timeout: 2
+winkeyer_enabled: false
+winkeyer_serial_port: ""
+cw_messages: built-in default Run/S&P function-key messages
 ```
 
 `poll_frequency` controls how often the backend polls frequency/mode.
@@ -420,6 +451,21 @@ Pts
 Op
 ```
 
+## UI themes
+
+The open-log screen includes a theme selector. The selected theme is stored in browser local storage under `log73.theme` and applied by adding a theme class to `document.body`.
+
+Available themes:
+
+```text
+Default
+Modern Dark Radio
+Classic Terminal
+Clean Light Desktop
+N1MM-ish Contest
+High Contrast
+```
+
 ## Logger UI behavior
 
 - Station callsign comes from the selected log.
@@ -429,6 +475,12 @@ Op
 - Radio mode/frequency come from backend websocket radio state.
 - The server indicator shows websocket connection status.
 - The title bar shows log, radio, contest, mode, and frequency.
+- CW WPM is stored in browser local storage under `log73.cw_wpm` and sent to the backend when the websocket is connected.
+- CW function-key labels are loaded from `/api/radios/:id/cw-labels` for separate Run and S&P banks.
+- Run/S&P operating mode chooses which CW function-key bank is active.
+- Run F1 can be repeated automatically after CW send completion when repeat is enabled.
+- S&P F1 sends the QRL message and then switches to Run mode.
+- Stop CW sends a websocket `stop_cw` command.
 - Exit Logger returns to the log/radio selection screen.
 - Fixed exchange fields are read-only and skipped during tab navigation.
 - RST validation depends on mode:
