@@ -1,0 +1,44 @@
+/* Clean Light Desktop theme overrides. */
+body.theme-clean-light-desktop .app-container { background-color: #f8fafc; color: #1f2937; }
+body.theme-clean-light-desktop .window,
+body.theme-clean-light-desktop .log-window,
+body.theme-clean-light-desktop .selection-window,
+body.theme-clean-light-desktop .form-window { border-color: #94a3b8; background-color: #e2e8f0; box-shadow: 0 4px 14px rgba(15, 23, 42, 0.18); }
+body.theme-clean-light-desktop .title-bar,
+body.theme-clean-light-desktop .log-title-bar { background-color: #1e3a8a; color: #ffffff; }
+body.theme-clean-light-desktop .radio-controls,
+body.theme-clean-light-desktop .status-bar,
+body.theme-clean-light-desktop .log-table th { background-color: #cbd5e1; color: #1f2937; }
+body.theme-clean-light-desktop .radio-control.unsupported { color: #dc2626; }
+body.theme-clean-light-desktop .entry-fields input,
+body.theme-clean-light-desktop .form-window input,
+body.theme-clean-light-desktop .form-window select,
+body.theme-clean-light-desktop .log-cell-editor,
+body.theme-clean-light-desktop .selection-list { border-color: #64748b; background-color: #ffffff; color: #111827; }
+body.theme-clean-light-desktop .entry-fields input:read-only { background-color: #f1f5f9; color: #475569; }
+body.theme-clean-light-desktop .f-key,
+body.theme-clean-light-desktop .cmd-btn,
+body.theme-clean-light-desktop .title-button,
+body.theme-clean-light-desktop .window-controls button { border-color: #64748b; background-color: #e5e7eb; color: #111827; }
+body.theme-clean-light-desktop .f-key.active,
+body.theme-clean-light-desktop .cmd-btn.primary { background-color: #2563eb; color: #ffffff; }
+body.theme-clean-light-desktop .log-table { background-color: #ffffff; }
+body.theme-clean-light-desktop .log-table th,
+body.theme-clean-light-desktop .log-table td { border-color: #cbd5e1; }
+body.theme-clean-light-desktop .log-table tbody tr:nth-child(odd) { background-color: #f8fafc; }
+body.theme-clean-light-desktop .log-table tbody tr:nth-child(even) { background-color: #ffffff; }
+body.theme-clean-light-desktop .log-table tbody tr.uncommitted-contact { background-color: #fef3c7; }
+body.theme-clean-light-desktop .log-table tbody tr.selected-contact,
+body.theme-clean-light-desktop .log-table tbody tr.selected-contact:nth-child(odd),
+body.theme-clean-light-desktop .log-table tbody tr.selected-contact:nth-child(even),
+body.theme-clean-light-desktop .log-table tbody tr.selected-contact.uncommitted-contact { background-color: #2563eb; }
+body.theme-clean-light-desktop .log-table td { color: #111827; }
+body.theme-clean-light-desktop .log-table tbody tr.selected-contact td { color: #ffffff; }
+body.theme-clean-light-desktop .empty-log { color: #64748b; }
+body.theme-clean-light-desktop .log-context-menu,
+body.theme-clean-light-desktop .error-message { border-color: #64748b; background-color: #ffffff; color: #111827; }
+body.theme-clean-light-desktop .log-context-menu button { color: #111827; }
+body.theme-clean-light-desktop .log-context-menu button:hover:not(:disabled) { background-color: #2563eb; color: #ffffff; }
+body.theme-clean-light-desktop .log-context-menu button:disabled { color: #94a3b8; }
+body.theme-clean-light-desktop .backend-socket-light.connected { background-color: #16a34a; }
+body.theme-clean-light-desktop .backend-socket-light.disconnected { background-color: #dc2626; }

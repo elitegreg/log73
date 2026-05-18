@@ -1,0 +1,45 @@
+/* High-Contrast Accessible theme overrides. */
+body.theme-high-contrast .app-container { background-color: #020617; color: #ffffff; }
+body.theme-high-contrast .window,
+body.theme-high-contrast .log-window,
+body.theme-high-contrast .selection-window,
+body.theme-high-contrast .form-window { border: 2px solid #ffffff; background-color: #0f172a; box-shadow: none; }
+body.theme-high-contrast .title-bar,
+body.theme-high-contrast .log-title-bar { background-color: #000000; color: #ffffff; border-bottom: 2px solid #ffffff; }
+body.theme-high-contrast .radio-controls,
+body.theme-high-contrast .status-bar,
+body.theme-high-contrast .log-table th { background-color: #1e293b; color: #ffffff; }
+body.theme-high-contrast .radio-control.unsupported { color: #ff3333; }
+body.theme-high-contrast .entry-fields input,
+body.theme-high-contrast .form-window input,
+body.theme-high-contrast .form-window select,
+body.theme-high-contrast .log-cell-editor,
+body.theme-high-contrast .selection-list { border: 2px solid #ffffff; background-color: #000000; color: #ffffff; }
+body.theme-high-contrast .entry-fields input:read-only { background-color: #334155; color: #ffffff; }
+body.theme-high-contrast .f-key,
+body.theme-high-contrast .cmd-btn,
+body.theme-high-contrast .title-button,
+body.theme-high-contrast .window-controls button { border: 2px solid #ffffff; background-color: #000000; color: #ffffff; }
+body.theme-high-contrast .f-key.active,
+body.theme-high-contrast .cmd-btn.primary { background-color: #ffff00; color: #000000; }
+body.theme-high-contrast .log-table { background-color: #000000; }
+body.theme-high-contrast .log-table th,
+body.theme-high-contrast .log-table td { border: 2px solid #ffffff; }
+body.theme-high-contrast .log-table tbody tr:nth-child(odd) { background-color: #0f172a; }
+body.theme-high-contrast .log-table tbody tr:nth-child(even) { background-color: #000000; }
+body.theme-high-contrast .log-table tbody tr.uncommitted-contact { background-color: #7c2d12; }
+body.theme-high-contrast .log-table tbody tr.selected-contact,
+body.theme-high-contrast .log-table tbody tr.selected-contact:nth-child(odd),
+body.theme-high-contrast .log-table tbody tr.selected-contact:nth-child(even),
+body.theme-high-contrast .log-table tbody tr.selected-contact.uncommitted-contact { background-color: #ffff00; }
+body.theme-high-contrast .log-table td { color: #ffffff; }
+body.theme-high-contrast .log-table tbody tr.selected-contact td { color: #000000; }
+body.theme-high-contrast .empty-log { color: #ffffff; }
+body.theme-high-contrast .log-context-menu,
+body.theme-high-contrast .error-message { border: 2px solid #ffffff; background-color: #000000; color: #ffffff; }
+body.theme-high-contrast .log-context-menu button { color: #ffffff; }
+body.theme-high-contrast .log-context-menu button:hover:not(:disabled) { background-color: #ffff00; color: #000000; }
+body.theme-high-contrast .log-context-menu button:disabled { color: #94a3b8; }
+body.theme-high-contrast .backend-socket-light { border-color: #ffffff; }
+body.theme-high-contrast .backend-socket-light.connected { background-color: #00ff00; }
+body.theme-high-contrast .backend-socket-light.disconnected { background-color: #ff0000; }
