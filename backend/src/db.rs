@@ -23,6 +23,12 @@ pub struct NewLog {
     pub station_callsign: String,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UpdateLog {
+    pub name: String,
+    pub station_callsign: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RadioConfig {
     pub id: i64,
@@ -133,6 +139,22 @@ impl Database {
             .ok_or(rusqlite::Error::QueryReturnedNoRows)
     }
 
+    pub fn update_log(&self, id: i64, log: UpdateLog) -> rusqlite::Result<Option<Log>> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        let updated = connection.execute(
+            "UPDATE logs SET NAME = ?1, STATION_CALLSIGN = ?2 WHERE ID = ?3",
+            params![
+                log.name.trim(),
+                log.station_callsign.trim().to_uppercase(),
+                id
+            ],
+        )?;
+        if updated == 0 {
+            return Ok(None);
+        }
+        select_log(&connection, id)
+    }
+
     pub fn delete_log(&self, id: i64) -> rusqlite::Result<bool> {
         let connection = self.connection.lock().expect("database mutex poisoned");
         let qso_count: i64 = connection.query_row(
@@ -177,6 +199,27 @@ impl Database {
         )?;
         select_radio(&connection, connection.last_insert_rowid())?
             .ok_or(rusqlite::Error::QueryReturnedNoRows)
+    }
+
+    pub fn update_radio(&self, id: i64, radio: NewRadio) -> rusqlite::Result<Option<RadioConfig>> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        let updated = connection.execute(
+            "UPDATE radios SET NAME = ?1, RIGCTLD_HOST = ?2, RIGCTLD_PORT = ?3, POLL_FREQUENCY = ?4, RIGCTLD_TIMEOUT = ?5, WINKEYER_ENABLED = ?6, WINKEYER_SERIAL_PORT = ?7 WHERE ID = ?8",
+            params![
+                radio.name.trim(),
+                radio.rigctld_host.trim(),
+                radio.rigctld_port,
+                radio.poll_frequency,
+                radio.rigctld_timeout,
+                radio.winkeyer_enabled,
+                radio.winkeyer_serial_port.trim(),
+                id
+            ],
+        )?;
+        if updated == 0 {
+            return Ok(None);
+        }
+        select_radio(&connection, id)
     }
 
     pub fn delete_radio(&self, id: i64) -> rusqlite::Result<bool> {

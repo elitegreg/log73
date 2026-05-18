@@ -20,7 +20,7 @@ use axum::{
     routing::{delete, get},
 };
 use clap::Parser;
-use db::{Contact, Database, NewLog, NewRadio};
+use db::{Contact, Database, NewLog, NewRadio, UpdateLog};
 use futures_util::{SinkExt, StreamExt};
 use radio::{ClientMessage, RadioCommand, ServerMessage};
 use radio_manager::RadioManager;
@@ -129,14 +129,17 @@ async fn main() {
     let api = Router::new()
         .route("/contest-settings", get(contest_settings))
         .route("/logs", get(logs).post(create_log))
-        .route("/logs/{id}", get(log).delete(delete_log))
+        .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
         .route(
             "/logs/{log_id}/contacts",
             get(contacts).post(commit_contact),
         )
         .route("/contacts/{id}", delete(delete_contact))
         .route("/radios", get(radios).post(create_radio))
-        .route("/radios/{id}", get(radio).delete(delete_radio))
+        .route(
+            "/radios/{id}",
+            get(radio).put(update_radio).delete(delete_radio),
+        )
         .route("/radios/{id}/cw-labels", get(cw_labels));
 
     let app = Router::new()
@@ -384,6 +387,19 @@ async fn create_log(
     }
 }
 
+async fn update_log(
+    State(app_state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(payload): Json<UpdateLog>,
+) -> Json<serde_json::Value> {
+    debug!(id, payload = %pretty_json(&payload), "update log PUT body");
+    match app_state.db.update_log(id, payload) {
+        Ok(Some(log)) => Json(serde_json::json!({ "ok": true, "log": log })),
+        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
 async fn delete_log(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
@@ -431,6 +447,37 @@ async fn create_radio(
     debug!(payload = %pretty_json(&payload), "create radio POST body");
     match app_state.db.create_radio(payload) {
         Ok(radio) => Json(serde_json::json!({ "ok": true, "radio": radio })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn update_radio(
+    State(app_state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(payload): Json<NewRadio>,
+) -> Json<serde_json::Value> {
+    debug!(id, payload = %pretty_json(&payload), "update radio PUT body");
+    match app_state.db.update_radio(id, payload) {
+        Ok(Some(radio)) => {
+            let active = app_state.radio_manager.is_active(id).await;
+            debug!(
+                id,
+                active, "radio updated; checking whether reload is needed"
+            );
+            if active {
+                if let Err(error) = app_state
+                    .radio_manager
+                    .reload_config(id, radio.clone())
+                    .await
+                {
+                    warn!(id, %error, "failed to reload active radio after update");
+                    return Json(serde_json::json!({ "ok": false, "error": error }));
+                }
+                debug!(id, "active radio reload requested after update");
+            }
+            Json(serde_json::json!({ "ok": true, "radio": radio }))
+        }
+        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
 }

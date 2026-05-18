@@ -79,7 +79,8 @@ function OpenLogScreen({ theme, onSetTheme }) {
           </select>
           <div className="selection-buttons">
             <Link className="cmd-btn" to="/ui/create_log">Create</Link>
-            <button className="cmd-btn" onClick={deleteLog}>Delete</button>
+            <Link className={`cmd-btn${selectedLogId ? '' : ' disabled'}`} to={selectedLogId ? `/ui/edit_log/${selectedLogId}` : '#'} onClick={(event) => { if (!selectedLogId) event.preventDefault(); }}>Edit</Link>
+            <button className="cmd-btn" onClick={deleteLog} disabled={!selectedLogId}>Delete</button>
           </div>
         </section>
         <section>
@@ -93,7 +94,8 @@ function OpenLogScreen({ theme, onSetTheme }) {
           </select>
           <div className="selection-buttons">
             <Link className="cmd-btn" to="/ui/create_radio">Create</Link>
-            <button className="cmd-btn" onClick={deleteRadio}>Delete</button>
+            <Link className={`cmd-btn${selectedRadioId ? '' : ' disabled'}`} to={selectedRadioId ? `/ui/edit_radio/${selectedRadioId}` : '#'} onClick={(event) => { if (!selectedRadioId) event.preventDefault(); }}>Edit</Link>
+            <button className="cmd-btn" onClick={deleteRadio} disabled={!selectedRadioId}>Delete</button>
           </div>
         </section>
       </div>

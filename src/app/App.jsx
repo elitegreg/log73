@@ -28,7 +28,9 @@ function App() {
         <Route path="/" element={<Navigate to="/ui/open_log" replace />} />
         <Route path="/ui/open_log" element={<OpenLogScreen theme={theme} onSetTheme={setTheme} />} />
         <Route path="/ui/create_log" element={<CreateLogScreen />} />
+        <Route path="/ui/edit_log/:logId" element={<CreateLogScreen />} />
         <Route path="/ui/create_radio" element={<CreateRadioScreen />} />
+        <Route path="/ui/edit_radio/:radioId" element={<CreateRadioScreen />} />
         <Route path="/ui/logger/:logId/:radioId" element={<LoggerScreen />} />
         <Route path="*" element={<Navigate to="/ui/open_log" replace />} />
       </Routes>

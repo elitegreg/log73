@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { apiJson } from '../lib/api';
 
 function CreateRadioScreen() {
   const navigate = useNavigate();
+  const { radioId } = useParams();
+  const isEditing = Boolean(radioId);
   const [name, setName] = useState('');
   const [host, setHost] = useState('127.0.0.1');
   const [port, setPort] = useState(4532);
@@ -14,16 +16,32 @@ function CreateRadioScreen() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (isEditing) {
+      apiJson(`/radios/${radioId}`)
+        .then((result) => {
+          if (!result.ok) throw new Error(result.error ?? 'Radio not found');
+          setName(result.radio.name ?? '');
+          setHost(result.radio.rigctld_host ?? '127.0.0.1');
+          setPort(result.radio.rigctld_port ?? 4532);
+          setPollFrequency(result.radio.poll_frequency ?? 0.25);
+          setRigctldTimeout(result.radio.rigctld_timeout ?? 2);
+          setWinkeyerEnabled(Boolean(result.radio.winkeyer_enabled));
+          setWinkeyerSerialPort(result.radio.winkeyer_serial_port ?? '');
+        })
+        .catch((err) => setError(err.message));
+      return;
+    }
+
     apiJson('/radios')
       .then((radios) => setPort(4532 + radios.length))
       .catch(() => setPort(4532));
-  }, []);
+  }, [isEditing, radioId]);
 
-  async function createRadio(event) {
+  async function saveRadio(event) {
     event.preventDefault();
     setError('');
-    const result = await apiJson('/radios', {
-      method: 'POST',
+    const result = await apiJson(isEditing ? `/radios/${radioId}` : '/radios', {
+      method: isEditing ? 'PUT' : 'POST',
       body: JSON.stringify({
         name,
         rigctld_host: host,
@@ -35,15 +53,15 @@ function CreateRadioScreen() {
       }),
     });
     if (!result.ok) {
-      setError(result.error ?? 'Unable to create radio');
+      setError(result.error ?? `Unable to ${isEditing ? 'update' : 'create'} radio`);
       return;
     }
     navigate('/ui/open_log');
   }
 
   return (
-    <form className="form-window" onSubmit={createRadio}>
-      <div className="title-bar">Log73 - Create Radio</div>
+    <form className="form-window" onSubmit={saveRadio}>
+      <div className="title-bar">Log73 - {isEditing ? 'Edit' : 'Create'} Radio</div>
       {error && <div className="error-message">{error}</div>}
       <label>Name
         <input value={name} onChange={(event) => setName(event.target.value)} required />
@@ -60,15 +78,15 @@ function CreateRadioScreen() {
       <label>rigctld Timeout (seconds)
         <input type="number" min="0.01" step="0.01" value={rigctldTimeout} onChange={(event) => setRigctldTimeout(event.target.value)} required />
       </label>
-      <label>
+      <label className="checkbox-label">
         <input type="checkbox" checked={winkeyerEnabled} onChange={(event) => setWinkeyerEnabled(event.target.checked)} />
-        Enable Winkeyer
+        <span>Enable Winkeyer</span>
       </label>
       <label>Winkeyer Serial Port
         <input value={winkeyerSerialPort} onChange={(event) => setWinkeyerSerialPort(event.target.value)} required={winkeyerEnabled} disabled={!winkeyerEnabled} placeholder="/dev/ttyUSB0" />
       </label>
       <div className="selection-actions">
-        <button className="cmd-btn primary" type="submit">Create</button>
+        <button className="cmd-btn primary" type="submit">{isEditing ? 'Save' : 'Create'}</button>
         <button className="cmd-btn" type="button" onClick={() => navigate('/ui/open_log')}>Cancel</button>
       </div>
     </form>

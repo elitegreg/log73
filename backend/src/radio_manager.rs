@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 #[derive(Clone)]
 pub struct RadioManager {
@@ -66,6 +66,8 @@ impl RadioManager {
             port = config.rigctld_port,
             poll_frequency = config.poll_frequency,
             rigctld_timeout = config.rigctld_timeout,
+            winkeyer_enabled = config.winkeyer_enabled,
+            winkeyer_serial_port = %config.winkeyer_serial_port,
             "starting managed radio"
         );
         let current = Arc::new(RwLock::new(None));
@@ -103,6 +105,11 @@ impl RadioManager {
             let mut radios = self.radios.lock().await;
             if let Some(radio) = radios.get_mut(&radio_id) {
                 radio.refcount = radio.refcount.saturating_sub(1);
+                debug!(
+                    radio_id,
+                    refcount = radio.refcount,
+                    "released managed radio reference"
+                );
                 if radio.refcount == 0 {
                     removed = radios.remove(&radio_id);
                 }
@@ -122,6 +129,32 @@ impl RadioManager {
 
     pub async fn is_active(&self, radio_id: i64) -> bool {
         self.radios.lock().await.contains_key(&radio_id)
+    }
+
+    pub async fn reload_config(&self, radio_id: i64, config: RadioConfig) -> Result<(), String> {
+        let command_sender = {
+            let radios = self.radios.lock().await;
+            radios.get(&radio_id).map(|radio| radio.commands.clone())
+        };
+
+        let Some(command_sender) = command_sender else {
+            return Ok(());
+        };
+
+        debug!(
+            radio_id,
+            host = %config.rigctld_host,
+            port = config.rigctld_port,
+            poll_frequency = config.poll_frequency,
+            rigctld_timeout = config.rigctld_timeout,
+            winkeyer_enabled = config.winkeyer_enabled,
+            winkeyer_serial_port = %config.winkeyer_serial_port,
+            "requesting active radio config reload"
+        );
+        command_sender
+            .send(RadioCommand::ReloadConfig(config))
+            .await
+            .map_err(|_| "radio task unavailable".to_string())
     }
 }
 
@@ -147,21 +180,42 @@ impl RadioHandle {
 }
 
 async fn run_managed_radio(
-    config: RadioConfig,
+    mut config: RadioConfig,
     current: Arc<RwLock<Option<RadioState>>>,
     updates: broadcast::Sender<RadioState>,
     mut commands: mpsc::Receiver<RadioCommand>,
     mut shutdown: oneshot::Receiver<()>,
 ) {
-    let poll_interval = Duration::from_secs_f64(config.poll_frequency);
-    let rigctld_timeout = Duration::from_secs_f64(config.rigctld_timeout);
-
     loop {
+        let poll_interval = Duration::from_secs_f64(config.poll_frequency);
+        let rigctld_timeout = Duration::from_secs_f64(config.rigctld_timeout);
+        debug!(
+            radio_id = config.id,
+            host = %config.rigctld_host,
+            port = config.rigctld_port,
+            poll_frequency = config.poll_frequency,
+            rigctld_timeout = config.rigctld_timeout,
+            "attempting rigctld connection"
+        );
         let mut rig = rigctld::Rig::new(&config.rigctld_host, config.rigctld_port);
         rig.set_communication_timeout(rigctld_timeout);
 
         tokio::select! {
             _ = &mut shutdown => return,
+            command = commands.recv() => {
+                match command {
+                    Some(RadioCommand::ReloadConfig(new_config)) => {
+                        info!(radio_id = new_config.id, "reloading radio config before rigctld connect");
+                        config = new_config;
+                        continue;
+                    }
+                    Some(command) => {
+                        warn!(radio_id = config.id, ?command, "dropping radio command while rigctld is disconnected");
+                        continue;
+                    }
+                    None => return,
+                }
+            }
             result = rig.connect() => {
                 if let Err(error) = result {
                     warn!(
@@ -203,10 +257,17 @@ async fn run_managed_radio(
                     return;
                 }
                 _ = interval.tick() => {
+                    trace!(radio_id = config.id, "polling radio state");
                     match poll_radio(&mut rig).await {
                         Ok(state) => {
                             last_frequency_hz = state.frequency_hz;
                             *current.write().await = Some(state.clone());
+                            trace!(
+                                radio_id = config.id,
+                                frequency_hz = state.frequency_hz,
+                                mode = %state.mode,
+                                "polled radio state"
+                            );
                             let _ = updates.send(state);
                         }
                         Err(error) => {
@@ -224,21 +285,44 @@ async fn run_managed_radio(
                         let _ = cw_task.await;
                         return;
                     };
-                    debug!(radio_id = config.id, ?command, "applying radio command");
+                    debug!(radio_id = config.id, ?command, "received radio command");
                     match command {
                         RadioCommand::SendCw { mode, key, fields, completed } => {
+                            debug!(radio_id = config.id, mode, key, "forwarding cw send command");
                             if let Err(error) = cw_tx.send(CwTaskCommand::Send { mode, key, fields, completed }).await {
                                 let CwTaskCommand::Send { completed, .. } = error.0 else { unreachable!() };
                                 let _ = completed.send(Err("cw task unavailable".to_string()));
                             }
                         }
                         RadioCommand::StopCw => {
+                            debug!(radio_id = config.id, "forwarding cw stop command");
                             let _ = cw_tx.send(CwTaskCommand::Stop).await;
                         }
                         RadioCommand::SetWpm(wpm) => {
+                            debug!(radio_id = config.id, wpm, "forwarding cw set_wpm command");
                             let _ = cw_tx.send(CwTaskCommand::SetWpm(wpm)).await;
                         }
+                        RadioCommand::ReloadConfig(new_config) => {
+                            info!(
+                                radio_id = new_config.id,
+                                host = %new_config.rigctld_host,
+                                port = new_config.rigctld_port,
+                                poll_frequency = new_config.poll_frequency,
+                                rigctld_timeout = new_config.rigctld_timeout,
+                                winkeyer_enabled = new_config.winkeyer_enabled,
+                                winkeyer_serial_port = %new_config.winkeyer_serial_port,
+                                "reloading active radio config"
+                            );
+                            debug!(radio_id = config.id, "shutting down cw task for radio config reload");
+                            let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
+                            let _ = cw_task.await;
+                            debug!(radio_id = config.id, "disconnecting rigctld for radio config reload");
+                            rig.disconnect();
+                            config = new_config;
+                            break;
+                        }
                         command => {
+                            debug!(radio_id = config.id, ?command, last_frequency_hz, "applying rigctld command");
                             if let Err(error) = apply_command(&mut rig, command, last_frequency_hz).await {
                                 error!(radio_id = config.id, %error, "failed to apply radio command");
                                 let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
@@ -592,6 +676,9 @@ async fn apply_command(
                 }
             }
         }
-        RadioCommand::SendCw { .. } | RadioCommand::StopCw | RadioCommand::SetWpm(_) => Ok(()),
+        RadioCommand::SendCw { .. }
+        | RadioCommand::StopCw
+        | RadioCommand::SetWpm(_)
+        | RadioCommand::ReloadConfig(_) => Ok(()),
     }
 }

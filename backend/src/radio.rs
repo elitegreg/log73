@@ -1,4 +1,5 @@
 use crate::bands::band_for_frequency;
+use crate::db::RadioConfig;
 use crate::frequency::Frequency;
 use serde::{Deserialize, Serialize};
 
@@ -57,6 +58,7 @@ pub enum RadioCommand {
     },
     StopCw,
     SetWpm(u8),
+    ReloadConfig(RadioConfig),
 }
 
 pub fn normalize_mode(mode: &rigctld::Mode) -> String {

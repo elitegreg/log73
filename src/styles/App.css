@@ -162,13 +162,29 @@
 }
 
 .cmd-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
   background-color: #d3d3d3;
   border: 1px solid #808080;
   padding: 2px 5px;
   margin: 2px;
   cursor: pointer;
   min-width: 60px;
+  min-height: 22px;
+  color: #000;
+  font: inherit;
   text-align: center;
+  line-height: 1.2;
+  vertical-align: middle;
+}
+
+.cmd-btn:disabled,
+.cmd-btn.disabled {
+  cursor: default;
+  opacity: 0.55;
 }
 
 .status-bar {
@@ -373,6 +389,18 @@
 .form-window select {
   font-size: 16px;
   padding: 4px;
+}
+
+.form-window label.checkbox-label {
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.form-window label.checkbox-label input {
+  width: auto;
+  margin: 0;
 }
 
 .error-message {
