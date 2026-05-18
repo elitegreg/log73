@@ -10,6 +10,7 @@ const DEFAULT_CW_LABELS = {
   's&p': Array.from({ length: 12 }, (_, index) => ({ key: `F${index + 1}`, label: '-' })),
 };
 const CALLSIGN_FIELD_WIDTH_CHARS = 13;
+const MAX_COMPLETION_MATCHES = 100;
 const AMATEUR_BANDS = [
   { meters: 160, name: '160m', lowerHz: 1800000, upperHz: 2000000 },
   { meters: 80, name: '80m', lowerHz: 3500000, upperHz: 4000000 },
@@ -70,6 +71,16 @@ function isEmptyCwButton(button) {
   return String(button?.label ?? '').trim() === '-';
 }
 
+function exchangeCompletionMatches(field, value) {
+  const query = String(value ?? '').trim().toUpperCase();
+  if (query.length < 1 || (field?.valid_values ?? []).length === 0) return [];
+
+  return field.valid_values
+    .map((validValue) => String(validValue).toUpperCase())
+    .filter((validValue) => validValue.includes(query))
+    .slice(0, MAX_COMPLETION_MATCHES);
+}
+
 function MainWindow({
   settings,
   log,
@@ -95,6 +106,7 @@ function MainWindow({
   const [operatingMode, setOperatingMode] = useState('S&P');
   const [repeatRunF1, setRepeatRunF1] = useState(false);
   const [activeCwKeys, setActiveCwKeys] = useState(() => new Set());
+  const [activeCompletionField, setActiveCompletionField] = useState(null);
   const [supercheckpartialMatches, setSupercheckpartialMatches] = useState([]);
   const [cwWpm, setCwWpm] = useState(() => {
     const storedWpm = Number.parseInt(localStorage.getItem(CW_WPM_STORAGE_KEY) ?? '', 10);
@@ -147,6 +159,11 @@ function MainWindow({
   }, [backendSocketStatus, cwWpm]);
 
   useEffect(() => {
+    if (activeCompletionField !== 'CALL') {
+      setSupercheckpartialMatches([]);
+      return undefined;
+    }
+
     const query = callSign.trim().toUpperCase();
     if (query.length < 3) {
       setSupercheckpartialMatches([]);
@@ -169,10 +186,19 @@ function MainWindow({
     return () => {
       cancelled = true;
     };
-  }, [callSign]);
+  }, [activeCompletionField, callSign]);
 
   const cwModeKey = operatingMode === 'Run' ? 'run' : 's&p';
   const activeCwLabels = cwLabels?.[cwModeKey] ?? DEFAULT_CW_LABELS[cwModeKey];
+  const activeExchangeCompletionField = (settings?.exchange ?? []).find(
+    (field) => field.name === activeCompletionField && field.fixed !== true,
+  );
+  const completionMatches = activeCompletionField === 'CALL'
+    ? supercheckpartialMatches
+    : exchangeCompletionMatches(
+      activeExchangeCompletionField,
+      exchangeValues[activeExchangeCompletionField?.name],
+    );
 
   function currentCwFields() {
     const fields = {
@@ -522,6 +548,8 @@ function MainWindow({
             value={callSign}
             onChange={handleCallsignChange}
             onKeyDown={handleCallsignKeyDown}
+            onFocus={() => setActiveCompletionField('CALL')}
+            onBlur={() => setActiveCompletionField(null)}
             className="callsign"
             maxLength={12}
           />
@@ -551,6 +579,8 @@ function MainWindow({
                 value={value}
                 onChange={(event) => updateExchangeField(field, event.target.value)}
                 onKeyDown={(event) => handleExchangeKeyDown(event, index)}
+                onFocus={() => setActiveCompletionField(field.fixed === true ? null : field.name)}
+                onBlur={() => setActiveCompletionField(null)}
                 readOnly={field.fixed === true}
                 tabIndex={field.fixed === true ? -1 : undefined}
                 className={field.fixed === true ? 'fixed-field' : ''}
@@ -565,8 +595,8 @@ function MainWindow({
         rows="3"
         readOnly
         tabIndex={-1}
-        aria-label="Super Check Partial matches"
-        value={supercheckpartialMatches.join(' ')}
+        aria-label="Completion matches"
+        value={completionMatches.join(' ')}
       />
       <div className="function-keys">
         <div className="f-row">
