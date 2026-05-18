@@ -3,6 +3,11 @@ import { fieldDefault, parseFieldType, sanitizeCallsign, sanitizeExchangeValue }
 
 
 const MODE_OPTIONS = ['CW', 'SSB', 'FM', 'AM'];
+const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
+const DEFAULT_CW_LABELS = {
+  run: Array.from({ length: 12 }, (_, index) => ({ key: `F${index + 1}`, label: '-' })),
+  's&p': Array.from({ length: 12 }, (_, index) => ({ key: `F${index + 1}`, label: '-' })),
+};
 const CALLSIGN_FIELD_WIDTH_CHARS = 13;
 const AMATEUR_BANDS = [
   { meters: 160, name: '160m', lowerHz: 1800000, upperHz: 2000000 },
@@ -51,6 +56,19 @@ function createContactId(date, callSign) {
   return `${date.getTime()}-${callSign}-${Math.random().toString(36).slice(2)}`;
 }
 
+function cwButtonLabel(label, stationCallsign) {
+  return String(label ?? '').replaceAll('{STATION_CALLSIGN}', stationCallsign);
+}
+
+function createCwRequestId() {
+  if (window.crypto?.randomUUID) return window.crypto.randomUUID();
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function isEmptyCwButton(button) {
+  return String(button?.label ?? '').trim() === '-';
+}
+
 function MainWindow({
   settings,
   log,
@@ -59,18 +77,36 @@ function MainWindow({
   operatorCallsign,
   radioState,
   backendSocketStatus,
+  cwLabels,
+  cwSentEvent,
   sessionId,
   logId,
   onSetRadioFrequency,
   onSetRadioMode,
+  onSendCw,
+  onStopCw,
+  onSetCwWpm,
   onLogContact,
   onExit,
 }) {
   const [callSign, setCallSign] = useState('');
   const [exchangeValues, setExchangeValues] = useState({});
   const [operatingMode, setOperatingMode] = useState('S&P');
-  const [cwWpm, setCwWpm] = useState(20);
+  const [repeatRunF1, setRepeatRunF1] = useState(false);
+  const [activeCwKeys, setActiveCwKeys] = useState(() => new Set());
+  const [cwWpm, setCwWpm] = useState(() => {
+    const storedWpm = Number.parseInt(localStorage.getItem(CW_WPM_STORAGE_KEY) ?? '', 10);
+    return Number.isFinite(storedWpm) ? storedWpm : 20;
+  });
   const callSignRef = useRef(null);
+  const setCwWpmRef = useRef(onSetCwWpm);
+  const repeatActiveRef = useRef(false);
+  const repeatRequestIdRef = useRef(null);
+  const repeatTimeoutRef = useRef(null);
+  const callSignValueRef = useRef('');
+  const repeatSendRunF1Ref = useRef(() => {});
+  const activeCwRequestsRef = useRef(new Map());
+  const activeCwTimeoutsRef = useRef(new Map());
   const exchangeInputRefs = useRef({});
   const callSignEditedAtRef = useRef(new Date());
   const radioMode = radioState?.mode ?? 'CW';
@@ -93,6 +129,152 @@ function MainWindow({
     setExchangeValues(exchangeDefaults(settings, radioMode));
   }, [settings, radioMode]);
 
+  useEffect(() => {
+    setCwWpmRef.current = onSetCwWpm;
+  });
+
+  useEffect(() => {
+    localStorage.setItem(CW_WPM_STORAGE_KEY, String(cwWpm));
+    setCwWpmRef.current?.(cwWpm);
+  }, [cwWpm]);
+
+  useEffect(() => {
+    if (backendSocketStatus === 'connected') {
+      setCwWpmRef.current?.(cwWpm);
+    }
+  }, [backendSocketStatus, cwWpm]);
+
+  const cwModeKey = operatingMode === 'Run' ? 'run' : 's&p';
+  const activeCwLabels = cwLabels?.[cwModeKey] ?? DEFAULT_CW_LABELS[cwModeKey];
+
+  function currentCwFields() {
+    const fields = {
+      STATION_CALLSIGN: stationCallsign,
+      CALL: callSign.trim().toUpperCase(),
+    };
+
+    for (const field of settings?.exchange ?? []) {
+      fields[field.adif] = String(exchangeValues[field.name] ?? fieldDefault(field, radioMode)).trim().toUpperCase();
+    }
+
+    return fields;
+  }
+
+  function stopRepeat() {
+    repeatActiveRef.current = false;
+    repeatRequestIdRef.current = null;
+    if (repeatTimeoutRef.current !== null) {
+      window.clearTimeout(repeatTimeoutRef.current);
+      repeatTimeoutRef.current = null;
+    }
+  }
+
+  function markCwKeyActive(requestId, key) {
+    activeCwRequestsRef.current.set(requestId, key);
+    setActiveCwKeys((current) => new Set(current).add(key));
+    const timeoutMs = radio?.winkeyer_enabled ? 30000 : 500;
+    const timeoutId = window.setTimeout(() => clearCwRequest(requestId), timeoutMs);
+    activeCwTimeoutsRef.current.set(requestId, timeoutId);
+  }
+
+  function clearCwRequest(requestId) {
+    const key = activeCwRequestsRef.current.get(requestId);
+    if (!key) return;
+    activeCwRequestsRef.current.delete(requestId);
+    const timeoutId = activeCwTimeoutsRef.current.get(requestId);
+    if (timeoutId !== undefined) {
+      window.clearTimeout(timeoutId);
+      activeCwTimeoutsRef.current.delete(requestId);
+    }
+    setActiveCwKeys((current) => {
+      const stillActive = [...activeCwRequestsRef.current.values()].includes(key);
+      if (stillActive) return current;
+      const next = new Set(current);
+      next.delete(key);
+      return next;
+    });
+  }
+
+  function sendSingleCwKey(key, mode = cwModeKey) {
+    const button = (cwLabels?.[mode] ?? DEFAULT_CW_LABELS[mode]).find((label) => label.key === key);
+    if (isEmptyCwButton(button)) return null;
+    const requestId = createCwRequestId();
+    markCwKeyActive(requestId, key);
+    onSendCw?.({
+      request_id: requestId,
+      mode,
+      key,
+      fields: currentCwFields(),
+    });
+    return requestId;
+  }
+
+  repeatSendRunF1Ref.current = () => {
+    repeatRequestIdRef.current = sendSingleCwKey('F1', 'run');
+  };
+  callSignValueRef.current = callSign;
+
+  function sendCwKey(key) {
+    const shouldRepeat = cwModeKey === 'run' && key === 'F1' && repeatRunF1;
+    stopRepeat();
+    const requestId = sendSingleCwKey(key);
+    if (!requestId) return;
+
+    if (shouldRepeat) {
+      repeatActiveRef.current = true;
+      repeatRequestIdRef.current = requestId;
+    }
+
+    if (cwModeKey === 's&p' && key === 'F1') {
+      setOperatingMode('Run');
+    }
+  }
+
+  function stopCwSending() {
+    stopRepeat();
+    onStopCw?.();
+  }
+
+  useEffect(() => () => {
+    stopRepeat();
+    for (const timeoutId of activeCwTimeoutsRef.current.values()) {
+      window.clearTimeout(timeoutId);
+    }
+    activeCwTimeoutsRef.current.clear();
+    activeCwRequestsRef.current.clear();
+  }, []);
+
+  useEffect(() => {
+    if (cwSentEvent?.requestId) clearCwRequest(cwSentEvent.requestId);
+    if (!repeatActiveRef.current || !cwSentEvent?.requestId || cwSentEvent.requestId !== repeatRequestIdRef.current) return;
+    repeatTimeoutRef.current = window.setTimeout(() => {
+      repeatTimeoutRef.current = null;
+      if (!repeatActiveRef.current || callSignValueRef.current.trim() !== '') {
+        stopRepeat();
+        return;
+      }
+      repeatSendRunF1Ref.current();
+    }, 2000);
+  }, [cwSentEvent]);
+
+  useEffect(() => {
+    function handleFunctionKey(event) {
+      if (event.target?.closest?.('.log-window')) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        stopCwSending();
+        return;
+      }
+      if (/^F([1-9]|1[0-2])$/.test(event.key)) {
+        event.preventDefault();
+        sendCwKey(event.key);
+      }
+    }
+
+    window.addEventListener('keydown', handleFunctionKey);
+    return () => window.removeEventListener('keydown', handleFunctionKey);
+  });
+
   function updateExchangeField(field, value) {
     setExchangeValues((current) => ({
       ...current,
@@ -101,6 +283,7 @@ function MainWindow({
   }
 
   function handleCallsignChange(event) {
+    stopRepeat();
     setCallSign(sanitizeCallsign(event.target.value));
     callSignEditedAtRef.current = new Date();
   }
@@ -226,7 +409,11 @@ function MainWindow({
 
   function handleCwWpmChange(event) {
     const wpm = Number.parseInt(event.target.value, 10);
-    setCwWpm(Number.isFinite(wpm) ? wpm : 20);
+    if (!Number.isFinite(wpm)) {
+      setCwWpm(20);
+      return;
+    }
+    setCwWpm(Math.min(Math.max(wpm, 5), 60));
   }
 
   return (
@@ -339,26 +526,33 @@ function MainWindow({
       </div>
       <div className="function-keys">
         <div className="f-row">
-          <button className="f-key">F1 S&amp;P CQ</button>
-          <button className="f-key">F2 Exch</button>
-          <button className="f-key">F3 Spare</button>
-          <button className="f-key">F4 KBUT</button>
-          <button className="f-key">F5 His Call</button>
-          <button className="f-key">F6 KBUT</button>
+          {activeCwLabels.slice(0, 6).map((button) => (
+            <button key={button.key} className={`f-key ${activeCwKeys.has(button.key) ? 'active' : ''}`.trim()} type="button" title={`Keyboard shortcut: ${button.key}`} onClick={() => sendCwKey(button.key)}>
+              {button.key} {cwButtonLabel(button.label, stationCallsign)}
+              {cwModeKey === 'run' && button.key === 'F1' && (
+                <label className="f-key-repeat" style={{ float: 'right' }} onClick={(event) => event.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={repeatRunF1}
+                    onChange={(event) => setRepeatRunF1(event.target.checked)}
+                  />
+                  Rpt
+                </label>
+              )}
+            </button>
+          ))}
         </div>
         <div className="f-row">
-          <button className="f-key">F7 Rpt Exch</button>
-          <button className="f-key">F8 Agn?</button>
-          <button className="f-key">F9 Zone</button>
-          <button className="f-key">F10 Spare</button>
-          <button className="f-key">F11 Spare</button>
-          <button className="f-key">F12 Wipe</button>
+          {activeCwLabels.slice(6, 12).map((button) => (
+            <button key={button.key} className={`f-key ${activeCwKeys.has(button.key) ? 'active' : ''}`.trim()} type="button" title={`Keyboard shortcut: ${button.key}`} onClick={() => sendCwKey(button.key)}>
+              {button.key} {cwButtonLabel(button.label, stationCallsign)}
+            </button>
+          ))}
         </div>
       </div>
       <div className="command-buttons">
-        <button className="cmd-btn">Call Esc Stop</button>
+        <button className="cmd-btn" type="button" title="Keyboard shortcut: Esc" onClick={stopCwSending}>Stop Sending</button>
         <button className="cmd-btn" onClick={resetEntryFields}>Wipe</button>
-        <button className="cmd-btn">UserText</button>
         <button className="cmd-btn" onClick={logContact}>Log it</button>
         <button className="cmd-btn">Edit</button>
         <button className="cmd-btn">Mark</button>

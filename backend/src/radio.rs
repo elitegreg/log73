@@ -13,6 +13,9 @@ pub enum ServerMessage {
         id: i64,
         log_id: i64,
     },
+    CwSent {
+        request_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,14 +27,36 @@ pub struct RadioState {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
-    SetFrequency { frequency_hz: u64 },
-    SetMode { mode: String },
+    SetFrequency {
+        frequency_hz: u64,
+    },
+    SetMode {
+        mode: String,
+    },
+    SendCw {
+        request_id: String,
+        mode: String,
+        key: String,
+        fields: serde_json::Map<String, serde_json::Value>,
+    },
+    StopCw,
+    SetWpm {
+        wpm: u8,
+    },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum RadioCommand {
     SetFrequency(u64),
     SetMode(String),
+    SendCw {
+        mode: String,
+        key: String,
+        fields: serde_json::Map<String, serde_json::Value>,
+        completed: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    StopCw,
+    SetWpm(u8),
 }
 
 pub fn normalize_mode(mode: &rigctld::Mode) -> String {

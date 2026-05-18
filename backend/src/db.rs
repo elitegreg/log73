@@ -1,3 +1,4 @@
+use crate::cw::DEFAULT_CW_MESSAGES;
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -30,6 +31,9 @@ pub struct RadioConfig {
     pub rigctld_port: u16,
     pub poll_frequency: f64,
     pub rigctld_timeout: f64,
+    pub winkeyer_enabled: bool,
+    pub winkeyer_serial_port: String,
+    pub cw_messages: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -39,6 +43,8 @@ pub struct NewRadio {
     pub rigctld_port: u16,
     pub poll_frequency: f64,
     pub rigctld_timeout: f64,
+    pub winkeyer_enabled: bool,
+    pub winkeyer_serial_port: String,
 }
 
 const QSO_COLUMNS: &[&str] = &[
@@ -143,7 +149,7 @@ impl Database {
     pub fn radios(&self) -> rusqlite::Result<Vec<RadioConfig>> {
         let connection = self.connection.lock().expect("database mutex poisoned");
         let mut statement = connection.prepare(
-            "SELECT ID, NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT FROM radios ORDER BY ID",
+            "SELECT ID, NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES FROM radios ORDER BY ID",
         )?;
         let rows = statement.query_map([], row_to_radio)?;
         rows.collect()
@@ -157,13 +163,16 @@ impl Database {
     pub fn create_radio(&self, radio: NewRadio) -> rusqlite::Result<RadioConfig> {
         let connection = self.connection.lock().expect("database mutex poisoned");
         connection.execute(
-            "INSERT INTO radios (NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT) VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO radios (NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 radio.name.trim(),
                 radio.rigctld_host.trim(),
                 radio.rigctld_port,
                 radio.poll_frequency,
-                radio.rigctld_timeout
+                radio.rigctld_timeout,
+                radio.winkeyer_enabled,
+                radio.winkeyer_serial_port.trim(),
+                DEFAULT_CW_MESSAGES
             ],
         )?;
         select_radio(&connection, connection.last_insert_rowid())?
@@ -244,7 +253,10 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
             RIGCTLD_HOST TEXT NOT NULL,
             RIGCTLD_PORT INTEGER NOT NULL CHECK (RIGCTLD_PORT >= 0 AND RIGCTLD_PORT <= 65535),
             POLL_FREQUENCY REAL NOT NULL DEFAULT 0.25 CHECK (POLL_FREQUENCY > 0),
-            RIGCTLD_TIMEOUT REAL NOT NULL DEFAULT 2.0 CHECK (RIGCTLD_TIMEOUT > 0)
+            RIGCTLD_TIMEOUT REAL NOT NULL DEFAULT 2.0 CHECK (RIGCTLD_TIMEOUT > 0),
+            WINKEYER_ENABLED INTEGER NOT NULL DEFAULT 0,
+            WINKEYER_SERIAL_PORT TEXT NOT NULL DEFAULT '',
+            CW_MESSAGES TEXT NOT NULL
         ) STRICT;
 
         CREATE TABLE IF NOT EXISTS qsos (
@@ -314,7 +326,7 @@ fn row_to_log(row: &rusqlite::Row<'_>) -> rusqlite::Result<Log> {
 fn select_radio(connection: &Connection, id: i64) -> rusqlite::Result<Option<RadioConfig>> {
     connection
         .query_row(
-            "SELECT ID, NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT FROM radios WHERE ID = ?1",
+            "SELECT ID, NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES FROM radios WHERE ID = ?1",
             params![id],
             row_to_radio,
         )
@@ -330,6 +342,9 @@ fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioConfig> {
         rigctld_port: port as u16,
         poll_frequency: row.get("POLL_FREQUENCY")?,
         rigctld_timeout: row.get("RIGCTLD_TIMEOUT")?,
+        winkeyer_enabled: row.get("WINKEYER_ENABLED")?,
+        winkeyer_serial_port: row.get("WINKEYER_SERIAL_PORT")?,
+        cw_messages: row.get("CW_MESSAGES")?,
     })
 }
 

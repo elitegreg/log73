@@ -1,3 +1,4 @@
+use crate::cw;
 use crate::db::{Database, RadioConfig};
 use crate::radio::{RadioCommand, RadioState, ServerMessage, mode_for_request, normalize_mode};
 use std::collections::HashMap;
@@ -182,6 +183,9 @@ async fn run_managed_radio(
             port = config.rigctld_port,
             "connected to rigctld"
         );
+        let (cw_tx, cw_rx) = mpsc::channel(32);
+        let cw_config = config.clone();
+        let cw_task = tokio::spawn(async move { run_cw_task(cw_config, cw_rx).await });
         let mut interval = tokio::time::interval(poll_interval);
         let mut last_frequency_hz = current
             .read()
@@ -193,6 +197,8 @@ async fn run_managed_radio(
         loop {
             tokio::select! {
                 _ = &mut shutdown => {
+                    let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
+                    let _ = cw_task.await;
                     rig.disconnect();
                     return;
                 }
@@ -205,20 +211,296 @@ async fn run_managed_radio(
                         }
                         Err(error) => {
                             warn!(radio_id = config.id, %error, "failed to poll rigctld");
+                            let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
+                            let _ = cw_task.await;
                             rig.disconnect();
                             break;
                         }
                     }
                 }
                 command = commands.recv() => {
-                    let Some(command) = command else { return; };
+                    let Some(command) = command else {
+                        let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
+                        let _ = cw_task.await;
+                        return;
+                    };
                     debug!(radio_id = config.id, ?command, "applying radio command");
-                    if let Err(error) = apply_command(&mut rig, command, last_frequency_hz).await {
-                        error!(radio_id = config.id, %error, "failed to apply radio command");
-                        rig.disconnect();
-                        break;
+                    match command {
+                        RadioCommand::SendCw { mode, key, fields, completed } => {
+                            if let Err(error) = cw_tx.send(CwTaskCommand::Send { mode, key, fields, completed }).await {
+                                let CwTaskCommand::Send { completed, .. } = error.0 else { unreachable!() };
+                                let _ = completed.send(Err("cw task unavailable".to_string()));
+                            }
+                        }
+                        RadioCommand::StopCw => {
+                            let _ = cw_tx.send(CwTaskCommand::Stop).await;
+                        }
+                        RadioCommand::SetWpm(wpm) => {
+                            let _ = cw_tx.send(CwTaskCommand::SetWpm(wpm)).await;
+                        }
+                        command => {
+                            if let Err(error) = apply_command(&mut rig, command, last_frequency_hz).await {
+                                error!(radio_id = config.id, %error, "failed to apply radio command");
+                                let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
+                                let _ = cw_task.await;
+                                rig.disconnect();
+                                break;
+                            }
+                        }
                     }
                 }
+            }
+        }
+    }
+}
+
+enum CwTaskCommand {
+    Send {
+        mode: String,
+        key: String,
+        fields: serde_json::Map<String, serde_json::Value>,
+        completed: oneshot::Sender<Result<(), String>>,
+    },
+    Stop,
+    SetWpm(u8),
+    Shutdown,
+}
+
+async fn run_cw_task(config: RadioConfig, mut commands: mpsc::Receiver<CwTaskCommand>) {
+    let mut controller = CwController::new(&config).await;
+
+    while let Some(command) = commands.recv().await {
+        match command {
+            CwTaskCommand::Send {
+                mode,
+                key,
+                fields,
+                completed,
+            } => {
+                debug!(
+                    radio_id = config.id,
+                    mode, key, "cw task received send command"
+                );
+                let result = controller.send(&mode, &key, &fields, &mut commands).await;
+                debug!(
+                    radio_id = config.id,
+                    ?result,
+                    "cw task send command finished"
+                );
+                let _ = completed.send(result);
+            }
+            CwTaskCommand::Stop => {
+                debug!(radio_id = config.id, "cw task received stop command");
+                controller.stop().await;
+            }
+            CwTaskCommand::SetWpm(wpm) => {
+                debug!(
+                    radio_id = config.id,
+                    wpm, "cw task received set_wpm command"
+                );
+                controller.set_wpm(wpm).await;
+            }
+            CwTaskCommand::Shutdown => {
+                debug!(radio_id = config.id, "cw task received shutdown command");
+                break;
+            }
+        }
+    }
+
+    controller.close().await;
+}
+
+struct CwController {
+    radio_id: i64,
+    enabled: bool,
+    serial_port: String,
+    messages: String,
+    winkeyer: Option<winkeyer::WinKeyer>,
+}
+
+impl CwController {
+    async fn new(config: &RadioConfig) -> Self {
+        let mut controller = Self {
+            radio_id: config.id,
+            enabled: config.winkeyer_enabled,
+            serial_port: config.winkeyer_serial_port.clone(),
+            messages: config.cw_messages.clone(),
+            winkeyer: None,
+        };
+        if controller.enabled {
+            controller.connect().await;
+        }
+        controller
+    }
+
+    async fn connect(&mut self) {
+        if !self.enabled || self.serial_port.trim().is_empty() {
+            return;
+        }
+
+        match winkeyer::WinKeyer::open(&self.serial_port).await {
+            Ok((mut winkeyer, revision)) => {
+                winkeyer.set_timeout(Duration::from_millis(500));
+                info!(
+                    radio_id = self.radio_id,
+                    serial_port = %self.serial_port,
+                    revision,
+                    "connected to winkeyer"
+                );
+                self.winkeyer = Some(winkeyer);
+            }
+            Err(error) => {
+                warn!(
+                    radio_id = self.radio_id,
+                    serial_port = %self.serial_port,
+                    %error,
+                    "failed to connect to winkeyer"
+                );
+                self.winkeyer = None;
+            }
+        }
+    }
+
+    async fn ensure_connected(&mut self) -> Option<&mut winkeyer::WinKeyer> {
+        if !self.enabled {
+            debug!(
+                radio_id = self.radio_id,
+                "ignoring cw command; winkeyer disabled"
+            );
+            return None;
+        }
+        if self.winkeyer.is_none() {
+            self.connect().await;
+        }
+        self.winkeyer.as_mut()
+    }
+
+    async fn send(
+        &mut self,
+        mode: &str,
+        key: &str,
+        fields: &serde_json::Map<String, serde_json::Value>,
+        commands: &mut mpsc::Receiver<CwTaskCommand>,
+    ) -> Result<(), String> {
+        let Some(text) = cw::render(&self.messages, mode, key, fields) else {
+            warn!(radio_id = self.radio_id, mode, key, "unknown cw message");
+            return Err("unknown cw message".to_string());
+        };
+        if text.is_empty() {
+            debug!(
+                radio_id = self.radio_id,
+                mode, key, "ignoring empty cw message"
+            );
+            return Ok(());
+        }
+        debug!(radio_id = self.radio_id, mode, key, text, "sending cw text");
+        let radio_id = self.radio_id;
+        let Some(winkeyer) = self.ensure_connected().await else {
+            return Err("winkeyer unavailable".to_string());
+        };
+        if let Err(error) = winkeyer.send_text(&text).await {
+            warn!(radio_id, %error, "failed to send cw text");
+            self.winkeyer = None;
+            return Err(error.to_string());
+        }
+        debug!(radio_id, mode, key, "cw text queued to winkeyer");
+        // WK status may not report busy immediately after queueing text, so give the
+        // keyer a short moment to start before waiting for idle/completion.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        debug!(radio_id, mode, key, "waiting for winkeyer idle");
+        let result = self.wait_until_idle_or_stopped(commands).await;
+        debug!(
+            radio_id,
+            mode,
+            key,
+            ?result,
+            "finished waiting for winkeyer idle"
+        );
+        result
+    }
+
+    async fn wait_until_idle_or_stopped(
+        &mut self,
+        commands: &mut mpsc::Receiver<CwTaskCommand>,
+    ) -> Result<(), String> {
+        loop {
+            tokio::select! {
+                command = commands.recv() => {
+                    match command {
+                        Some(CwTaskCommand::Stop) => {
+                            debug!(radio_id = self.radio_id, "stop command interrupting cw idle wait");
+                            self.stop().await;
+                            return Ok(());
+                        }
+                        Some(CwTaskCommand::SetWpm(wpm)) => {
+                            debug!(radio_id = self.radio_id, wpm, "set_wpm command received during cw idle wait");
+                            self.set_wpm(wpm).await;
+                        }
+                        Some(CwTaskCommand::Shutdown) | None => {
+                            debug!(radio_id = self.radio_id, "shutdown interrupting cw idle wait");
+                            self.stop().await;
+                            return Err("cw shutdown".to_string());
+                        }
+                        Some(CwTaskCommand::Send { completed, .. }) => {
+                            debug!(radio_id = self.radio_id, "rejecting cw send command while busy");
+                            let _ = completed.send(Err("cw busy".to_string()));
+                        }
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                    let radio_id = self.radio_id;
+                    let Some(winkeyer) = self.ensure_connected().await else {
+                        return Err("winkeyer unavailable".to_string());
+                    };
+                    match winkeyer.status().await {
+                        Ok(status) if !status.busy && !status.wait && !status.key_down => {
+                            debug!(radio_id = self.radio_id, "winkeyer is idle");
+                            return Ok(());
+                        }
+                        Ok(_) => {}
+                        Err(error) => {
+                            warn!(radio_id, %error, "failed waiting for winkeyer idle");
+                            self.winkeyer = None;
+                            return Err(error.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    async fn stop(&mut self) {
+        let radio_id = self.radio_id;
+        let Some(winkeyer) = self.ensure_connected().await else {
+            return;
+        };
+        debug!(radio_id, "clearing winkeyer buffer");
+        if let Err(error) = winkeyer.clear_buffer().await {
+            warn!(radio_id, %error, "failed to clear winkeyer buffer");
+            self.winkeyer = None;
+        } else {
+            debug!(radio_id, "winkeyer buffer cleared");
+        }
+    }
+
+    async fn set_wpm(&mut self, wpm: u8) {
+        let radio_id = self.radio_id;
+        let Some(winkeyer) = self.ensure_connected().await else {
+            return;
+        };
+        debug!(radio_id, wpm, "setting winkeyer wpm");
+        if let Err(error) = winkeyer.set_wpm(wpm).await {
+            warn!(radio_id, wpm, %error, "failed to set winkeyer wpm");
+            self.winkeyer = None;
+        } else {
+            debug!(radio_id, wpm, "winkeyer wpm set");
+        }
+    }
+
+    async fn close(&mut self) {
+        if let Some(mut winkeyer) = self.winkeyer.take() {
+            if let Err(error) = winkeyer.close().await {
+                warn!(radio_id = self.radio_id, %error, "failed to close winkeyer");
             }
         }
     }
@@ -256,5 +538,6 @@ async fn apply_command(
                 }
             }
         }
+        RadioCommand::SendCw { .. } | RadioCommand::StopCw | RadioCommand::SetWpm(_) => Ok(()),
     }
 }

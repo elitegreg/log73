@@ -1,5 +1,6 @@
 mod auth;
 mod bands;
+mod cw;
 mod db;
 mod frequency;
 mod radio;
@@ -25,7 +26,7 @@ use radio::{ClientMessage, RadioCommand, ServerMessage};
 use radio_manager::RadioManager;
 use scqso_in_state::ContestRules;
 use std::{collections::HashMap, fs::OpenOptions, path::PathBuf, time::Duration};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc, oneshot};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{Span, debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt};
@@ -135,7 +136,8 @@ async fn main() {
         )
         .route("/contacts/{id}", delete(delete_contact))
         .route("/radios", get(radios).post(create_radio))
-        .route("/radios/{id}", get(radio).delete(delete_radio));
+        .route("/radios/{id}", get(radio).delete(delete_radio))
+        .route("/radios/{id}/cw-labels", get(cw_labels));
 
     let app = Router::new()
         .nest("/api", api)
@@ -208,6 +210,7 @@ async fn handle_socket(
 
     let mut radio_updates = radio_handle.subscribe();
     let mut log_events = app_state.log_events.subscribe();
+    let (direct_tx, mut direct_rx) = mpsc::channel::<ServerMessage>(32);
     let outbound_session_id = session_id.clone();
     let outbound = tokio::spawn(async move {
         loop {
@@ -226,6 +229,10 @@ async fn handle_socket(
                     Ok(event) => serde_json::to_string(&event).expect("log event should serialize"),
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
+                },
+                direct = direct_rx.recv() => match direct {
+                    Some(message) => serde_json::to_string(&message).expect("direct message should serialize"),
+                    None => break,
                 }
             };
 
@@ -255,6 +262,88 @@ async fn handle_socket(
                     radio_id, mode, "websocket set_mode command received"
                 );
                 let _ = radio_handle.send_command(RadioCommand::SetMode(mode)).await;
+            }
+            Ok(ClientMessage::SendCw {
+                request_id,
+                mode,
+                key,
+                fields,
+            }) => {
+                debug!(
+                    session_id,
+                    radio_id, request_id, mode, key, "websocket send_cw command received"
+                );
+                let (completed_tx, completed_rx) = oneshot::channel();
+                let command_result = radio_handle
+                    .send_command(RadioCommand::SendCw {
+                        mode,
+                        key,
+                        fields,
+                        completed: completed_tx,
+                    })
+                    .await;
+                if command_result.is_ok() {
+                    let direct_tx = direct_tx.clone();
+                    let completion_session_id = session_id.clone();
+                    tokio::spawn(async move {
+                        debug!(
+                            session_id = %completion_session_id,
+                            request_id,
+                            "waiting for cw send completion"
+                        );
+                        match completed_rx.await {
+                            Ok(Ok(())) => {
+                                debug!(
+                                    session_id = %completion_session_id,
+                                    request_id,
+                                    "cw send complete; sending cw_sent websocket message"
+                                );
+                                if direct_tx
+                                    .send(ServerMessage::CwSent { request_id })
+                                    .await
+                                    .is_err()
+                                {
+                                    debug!(
+                                        session_id = %completion_session_id,
+                                        "unable to send cw_sent websocket message; session closed"
+                                    );
+                                }
+                            }
+                            Ok(Err(error)) => {
+                                debug!(
+                                    session_id = %completion_session_id,
+                                    request_id,
+                                    %error,
+                                    "cw send did not complete; not sending cw_sent websocket message"
+                                );
+                            }
+                            Err(error) => {
+                                debug!(
+                                    session_id = %completion_session_id,
+                                    request_id,
+                                    %error,
+                                    "cw completion channel closed; not sending cw_sent websocket message"
+                                );
+                            }
+                        }
+                    });
+                } else {
+                    debug!(
+                        session_id,
+                        radio_id, request_id, "failed to queue cw command"
+                    );
+                }
+            }
+            Ok(ClientMessage::StopCw) => {
+                debug!(session_id, radio_id, "websocket stop_cw command received");
+                let _ = radio_handle.send_command(RadioCommand::StopCw).await;
+            }
+            Ok(ClientMessage::SetWpm { wpm }) => {
+                debug!(
+                    session_id,
+                    radio_id, wpm, "websocket set_wpm command received"
+                );
+                let _ = radio_handle.send_command(RadioCommand::SetWpm(wpm)).await;
             }
             Err(error) => warn!(session_id, radio_id, %error, "invalid websocket message"),
         }
@@ -317,6 +406,19 @@ async fn radios(State(app_state): State<AppState>) -> Json<Vec<db::RadioConfig>>
 async fn radio(State(app_state): State<AppState>, Path(id): Path<i64>) -> Json<serde_json::Value> {
     match app_state.db.radio(id) {
         Ok(Some(radio)) => Json(serde_json::json!({ "ok": true, "radio": radio })),
+        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn cw_labels(
+    State(app_state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<serde_json::Value> {
+    match app_state.db.radio(id) {
+        Ok(Some(radio)) => {
+            Json(serde_json::json!({ "ok": true, "labels": cw::labels(&radio.cw_messages) }))
+        }
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }

@@ -9,6 +9,8 @@ function CreateRadioScreen() {
   const [port, setPort] = useState(4532);
   const [pollFrequency, setPollFrequency] = useState(0.25);
   const [rigctldTimeout, setRigctldTimeout] = useState(2);
+  const [winkeyerEnabled, setWinkeyerEnabled] = useState(false);
+  const [winkeyerSerialPort, setWinkeyerSerialPort] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -28,6 +30,8 @@ function CreateRadioScreen() {
         rigctld_port: Number(port),
         poll_frequency: Number(pollFrequency),
         rigctld_timeout: Number(rigctldTimeout),
+        winkeyer_enabled: winkeyerEnabled,
+        winkeyer_serial_port: winkeyerEnabled ? winkeyerSerialPort : '',
       }),
     });
     if (!result.ok) {
@@ -55,6 +59,13 @@ function CreateRadioScreen() {
       </label>
       <label>rigctld Timeout (seconds)
         <input type="number" min="0.01" step="0.01" value={rigctldTimeout} onChange={(event) => setRigctldTimeout(event.target.value)} required />
+      </label>
+      <label>
+        <input type="checkbox" checked={winkeyerEnabled} onChange={(event) => setWinkeyerEnabled(event.target.checked)} />
+        Enable Winkeyer
+      </label>
+      <label>Winkeyer Serial Port
+        <input value={winkeyerSerialPort} onChange={(event) => setWinkeyerSerialPort(event.target.value)} required={winkeyerEnabled} disabled={!winkeyerEnabled} placeholder="/dev/ttyUSB0" />
       </label>
       <div className="selection-actions">
         <button className="cmd-btn primary" type="submit">Create</button>

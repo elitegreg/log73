@@ -111,6 +111,8 @@ function LoggerScreen() {
   const [settings, setSettings] = useState(null);
   const [log, setLog] = useState(null);
   const [radio, setRadio] = useState(null);
+  const [cwLabels, setCwLabels] = useState(null);
+  const [cwSentEvent, setCwSentEvent] = useState(null);
   const [contacts, setContacts] = useState(() => loadLocalContacts(logId));
   const [operatorCallsign, setOperatorCallsign] = useState('');
   const [sessionId] = useState(getSessionId);
@@ -124,16 +126,18 @@ function LoggerScreen() {
 
   useEffect(() => {
     async function loadContext() {
-      const [contestSettings, logResult, radioResult] = await Promise.all([
+      const [contestSettings, logResult, radioResult, cwLabelsResult] = await Promise.all([
         apiJson('/contest-settings'),
         apiJson(`/logs/${numericLogId}`),
         apiJson(`/radios/${numericRadioId}`),
+        apiJson(`/radios/${numericRadioId}/cw-labels`),
       ]);
       if (!logResult.ok) throw new Error(logResult.error ?? 'Log not found');
       if (!radioResult.ok) throw new Error(radioResult.error ?? 'Radio not found');
       setSettings(contestSettings);
       setLog(logResult.log);
       setRadio(radioResult.radio);
+      if (cwLabelsResult.ok) setCwLabels(cwLabelsResult.labels);
       setOperatorCallsign((current) => current || promptForOperatorCallsign(logResult.log.station_callsign));
     }
     loadContext().catch((error) => alert(`Unable to load logger context.\n\n${error.message}`));
@@ -182,6 +186,8 @@ function LoggerScreen() {
           const message = JSON.parse(event.data);
           if (message.type === 'radio_state') {
             setRadioState({ frequency_hz: message.frequency_hz, mode: message.mode });
+          } else if (message.type === 'cw_sent') {
+            setCwSentEvent({ requestId: message.request_id, sequence: Date.now() });
           } else if (message.type === 'log_entry' && message.contact?._session_id !== sessionId && Number(message.contact?._log_id) === numericLogId) {
             setContacts((currentContacts) => mergeContact(currentContacts, message.contact));
           } else if (message.type === 'contact_deleted' && Number(message.log_id) === numericLogId) {
@@ -351,10 +357,15 @@ function LoggerScreen() {
         operatorCallsign={operatorCallsign}
         radioState={radioState}
         backendSocketStatus={backendSocketStatus}
+        cwLabels={cwLabels}
+        cwSentEvent={cwSentEvent}
         sessionId={sessionId}
         logId={numericLogId}
         onSetRadioFrequency={(frequencyHz) => sendRadioMessage({ type: 'set_frequency', frequency_hz: frequencyHz })}
         onSetRadioMode={(mode) => sendRadioMessage({ type: 'set_mode', mode })}
+        onSendCw={(payload) => sendRadioMessage({ type: 'send_cw', ...payload })}
+        onStopCw={() => sendRadioMessage({ type: 'stop_cw' })}
+        onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}
         onLogContact={(contact) => setContacts((currentContacts) => sortContacts([...currentContacts, contact]))}
         onExit={exitLogger}
       />
