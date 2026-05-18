@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiJson } from './api';
+import { apiJson } from '../lib/api';
 
 function CreateLogScreen() {
   const navigate = useNavigate();

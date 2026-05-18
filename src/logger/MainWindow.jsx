@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { fieldDefault, parseFieldType, sanitizeCallsign, sanitizeExchangeValue } from './contactFields';
-import './App.css';
+import { fieldDefault, parseFieldType, sanitizeCallsign, sanitizeExchangeValue } from '../domain/contactFields';
+
 
 const MODE_OPTIONS = ['CW', 'SSB', 'FM', 'AM'];
 const CALLSIGN_FIELD_WIDTH_CHARS = 13;

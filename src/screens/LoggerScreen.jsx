@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { apiJson, websocketUrl } from './api';
-import LogWindow from './LogWindow';
-import MainWindow from './MainWindow';
+import { apiJson, websocketUrl } from '../lib/api';
+import LogWindow from '../logger/LogWindow';
+import MainWindow from '../logger/MainWindow';
 
 const CONTACTS_STORAGE_KEY = 'log73.contacts';
 const SESSION_STORAGE_KEY = 'log73.session_id';

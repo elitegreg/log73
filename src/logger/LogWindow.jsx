@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { sanitizeCallsign, sanitizeExchangeValue } from './contactFields';
-import './App.css';
+import { sanitizeCallsign, sanitizeExchangeValue } from '../domain/contactFields';
+
 
 const READ_ONLY_COLUMNS = new Set(['Mult', 'Pts']);
 

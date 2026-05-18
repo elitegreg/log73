@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { apiJson } from './api';
-import { THEME_OPTIONS } from './themes';
+import { apiJson } from '../lib/api';
+import { THEME_OPTIONS } from '../themes/themes';
 
 function OpenLogScreen({ theme, onSetTheme }) {
   const navigate = useNavigate();

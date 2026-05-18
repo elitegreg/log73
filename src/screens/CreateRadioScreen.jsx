@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { apiJson } from './api';
+import { apiJson } from '../lib/api';
 
 function CreateRadioScreen() {
   const navigate = useNavigate();
