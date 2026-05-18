@@ -357,7 +357,7 @@ function MainWindow({
       </div>
       <div className="command-buttons">
         <button className="cmd-btn">Call Esc Stop</button>
-        <button className="cmd-btn">Wipe</button>
+        <button className="cmd-btn" onClick={resetEntryFields}>Wipe</button>
         <button className="cmd-btn">UserText</button>
         <button className="cmd-btn" onClick={logContact}>Log it</button>
         <button className="cmd-btn">Edit</button>
