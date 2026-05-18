@@ -14,7 +14,8 @@ body.theme-modern-dark-radio .entry-fields input,
 body.theme-modern-dark-radio .form-window input,
 body.theme-modern-dark-radio .form-window select,
 body.theme-modern-dark-radio .log-cell-editor,
-body.theme-modern-dark-radio .selection-list { border-color: #6b7280; background-color: #111827; color: #f9fafb; }
+body.theme-modern-dark-radio .selection-list,
+body.theme-modern-dark-radio .supercheckpartial-box { border-color: #6b7280; background-color: #111827; color: #f9fafb; }
 body.theme-modern-dark-radio .entry-fields input:read-only { background-color: #374151; color: #d1d5db; }
 body.theme-modern-dark-radio .f-key,
 body.theme-modern-dark-radio .cmd-btn,

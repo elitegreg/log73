@@ -14,7 +14,8 @@ body.theme-high-contrast .entry-fields input,
 body.theme-high-contrast .form-window input,
 body.theme-high-contrast .form-window select,
 body.theme-high-contrast .log-cell-editor,
-body.theme-high-contrast .selection-list { border: 2px solid #ffffff; background-color: #000000; color: #ffffff; }
+body.theme-high-contrast .selection-list,
+body.theme-high-contrast .supercheckpartial-box { border: 2px solid #ffffff; background-color: #000000; color: #ffffff; }
 body.theme-high-contrast .entry-fields input:read-only { background-color: #334155; color: #ffffff; }
 body.theme-high-contrast .f-key,
 body.theme-high-contrast .cmd-btn,

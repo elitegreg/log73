@@ -14,7 +14,8 @@ body.theme-n1mm-contest .entry-fields input { border-color: #000000; background-
 body.theme-n1mm-contest .form-window input,
 body.theme-n1mm-contest .form-window select,
 body.theme-n1mm-contest .log-cell-editor,
-body.theme-n1mm-contest .selection-list { border-color: #404040; background-color: #ffffff; color: #000000; }
+body.theme-n1mm-contest .selection-list,
+body.theme-n1mm-contest .supercheckpartial-box { border-color: #404040; background-color: #ffffff; color: #000000; }
 body.theme-n1mm-contest .entry-fields input:read-only { background-color: #e6e6e6; color: #202020; }
 body.theme-n1mm-contest .f-key,
 body.theme-n1mm-contest .cmd-btn,

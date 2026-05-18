@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fieldDefault, parseFieldType, sanitizeCallsign, sanitizeExchangeValue } from '../domain/contactFields';
+import { supercheckpartial } from '../lib/api';
 
 
 const MODE_OPTIONS = ['CW', 'SSB', 'FM', 'AM'];
@@ -94,6 +95,7 @@ function MainWindow({
   const [operatingMode, setOperatingMode] = useState('S&P');
   const [repeatRunF1, setRepeatRunF1] = useState(false);
   const [activeCwKeys, setActiveCwKeys] = useState(() => new Set());
+  const [supercheckpartialMatches, setSupercheckpartialMatches] = useState([]);
   const [cwWpm, setCwWpm] = useState(() => {
     const storedWpm = Number.parseInt(localStorage.getItem(CW_WPM_STORAGE_KEY) ?? '', 10);
     return Number.isFinite(storedWpm) ? storedWpm : 20;
@@ -143,6 +145,31 @@ function MainWindow({
       setCwWpmRef.current?.(cwWpm);
     }
   }, [backendSocketStatus, cwWpm]);
+
+  useEffect(() => {
+    const query = callSign.trim().toUpperCase();
+    if (query.length < 3) {
+      setSupercheckpartialMatches([]);
+      return undefined;
+    }
+
+    let cancelled = false;
+    supercheckpartial(query)
+      .then((result) => {
+        if (!cancelled) {
+          setSupercheckpartialMatches(result.callsigns ?? []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSupercheckpartialMatches([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [callSign]);
 
   const cwModeKey = operatingMode === 'Run' ? 'run' : 's&p';
   const activeCwLabels = cwLabels?.[cwModeKey] ?? DEFAULT_CW_LABELS[cwModeKey];
@@ -533,6 +560,14 @@ function MainWindow({
           );
         })}
       </div>
+      <textarea
+        className="supercheckpartial-box"
+        rows="3"
+        readOnly
+        tabIndex={-1}
+        aria-label="Super Check Partial matches"
+        value={supercheckpartialMatches.join(' ')}
+      />
       <div className="function-keys">
         <div className="f-row">
           {activeCwLabels.slice(0, 6).map((button) => (

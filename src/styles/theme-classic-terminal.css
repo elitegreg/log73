@@ -14,7 +14,8 @@ body.theme-classic-terminal .entry-fields input,
 body.theme-classic-terminal .form-window input,
 body.theme-classic-terminal .form-window select,
 body.theme-classic-terminal .log-cell-editor,
-body.theme-classic-terminal .selection-list { border-color: #33ff66; background-color: #000000; color: #b6ffbf; }
+body.theme-classic-terminal .selection-list,
+body.theme-classic-terminal .supercheckpartial-box { border-color: #33ff66; background-color: #000000; color: #b6ffbf; }
 body.theme-classic-terminal .entry-fields input:read-only { background-color: #071407; color: #7cff8f; }
 body.theme-classic-terminal .f-key,
 body.theme-classic-terminal .cmd-btn,

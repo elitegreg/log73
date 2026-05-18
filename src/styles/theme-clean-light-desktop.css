@@ -14,7 +14,8 @@ body.theme-clean-light-desktop .entry-fields input,
 body.theme-clean-light-desktop .form-window input,
 body.theme-clean-light-desktop .form-window select,
 body.theme-clean-light-desktop .log-cell-editor,
-body.theme-clean-light-desktop .selection-list { border-color: #64748b; background-color: #ffffff; color: #111827; }
+body.theme-clean-light-desktop .selection-list,
+body.theme-clean-light-desktop .supercheckpartial-box { border-color: #64748b; background-color: #ffffff; color: #111827; }
 body.theme-clean-light-desktop .entry-fields input:read-only { background-color: #f1f5f9; color: #475569; }
 body.theme-clean-light-desktop .f-key,
 body.theme-clean-light-desktop .cmd-btn,

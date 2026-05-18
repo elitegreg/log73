@@ -7,6 +7,7 @@ mod frequency;
 mod radio;
 mod radio_manager;
 mod static_assets;
+mod supercheckpartial;
 
 use axum::{
     Json, Router,
@@ -26,6 +27,7 @@ use futures_util::{SinkExt, StreamExt};
 use radio::{ClientMessage, RadioCommand, ServerMessage};
 use radio_manager::RadioManager;
 use std::{collections::HashMap, fs::OpenOptions, path::PathBuf, time::Duration};
+use supercheckpartial::SuperCheckPartial;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{Span, debug, error, info, warn};
@@ -37,6 +39,7 @@ struct AppState {
     log_events: broadcast::Sender<ServerMessage>,
     db: Database,
     contest_rules: ContestRulesStore,
+    supercheckpartial: SuperCheckPartial,
 }
 
 fn init_tracing(cli: &Cli) -> std::io::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
@@ -86,6 +89,9 @@ struct Cli {
 
     #[arg(long, default_value = "../contest-rules")]
     contest_rules_dir: PathBuf,
+
+    #[arg(long, default_value = "../data")]
+    data_dir: PathBuf,
 }
 
 #[tokio::main]
@@ -96,6 +102,19 @@ async fn main() {
     let (log_events, _) = broadcast::channel(128);
     let contest_rules = ContestRulesStore::load_dir(&cli.contest_rules_dir)
         .unwrap_or_else(|error| panic!("failed to load contest rules: {error}"));
+    let supercheckpartial = SuperCheckPartial::load_dir(&cli.data_dir).unwrap_or_else(|error| {
+        warn!(
+            data_dir = %cli.data_dir.display(),
+            %error,
+            "failed to load MASTER.SCP; supercheckpartial matches will be unavailable"
+        );
+        SuperCheckPartial::default()
+    });
+    info!(
+        callsigns = supercheckpartial.len(),
+        data_dir = %cli.data_dir.display(),
+        "loaded supercheckpartial callsigns"
+    );
     let db = Database::open("log73.db").expect("failed to open log73.db");
     let radio_manager = RadioManager::new(db.clone());
     let app_state = AppState {
@@ -103,6 +122,7 @@ async fn main() {
         log_events,
         db,
         contest_rules,
+        supercheckpartial,
     };
 
     let request_trace_layer = TraceLayer::new_for_http()
@@ -136,6 +156,7 @@ async fn main() {
     let api = Router::new()
         .route("/contest-rules", get(list_contest_rules))
         .route("/contest-settings", get(contest_settings))
+        .route("/supercheckpartial", get(supercheckpartial_matches))
         .route("/logs", get(logs).post(create_log))
         .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
         .route(
@@ -370,6 +391,11 @@ struct ContestSettingsQuery {
     contest_id: Option<String>,
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct SuperCheckPartialQuery {
+    query: Option<String>,
+}
+
 async fn list_contest_rules(
     State(app_state): State<AppState>,
 ) -> Json<Vec<contest_rules::ContestSummary>> {
@@ -388,6 +414,19 @@ async fn contest_settings(
         .expect("contest rules store should not be empty")
         .clone();
     Json(rules)
+}
+
+async fn supercheckpartial_matches(
+    State(app_state): State<AppState>,
+    Query(query): Query<SuperCheckPartialQuery>,
+) -> Json<serde_json::Value> {
+    let matches = query
+        .query
+        .as_deref()
+        .map(|query| app_state.supercheckpartial.matches(query))
+        .unwrap_or_default();
+
+    Json(serde_json::json!({ "ok": true, "callsigns": matches }))
 }
 
 async fn logs(State(app_state): State<AppState>) -> Json<Vec<db::Log>> {

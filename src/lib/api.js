@@ -14,6 +14,11 @@ export async function apiJson(path, options = {}) {
   return response.json();
 }
 
+export async function supercheckpartial(query) {
+  const search = new URLSearchParams({ query });
+  return apiJson(`/supercheckpartial?${search.toString()}`);
+}
+
 export function websocketUrl(params) {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const search = new URLSearchParams(params);
