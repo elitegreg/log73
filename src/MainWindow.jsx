@@ -339,7 +339,7 @@ function MainWindow({
       </div>
       <div className="function-keys">
         <div className="f-row">
-          <button className="f-key active">F1 S&amp;P CQ</button>
+          <button className="f-key">F1 S&amp;P CQ</button>
           <button className="f-key">F2 Exch</button>
           <button className="f-key">F3 Spare</button>
           <button className="f-key">F4 KBUT</button>
