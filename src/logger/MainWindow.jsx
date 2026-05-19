@@ -599,7 +599,7 @@ function MainWindow({
           const { kind, maxLength } = parseFieldType(field.type, radioMode);
           const value = exchangeValue(field);
           const validation = validateExchangeField(field, value, radioMode);
-          const fieldWidthChars = Math.max(maxLength + 1, 4);
+          const fieldWidthChars = Math.max(maxLength + 1, field.name.length, 4);
 
           return (
             <label

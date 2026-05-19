@@ -176,6 +176,7 @@ contests:
       - name: 'RST(r)'
         type: 'RST'
         adif: 'RST_RCVD'
+        default: 599
         is_sent: false
       - name: 'State'
         type: 'String:4'

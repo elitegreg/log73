@@ -100,14 +100,15 @@ function fieldMapFromSettings(settings) {
 }
 
 function columnWidthChars(settings, column, radioMode) {
-  if (FIXED_COLUMN_WIDTHS[column]) return FIXED_COLUMN_WIDTHS[column];
+  const headerWidth = String(column).length;
+  let dataWidth = FIXED_COLUMN_WIDTHS[column];
 
   const exchangeField = exchangeFieldForColumn(settings, column);
-  if (exchangeField) {
-    return parseFieldType(exchangeField.type, radioMode).maxLength;
+  if (!dataWidth && exchangeField) {
+    dataWidth = parseFieldType(exchangeField.type, radioMode).maxLength;
   }
 
-  return Math.max(String(column).length, 4);
+  return Math.max(dataWidth ?? 4, headerWidth, 4);
 }
 
 function columnWidthPercent(settings, column, radioMode, columns) {
@@ -119,6 +120,10 @@ function columnWidthPercent(settings, column, radioMode, columns) {
   return `${(widthChars / Math.max(totalWidthChars, 1)) * 100}%`;
 }
 
+function columnWidthStyle(settings, column, radioMode, columns) {
+  return { width: columnWidthPercent(settings, column, radioMode, columns) };
+}
+
 function exchangeValueForColumn(settings, column, entry, columnFieldMap) {
   const exchangeField = exchangeFieldForColumn(settings, column);
   if (!exchangeField) return null;
@@ -126,10 +131,18 @@ function exchangeValueForColumn(settings, column, entry, columnFieldMap) {
   return entry[adifField] ?? entry[column] ?? '';
 }
 
+function contactMode(entry, fallbackMode = 'CW') {
+  return String(entry.MODE ?? entry.Mode ?? fallbackMode).toUpperCase();
+}
+
 function cellValidation(settings, column, entry, columnFieldMap, radioMode) {
   const exchangeField = exchangeFieldForColumn(settings, column);
   if (!exchangeField || exchangeField.is_sent) return { ok: true, error: '' };
-  return validateExchangeField(exchangeField, exchangeValueForColumn(settings, column, entry, columnFieldMap), radioMode);
+  return validateExchangeField(
+    exchangeField,
+    exchangeValueForColumn(settings, column, entry, columnFieldMap),
+    contactMode(entry, radioMode),
+  );
 }
 
 function formatCell(column, entry, columnFieldMap) {
@@ -203,7 +216,7 @@ function sanitizeUpdateInput(settings, column, value, radioMode) {
   return value;
 }
 
-function parseUpdateValue(settings, column, value, radioMode) {
+function parseUpdateValue(settings, column, value, radioMode, entry = null) {
   if (column === 'Date/Time (UTC)') {
     const epoch = parseDateTimeUtc(value);
     if (epoch === null) {
@@ -234,10 +247,11 @@ function parseUpdateValue(settings, column, value, radioMode) {
     return { ok: true, value: mode };
   }
 
-  const sanitizedValue = sanitizeUpdateInput(settings, column, value, radioMode).trim();
+  const validationMode = entry ? contactMode(entry, radioMode) : radioMode;
+  const sanitizedValue = sanitizeUpdateInput(settings, column, value, validationMode).trim();
   const exchangeField = exchangeFieldForColumn(settings, column);
   if (exchangeField && !exchangeField.is_sent) {
-    const validation = validateExchangeField(exchangeField, sanitizedValue, radioMode);
+    const validation = validateExchangeField(exchangeField, sanitizedValue, validationMode);
     if (!validation.ok) return { ok: false, error: validation.error };
   }
 
@@ -357,7 +371,9 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
     const field = editableFieldForColumn(editingCell.column, columnFieldMap);
     if (!field) return;
 
-    const parsed = parseUpdateValue(settings, editingCell.column, editingCell.value, radioMode);
+    const contactIndex = contacts.findIndex((entry, index) => contactKey(entry, index) === editingCell.key);
+    const editingContact = contactIndex === -1 ? null : contacts[contactIndex];
+    const parsed = parseUpdateValue(settings, editingCell.column, editingCell.value, radioMode, editingContact);
     if (!parsed.ok) {
       window.alert(parsed.error);
       inputRef.current?.focus();
@@ -372,15 +388,21 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
   return (
     <div className="log-window">
       <div className="log-title-bar">Log: {log?.name ?? 'Loading log...'} - {settings?.contest ?? 'Loading contest...'}</div>
-      <table className="log-table">
-        <thead>
-          <tr>
+      <div className="log-table-scroll">
+        <table className="log-table">
+          <colgroup>
             {columns.map((column) => (
-              <th key={column} style={{ width: columnWidthPercent(settings, column, radioMode, columns) }}>{column}</th>
+              <col key={column} style={columnWidthStyle(settings, column, radioMode, columns)} />
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </colgroup>
+          <thead>
+            <tr>
+              {columns.map((column) => (
+                <th key={column}>{column}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
           {contacts.map((entry, index) => {
             const key = contactKey(entry, index);
             const isSelected = selectedKeys.has(key);
@@ -397,14 +419,13 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
                     <td
                       key={column}
                       className={validation.ok ? undefined : 'invalid-cell'}
-                      style={{ width: columnWidthPercent(settings, column, radioMode, columns) }}
                       title={validation.ok ? undefined : validation.error}
                       onContextMenu={(event) => openContextMenu(event, entry, index, column)}
                     >
                       {isEditing ? (
                         <input
                           ref={inputRef}
-                          className={`log-cell-editor ${parseUpdateValue(settings, editingCell.column, editingCell.value, radioMode).ok ? '' : 'invalid-field'}`.trim()}
+                          className={`log-cell-editor ${parseUpdateValue(settings, editingCell.column, editingCell.value, radioMode, entry).ok ? '' : 'invalid-field'}`.trim()}
                           value={editingCell.value}
                           onChange={(event) => setEditingCell({
                             ...editingCell,
@@ -435,8 +456,9 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
               </td>
             </tr>
           )}
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
       {contextMenu && (
         <div
           className="log-context-menu"

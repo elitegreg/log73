@@ -249,10 +249,17 @@
   font-weight: bold;
 }
 
+.log-table-scroll {
+  max-height: 230px;
+  min-height: 230px;
+  overflow-y: auto;
+}
+
 .log-table {
   width: 100%;
   border-collapse: collapse;
   background-color: white;
+  table-layout: fixed;
 }
 
 .log-table th,
@@ -266,27 +273,11 @@
 }
 
 .log-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
   background-color: #d3d3d3; /* Grey header background */
   font-weight: bold;
-}
-
-.log-table tbody {
-  display: block;
-  max-height: 200px; /* Scrollable height */
-  min-height: 200px; /* Scrollable height */
-  overflow-y: scroll;
-  width: 100%;
-}
-
-.log-table thead,
-.log-table tbody tr {
-  display: table;
-  width: 100%;
-  table-layout: fixed;
-}
-
-.log-table thead {
-  width: calc(100% - 15px); /* Account for body scrollbar */
 }
 
 .log-table tbody tr {
