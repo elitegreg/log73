@@ -1,9 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { sanitizeCallsign, sanitizeExchangeValue } from '../domain/contactFields';
+import { parseFieldType, sanitizeCallsign, sanitizeExchangeValue } from '../domain/contactFields';
 import { validateExchangeField } from '../domain/validation';
 
 
 const READ_ONLY_COLUMNS = new Set(['Mult', 'Pts']);
+const COLUMN_PADDING_CHARS = 2;
+const FIXED_COLUMN_WIDTHS = {
+  'Date/Time (UTC)': 19,
+  Freq: 7,
+  Mode: 3,
+  Call: 12,
+  Mult: 2,
+  Pts: 2,
+  Op: 12,
+};
 
 function epochFromLegacyQsoDateTime(entry) {
   const date = String(entry.QSO_DATE ?? '');
@@ -87,6 +97,26 @@ function fieldMapFromSettings(settings) {
   }
 
   return fieldMap;
+}
+
+function columnWidthChars(settings, column, radioMode) {
+  if (FIXED_COLUMN_WIDTHS[column]) return FIXED_COLUMN_WIDTHS[column];
+
+  const exchangeField = exchangeFieldForColumn(settings, column);
+  if (exchangeField) {
+    return parseFieldType(exchangeField.type, radioMode).maxLength;
+  }
+
+  return Math.max(String(column).length, 4);
+}
+
+function columnWidthPercent(settings, column, radioMode, columns) {
+  const totalWidthChars = columns.reduce(
+    (total, currentColumn) => total + columnWidthChars(settings, currentColumn, radioMode) + COLUMN_PADDING_CHARS,
+    0,
+  );
+  const widthChars = columnWidthChars(settings, column, radioMode) + COLUMN_PADDING_CHARS;
+  return `${(widthChars / Math.max(totalWidthChars, 1)) * 100}%`;
 }
 
 function exchangeValueForColumn(settings, column, entry, columnFieldMap) {
@@ -343,18 +373,10 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
     <div className="log-window">
       <div className="log-title-bar">Log: {log?.name ?? 'Loading log...'} - {settings?.contest ?? 'Loading contest...'}</div>
       <table className="log-table">
-        <colgroup>
-          {columns.map((column) => (
-            <col
-              key={column}
-              className={column === 'Date/Time (UTC)' ? 'date-time-column' : undefined}
-            />
-          ))}
-        </colgroup>
         <thead>
           <tr>
             {columns.map((column) => (
-              <th key={column}>{column}</th>
+              <th key={column} style={{ width: columnWidthPercent(settings, column, radioMode, columns) }}>{column}</th>
             ))}
           </tr>
         </thead>
@@ -375,6 +397,7 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
                     <td
                       key={column}
                       className={validation.ok ? undefined : 'invalid-cell'}
+                      style={{ width: columnWidthPercent(settings, column, radioMode, columns) }}
                       title={validation.ok ? undefined : validation.error}
                       onContextMenu={(event) => openContextMenu(event, entry, index, column)}
                     >

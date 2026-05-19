@@ -260,10 +260,9 @@
   border: 1px solid #808080;
   padding: 2px 5px;
   text-align: left;
-}
-
-.log-table .date-time-column {
-  width: 18%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .log-table th {
@@ -282,16 +281,15 @@
 .log-table thead,
 .log-table tbody tr {
   display: table;
-  width: calc(100% - 15px);
+  width: 100%;
   table-layout: fixed;
 }
 
 .log-table thead {
-  width: calc(100% - 15px); /* Ensure thead uses full width */
+  width: calc(100% - 15px); /* Account for body scrollbar */
 }
 
 .log-table tbody tr {
-  width: 100%; /* Ensure rows match adjusted width */
   user-select: none;
 }
 
