@@ -121,6 +121,7 @@ function MainWindow({
   const repeatTimeoutRef = useRef(null);
   const callSignValueRef = useRef('');
   const repeatSendRunF1Ref = useRef(() => {});
+  const callsignSelectionRef = useRef(null);
   const activeCwRequestsRef = useRef(new Map());
   const activeCwTimeoutsRef = useRef(new Map());
   const exchangeInputRefs = useRef({});
@@ -159,6 +160,17 @@ function MainWindow({
       setCwWpmRef.current?.(cwWpm);
     }
   }, [backendSocketStatus, cwWpm]);
+
+  useEffect(() => {
+    const selection = callsignSelectionRef.current;
+    const input = callSignRef.current;
+    if (!selection || !input || document.activeElement !== input) return;
+
+    const start = Math.min(selection.start, input.value.length);
+    const end = Math.min(selection.end, input.value.length);
+    input.setSelectionRange(start, end);
+    callsignSelectionRef.current = null;
+  }, [callSign]);
 
   useEffect(() => {
     if (activeCompletionField !== 'CALL') {
@@ -339,6 +351,11 @@ function MainWindow({
 
   function handleCallsignChange(event) {
     stopRepeat();
+    const { selectionStart, selectionEnd } = event.target;
+    callsignSelectionRef.current = {
+      start: selectionStart ?? event.target.value.length,
+      end: selectionEnd ?? event.target.value.length,
+    };
     setCallSign(sanitizeCallsign(event.target.value));
     callSignEditedAtRef.current = new Date();
   }
