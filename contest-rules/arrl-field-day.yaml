@@ -142,7 +142,6 @@ contests:
       - 'Call'
       - 'Class'
       - 'Section'
-      - 'Mult'
       - 'Pts'
       - 'Op'
     qso_column_fields:
