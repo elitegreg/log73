@@ -14,12 +14,14 @@ contests:
       - 'CALL'
       - 'BAND'
       - 'MODE'
+      - 'STX_STRING'
       - 'SRX_STRING'
     multipliers:
       - name: 'Exchange'
         field: 'SRX_STRING'
         key:
           - 'SRX_STRING'
+          - 'STX_STRING'
           - 'BAND'
           - 'MODE'
         in_sets: ['Counties', 'States']
@@ -30,6 +32,7 @@ contests:
           - 'CALL'
           - 'BAND'
           - 'MODE'
+          - 'STX_STRING'
         values:
           W4CAE: 350
           WW4SF: 250
