@@ -3,6 +3,37 @@ contests:
     display_name: 'SC QSO Party (In State)'
     allowed_bands: [160, 80, 40, 20, 15, 10, 6, 2]
     allowed_modes: ['SSB', 'FM', 'AM', 'CW']
+    qso_points:
+      rules:
+        - when:
+            field: 'State'
+            in_set: 'Counties'
+          points: 2
+        - points: 4
+    dupe_key:
+      - 'CALL'
+      - 'BAND'
+      - 'MODE'
+      - 'SRX_STRING'
+    multipliers:
+      - name: 'Exchange'
+        field: 'SRX_STRING'
+        key:
+          - 'SRX_STRING'
+          - 'BAND'
+          - 'MODE'
+        in_sets: ['Counties', 'States']
+    bonus_points:
+      - name: 'Bonus Station'
+        field: 'CALL'
+        key:
+          - 'CALL'
+          - 'BAND'
+          - 'MODE'
+        values:
+          W4CAE: 350
+          WW4SF: 250
+          K4YTZ: 250
     define:
       - name: 'DX'
         values:
@@ -17,36 +48,36 @@ contests:
           - BARN
           - BEAU
           - BERK
-          - CALH
+          - CHOU
           - CHAR
-          - CHER
           - CHES
-          - CHESF
-          - CLAR
+          - CHFD
+          - CKEE
+          - CLRN
           - COLL
           - DARL
           - DILL
           - DORC
           - EDGE
           - FAIR
-          - FLORE
+          - FLOR
           - GEOR
-          - GREEN
-          - GREENV
-          - HAMPT
+          - GRWD
+          - GVIL
+          - HAMP
           - HORR
           - JASP
           - KERS
-          - LANC
           - LAUR
           - LEE
           - LEXI
-          - MCCO
+          - LNCS
           - MARI
-          - MARLB
+          - MARL
+          - MCOR
           - NEWB
-          - OCONE
-          - ORAN
+          - OCON
+          - ORNG
           - PICK
           - RICH
           - SALU
@@ -96,7 +127,6 @@ contests:
           - OR
           - PA
           - RI
-          - SC
           - SD
           - TN
           - TX
@@ -124,7 +154,7 @@ contests:
     log_params:
       - name: 'County'
         label: 'County'
-        type: 'String:6'
+        type: 'String:4'
         required: true
         in_sets: ['Counties']
     exchange:
@@ -134,7 +164,7 @@ contests:
         default: 599
         is_sent: true
       - name: 'County'
-        type: 'String:6'
+        type: 'String:4'
         adif: 'STX_STRING'
         fixed: true
         source_param: 'County'
@@ -148,7 +178,7 @@ contests:
         type: 'String:4'
         adif: 'SRX_STRING'
         is_sent: false
-        in_sets: ['States', 'DX']
+        in_sets: ['Counties', 'States', 'DX']
     qso_columns:
       - 'Date/Time (UTC)'
       - 'Freq'
@@ -173,6 +203,8 @@ contests:
   - id: 'SC-QSO-PARTY'
     extends: 'SC-QSO-PARTY (In State)'
     display_name: 'SC QSO Party'
+    qso_points:
+      points: 2
     log_params:
       - name: 'State'
         label: 'State'
@@ -196,7 +228,7 @@ contests:
         adif: 'RST_RCVD'
         is_sent: false
       - name: 'County'
-        type: 'String:6'
+        type: 'String:4'
         adif: 'SRX_STRING'
         is_sent: false
         in_sets: ['Counties']

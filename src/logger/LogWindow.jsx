@@ -97,8 +97,12 @@ function formatCell(column, entry, columnFieldMap) {
     return formatFrequency(entry, columnFieldMap[column]);
   }
 
-  if (column === 'Mult' || column === 'Pts') {
-    return entry[column] ?? '';
+  if (column === 'Mult') {
+    return entry._mult ?? entry[column] ?? '';
+  }
+
+  if (column === 'Pts') {
+    return entry._pts ?? entry[column] ?? '';
   }
 
   const adifField = columnFieldMap[column];

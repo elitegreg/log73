@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiJson, websocketUrl } from '../lib/api';
 import LogWindow from '../logger/LogWindow';
@@ -103,6 +103,24 @@ function mergeContact(contacts, contact) {
   return sortContacts(nextContacts);
 }
 
+function scoreNumber(value) {
+  const number = Number(value ?? 0);
+  return Number.isFinite(number) ? number : 0;
+}
+
+function scoreSummary(contacts) {
+  const qsoPoints = contacts.reduce((total, contact) => total + scoreNumber(contact._pts), 0);
+  const multipliers = contacts.reduce((total, contact) => total + scoreNumber(contact._mult), 0);
+  const bonusPoints = contacts.reduce((total, contact) => total + scoreNumber(contact._bonus), 0);
+  return {
+    qsoCount: contacts.length,
+    qsoPoints,
+    multipliers,
+    bonusPoints,
+    score: qsoPoints * multipliers + bonusPoints,
+  };
+}
+
 function LoggerScreen() {
   const { logId, radioId } = useParams();
   const navigate = useNavigate();
@@ -121,6 +139,7 @@ function LoggerScreen() {
   const backendSocketRef = useRef(null);
   const committingContactIdsRef = useRef(new Set());
   const refreshContactsRef = useRef(() => {});
+  const currentScoreSummary = useMemo(() => scoreSummary(contacts), [contacts]);
 
   useEffect(() => { saveLocalContacts(logId, contacts); }, [contacts, logId]);
 
@@ -367,6 +386,8 @@ function LoggerScreen() {
         onStopCw={() => sendRadioMessage({ type: 'stop_cw' })}
         onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}
         onLogContact={(contact) => setContacts((currentContacts) => sortContacts([...currentContacts, contact]))}
+        onRescore={() => refreshContactsRef.current()}
+        scoreSummary={currentScoreSummary}
         onExit={exitLogger}
       />
       <LogWindow

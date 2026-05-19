@@ -56,6 +56,55 @@ pub struct ContestMetadata {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScoringCondition {
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_set: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub in_sets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub valid_values: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QsoPointRule {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<ScoringCondition>,
+    pub points: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct QsoPoints {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub points: Option<i64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rules: Vec<QsoPointRule>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiplierRule {
+    pub name: String,
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub key: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub in_sets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub valid_values: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BonusPointRule {
+    pub name: String,
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub key: Vec<String>,
+    pub values: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContestRules {
     pub contest: String,
     #[serde(default)]
@@ -69,6 +118,14 @@ pub struct ContestRules {
     pub qso_column_fields: BTreeMap<String, String>,
     #[serde(default)]
     pub log_params: Vec<ContestParam>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qso_points: Option<QsoPoints>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dupe_key: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub multipliers: Vec<MultiplierRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bonus_points: Vec<BonusPointRule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<ContestMetadata>,
 }
@@ -111,6 +168,14 @@ struct RawContestRules {
     qso_column_fields: Option<BTreeMap<String, String>>,
     #[serde(default)]
     log_params: Option<Vec<ContestParam>>,
+    #[serde(default)]
+    qso_points: Option<QsoPoints>,
+    #[serde(default)]
+    dupe_key: Option<Vec<String>>,
+    #[serde(default)]
+    multipliers: Option<Vec<MultiplierRule>>,
+    #[serde(default)]
+    bonus_points: Option<Vec<BonusPointRule>>,
     #[serde(default)]
     metadata: Option<ContestMetadata>,
 }
@@ -203,6 +268,25 @@ fn defined_values(define: &[ValueSet], in_sets: &[String]) -> Result<Vec<String>
     Ok(values)
 }
 
+fn scoring_condition_in_sets(condition: &ScoringCondition) -> Vec<String> {
+    let mut in_sets = condition.in_sets.clone();
+    if let Some(in_set) = &condition.in_set {
+        in_sets.push(in_set.clone());
+    }
+    in_sets
+}
+
+fn resolve_scoring_condition_in_sets(
+    define: &[ValueSet],
+    condition: &mut ScoringCondition,
+) -> Result<(), String> {
+    let in_sets = scoring_condition_in_sets(condition);
+    if !in_sets.is_empty() {
+        condition.valid_values = defined_values(define, &in_sets)?;
+    }
+    Ok(())
+}
+
 fn resolve_in_sets(contest: &mut ContestRules) -> Result<(), String> {
     for param in &mut contest.log_params {
         if !param.in_sets.is_empty() {
@@ -213,6 +297,20 @@ fn resolve_in_sets(contest: &mut ContestRules) -> Result<(), String> {
     for field in &mut contest.exchange {
         if !field.in_sets.is_empty() {
             field.valid_values = defined_values(&contest.define, &field.in_sets)?;
+        }
+    }
+
+    if let Some(qso_points) = &mut contest.qso_points {
+        for rule in &mut qso_points.rules {
+            if let Some(condition) = &mut rule.when {
+                resolve_scoring_condition_in_sets(&contest.define, condition)?;
+            }
+        }
+    }
+
+    for multiplier in &mut contest.multipliers {
+        if !multiplier.in_sets.is_empty() {
+            multiplier.valid_values = defined_values(&contest.define, &multiplier.in_sets)?;
         }
     }
 
@@ -253,6 +351,10 @@ fn resolve_contest(
             qso_columns: Vec::new(),
             qso_column_fields: BTreeMap::new(),
             log_params: Vec::new(),
+            qso_points: None,
+            dupe_key: Vec::new(),
+            multipliers: Vec::new(),
+            bonus_points: Vec::new(),
             metadata: None,
         }
     };
@@ -283,6 +385,18 @@ fn resolve_contest(
     }
     if let Some(log_params) = &raw.log_params {
         contest.log_params = log_params.clone();
+    }
+    if let Some(qso_points) = &raw.qso_points {
+        contest.qso_points = Some(qso_points.clone());
+    }
+    if let Some(dupe_key) = &raw.dupe_key {
+        contest.dupe_key = dupe_key.clone();
+    }
+    if let Some(multipliers) = &raw.multipliers {
+        contest.multipliers = multipliers.clone();
+    }
+    if let Some(bonus_points) = &raw.bonus_points {
+        contest.bonus_points = bonus_points.clone();
     }
     if let Some(metadata) = &raw.metadata {
         contest.metadata = Some(metadata.clone());

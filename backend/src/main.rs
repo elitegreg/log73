@@ -6,6 +6,7 @@ mod db;
 mod frequency;
 mod radio;
 mod radio_manager;
+mod scoring;
 mod static_assets;
 mod supercheckpartial;
 
@@ -26,6 +27,7 @@ use db::{Contact, Database, NewLog, NewRadio, UpdateLog};
 use futures_util::{SinkExt, StreamExt};
 use radio::{ClientMessage, RadioCommand, ServerMessage};
 use radio_manager::RadioManager;
+use scoring::ScoringModules;
 use std::{collections::HashMap, fs::OpenOptions, path::PathBuf, time::Duration};
 use supercheckpartial::SuperCheckPartial;
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -39,6 +41,7 @@ struct AppState {
     log_events: broadcast::Sender<ServerMessage>,
     db: Database,
     contest_rules: ContestRulesStore,
+    scoring_modules: ScoringModules,
     supercheckpartial: SuperCheckPartial,
 }
 
@@ -122,6 +125,7 @@ async fn main() {
         log_events,
         db,
         contest_rules,
+        scoring_modules: ScoringModules::new(),
         supercheckpartial,
     };
 
@@ -604,7 +608,7 @@ async fn contacts(
     State(app_state): State<AppState>,
     Path(log_id): Path<i64>,
 ) -> Json<Vec<Contact>> {
-    match app_state.db.contacts(log_id) {
+    match scored_contacts_for_log(&app_state, log_id) {
         Ok(contacts) => Json(contacts),
         Err(error) => {
             error!(log_id, %error, "failed to load contacts");
@@ -630,7 +634,11 @@ async fn commit_contact(
 
     match app_state.db.upsert_contacts(log_id, input_contacts) {
         Ok(mut contacts) => {
+            let scored_contacts = scored_contacts_for_log(&app_state, log_id).unwrap_or_default();
             for (contact, session_id) in contacts.iter_mut().zip(session_ids) {
+                if let Some(scored_contact) = scored_contact_by_id(&scored_contacts, contact) {
+                    *contact = scored_contact;
+                }
                 if let Some(session_id) = session_id {
                     contact.insert(
                         "_session_id".to_string(),
@@ -672,6 +680,64 @@ fn contact_session_id(contact: &Contact) -> Option<String> {
         .get("_session_id")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
+}
+
+fn scored_contacts_for_log(app_state: &AppState, log_id: i64) -> Result<Vec<Contact>, String> {
+    let log = app_state
+        .db
+        .log(log_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("log {log_id} not found"))?;
+    let rules = app_state
+        .contest_rules
+        .get(&log.contest_id)
+        .ok_or_else(|| format!("unknown contest: {}", log.contest_id))?;
+    let mut contacts = app_state
+        .db
+        .contacts(log_id)
+        .map_err(|error| error.to_string())?;
+
+    contacts.sort_by(|left, right| contact_score_order(left).cmp(&contact_score_order(right)));
+    let module = app_state
+        .scoring_modules
+        .get(rules, log.contest_params.clone());
+    let mut scorer = module.scorer();
+    scorer.reset();
+    for contact in &mut contacts {
+        scorer.add_qso(contact);
+    }
+    contacts.sort_by(|left, right| contact_display_order(right).cmp(&contact_display_order(left)));
+    Ok(contacts)
+}
+
+fn scored_contact_by_id(scored_contacts: &[Contact], contact: &Contact) -> Option<Contact> {
+    let id = contact_id(contact)?;
+    scored_contacts
+        .iter()
+        .find(|scored_contact| contact_id(scored_contact) == Some(id))
+        .cloned()
+}
+
+fn contact_score_order(contact: &Contact) -> (i64, i64) {
+    (contact_epoch(contact), contact_id(contact).unwrap_or(0))
+}
+
+fn contact_display_order(contact: &Contact) -> (i64, i64) {
+    contact_score_order(contact)
+}
+
+fn contact_epoch(contact: &Contact) -> i64 {
+    contact
+        .get("QSO_DATE_TIME_ON")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(0)
+}
+
+fn contact_id(contact: &Contact) -> Option<i64> {
+    contact
+        .get("_id")
+        .or_else(|| contact.get("ID"))
+        .and_then(serde_json::Value::as_i64)
 }
 
 fn contacts_from_payload(payload: serde_json::Value) -> Result<Vec<Contact>, String> {

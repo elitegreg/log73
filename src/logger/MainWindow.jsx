@@ -99,6 +99,8 @@ function MainWindow({
   onStopCw,
   onSetCwWpm,
   onLogContact,
+  onRescore,
+  scoreSummary,
   onExit,
 }) {
   const [callSign, setCallSign] = useState('');
@@ -628,7 +630,7 @@ function MainWindow({
         <button className="cmd-btn" type="button" title="Keyboard shortcut: Esc" onClick={stopCwSending}>Stop Sending</button>
         <button className="cmd-btn" onClick={resetEntryFields}>Wipe</button>
         <button className="cmd-btn" onClick={logContact}>Log it</button>
-        <button className="cmd-btn">Edit</button>
+        <button className="cmd-btn" type="button" onClick={onRescore}>Rescore</button>
         <button className="cmd-btn">Mark</button>
         <button className="cmd-btn">Store</button>
         <button className="cmd-btn">Spot It</button>
@@ -637,6 +639,9 @@ function MainWindow({
       <div className="status-bar">
         <span>
           {stationCallsign} / Op: {operatorCallsign}
+        </span>
+        <span>
+          QSOs: {scoreSummary?.qsoCount ?? 0}  Mults: {scoreSummary?.multipliers ?? 0}  Score: {scoreSummary?.score ?? 0}
         </span>
       </div>
     </div>
