@@ -1,4 +1,5 @@
 /* Modern Dark Radio Console theme overrides. */
+body.theme-modern-dark-radio { --invalid-border-color: #fb923c; --invalid-background-color: #7c2d12; --invalid-text-color: #ffedd5; }
 body.theme-modern-dark-radio .app-container { background-color: #111827; color: #f9fafb; }
 body.theme-modern-dark-radio .window,
 body.theme-modern-dark-radio .log-window,
@@ -35,6 +36,7 @@ body.theme-modern-dark-radio .log-table tbody tr.selected-contact:nth-child(even
 body.theme-modern-dark-radio .log-table tbody tr.selected-contact.uncommitted-contact { background-color: #2563eb; }
 body.theme-modern-dark-radio .log-table td,
 body.theme-modern-dark-radio .log-table tbody tr.selected-contact td { color: #f9fafb; }
+body.theme-modern-dark-radio .log-table tbody tr.selected-contact td.invalid-cell { background-color: #fed7aa; color: #431407; }
 body.theme-modern-dark-radio .empty-log { color: #d1d5db; }
 body.theme-modern-dark-radio .log-context-menu,
 body.theme-modern-dark-radio .error-message { border-color: #6b7280; background-color: #1f2937; color: #f9fafb; }

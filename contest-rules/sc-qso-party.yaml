@@ -180,10 +180,6 @@ contests:
         is_sent: false
         in_sets: ['Counties', 'States', 'DX']
     qso_columns:
-      - 'Date/Time (UTC)'
-      - 'Freq'
-      - 'Mode'
-      - 'Call'
       - 'RST(s)'
       - 'RST(r)'
       - 'State'
@@ -233,10 +229,6 @@ contests:
         is_sent: false
         in_sets: ['Counties']
     qso_columns:
-      - 'Date/Time (UTC)'
-      - 'Freq'
-      - 'Mode'
-      - 'Call'
       - 'RST(s)'
       - 'RST(r)'
       - 'County'

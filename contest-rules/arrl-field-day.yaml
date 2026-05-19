@@ -107,6 +107,7 @@ contests:
         label: 'Class'
         type: 'String:3'
         required: true
+        regex: '^\d+[A-F]$'
       - name: 'Section'
         label: 'Section'
         type: 'String:3'
@@ -118,6 +119,7 @@ contests:
         adif: 'STX_STRING'
         fixed: true
         source_param: 'Class'
+        regex: '^\d+[A-F]$'
         is_sent: true
       - name: 'Section(s)'
         type: 'String:3'
@@ -129,6 +131,7 @@ contests:
       - name: 'Class'
         type: 'String:3'
         adif: 'SRX_STRING'
+        regex: '^\d+[A-F]$'
         is_sent: false
       - name: 'Section'
         type: 'String:3'
@@ -136,10 +139,6 @@ contests:
         is_sent: false
         in_sets: ['Sections']
     qso_columns:
-      - 'Date/Time (UTC)'
-      - 'Freq'
-      - 'Mode'
-      - 'Call'
       - 'Class'
       - 'Section'
       - 'Pts'

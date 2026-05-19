@@ -20,6 +20,8 @@ pub struct ExchangeField {
     pub default: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_param: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regex: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub in_sets: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -35,6 +37,8 @@ pub struct ContestParam {
     pub field_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub regex: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -287,6 +291,21 @@ fn resolve_scoring_condition_in_sets(
     Ok(())
 }
 
+const STANDARD_QSO_COLUMNS: &[&str] = &["Date/Time (UTC)", "Freq", "Mode", "Call"];
+
+fn prepend_standard_qso_columns(contest: &mut ContestRules) {
+    let existing = contest.qso_columns.clone();
+    contest.qso_columns = STANDARD_QSO_COLUMNS
+        .iter()
+        .map(|column| (*column).to_string())
+        .chain(
+            existing
+                .into_iter()
+                .filter(|column| !STANDARD_QSO_COLUMNS.contains(&column.as_str())),
+        )
+        .collect();
+}
+
 fn resolve_in_sets(contest: &mut ContestRules) -> Result<(), String> {
     for param in &mut contest.log_params {
         if !param.in_sets.is_empty() {
@@ -403,6 +422,7 @@ fn resolve_contest(
     }
 
     resolve_in_sets(&mut contest)?;
+    prepend_standard_qso_columns(&mut contest);
 
     stack.pop();
     resolved.insert(id.to_string(), contest.clone());

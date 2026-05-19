@@ -491,6 +491,13 @@ fn validate_log_params(contest_rules: &ContestRulesStore, payload: &NewLog) -> R
                 param.valid_values.join(", ")
             ));
         }
+        if let Some(pattern) = &param.regex {
+            let regex = regex::Regex::new(pattern)
+                .map_err(|error| format!("invalid regex for {}: {error}", param.label))?;
+            if !regex.is_match(value) {
+                return Err(format!("{} is invalid", param.label));
+            }
+        }
     }
     Ok(())
 }

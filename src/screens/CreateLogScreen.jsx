@@ -126,6 +126,7 @@ function CreateLogScreen() {
               value={contestParams[param.name] ?? ''}
               onChange={(event) => updateContestParam(param, event.target.value)}
               required={param.required !== false}
+              pattern={param.regex ?? undefined}
               inputMode={kind === 'NUMERIC' ? 'numeric' : 'text'}
               maxLength={maxLength}
               disabled={isEditing}

@@ -643,6 +643,7 @@ dependencies = [
  "clap",
  "futures-util",
  "mime_guess",
+ "regex",
  "rigctld",
  "rusqlite",
  "rust-embed",

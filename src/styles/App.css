@@ -110,6 +110,12 @@
   font-size: 11px;
 }
 
+:root {
+  --invalid-border-color: #b00020;
+  --invalid-background-color: #ffd6dd;
+  --invalid-text-color: #5c0010;
+}
+
 .entry-fields input {
   box-sizing: border-box;
   width: 100%;
@@ -124,6 +130,20 @@
 .entry-fields input:read-only {
   background-color: #e8e8e8;
   color: #333;
+}
+
+.entry-fields input.invalid-field,
+.log-cell-editor.invalid-field {
+  border-color: var(--invalid-border-color);
+  background-color: var(--invalid-background-color);
+  color: var(--invalid-text-color);
+  box-shadow: inset 0 0 0 1px var(--invalid-border-color);
+}
+
+.log-table td.invalid-cell {
+  background-color: var(--invalid-background-color);
+  color: var(--invalid-text-color);
+  box-shadow: inset 0 0 0 2px var(--invalid-border-color);
 }
 
 .supercheckpartial-box {

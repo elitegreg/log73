@@ -1,4 +1,5 @@
 /* Classic Terminal theme overrides. */
+body.theme-classic-terminal { --invalid-border-color: #ff4040; --invalid-background-color: #3a0000; --invalid-text-color: #ffe0e0; }
 body.theme-classic-terminal .app-container { background-color: #000000; color: #33ff66; font-family: 'Courier New', monospace; }
 body.theme-classic-terminal .window,
 body.theme-classic-terminal .log-window,
@@ -35,6 +36,7 @@ body.theme-classic-terminal .log-table tbody tr.selected-contact:nth-child(even)
 body.theme-classic-terminal .log-table tbody tr.selected-contact.uncommitted-contact { background-color: #33ff66; }
 body.theme-classic-terminal .log-table td { color: #b6ffbf; }
 body.theme-classic-terminal .log-table tbody tr.selected-contact td { color: #000000; }
+body.theme-classic-terminal .log-table tbody tr.selected-contact td.invalid-cell { background-color: #ffb3b3; color: #3a0000; }
 body.theme-classic-terminal .empty-log { color: #7cff8f; }
 body.theme-classic-terminal .log-context-menu,
 body.theme-classic-terminal .error-message { border-color: #33ff66; background-color: #000000; color: #33ff66; }

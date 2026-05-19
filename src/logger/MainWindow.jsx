@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { fieldDefault, parseFieldType, sanitizeCallsign, sanitizeExchangeValue } from '../domain/contactFields';
+import { validateExchangeField } from '../domain/validation';
 import { supercheckpartial } from '../lib/api';
 
 
@@ -360,12 +361,28 @@ function MainWindow({
     callSignEditedAtRef.current = new Date();
   }
 
+  function exchangeValue(field) {
+    return exchangeValues[field.name] ?? fieldDefault(field, radioMode, log?.contest_params ?? {});
+  }
+
+  function exchangeValidation(field) {
+    return validateExchangeField(field, exchangeValue(field), radioMode);
+  }
+
+  function firstInvalidExchangeField() {
+    return (settings?.exchange ?? []).find((field) => !exchangeValidation(field).ok);
+  }
+
   function allRequiredFieldsFilled() {
     return (
       Boolean(settings?.exchange) &&
       callSign.trim() !== '' &&
-      settings.exchange.every((field) => String(exchangeValues[field.name] ?? '').trim() !== '')
+      settings.exchange.every((field) => String(exchangeValue(field)).trim() !== '')
     );
+  }
+
+  function canLogContact(force = false) {
+    return allRequiredFieldsFilled() && (force || !firstInvalidExchangeField());
   }
 
   function resetEntryFields() {
@@ -375,8 +392,12 @@ function MainWindow({
     callSignRef.current?.focus();
   }
 
-  function logContact() {
-    if (!allRequiredFieldsFilled()) {
+  function logContact(force = false) {
+    if (!canLogContact(force)) {
+      const invalidField = firstInvalidExchangeField();
+      if (invalidField) {
+        exchangeInputRefs.current[invalidField.name]?.focus();
+      }
       return false;
     }
 
@@ -398,7 +419,7 @@ function MainWindow({
     };
 
     for (const field of settings.exchange) {
-      contact[field.adif] = String(exchangeValues[field.name] ?? '').trim().toUpperCase();
+      contact[field.adif] = String(exchangeValue(field)).trim().toUpperCase();
     }
 
     onLogContact?.(contact);
@@ -441,6 +462,7 @@ function MainWindow({
 
   function handleCallsignKeyDown(event) {
     const value = callSign.trim();
+    const forceLog = event.ctrlKey && event.altKey;
 
     if (event.key === 'Tab') {
       handleFieldTab(event, 'CALL');
@@ -456,7 +478,7 @@ function MainWindow({
 
     if (event.key === 'Enter' && allRequiredFieldsFilled()) {
       event.preventDefault();
-      logContact();
+      logContact(forceLog);
     }
   }
 
@@ -472,7 +494,7 @@ function MainWindow({
   function handleExchangeKeyDown(event, index) {
     if (event.key === 'Enter' && allRequiredFieldsFilled()) {
       event.preventDefault();
-      logContact();
+      logContact(event.ctrlKey && event.altKey);
       return;
     }
 
@@ -575,7 +597,8 @@ function MainWindow({
         </label>
         {settings?.exchange?.map((field, index) => {
           const { kind, maxLength } = parseFieldType(field.type, radioMode);
-          const value = exchangeValues[field.name] ?? fieldDefault(field, radioMode, log?.contest_params ?? {});
+          const value = exchangeValue(field);
+          const validation = validateExchangeField(field, value, radioMode);
           const fieldWidthChars = Math.max(maxLength + 1, 4);
 
           return (
@@ -602,7 +625,9 @@ function MainWindow({
                 onBlur={() => setActiveCompletionField(null)}
                 readOnly={field.fixed === true}
                 tabIndex={field.fixed === true ? -1 : undefined}
-                className={field.fixed === true ? 'fixed-field' : ''}
+                className={`${field.fixed === true ? 'fixed-field' : ''}${validation.ok ? '' : ' invalid-field'}`.trim()}
+                title={validation.ok ? undefined : validation.error}
+                aria-invalid={validation.ok ? undefined : true}
                 maxLength={maxLength}
               />
             </label>
@@ -646,7 +671,7 @@ function MainWindow({
       <div className="command-buttons">
         <button className="cmd-btn" type="button" title="Keyboard shortcut: Esc" onClick={stopCwSending}>Stop Sending</button>
         <button className="cmd-btn" onClick={resetEntryFields}>Wipe</button>
-        <button className="cmd-btn" onClick={logContact}>Log it</button>
+        <button className="cmd-btn" onClick={() => logContact(false)}>Log it</button>
         <button className="cmd-btn" type="button" onClick={onRescore}>Rescore</button>
         <button className="cmd-btn">Mark</button>
         <button className="cmd-btn">Store</button>

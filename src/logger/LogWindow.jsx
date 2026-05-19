@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { sanitizeCallsign, sanitizeExchangeValue } from '../domain/contactFields';
+import { validateExchangeField } from '../domain/validation';
 
 
 const READ_ONLY_COLUMNS = new Set(['Mult', 'Pts']);
@@ -86,6 +87,19 @@ function fieldMapFromSettings(settings) {
   }
 
   return fieldMap;
+}
+
+function exchangeValueForColumn(settings, column, entry, columnFieldMap) {
+  const exchangeField = exchangeFieldForColumn(settings, column);
+  if (!exchangeField) return null;
+  const adifField = columnFieldMap[column] ?? exchangeField.adif;
+  return entry[adifField] ?? entry[column] ?? '';
+}
+
+function cellValidation(settings, column, entry, columnFieldMap, radioMode) {
+  const exchangeField = exchangeFieldForColumn(settings, column);
+  if (!exchangeField || exchangeField.is_sent) return { ok: true, error: '' };
+  return validateExchangeField(exchangeField, exchangeValueForColumn(settings, column, entry, columnFieldMap), radioMode);
 }
 
 function formatCell(column, entry, columnFieldMap) {
@@ -190,7 +204,14 @@ function parseUpdateValue(settings, column, value, radioMode) {
     return { ok: true, value: mode };
   }
 
-  return { ok: true, value: sanitizeUpdateInput(settings, column, value, radioMode).trim() };
+  const sanitizedValue = sanitizeUpdateInput(settings, column, value, radioMode).trim();
+  const exchangeField = exchangeFieldForColumn(settings, column);
+  if (exchangeField && !exchangeField.is_sent) {
+    const validation = validateExchangeField(exchangeField, sanitizedValue, radioMode);
+    if (!validation.ok) return { ok: false, error: validation.error };
+  }
+
+  return { ok: true, value: sanitizedValue };
 }
 
 function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts, onUpdateContacts }) {
@@ -349,12 +370,18 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
               >
                 {columns.map((column) => {
                   const isEditing = editingCell?.key === key && editingCell.column === column;
+                  const validation = cellValidation(settings, column, entry, columnFieldMap, radioMode);
                   return (
-                    <td key={column} onContextMenu={(event) => openContextMenu(event, entry, index, column)}>
+                    <td
+                      key={column}
+                      className={validation.ok ? undefined : 'invalid-cell'}
+                      title={validation.ok ? undefined : validation.error}
+                      onContextMenu={(event) => openContextMenu(event, entry, index, column)}
+                    >
                       {isEditing ? (
                         <input
                           ref={inputRef}
-                          className="log-cell-editor"
+                          className={`log-cell-editor ${parseUpdateValue(settings, editingCell.column, editingCell.value, radioMode).ok ? '' : 'invalid-field'}`.trim()}
                           value={editingCell.value}
                           onChange={(event) => setEditingCell({
                             ...editingCell,
