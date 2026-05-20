@@ -72,7 +72,6 @@ pub fn mode_for_request(requested: &str, frequency_hz: u64) -> Option<rigctld::M
     match requested.to_uppercase().as_str() {
         "CW" => Some(rigctld::Mode::CW),
         "FM" => Some(rigctld::Mode::FM),
-        "AM" => Some(rigctld::Mode::AM),
         "SSB" => Some(ssb_mode_for_frequency(frequency_hz)),
         "USB" => Some(rigctld::Mode::USB),
         "LSB" => Some(rigctld::Mode::LSB),

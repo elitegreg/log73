@@ -69,7 +69,7 @@ impl ContestRules {
         Self {
             contest: "SC-QSO-PARTY",
             allowed_bands: &[160, 80, 40, 20, 15, 10, 6, 2],
-            allowed_modes: &["SSB", "FM", "AM", "CW"],
+            allowed_modes: &["SSB", "FM", "CW"],
             exchange,
             qso_columns: vec![
                 "Date/Time (UTC)",

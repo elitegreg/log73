@@ -2,7 +2,7 @@ contests:
   - id: 'SC-QSO-PARTY (In State)'
     display_name: 'SC QSO Party (In State)'
     allowed_bands: [160, 80, 40, 20, 15, 10, 6, 2]
-    allowed_modes: ['SSB', 'FM', 'AM', 'CW']
+    allowed_modes: ['SSB', 'FM', 'CW']
     qso_points:
       rules:
         - when:

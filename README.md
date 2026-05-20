@@ -421,7 +421,7 @@ SC-QSO-PARTY             out-of-state
 SC-QSO-PARTY (In State)  in-state
 ```
 
-Both variants use bands `160, 80, 40, 20, 15, 10, 6, 2` and modes `SSB, FM, AM, CW`.
+Both variants use bands `160, 80, 40, 20, 15, 10, 6, 2` and modes `SSB, FM, CW`.
 
 Log creation dynamically requests required rule parameters:
 

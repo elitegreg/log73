@@ -4,7 +4,7 @@ import { validateExchangeField } from '../domain/validation';
 import { supercheckpartial } from '../lib/api';
 
 
-const MODE_OPTIONS = ['CW', 'SSB', 'FM', 'AM'];
+const MODE_OPTIONS = ['CW', 'SSB', 'FM'];
 const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
 const DEFAULT_CW_LABELS = {
   run: Array.from({ length: 12 }, (_, index) => ({ key: `F${index + 1}`, label: '-' })),
