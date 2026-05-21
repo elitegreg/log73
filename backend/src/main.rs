@@ -468,7 +468,7 @@ async fn supercheckpartial_matches(State(app_state): State<AppState>) -> Json<se
 }
 
 async fn config(State(app_state): State<AppState>) -> Json<serde_json::Value> {
-    match app_state.db.auth_config_view() {
+    match app_state.db.auth_config_view().await {
         Ok(config) => Json(serde_json::json!({ "ok": true, "config": config })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -499,11 +499,15 @@ async fn update_config(
         Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
     };
 
-    match app_state.db.update_auth_config(db::UpdateAuthConfig {
-        login_user: payload.login_user,
-        login_password,
-    }) {
-        Ok(()) => match app_state.db.auth_config_view() {
+    match app_state
+        .db
+        .update_auth_config(db::UpdateAuthConfig {
+            login_user: payload.login_user,
+            login_password,
+        })
+        .await
+    {
+        Ok(()) => match app_state.db.auth_config_view().await {
             Ok(config) => Json(serde_json::json!({ "ok": true, "config": config })),
             Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
         },
@@ -512,14 +516,17 @@ async fn update_config(
 }
 
 async fn logs(State(app_state): State<AppState>) -> Json<Vec<db::Log>> {
-    Json(app_state.db.logs().unwrap_or_else(|error| {
-        error!(%error, "failed to load logs");
-        Vec::new()
-    }))
+    match app_state.db.logs().await {
+        Ok(logs) => Json(logs),
+        Err(error) => {
+            error!(%error, "failed to load logs");
+            Json(Vec::new())
+        }
+    }
 }
 
 async fn log(State(app_state): State<AppState>, Path(id): Path<i64>) -> Json<serde_json::Value> {
-    match app_state.db.log(id) {
+    match app_state.db.log(id).await {
         Ok(Some(log)) => Json(serde_json::json!({ "ok": true, "log": log })),
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
@@ -534,7 +541,7 @@ async fn create_log(
     if let Err(error) = validation::validate_new_log(&app_state.contest_rules, &payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
-    match app_state.db.create_log(payload) {
+    match app_state.db.create_log(payload).await {
         Ok(log) => Json(serde_json::json!({ "ok": true, "log": log })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -549,7 +556,7 @@ async fn update_log(
     if let Err(error) = validation::validate_update_log(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
-    match app_state.db.update_log(id, payload) {
+    match app_state.db.update_log(id, payload).await {
         Ok(Some(log)) => Json(serde_json::json!({ "ok": true, "log": log })),
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
@@ -560,7 +567,7 @@ async fn delete_log(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    match app_state.db.delete_log(id) {
+    match app_state.db.delete_log(id).await {
         Ok(deleted) => Json(serde_json::json!({ "ok": true, "deleted": deleted })),
         Err(_) => {
             Json(serde_json::json!({ "ok": false, "error": "cannot delete a log that has QSOs" }))
@@ -569,14 +576,17 @@ async fn delete_log(
 }
 
 async fn radios(State(app_state): State<AppState>) -> Json<Vec<db::RadioConfig>> {
-    Json(app_state.db.radios().unwrap_or_else(|error| {
-        error!(%error, "failed to load radios");
-        Vec::new()
-    }))
+    match app_state.db.radios().await {
+        Ok(radios) => Json(radios),
+        Err(error) => {
+            error!(%error, "failed to load radios");
+            Json(Vec::new())
+        }
+    }
 }
 
 async fn radio(State(app_state): State<AppState>, Path(id): Path<i64>) -> Json<serde_json::Value> {
-    match app_state.db.radio(id) {
+    match app_state.db.radio(id).await {
         Ok(Some(radio)) => Json(serde_json::json!({ "ok": true, "radio": radio })),
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
@@ -587,7 +597,7 @@ async fn cw_labels(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    match app_state.db.radio(id) {
+    match app_state.db.radio(id).await {
         Ok(Some(radio)) => {
             Json(serde_json::json!({ "ok": true, "labels": cw::labels(&radio.cw_messages) }))
         }
@@ -604,7 +614,7 @@ async fn create_radio(
     if let Err(error) = validation::validate_radio(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
-    match app_state.db.create_radio(payload) {
+    match app_state.db.create_radio(payload).await {
         Ok(radio) => Json(serde_json::json!({ "ok": true, "radio": radio })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -619,7 +629,7 @@ async fn update_radio(
     if let Err(error) = validation::validate_radio(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
-    match app_state.db.update_radio(id, payload) {
+    match app_state.db.update_radio(id, payload).await {
         Ok(Some(radio)) => {
             let active = app_state.radio_manager.is_active(id).await;
             debug!(
@@ -652,7 +662,7 @@ async fn delete_radio(
         return Json(serde_json::json!({ "ok": false, "error": "cannot delete an active radio" }));
     }
 
-    match app_state.db.delete_radio(id) {
+    match app_state.db.delete_radio(id).await {
         Ok(deleted) => Json(serde_json::json!({ "ok": true, "deleted": deleted })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -660,6 +670,7 @@ async fn delete_radio(
 
 const DEFAULT_CONTACTS_PAGE_LIMIT: usize = 200;
 const MAX_CONTACTS_PAGE_LIMIT: usize = 1000;
+const TOKIO_YIELD_EVERY_ROWS: usize = 1000;
 
 #[derive(Debug, Default, serde::Deserialize)]
 struct ContactsQuery {
@@ -686,7 +697,7 @@ async fn contacts(
     Path(log_id): Path<i64>,
     Query(query): Query<ContactsQuery>,
 ) -> Json<Vec<Contact>> {
-    if let Err(error) = ensure_score_tracker_for_log(&app_state, log_id) {
+    if let Err(error) = ensure_score_tracker_for_log(&app_state, log_id).await {
         error!(log_id, %error, "failed to load contacts");
         return Json(Vec::new());
     }
@@ -719,7 +730,9 @@ async fn commit_contact(
         &app_state.contest_rules,
         log_id,
         &input_contacts,
-    ) {
+    )
+    .await
+    {
         return Json(serde_json::json!({ "ok": false, "error": error, "status": "failed" }));
     }
     let session_ids = input_contacts
@@ -727,7 +740,7 @@ async fn commit_contact(
         .map(contact_session_id)
         .collect::<Vec<_>>();
 
-    if let Err(error) = ensure_score_tracker_for_log(&app_state, log_id) {
+    if let Err(error) = ensure_score_tracker_for_log(&app_state, log_id).await {
         warn!(log_id, %error, "unable to initialize score tracker before committing contact");
     }
     let old_contacts = input_contacts
@@ -737,10 +750,10 @@ async fn commit_contact(
         })
         .collect::<Vec<_>>();
 
-    match app_state.db.upsert_contacts(log_id, input_contacts) {
+    match app_state.db.upsert_contacts(log_id, input_contacts).await {
         Ok(mut contacts) => {
             let score_result =
-                score_committed_contacts(&app_state, log_id, &mut contacts, &old_contacts);
+                score_committed_contacts(&app_state, log_id, &mut contacts, &old_contacts).await;
             for (contact, session_id) in contacts.iter_mut().zip(session_ids) {
                 if let Some(session_id) = session_id {
                     contact.insert(
@@ -772,7 +785,7 @@ async fn delete_contact(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    match app_state.db.delete_contact(id) {
+    match app_state.db.delete_contact(id).await {
         Ok(Some(log_id)) => {
             let old_contact = app_state.score_tracker.contact(log_id, id);
             let needs_full_rescore = old_contact
@@ -785,14 +798,14 @@ async fn delete_contact(
                 })
                 .unwrap_or(true);
             let score_result = if needs_full_rescore {
-                rescore_log_after_change(&app_state, log_id, &HashSet::new())
+                rescore_log_after_change(&app_state, log_id, &HashSet::new()).await
             } else {
                 match app_state.score_tracker.delete_incremental(log_id, id) {
                     Some(totals) => ContactScoreResult {
                         totals,
                         changed_contacts: Vec::new(),
                     },
-                    None => rescore_log_after_change(&app_state, log_id, &HashSet::new()),
+                    None => rescore_log_after_change(&app_state, log_id, &HashSet::new()).await,
                 }
             };
 
@@ -831,10 +844,14 @@ struct ContactScoreResult {
     changed_contacts: Vec<Contact>,
 }
 
-fn scored_contacts_for_log(app_state: &AppState, log_id: i64) -> Result<ScoredLogSnapshot, String> {
+async fn scored_contacts_for_log(
+    app_state: &AppState,
+    log_id: i64,
+) -> Result<ScoredLogSnapshot, String> {
     let log = app_state
         .db
         .log(log_id)
+        .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("log {log_id} not found"))?;
     let rules = app_state
@@ -844,7 +861,10 @@ fn scored_contacts_for_log(app_state: &AppState, log_id: i64) -> Result<ScoredLo
     let mut contacts = app_state
         .db
         .contacts(log_id)
+        .await
         .map_err(|error| error.to_string())?;
+
+    yield_now_for_row_count(contacts.len()).await;
 
     contacts.sort_by_key(contact_score_order);
     let module = app_state
@@ -853,19 +873,20 @@ fn scored_contacts_for_log(app_state: &AppState, log_id: i64) -> Result<ScoredLo
     let totals = app_state
         .score_tracker
         .reset_log(log_id, module, &mut contacts);
+    tokio::task::yield_now().await;
     contacts.sort_by_key(|contact| std::cmp::Reverse(contact_display_order(contact)));
     Ok(ScoredLogSnapshot { contacts, totals })
 }
 
-fn ensure_score_tracker_for_log(app_state: &AppState, log_id: i64) -> Result<(), String> {
+async fn ensure_score_tracker_for_log(app_state: &AppState, log_id: i64) -> Result<(), String> {
     if app_state.score_tracker.totals(log_id).is_some() {
         return Ok(());
     }
 
-    scored_contacts_for_log(app_state, log_id).map(|_| ())
+    scored_contacts_for_log(app_state, log_id).await.map(|_| ())
 }
 
-fn score_committed_contacts(
+async fn score_committed_contacts(
     app_state: &AppState,
     log_id: i64,
     contacts: &mut [Contact],
@@ -906,7 +927,7 @@ fn score_committed_contacts(
         .iter()
         .filter_map(contact_id)
         .collect::<HashSet<_>>();
-    let scored_log = match scored_contacts_for_log(app_state, log_id) {
+    let scored_log = match scored_contacts_for_log(app_state, log_id).await {
         Ok(scored_log) => scored_log,
         Err(error) => {
             error!(log_id, %error, "failed to rescore contacts after commit");
@@ -917,10 +938,11 @@ fn score_committed_contacts(
         }
     };
 
-    for contact in contacts.iter_mut() {
+    for (index, contact) in contacts.iter_mut().enumerate() {
         if let Some(scored_contact) = scored_contact_by_id(&scored_log.contacts, contact) {
             *contact = scored_contact;
         }
+        yield_now_every_rows(index + 1).await;
     }
 
     ContactScoreResult {
@@ -928,24 +950,26 @@ fn score_committed_contacts(
             &old_scored_contacts,
             &scored_log.contacts,
             &committed_contact_ids,
-        ),
+        )
+        .await,
         totals: scored_log.totals,
     }
 }
 
-fn rescore_log_after_change(
+async fn rescore_log_after_change(
     app_state: &AppState,
     log_id: i64,
     excluded_contact_ids: &HashSet<i64>,
 ) -> ContactScoreResult {
     let old_scored_contacts = app_state.score_tracker.contacts(log_id);
-    match scored_contacts_for_log(app_state, log_id) {
+    match scored_contacts_for_log(app_state, log_id).await {
         Ok(scored_log) => ContactScoreResult {
             changed_contacts: scoring_changed_contacts(
                 &old_scored_contacts,
                 &scored_log.contacts,
                 excluded_contact_ids,
-            ),
+            )
+            .await,
             totals: scored_log.totals,
         },
         Err(error) => {
@@ -982,7 +1006,7 @@ fn scored_contact_by_id(scored_contacts: &[Contact], contact: &Contact) -> Optio
         .cloned()
 }
 
-fn scoring_changed_contacts(
+async fn scoring_changed_contacts(
     old_contacts: &[Contact],
     new_contacts: &[Contact],
     excluded_contact_ids: &HashSet<i64>,
@@ -992,22 +1016,34 @@ fn scoring_changed_contacts(
         .filter_map(|contact| contact_id(contact).map(|id| (id, contact)))
         .collect::<HashMap<_, _>>();
 
-    new_contacts
-        .iter()
-        .filter(|contact| {
-            let Some(id) = contact_id(contact) else {
-                return false;
-            };
-            if excluded_contact_ids.contains(&id) {
-                return false;
-            }
-            old_contacts_by_id
+    let mut changed = Vec::new();
+    for (index, contact) in new_contacts.iter().enumerate() {
+        if let Some(id) = contact_id(contact)
+            && !excluded_contact_ids.contains(&id)
+            && old_contacts_by_id
                 .get(&id)
                 .map(|old_contact| scored_contact_values_changed(old_contact, contact))
                 .unwrap_or(false)
-        })
-        .cloned()
-        .collect()
+        {
+            changed.push(contact.clone());
+        }
+        yield_now_every_rows(index + 1).await;
+    }
+    changed
+}
+
+async fn yield_now_for_row_count(row_count: usize) {
+    let mut processed = TOKIO_YIELD_EVERY_ROWS;
+    while processed <= row_count {
+        tokio::task::yield_now().await;
+        processed += TOKIO_YIELD_EVERY_ROWS;
+    }
+}
+
+async fn yield_now_every_rows(processed_rows: usize) {
+    if processed_rows % TOKIO_YIELD_EVERY_ROWS == 0 {
+        tokio::task::yield_now().await;
+    }
 }
 
 fn scored_contact_values_changed(old_contact: &Contact, new_contact: &Contact) -> bool {

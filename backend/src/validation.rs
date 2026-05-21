@@ -113,7 +113,7 @@ pub fn validate_auth_config(
     Ok(())
 }
 
-pub fn validate_contacts(
+pub async fn validate_contacts(
     database: &Database,
     contest_rules: &ContestRulesStore,
     log_id: i64,
@@ -133,6 +133,7 @@ pub fn validate_contacts(
 
     let log = database
         .log(log_id)
+        .await
         .map_err(|error| error.to_string())?
         .ok_or_else(|| format!("log {log_id} not found"))?;
     let rules = contest_rules
@@ -146,6 +147,7 @@ pub fn validate_contacts(
         if let Some(contact_id) = contact_id(contact)
             && let Some(existing_log_id) = database
                 .contact_log_id(contact_id)
+                .await
                 .map_err(|error| format!("contact {}: {error}", index + 1))?
             && existing_log_id != log_id
         {

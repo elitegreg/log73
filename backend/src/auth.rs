@@ -18,7 +18,7 @@ pub async fn basic_auth(
     request: Request<Body>,
     next: Next,
 ) -> Response {
-    let Ok(config) = app_state.db.auth_config() else {
+    let Ok(config) = app_state.db.auth_config().await else {
         debug!(method = %request.method(), uri = %request.uri(), "request failed basic authentication config lookup");
         return unauthorized(request);
     };

@@ -45,6 +45,44 @@ impl RadioManager {
 
     pub async fn acquire(&self, radio_id: i64) -> Result<RadioHandle, String> {
         loop {
+            let wait_for_shutdown = {
+                let mut radios = self.radios.lock().await;
+
+                if let Some(slot) = radios.get_mut(&radio_id) {
+                    match slot {
+                        ManagedRadioSlot::Active(radio) => {
+                            radio.refcount += 1;
+                            debug!(
+                                radio_id,
+                                refcount = radio.refcount,
+                                "acquired existing managed radio"
+                            );
+                            return Ok(RadioHandle {
+                                current: radio.current.clone(),
+                                updates: radio.updates.clone(),
+                                commands: radio.commands.clone(),
+                            });
+                        }
+                        ManagedRadioSlot::ShuttingDown { done } => Some(done.clone()),
+                    }
+                } else {
+                    None
+                }
+            };
+
+            if let Some(done) = wait_for_shutdown {
+                debug!(radio_id, "waiting for managed radio shutdown to complete");
+                done.notified().await;
+                continue;
+            }
+
+            let config = self
+                .db
+                .radio(radio_id)
+                .await
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| format!("radio not found: {radio_id}"))?;
+
             let mut wait_for_shutdown = None;
             {
                 let mut radios = self.radios.lock().await;
@@ -71,11 +109,6 @@ impl RadioManager {
                 }
 
                 if wait_for_shutdown.is_none() {
-                    let config = self
-                        .db
-                        .radio(radio_id)
-                        .map_err(|error| error.to_string())?
-                        .ok_or_else(|| format!("radio not found: {radio_id}"))?;
                     debug!(
                         radio_id,
                         host = %config.rigctld_host,

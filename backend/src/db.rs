@@ -4,7 +4,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::thread;
+use tokio::sync::{mpsc, oneshot};
 
 pub type Contact = Map<String, Value>;
 
@@ -268,123 +269,173 @@ ON CONFLICT(ID) DO UPDATE SET
     JSON = excluded.JSON
 "#;
 
+const DB_COMMAND_BUFFER: usize = 64;
+
+enum DbCommand {
+    Logs {
+        response: oneshot::Sender<rusqlite::Result<Vec<Log>>>,
+    },
+    Log {
+        id: i64,
+        response: oneshot::Sender<rusqlite::Result<Option<Log>>>,
+    },
+    CreateLog {
+        log: NewLog,
+        response: oneshot::Sender<rusqlite::Result<Log>>,
+    },
+    UpdateLog {
+        id: i64,
+        log: UpdateLog,
+        response: oneshot::Sender<rusqlite::Result<Option<Log>>>,
+    },
+    DeleteLog {
+        id: i64,
+        response: oneshot::Sender<rusqlite::Result<bool>>,
+    },
+    Radios {
+        response: oneshot::Sender<rusqlite::Result<Vec<RadioConfig>>>,
+    },
+    Radio {
+        id: i64,
+        response: oneshot::Sender<rusqlite::Result<Option<RadioConfig>>>,
+    },
+    AuthConfig {
+        response: oneshot::Sender<rusqlite::Result<AuthConfig>>,
+    },
+    UpdateAuthConfig {
+        config: UpdateAuthConfig,
+        response: oneshot::Sender<rusqlite::Result<()>>,
+    },
+    CreateRadio {
+        radio: NewRadio,
+        response: oneshot::Sender<rusqlite::Result<RadioConfig>>,
+    },
+    UpdateRadio {
+        id: i64,
+        radio: NewRadio,
+        response: oneshot::Sender<rusqlite::Result<Option<RadioConfig>>>,
+    },
+    DeleteRadio {
+        id: i64,
+        response: oneshot::Sender<rusqlite::Result<bool>>,
+    },
+    Contacts {
+        log_id: i64,
+        response: oneshot::Sender<rusqlite::Result<Vec<Contact>>>,
+    },
+    UpsertContacts {
+        log_id: i64,
+        contacts: Vec<Contact>,
+        response: oneshot::Sender<rusqlite::Result<Vec<Contact>>>,
+    },
+    ContactLogId {
+        id: i64,
+        response: oneshot::Sender<rusqlite::Result<Option<i64>>>,
+    },
+    DeleteContact {
+        id: i64,
+        response: oneshot::Sender<rusqlite::Result<Option<i64>>>,
+    },
+}
+
 #[derive(Clone)]
 pub struct Database {
-    connection: Arc<Mutex<Connection>>,
+    commands: mpsc::Sender<DbCommand>,
 }
 
 impl Database {
     pub fn open(path: &str) -> rusqlite::Result<Self> {
-        let connection = Connection::open(path)?;
-        connection.pragma_update(None, "foreign_keys", "ON")?;
-        initialize_schema(&connection)?;
+        let (commands, command_rx) = mpsc::channel(DB_COMMAND_BUFFER);
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+        let path = path.to_string();
 
-        Ok(Self {
-            connection: Arc::new(Mutex::new(connection)),
-        })
-    }
+        thread::Builder::new()
+            .name("log73-db-worker".to_string())
+            .spawn(move || {
+                let connection = Connection::open(&path).and_then(|connection| {
+                    connection.pragma_update(None, "foreign_keys", "ON")?;
+                    initialize_schema(&connection)?;
+                    Ok(connection)
+                });
 
-    pub fn logs(&self) -> rusqlite::Result<Vec<Log>> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        let mut statement = connection
-            .prepare("SELECT ID, NAME, CONTEST_ID, STATION_CALLSIGN, CONTEST_PARAMS_JSON FROM logs ORDER BY NAME, ID")?;
-        let rows = statement.query_map([], row_to_log)?;
-        rows.collect()
-    }
+                match connection {
+                    Ok(connection) => {
+                        let _ = ready_tx.send(Ok(()));
+                        run_db_worker(connection, command_rx);
+                    }
+                    Err(error) => {
+                        let _ = ready_tx.send(Err(error));
+                    }
+                }
+            })
+            .map_err(|error| {
+                rusqlite::Error::InvalidParameterName(format!(
+                    "failed to spawn database worker thread: {error}"
+                ))
+            })?;
 
-    pub fn log(&self, id: i64) -> rusqlite::Result<Option<Log>> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        select_log(&connection, id)
-    }
-
-    pub fn create_log(&self, log: NewLog) -> rusqlite::Result<Log> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        connection.execute(
-            "INSERT INTO logs (NAME, CONTEST_ID, STATION_CALLSIGN, CONTEST_PARAMS_JSON) VALUES (?1, ?2, ?3, ?4)",
-            params![
-                log.name.trim(),
-                log.contest_id.trim(),
-                log.station_callsign.trim().to_uppercase(),
-                log.contest_params.to_string()
-            ],
-        )?;
-        select_log(&connection, connection.last_insert_rowid())?
-            .ok_or(rusqlite::Error::QueryReturnedNoRows)
-    }
-
-    pub fn update_log(&self, id: i64, log: UpdateLog) -> rusqlite::Result<Option<Log>> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        let updated = connection.execute(
-            "UPDATE logs SET NAME = ?1, STATION_CALLSIGN = ?2 WHERE ID = ?3",
-            params![
-                log.name.trim(),
-                log.station_callsign.trim().to_uppercase(),
-                id
-            ],
-        )?;
-        if updated == 0 {
-            return Ok(None);
-        }
-        select_log(&connection, id)
-    }
-
-    pub fn delete_log(&self, id: i64) -> rusqlite::Result<bool> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        let qso_count: i64 = connection.query_row(
-            "SELECT COUNT(*) FROM qsos WHERE LOG_ID = ?1",
-            params![id],
-            |row| row.get(0),
-        )?;
-        if qso_count > 0 {
-            return Err(rusqlite::Error::InvalidQuery);
-        }
-        Ok(connection.execute("DELETE FROM logs WHERE ID = ?1", params![id])? > 0)
-    }
-
-    pub fn radios(&self) -> rusqlite::Result<Vec<RadioConfig>> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        let mut statement = connection.prepare(
-            "SELECT ID, NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES FROM radios ORDER BY ID",
-        )?;
-        let rows = statement.query_map([], row_to_radio)?;
-        rows.collect()
-    }
-
-    pub fn radio(&self, id: i64) -> rusqlite::Result<Option<RadioConfig>> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        select_radio(&connection, id)
-    }
-
-    pub fn auth_config(&self) -> rusqlite::Result<AuthConfig> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        match connection
-            .query_row(
-                "SELECT LOGIN_USER, LOGIN_PASSWORD FROM config LIMIT 1",
-                [],
-                |row| {
-                    Ok(AuthConfig {
-                        login_user: row.get(0)?,
-                        login_password: row.get(1)?,
-                    })
-                },
+        ready_rx.recv().map_err(|_| {
+            rusqlite::Error::InvalidParameterName(
+                "database worker failed to report initialization status".to_string(),
             )
-            .optional()
-        {
-            Ok(Some(config)) => Ok(config),
-            Ok(None) => Ok(AuthConfig {
-                login_user: String::new(),
-                login_password: String::new(),
-            }),
-            Err(error) if is_missing_config_column(&error) => Ok(AuthConfig {
-                login_user: String::new(),
-                login_password: String::new(),
-            }),
-            Err(error) => Err(error),
-        }
+        })??;
+
+        Ok(Self { commands })
     }
 
-    pub fn auth_config_view(&self) -> rusqlite::Result<AuthConfigView> {
-        let config = self.auth_config()?;
+    async fn call<T>(
+        &self,
+        command: impl FnOnce(oneshot::Sender<rusqlite::Result<T>>) -> DbCommand,
+    ) -> rusqlite::Result<T> {
+        let (response_tx, response_rx) = oneshot::channel();
+        self.commands
+            .send(command(response_tx))
+            .await
+            .map_err(|_| database_worker_unavailable())?;
+        response_rx
+            .await
+            .map_err(|_| database_worker_unavailable())?
+    }
+
+    pub async fn logs(&self) -> rusqlite::Result<Vec<Log>> {
+        self.call(|response| DbCommand::Logs { response }).await
+    }
+
+    pub async fn log(&self, id: i64) -> rusqlite::Result<Option<Log>> {
+        self.call(|response| DbCommand::Log { id, response }).await
+    }
+
+    pub async fn create_log(&self, log: NewLog) -> rusqlite::Result<Log> {
+        self.call(|response| DbCommand::CreateLog { log, response })
+            .await
+    }
+
+    pub async fn update_log(&self, id: i64, log: UpdateLog) -> rusqlite::Result<Option<Log>> {
+        self.call(|response| DbCommand::UpdateLog { id, log, response })
+            .await
+    }
+
+    pub async fn delete_log(&self, id: i64) -> rusqlite::Result<bool> {
+        self.call(|response| DbCommand::DeleteLog { id, response })
+            .await
+    }
+
+    pub async fn radios(&self) -> rusqlite::Result<Vec<RadioConfig>> {
+        self.call(|response| DbCommand::Radios { response }).await
+    }
+
+    pub async fn radio(&self, id: i64) -> rusqlite::Result<Option<RadioConfig>> {
+        self.call(|response| DbCommand::Radio { id, response })
+            .await
+    }
+
+    pub async fn auth_config(&self) -> rusqlite::Result<AuthConfig> {
+        self.call(|response| DbCommand::AuthConfig { response })
+            .await
+    }
+
+    pub async fn auth_config_view(&self) -> rusqlite::Result<AuthConfigView> {
+        let config = self.auth_config().await?;
         let login_enabled =
             !config.login_user.trim().is_empty() && !config.login_password.is_empty();
         Ok(AuthConfigView {
@@ -393,110 +444,315 @@ impl Database {
         })
     }
 
-    pub fn update_auth_config(&self, config: UpdateAuthConfig) -> rusqlite::Result<()> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        let updated = connection.execute(
-            "UPDATE config SET LOGIN_USER = ?1, LOGIN_PASSWORD = ?2",
-            params![config.login_user.trim(), config.login_password],
-        )?;
-        if updated == 0 {
-            connection.execute(
-                "INSERT INTO config (version, LOGIN_USER, LOGIN_PASSWORD) VALUES (1, ?1, ?2)",
-                params![config.login_user.trim(), config.login_password],
-            )?;
-        }
-        Ok(())
+    pub async fn update_auth_config(&self, config: UpdateAuthConfig) -> rusqlite::Result<()> {
+        self.call(|response| DbCommand::UpdateAuthConfig { config, response })
+            .await
     }
 
-    pub fn create_radio(&self, radio: NewRadio) -> rusqlite::Result<RadioConfig> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        connection.execute(
-            "INSERT INTO radios (NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                radio.name.trim(),
-                radio.rigctld_host.trim(),
-                radio.rigctld_port,
-                radio.poll_frequency,
-                radio.rigctld_timeout,
-                radio.winkeyer_enabled,
-                radio.winkeyer_serial_port.trim(),
-                DEFAULT_CW_MESSAGES
-            ],
-        )?;
-        select_radio(&connection, connection.last_insert_rowid())?
-            .ok_or(rusqlite::Error::QueryReturnedNoRows)
+    pub async fn create_radio(&self, radio: NewRadio) -> rusqlite::Result<RadioConfig> {
+        self.call(|response| DbCommand::CreateRadio { radio, response })
+            .await
     }
 
-    pub fn update_radio(&self, id: i64, radio: NewRadio) -> rusqlite::Result<Option<RadioConfig>> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        let updated = connection.execute(
-            "UPDATE radios SET NAME = ?1, RIGCTLD_HOST = ?2, RIGCTLD_PORT = ?3, POLL_FREQUENCY = ?4, RIGCTLD_TIMEOUT = ?5, WINKEYER_ENABLED = ?6, WINKEYER_SERIAL_PORT = ?7 WHERE ID = ?8",
-            params![
-                radio.name.trim(),
-                radio.rigctld_host.trim(),
-                radio.rigctld_port,
-                radio.poll_frequency,
-                radio.rigctld_timeout,
-                radio.winkeyer_enabled,
-                radio.winkeyer_serial_port.trim(),
-                id
-            ],
-        )?;
-        if updated == 0 {
-            return Ok(None);
-        }
-        select_radio(&connection, id)
+    pub async fn update_radio(
+        &self,
+        id: i64,
+        radio: NewRadio,
+    ) -> rusqlite::Result<Option<RadioConfig>> {
+        self.call(|response| DbCommand::UpdateRadio {
+            id,
+            radio,
+            response,
+        })
+        .await
     }
 
-    pub fn delete_radio(&self, id: i64) -> rusqlite::Result<bool> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        Ok(connection.execute("DELETE FROM radios WHERE ID = ?1", params![id])? > 0)
+    pub async fn delete_radio(&self, id: i64) -> rusqlite::Result<bool> {
+        self.call(|response| DbCommand::DeleteRadio { id, response })
+            .await
     }
 
-    pub fn contacts(&self, log_id: i64) -> rusqlite::Result<Vec<Contact>> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        let mut statement = connection.prepare(
-            "SELECT * FROM qsos WHERE LOG_ID = ?1 ORDER BY QSO_DATE_TIME_ON DESC, ID DESC",
-        )?;
-        let rows = statement.query_map(params![log_id], row_to_contact)?;
-        rows.collect()
+    pub async fn contacts(&self, log_id: i64) -> rusqlite::Result<Vec<Contact>> {
+        self.call(|response| DbCommand::Contacts { log_id, response })
+            .await
     }
 
-    pub fn upsert_contacts(
+    pub async fn upsert_contacts(
         &self,
         log_id: i64,
         contacts: Vec<Contact>,
     ) -> rusqlite::Result<Vec<Contact>> {
-        let mut connection = self.connection.lock().expect("database mutex poisoned");
-        let transaction = connection.transaction()?;
-        let mut committed = Vec::with_capacity(contacts.len());
+        self.call(|response| DbCommand::UpsertContacts {
+            log_id,
+            contacts,
+            response,
+        })
+        .await
+    }
 
-        for mut contact in contacts {
-            contact.insert("_log_id".to_string(), Value::Number(log_id.into()));
-            let id = upsert_contact(&transaction, contact)?;
-            if let Some(saved) = select_contact(&transaction, id)? {
-                committed.push(saved);
+    pub async fn contact_log_id(&self, id: i64) -> rusqlite::Result<Option<i64>> {
+        self.call(|response| DbCommand::ContactLogId { id, response })
+            .await
+    }
+
+    pub async fn delete_contact(&self, id: i64) -> rusqlite::Result<Option<i64>> {
+        self.call(|response| DbCommand::DeleteContact { id, response })
+            .await
+    }
+}
+
+fn database_worker_unavailable() -> rusqlite::Error {
+    rusqlite::Error::InvalidParameterName("database worker unavailable".to_string())
+}
+
+fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbCommand>) {
+    while let Some(command) = commands.blocking_recv() {
+        match command {
+            DbCommand::Logs { response } => {
+                let _ = response.send(db_logs(&connection));
+            }
+            DbCommand::Log { id, response } => {
+                let _ = response.send(select_log(&connection, id));
+            }
+            DbCommand::CreateLog { log, response } => {
+                let _ = response.send(db_create_log(&connection, log));
+            }
+            DbCommand::UpdateLog { id, log, response } => {
+                let _ = response.send(db_update_log(&connection, id, log));
+            }
+            DbCommand::DeleteLog { id, response } => {
+                let _ = response.send(db_delete_log(&connection, id));
+            }
+            DbCommand::Radios { response } => {
+                let _ = response.send(db_radios(&connection));
+            }
+            DbCommand::Radio { id, response } => {
+                let _ = response.send(select_radio(&connection, id));
+            }
+            DbCommand::AuthConfig { response } => {
+                let _ = response.send(db_auth_config(&connection));
+            }
+            DbCommand::UpdateAuthConfig { config, response } => {
+                let _ = response.send(db_update_auth_config(&connection, config));
+            }
+            DbCommand::CreateRadio { radio, response } => {
+                let _ = response.send(db_create_radio(&connection, radio));
+            }
+            DbCommand::UpdateRadio {
+                id,
+                radio,
+                response,
+            } => {
+                let _ = response.send(db_update_radio(&connection, id, radio));
+            }
+            DbCommand::DeleteRadio { id, response } => {
+                let _ = response.send(db_delete_radio(&connection, id));
+            }
+            DbCommand::Contacts { log_id, response } => {
+                let _ = response.send(db_contacts(&connection, log_id));
+            }
+            DbCommand::UpsertContacts {
+                log_id,
+                contacts,
+                response,
+            } => {
+                let _ = response.send(db_upsert_contacts(&mut connection, log_id, contacts));
+            }
+            DbCommand::ContactLogId { id, response } => {
+                let _ = response.send(select_contact_log_id(&connection, id));
+            }
+            DbCommand::DeleteContact { id, response } => {
+                let _ = response.send(db_delete_contact(&connection, id));
             }
         }
+    }
+}
 
-        transaction.commit()?;
-        Ok(committed)
+fn db_logs(connection: &Connection) -> rusqlite::Result<Vec<Log>> {
+    let mut statement = connection.prepare(
+        "SELECT ID, NAME, CONTEST_ID, STATION_CALLSIGN, CONTEST_PARAMS_JSON FROM logs ORDER BY NAME, ID",
+    )?;
+    let rows = statement.query_map([], row_to_log)?;
+    rows.collect()
+}
+
+fn db_create_log(connection: &Connection, log: NewLog) -> rusqlite::Result<Log> {
+    connection.execute(
+        "INSERT INTO logs (NAME, CONTEST_ID, STATION_CALLSIGN, CONTEST_PARAMS_JSON) VALUES (?1, ?2, ?3, ?4)",
+        params![
+            log.name.trim(),
+            log.contest_id.trim(),
+            log.station_callsign.trim().to_uppercase(),
+            log.contest_params.to_string()
+        ],
+    )?;
+    select_log(connection, connection.last_insert_rowid())?
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)
+}
+
+fn db_update_log(
+    connection: &Connection,
+    id: i64,
+    log: UpdateLog,
+) -> rusqlite::Result<Option<Log>> {
+    let updated = connection.execute(
+        "UPDATE logs SET NAME = ?1, STATION_CALLSIGN = ?2 WHERE ID = ?3",
+        params![
+            log.name.trim(),
+            log.station_callsign.trim().to_uppercase(),
+            id
+        ],
+    )?;
+    if updated == 0 {
+        return Ok(None);
+    }
+    select_log(connection, id)
+}
+
+fn db_delete_log(connection: &Connection, id: i64) -> rusqlite::Result<bool> {
+    let qso_count: i64 = connection.query_row(
+        "SELECT COUNT(*) FROM qsos WHERE LOG_ID = ?1",
+        params![id],
+        |row| row.get(0),
+    )?;
+    if qso_count > 0 {
+        return Err(rusqlite::Error::InvalidQuery);
+    }
+    Ok(connection.execute("DELETE FROM logs WHERE ID = ?1", params![id])? > 0)
+}
+
+fn db_radios(connection: &Connection) -> rusqlite::Result<Vec<RadioConfig>> {
+    let mut statement = connection.prepare(
+        "SELECT ID, NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES FROM radios ORDER BY ID",
+    )?;
+    let rows = statement.query_map([], row_to_radio)?;
+    rows.collect()
+}
+
+fn db_auth_config(connection: &Connection) -> rusqlite::Result<AuthConfig> {
+    match connection
+        .query_row(
+            "SELECT LOGIN_USER, LOGIN_PASSWORD FROM config LIMIT 1",
+            [],
+            |row| {
+                Ok(AuthConfig {
+                    login_user: row.get(0)?,
+                    login_password: row.get(1)?,
+                })
+            },
+        )
+        .optional()
+    {
+        Ok(Some(config)) => Ok(config),
+        Ok(None) => Ok(AuthConfig {
+            login_user: String::new(),
+            login_password: String::new(),
+        }),
+        Err(error) if is_missing_config_column(&error) => Ok(AuthConfig {
+            login_user: String::new(),
+            login_password: String::new(),
+        }),
+        Err(error) => Err(error),
+    }
+}
+
+fn db_update_auth_config(
+    connection: &Connection,
+    config: UpdateAuthConfig,
+) -> rusqlite::Result<()> {
+    let updated = connection.execute(
+        "UPDATE config SET LOGIN_USER = ?1, LOGIN_PASSWORD = ?2",
+        params![config.login_user.trim(), config.login_password],
+    )?;
+    if updated == 0 {
+        connection.execute(
+            "INSERT INTO config (version, LOGIN_USER, LOGIN_PASSWORD) VALUES (1, ?1, ?2)",
+            params![config.login_user.trim(), config.login_password],
+        )?;
+    }
+    Ok(())
+}
+
+fn db_create_radio(connection: &Connection, radio: NewRadio) -> rusqlite::Result<RadioConfig> {
+    connection.execute(
+        "INSERT INTO radios (NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            radio.name.trim(),
+            radio.rigctld_host.trim(),
+            radio.rigctld_port,
+            radio.poll_frequency,
+            radio.rigctld_timeout,
+            radio.winkeyer_enabled,
+            radio.winkeyer_serial_port.trim(),
+            DEFAULT_CW_MESSAGES
+        ],
+    )?;
+    select_radio(connection, connection.last_insert_rowid())?
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)
+}
+
+fn db_update_radio(
+    connection: &Connection,
+    id: i64,
+    radio: NewRadio,
+) -> rusqlite::Result<Option<RadioConfig>> {
+    let updated = connection.execute(
+        "UPDATE radios SET NAME = ?1, RIGCTLD_HOST = ?2, RIGCTLD_PORT = ?3, POLL_FREQUENCY = ?4, RIGCTLD_TIMEOUT = ?5, WINKEYER_ENABLED = ?6, WINKEYER_SERIAL_PORT = ?7 WHERE ID = ?8",
+        params![
+            radio.name.trim(),
+            radio.rigctld_host.trim(),
+            radio.rigctld_port,
+            radio.poll_frequency,
+            radio.rigctld_timeout,
+            radio.winkeyer_enabled,
+            radio.winkeyer_serial_port.trim(),
+            id
+        ],
+    )?;
+    if updated == 0 {
+        return Ok(None);
+    }
+    select_radio(connection, id)
+}
+
+fn db_delete_radio(connection: &Connection, id: i64) -> rusqlite::Result<bool> {
+    Ok(connection.execute("DELETE FROM radios WHERE ID = ?1", params![id])? > 0)
+}
+
+fn db_contacts(connection: &Connection, log_id: i64) -> rusqlite::Result<Vec<Contact>> {
+    let mut statement = connection
+        .prepare("SELECT * FROM qsos WHERE LOG_ID = ?1 ORDER BY QSO_DATE_TIME_ON DESC, ID DESC")?;
+    let rows = statement.query_map(params![log_id], row_to_contact)?;
+    rows.collect()
+}
+
+fn db_upsert_contacts(
+    connection: &mut Connection,
+    log_id: i64,
+    contacts: Vec<Contact>,
+) -> rusqlite::Result<Vec<Contact>> {
+    let transaction = connection.transaction()?;
+    let mut committed = Vec::with_capacity(contacts.len());
+
+    for mut contact in contacts {
+        contact.insert("_log_id".to_string(), Value::Number(log_id.into()));
+        let id = upsert_contact(&transaction, contact)?;
+        if let Some(saved) = select_contact(&transaction, id)? {
+            committed.push(saved);
+        }
     }
 
-    pub fn contact_log_id(&self, id: i64) -> rusqlite::Result<Option<i64>> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        select_contact_log_id(&connection, id)
-    }
+    transaction.commit()?;
+    Ok(committed)
+}
 
-    pub fn delete_contact(&self, id: i64) -> rusqlite::Result<Option<i64>> {
-        let connection = self.connection.lock().expect("database mutex poisoned");
-        let Some(log_id) = select_contact_log_id(&connection, id)? else {
-            return Ok(None);
-        };
+fn db_delete_contact(connection: &Connection, id: i64) -> rusqlite::Result<Option<i64>> {
+    let Some(log_id) = select_contact_log_id(connection, id)? else {
+        return Ok(None);
+    };
 
-        let deleted = connection.execute("DELETE FROM qsos WHERE ID = ?1", params![id])? > 0;
-        Ok(deleted.then_some(log_id))
-    }
+    let deleted = connection.execute("DELETE FROM qsos WHERE ID = ?1", params![id])? > 0;
+    Ok(deleted.then_some(log_id))
 }
 
 fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
@@ -853,7 +1109,7 @@ mod tests {
         Database::open(":memory:").expect("in-memory database opens")
     }
 
-    fn create_test_log(database: &Database) -> Log {
+    async fn create_test_log(database: &Database) -> Log {
         database
             .create_log(NewLog {
                 name: "Test log".to_string(),
@@ -861,6 +1117,7 @@ mod tests {
                 station_callsign: "N0CALL".to_string(),
                 contest_params: Value::Object(Map::new()),
             })
+            .await
             .expect("test log is created")
     }
 
@@ -875,13 +1132,14 @@ mod tests {
         ])
     }
 
-    #[test]
-    fn upsert_contacts_inserts_contact() {
+    #[tokio::test]
+    async fn upsert_contacts_inserts_contact() {
         let database = test_database();
-        let log = create_test_log(&database);
+        let log = create_test_log(&database).await;
 
         let saved = database
             .upsert_contacts(log.id, vec![base_contact()])
+            .await
             .expect("contact is inserted");
 
         assert_eq!(saved.len(), 1);
@@ -892,16 +1150,20 @@ mod tests {
         );
         assert_eq!(saved[0].get("CALL").and_then(Value::as_str), Some("K1ABC"));
 
-        let contacts = database.contacts(log.id).expect("contacts are listed");
+        let contacts = database
+            .contacts(log.id)
+            .await
+            .expect("contacts are listed");
         assert_eq!(contacts.len(), 1);
     }
 
-    #[test]
-    fn upsert_contacts_updates_existing_contact() {
+    #[tokio::test]
+    async fn upsert_contacts_updates_existing_contact() {
         let database = test_database();
-        let log = create_test_log(&database);
+        let log = create_test_log(&database).await;
         let inserted = database
             .upsert_contacts(log.id, vec![base_contact()])
+            .await
             .expect("contact is inserted");
         let contact_id = inserted[0]
             .get("_id")
@@ -915,6 +1177,7 @@ mod tests {
 
         let updated = database
             .upsert_contacts(log.id, vec![updated_contact])
+            .await
             .expect("contact is updated");
 
         assert_eq!(updated.len(), 1);
@@ -931,7 +1194,10 @@ mod tests {
             Some("updated")
         );
 
-        let contacts = database.contacts(log.id).expect("contacts are listed");
+        let contacts = database
+            .contacts(log.id)
+            .await
+            .expect("contacts are listed");
         assert_eq!(contacts.len(), 1);
         assert_eq!(
             contacts[0].get("CALL").and_then(Value::as_str),
@@ -939,29 +1205,37 @@ mod tests {
         );
     }
 
-    #[test]
-    fn upsert_contacts_treats_sql_like_values_as_data() {
+    #[tokio::test]
+    async fn upsert_contacts_treats_sql_like_values_as_data() {
         let database = test_database();
-        let log = create_test_log(&database);
+        let log = create_test_log(&database).await;
         let mut contact = base_contact();
         let sql_like_call = "K1ABC'); DROP TABLE logs; --";
         contact.insert("CALL".to_string(), json!(sql_like_call));
 
         let saved = database
             .upsert_contacts(log.id, vec![contact])
+            .await
             .expect("contact with sql-like value is inserted");
 
         assert_eq!(
             saved[0].get("CALL").and_then(Value::as_str),
             Some(sql_like_call)
         );
-        assert_eq!(database.logs().expect("logs table still exists").len(), 1);
+        assert_eq!(
+            database
+                .logs()
+                .await
+                .expect("logs table still exists")
+                .len(),
+            1
+        );
     }
 
-    #[test]
-    fn upsert_contacts_rejects_existing_contact_id_from_different_log() {
+    #[tokio::test]
+    async fn upsert_contacts_rejects_existing_contact_id_from_different_log() {
         let database = test_database();
-        let first_log = create_test_log(&database);
+        let first_log = create_test_log(&database).await;
         let second_log = database
             .create_log(NewLog {
                 name: "Second test log".to_string(),
@@ -969,9 +1243,11 @@ mod tests {
                 station_callsign: "N0CALL".to_string(),
                 contest_params: Value::Object(Map::new()),
             })
+            .await
             .expect("second test log is created");
         let inserted = database
             .upsert_contacts(first_log.id, vec![base_contact()])
+            .await
             .expect("contact is inserted");
         let contact_id = inserted[0]
             .get("_id")
@@ -984,11 +1260,13 @@ mod tests {
 
         let error = database
             .upsert_contacts(second_log.id, vec![attempted_update])
+            .await
             .expect_err("cross-log overwrite should be rejected");
         assert!(error.to_string().contains("belongs to log"));
 
         let first_log_contacts = database
             .contacts(first_log.id)
+            .await
             .expect("first-log contacts are listed");
         assert_eq!(first_log_contacts.len(), 1);
         assert_eq!(
@@ -998,6 +1276,7 @@ mod tests {
 
         let second_log_contacts = database
             .contacts(second_log.id)
+            .await
             .expect("second-log contacts are listed");
         assert!(second_log_contacts.is_empty());
     }
