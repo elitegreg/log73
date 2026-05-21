@@ -3,13 +3,20 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { apiJson, websocketUrl } from '../lib/api';
 import LogWindow from '../logger/LogWindow';
 import MainWindow from '../logger/MainWindow';
-
-const CONTACTS_STORAGE_KEY = 'log73.contacts';
-const SESSION_STORAGE_KEY = 'log73.session_id';
-const BACKEND_WS_INITIAL_RECONNECT_DELAY_MS = 2000;
-const BACKEND_WS_MAX_RECONNECT_DELAY_MS = 16000;
-const CONTACTS_LOAD_INITIAL_RETRY_DELAY_MS = 2000;
-const CONTACTS_LOAD_MAX_RETRY_DELAY_MS = 16000;
+import {
+  BACKEND_WS_INITIAL_RECONNECT_DELAY_MS,
+  BACKEND_WS_MAX_RECONNECT_DELAY_MS,
+  CONTACTS_LOAD_INITIAL_RETRY_DELAY_MS,
+  CONTACTS_LOAD_MAX_RETRY_DELAY_MS,
+  getSessionId,
+  loadLocalContacts,
+  saveLocalContacts,
+  committedBackendContact,
+  mergeContact,
+  sortContacts,
+  markContactFailed,
+  contactIdentifier,
+} from './loggerScreenHelpers';
 
 let promptedOperatorCallsign;
 
@@ -20,96 +27,6 @@ function promptForOperatorCallsign(defaultCallsign) {
   return promptedOperatorCallsign;
 }
 
-function contactSortValue(contact) {
-  if (typeof contact.QSO_DATE_TIME_ON === 'number') return contact.QSO_DATE_TIME_ON;
-  if (typeof contact._time_on_epoch === 'number') return contact._time_on_epoch;
-  const date = String(contact.QSO_DATE ?? '');
-  const time = String(contact.TIME_ON ?? '');
-  const parsed = Date.UTC(
-    Number.parseInt(date.slice(0, 4), 10),
-    Number.parseInt(date.slice(4, 6), 10) - 1,
-    Number.parseInt(date.slice(6, 8), 10),
-    Number.parseInt(time.slice(0, 2), 10),
-    Number.parseInt(time.slice(2, 4), 10),
-    Number.parseInt(time.slice(4, 6), 10),
-  );
-  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
-}
-
-function sortContacts(contacts) { return [...contacts].sort((a, b) => contactSortValue(b) - contactSortValue(a)); }
-
-function normalizeContact(contact) {
-  const nextContact = { ...contact };
-  if (nextContact._status === 'Committed') delete nextContact._client_id;
-  if (typeof nextContact.QSO_DATE_TIME_ON !== 'number') {
-    const epoch = contactSortValue(nextContact);
-    if (epoch > 0) nextContact.QSO_DATE_TIME_ON = epoch;
-  }
-  if (nextContact.FREQ !== undefined) {
-    const frequency = Number.parseFloat(String(nextContact.FREQ));
-    if (Number.isFinite(frequency)) nextContact.FREQ = Math.round(Math.abs(frequency) < 1000000 ? frequency * 1000000 : frequency);
-  }
-  delete nextContact.QSO_DATE;
-  delete nextContact.TIME_ON;
-  delete nextContact._time_on_epoch;
-  return nextContact;
-}
-
-function shouldPersistLocally(contact) { return contact._status === 'Pending' || contact._status === 'Updating' || contact._status === 'Failed'; }
-function contactStorageKey(logId) { return `${CONTACTS_STORAGE_KEY}.${logId}`; }
-
-function loadLocalContacts(logId) {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(contactStorageKey(logId)) ?? '[]');
-    return Array.isArray(parsed) ? sortContacts(parsed.map(normalizeContact).filter(shouldPersistLocally)) : [];
-  } catch (error) {
-    console.error('Unable to load locally stored contacts', error);
-    return [];
-  }
-}
-
-function saveLocalContacts(logId, contacts) {
-  localStorage.setItem(contactStorageKey(logId), JSON.stringify(contacts.filter(shouldPersistLocally)));
-}
-
-function committedBackendContact(contact) { return normalizeContact({ ...contact, _status: contact._status ?? 'Committed' }); }
-function createSessionId() { return window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
-function getSessionId() {
-  const existingSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
-  if (existingSessionId) return existingSessionId;
-  const sessionId = createSessionId();
-  localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
-  return sessionId;
-}
-
-function contactMatches(left, right) {
-  if (left._id !== undefined && right._id !== undefined) return String(left._id) === String(right._id);
-  if (left._client_id && right._client_id) return left._client_id === right._client_id;
-  return false;
-}
-
-function contactIdentifier(contact) {
-  if (contact._id !== undefined) return `id:${contact._id}`;
-  if (contact._client_id) return `client:${contact._client_id}`;
-  return null;
-}
-
-function mergeContact(contacts, contact) {
-  const committedContact = committedBackendContact(contact);
-  const index = contacts.findIndex((currentContact) => contactMatches(currentContact, contact));
-  if (index === -1) return sortContacts([...contacts, committedContact]);
-  const nextContacts = [...contacts];
-  nextContacts[index] = { ...nextContacts[index], ...committedContact, _error: undefined };
-  return sortContacts(nextContacts);
-}
-
-function markContactFailed(contacts, failedContact, error) {
-  return sortContacts(contacts.map((contact) => (
-    contactMatches(contact, failedContact)
-      ? { ...contact, _status: 'Failed', _error: error }
-      : contact
-  )));
-}
 
 function LoggerScreen() {
   const { logId, radioId } = useParams();
