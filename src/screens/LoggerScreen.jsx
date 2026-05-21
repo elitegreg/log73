@@ -8,6 +8,9 @@ import {
   BACKEND_WS_MAX_RECONNECT_DELAY_MS,
   CONTACTS_LOAD_INITIAL_RETRY_DELAY_MS,
   CONTACTS_LOAD_MAX_RETRY_DELAY_MS,
+  CONTACT_COMMIT_RETRY_DELAY_MS,
+  DEFAULT_RADIO_STATE,
+  EMPTY_SCORE_SUMMARY,
   getSessionId,
   loadLocalContacts,
   saveLocalContacts,
@@ -41,9 +44,9 @@ function LoggerScreen() {
   const [contacts, setContacts] = useState(() => loadLocalContacts(logId));
   const [operatorCallsign, setOperatorCallsign] = useState('');
   const [sessionId] = useState(getSessionId);
-  const [radioState, setRadioState] = useState({ mode: 'CW', frequency_hz: 14025000 });
+  const [radioState, setRadioState] = useState(DEFAULT_RADIO_STATE);
   const [backendSocketStatus, setBackendSocketStatus] = useState('disconnected');
-  const [scoreSummary, setScoreSummary] = useState({ qsoCount: 0, multipliers: 0, bonusPoints: 0, score: 0 });
+  const [scoreSummary, setScoreSummary] = useState(EMPTY_SCORE_SUMMARY);
   const backendSocketRef = useRef(null);
   const committingContactIdsRef = useRef(new Set());
   const refreshContactsRef = useRef(() => {});
@@ -51,7 +54,7 @@ function LoggerScreen() {
   useEffect(() => { saveLocalContacts(logId, contacts); }, [contacts, logId]);
 
   useEffect(() => {
-    setScoreSummary({ qsoCount: 0, multipliers: 0, bonusPoints: 0, score: 0 });
+    setScoreSummary(EMPTY_SCORE_SUMMARY);
   }, [numericLogId]);
 
   useEffect(() => {
@@ -232,7 +235,10 @@ function LoggerScreen() {
         }
       } catch (error) {
         console.error('Unable to commit contact', error);
-        window.setTimeout(() => setContacts((currentContacts) => sortContacts(currentContacts)), 5000);
+        window.setTimeout(
+          () => setContacts((currentContacts) => sortContacts(currentContacts)),
+          CONTACT_COMMIT_RETRY_DELAY_MS,
+        );
       } finally {
         committingContactIdsRef.current.delete(commitKey);
       }

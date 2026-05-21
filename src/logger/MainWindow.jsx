@@ -6,6 +6,17 @@ import { supercheckpartial } from '../lib/api';
 import {
   CW_WPM_STORAGE_KEY,
   DEFAULT_CW_LABELS,
+  DEFAULT_CW_WPM,
+  CW_WPM_MIN,
+  CW_WPM_MAX,
+  DEFAULT_RADIO_FREQUENCY_HZ,
+  SUPERCHECKPARTIAL_MIN_QUERY_LENGTH,
+  CW_ACTIVE_TIMEOUT_WIKEYER_MS,
+  CW_ACTIVE_TIMEOUT_NO_WIKEYER_MS,
+  CW_REPEAT_DELAY_MS,
+  FUNCTION_KEY_PATTERN,
+  HZ_PER_KHZ,
+  EPOCH_MS_PER_SECOND,
   exchangeDefaults,
   formatFrequency,
   isFrequencyInput,
@@ -53,7 +64,7 @@ function MainWindow({
   const [supercheckpartialMatches, setSupercheckpartialMatches] = useState([]);
   const [cwWpm, setCwWpm] = useState(() => {
     const storedWpm = Number.parseInt(localStorage.getItem(CW_WPM_STORAGE_KEY) ?? '', 10);
-    return Number.isFinite(storedWpm) ? storedWpm : 20;
+    return Number.isFinite(storedWpm) ? storedWpm : DEFAULT_CW_WPM;
   });
   const callSignRef = useRef(null);
   const setCwWpmRef = useRef(onSetCwWpm);
@@ -68,7 +79,7 @@ function MainWindow({
   const exchangeInputRefs = useRef({});
   const callSignEditedAtRef = useRef(new Date());
   const radioMode = radioState?.mode ?? 'CW';
-  const radioFrequencyHz = radioState?.frequency_hz ?? 14025000;
+  const radioFrequencyHz = radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
   const allowedBands = settings?.allowed_bands ?? [];
   const currentBand = bandForFrequency(radioFrequencyHz);
   const currentBandValue = currentBand ? String(currentBand.meters) : 'unknown';
@@ -139,7 +150,7 @@ function MainWindow({
     }
 
     const query = callSign.trim().toUpperCase();
-    if (query.length < 3) {
+    if (query.length < SUPERCHECKPARTIAL_MIN_QUERY_LENGTH) {
       setSupercheckpartialMatches([]);
       return;
     }
@@ -184,7 +195,7 @@ function MainWindow({
   function markCwKeyActive(requestId, key) {
     activeCwRequestsRef.current.set(requestId, key);
     setActiveCwKeys((current) => new Set(current).add(key));
-    const timeoutMs = radio?.winkeyer_enabled ? 30000 : 500;
+    const timeoutMs = radio?.winkeyer_enabled ? CW_ACTIVE_TIMEOUT_WIKEYER_MS : CW_ACTIVE_TIMEOUT_NO_WIKEYER_MS;
     const timeoutId = window.setTimeout(() => clearCwRequest(requestId), timeoutMs);
     activeCwTimeoutsRef.current.set(requestId, timeoutId);
   }
@@ -266,7 +277,7 @@ function MainWindow({
         return;
       }
       repeatSendRunF1Ref.current();
-    }, 2000);
+    }, CW_REPEAT_DELAY_MS);
   }, [cwSentEvent]);
 
   useEffect(() => {
@@ -277,7 +288,7 @@ function MainWindow({
         stopCwSending();
         return;
       }
-      if (/^F([1-9]|1[0-2])$/.test(event.key)) {
+      if (FUNCTION_KEY_PATTERN.test(event.key)) {
         event.preventDefault();
         sendCwKey(event.key);
       }
@@ -348,7 +359,7 @@ function MainWindow({
     const timeOn = callSignEditedAtRef.current;
     const normalizedCallSign = callSign.trim().toUpperCase();
     const contact = {
-      QSO_DATE_TIME_ON: Math.floor(timeOn.getTime() / 1000),
+      QSO_DATE_TIME_ON: Math.floor(timeOn.getTime() / EPOCH_MS_PER_SECOND),
       STATION_CALLSIGN: stationCallsign,
       OPERATOR: operatorCallsign,
       CONTEST_ID: settings.contest,
@@ -415,7 +426,7 @@ function MainWindow({
 
     if (event.key === 'Enter' && isFrequencyInput(value)) {
       event.preventDefault();
-      onSetRadioFrequency?.(Math.round(Number.parseFloat(value) * 1000));
+      onSetRadioFrequency?.(Math.round(Number.parseFloat(value) * HZ_PER_KHZ));
       setCallSign('');
       return;
     }
@@ -448,10 +459,10 @@ function MainWindow({
   function handleCwWpmChange(event) {
     const wpm = Number.parseInt(event.target.value, 10);
     if (!Number.isFinite(wpm)) {
-      setCwWpm(20);
+      setCwWpm(DEFAULT_CW_WPM);
       return;
     }
-    setCwWpm(Math.min(Math.max(wpm, 5), 60));
+    setCwWpm(Math.min(Math.max(wpm, CW_WPM_MIN), CW_WPM_MAX));
   }
 
   function handleQrzClick() {
@@ -482,6 +493,8 @@ function MainWindow({
         radioMode={radioMode}
         onSetRadioMode={onSetRadioMode}
         cwWpm={cwWpm}
+        cwWpmMin={CW_WPM_MIN}
+        cwWpmMax={CW_WPM_MAX}
         handleCwWpmChange={handleCwWpmChange}
         backendSocketStatus={backendSocketStatus}
       />

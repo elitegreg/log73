@@ -12,6 +12,8 @@ function RadioControls({
   radioMode,
   onSetRadioMode,
   cwWpm,
+  cwWpmMin,
+  cwWpmMax,
   handleCwWpmChange,
   backendSocketStatus,
 }) {
@@ -48,7 +50,7 @@ function RadioControls({
       {radioMode === 'CW' && (
         <label className="radio-control cw-wpm-control">
           CW WPM:
-          <input type="number" min="5" max="60" step="1" value={cwWpm} onChange={handleCwWpmChange} />
+          <input type="number" min={cwWpmMin} max={cwWpmMax} step="1" value={cwWpm} onChange={handleCwWpmChange} />
         </label>
       )}
       <div className="backend-socket-status" title={`Server ${backendSocketStatus}`}>

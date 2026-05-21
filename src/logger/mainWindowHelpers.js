@@ -1,9 +1,24 @@
+import { fieldDefault } from '../domain/contactFields';
+
 export const MODE_OPTIONS = ['CW', 'SSB', 'FM'];
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
 export const DEFAULT_CW_LABELS = {
   run: Array.from({ length: 12 }, (_, index) => ({ key: `F${index + 1}`, label: '-' })),
   's&p': Array.from({ length: 12 }, (_, index) => ({ key: `F${index + 1}`, label: '-' })),
 };
+
+export const DEFAULT_CW_WPM = 20;
+export const CW_WPM_MIN = 5;
+export const CW_WPM_MAX = 60;
+export const CW_WPM_STEP = 1;
+export const DEFAULT_RADIO_FREQUENCY_HZ = 14000000;
+export const SUPERCHECKPARTIAL_MIN_QUERY_LENGTH = 3;
+export const CW_ACTIVE_TIMEOUT_WIKEYER_MS = 30000;
+export const CW_ACTIVE_TIMEOUT_NO_WIKEYER_MS = 500;
+export const CW_REPEAT_DELAY_MS = 2000;
+export const FUNCTION_KEY_PATTERN = /^F([1-9]|1[0-2])$/;
+export const HZ_PER_KHZ = 1000;
+export const EPOCH_MS_PER_SECOND = 1000;
 export const CALLSIGN_FIELD_WIDTH_CHARS = 13;
 
 const AMATEUR_BANDS = [
@@ -28,7 +43,7 @@ export function exchangeDefaults(settings, radioMode, contestParams = {}) {
 }
 
 export function formatFrequency(frequencyHz) {
-  return Math.round(frequencyHz / 1000);
+  return Math.round(frequencyHz / HZ_PER_KHZ);
 }
 
 export function isFrequencyInput(value) {
@@ -60,5 +75,3 @@ export function createCwRequestId() {
 export function isEmptyCwButton(button) {
   return String(button?.label ?? '').trim() === '-';
 }
-
-import { fieldDefault } from '../domain/contactFields';

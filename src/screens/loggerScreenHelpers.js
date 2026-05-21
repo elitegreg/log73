@@ -4,6 +4,9 @@ export const BACKEND_WS_INITIAL_RECONNECT_DELAY_MS = 2000;
 export const BACKEND_WS_MAX_RECONNECT_DELAY_MS = 16000;
 export const CONTACTS_LOAD_INITIAL_RETRY_DELAY_MS = 2000;
 export const CONTACTS_LOAD_MAX_RETRY_DELAY_MS = 16000;
+export const CONTACT_COMMIT_RETRY_DELAY_MS = 5000;
+export const DEFAULT_RADIO_STATE = { mode: 'CW', frequency_hz: 14000000 };
+export const EMPTY_SCORE_SUMMARY = { qsoCount: 0, multipliers: 0, bonusPoints: 0, score: 0 };
 
 export function contactSortValue(contact) {
   if (typeof contact.QSO_DATE_TIME_ON === 'number') return contact.QSO_DATE_TIME_ON;
