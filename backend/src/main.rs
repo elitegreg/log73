@@ -654,20 +654,50 @@ async fn delete_radio(
     }
 }
 
+const DEFAULT_CONTACTS_PAGE_LIMIT: usize = 200;
+const MAX_CONTACTS_PAGE_LIMIT: usize = 1000;
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct ContactsQuery {
+    limit: Option<usize>,
+    offset: Option<usize>,
+}
+
+fn contacts_page(query: &ContactsQuery) -> Option<(usize, usize)> {
+    if query.limit.is_none() && query.offset.is_none() {
+        return None;
+    }
+
+    let limit = query
+        .limit
+        .unwrap_or(DEFAULT_CONTACTS_PAGE_LIMIT)
+        .clamp(1, MAX_CONTACTS_PAGE_LIMIT);
+    let offset = query.offset.unwrap_or(0);
+
+    Some((limit, offset))
+}
+
 async fn contacts(
     State(app_state): State<AppState>,
     Path(log_id): Path<i64>,
+    Query(query): Query<ContactsQuery>,
 ) -> Json<Vec<Contact>> {
-    match scored_contacts_for_log(&app_state, log_id) {
-        Ok(scored_log) => {
-            send_score_update(&app_state, log_id, &scored_log.totals);
-            Json(scored_log.contacts)
-        }
-        Err(error) => {
-            error!(log_id, %error, "failed to load contacts");
-            Json(Vec::new())
-        }
+    if let Err(error) = ensure_score_tracker_for_log(&app_state, log_id) {
+        error!(log_id, %error, "failed to load contacts");
+        return Json(Vec::new());
     }
+
+    let contacts = match contacts_page(&query) {
+        Some((limit, offset)) => app_state
+            .score_tracker
+            .contacts_display_page(log_id, offset, limit),
+        None => app_state
+            .score_tracker
+            .contacts_display_page(log_id, 0, usize::MAX),
+    };
+    let totals = app_state.score_tracker.totals(log_id).unwrap_or_default();
+    send_score_update(&app_state, log_id, &totals);
+    Json(contacts)
 }
 
 async fn commit_contact(

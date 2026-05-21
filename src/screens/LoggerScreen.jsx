@@ -8,6 +8,7 @@ import {
   BACKEND_WS_MAX_RECONNECT_DELAY_MS,
   CONTACTS_LOAD_INITIAL_RETRY_DELAY_MS,
   CONTACTS_LOAD_MAX_RETRY_DELAY_MS,
+  CONTACTS_PAGE_SIZE,
   CONTACT_COMMIT_RETRY_DELAY_MS,
   DEFAULT_RADIO_STATE,
   EMPTY_SCORE_SUMMARY,
@@ -177,7 +178,21 @@ function LoggerScreen() {
 
     async function loadContacts() {
       try {
-        const backendContacts = (await apiJson(`/logs/${numericLogId}/contacts`)).map(committedBackendContact);
+        const backendContacts = [];
+        let offset = 0;
+
+        while (true) {
+          const page = await apiJson(
+            `/logs/${numericLogId}/contacts?limit=${CONTACTS_PAGE_SIZE}&offset=${offset}`,
+          );
+          const committedPage = page.map(committedBackendContact);
+          backendContacts.push(...committedPage);
+          if (committedPage.length < CONTACTS_PAGE_SIZE) {
+            break;
+          }
+          offset += CONTACTS_PAGE_SIZE;
+        }
+
         const localUncommittedContacts = loadLocalContacts(logId).filter((contact) => contact._status !== 'Committed');
         setContacts(sortContacts([...backendContacts, ...localUncommittedContacts]));
         shouldRetryContactsLoad = false;

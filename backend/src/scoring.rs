@@ -101,6 +101,30 @@ impl ContestScoreTracker {
             .unwrap_or_default()
     }
 
+    pub fn contacts_display_page(&self, log_id: i64, offset: usize, limit: usize) -> Vec<Contact> {
+        if limit == 0 {
+            return Vec::new();
+        }
+
+        let logs = self.logs.lock().expect("score tracker mutex poisoned");
+        let Some(score) = logs.get(&log_id) else {
+            return Vec::new();
+        };
+
+        let total = score.contacts.len();
+        if offset >= total {
+            return Vec::new();
+        }
+
+        let end_from_newest = offset.saturating_add(limit).min(total);
+        let start = total - end_from_newest;
+        let end = total - offset;
+
+        let mut page = score.contacts[start..end].to_vec();
+        page.reverse();
+        page
+    }
+
     pub fn can_append(&self, log_id: i64, contact: &Contact) -> bool {
         let logs = self.logs.lock().expect("score tracker mutex poisoned");
         let Some(score) = logs.get(&log_id) else {
