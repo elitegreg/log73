@@ -118,6 +118,156 @@ const INTEGER_COLUMNS: &[&str] = &[
     "TX_PWR",
 ];
 
+const INSERT_QSO_SQL: &str = r#"
+INSERT INTO qsos (
+    LOG_ID,
+    QSO_DATE_TIME_ON,
+    STATION_CALLSIGN,
+    OPERATOR,
+    CALL,
+    BAND,
+    FREQ,
+    MODE,
+    RST_SENT,
+    RST_RCVD,
+    ARRL_SECT,
+    CNTY,
+    CQZ,
+    DXCC,
+    GRIDSQUARE,
+    MY_CNTY,
+    MY_CQ_ZONE,
+    MY_GRIDSQUARE,
+    MY_STATE,
+    MY_ARRL_SECT,
+    SRX,
+    SRX_STRING,
+    STATE,
+    STX,
+    STX_STRING,
+    TX_PWR,
+    JSON
+) VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    ?8,
+    ?9,
+    ?10,
+    ?11,
+    ?12,
+    ?13,
+    ?14,
+    ?15,
+    ?16,
+    ?17,
+    ?18,
+    ?19,
+    ?20,
+    ?21,
+    ?22,
+    ?23,
+    ?24,
+    ?25,
+    ?26,
+    ?27
+)
+"#;
+
+const UPSERT_QSO_SQL: &str = r#"
+INSERT INTO qsos (
+    ID,
+    LOG_ID,
+    QSO_DATE_TIME_ON,
+    STATION_CALLSIGN,
+    OPERATOR,
+    CALL,
+    BAND,
+    FREQ,
+    MODE,
+    RST_SENT,
+    RST_RCVD,
+    ARRL_SECT,
+    CNTY,
+    CQZ,
+    DXCC,
+    GRIDSQUARE,
+    MY_CNTY,
+    MY_CQ_ZONE,
+    MY_GRIDSQUARE,
+    MY_STATE,
+    MY_ARRL_SECT,
+    SRX,
+    SRX_STRING,
+    STATE,
+    STX,
+    STX_STRING,
+    TX_PWR,
+    JSON
+) VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    ?8,
+    ?9,
+    ?10,
+    ?11,
+    ?12,
+    ?13,
+    ?14,
+    ?15,
+    ?16,
+    ?17,
+    ?18,
+    ?19,
+    ?20,
+    ?21,
+    ?22,
+    ?23,
+    ?24,
+    ?25,
+    ?26,
+    ?27,
+    ?28
+)
+ON CONFLICT(ID) DO UPDATE SET
+    LOG_ID = excluded.LOG_ID,
+    QSO_DATE_TIME_ON = excluded.QSO_DATE_TIME_ON,
+    STATION_CALLSIGN = excluded.STATION_CALLSIGN,
+    OPERATOR = excluded.OPERATOR,
+    CALL = excluded.CALL,
+    BAND = excluded.BAND,
+    FREQ = excluded.FREQ,
+    MODE = excluded.MODE,
+    RST_SENT = excluded.RST_SENT,
+    RST_RCVD = excluded.RST_RCVD,
+    ARRL_SECT = excluded.ARRL_SECT,
+    CNTY = excluded.CNTY,
+    CQZ = excluded.CQZ,
+    DXCC = excluded.DXCC,
+    GRIDSQUARE = excluded.GRIDSQUARE,
+    MY_CNTY = excluded.MY_CNTY,
+    MY_CQ_ZONE = excluded.MY_CQ_ZONE,
+    MY_GRIDSQUARE = excluded.MY_GRIDSQUARE,
+    MY_STATE = excluded.MY_STATE,
+    MY_ARRL_SECT = excluded.MY_ARRL_SECT,
+    SRX = excluded.SRX,
+    SRX_STRING = excluded.SRX_STRING,
+    STATE = excluded.STATE,
+    STX = excluded.STX,
+    STX_STRING = excluded.STX_STRING,
+    TX_PWR = excluded.TX_PWR,
+    JSON = excluded.JSON
+"#;
+
 #[derive(Clone)]
 pub struct Database {
     connection: Arc<Mutex<Connection>>,
@@ -493,37 +643,18 @@ fn select_contact(connection: &Connection, id: i64) -> rusqlite::Result<Option<C
 fn upsert_contact(connection: &Connection, contact: Contact) -> rusqlite::Result<i64> {
     let id = json_i64(contact.get("_id")).or_else(|| json_i64(contact.get("ID")));
     let values = contact_to_sql_values(&contact);
-    let placeholders = QSO_COLUMNS
-        .iter()
-        .map(|_| "?")
-        .collect::<Vec<_>>()
-        .join(", ");
-    let update_assignments = QSO_COLUMNS
-        .iter()
-        .map(|column| format!("{column} = excluded.{column}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let mut sql_values = Vec::new();
+    let mut sql_values = Vec::with_capacity(values.len() + if id.is_some() { 1 } else { 0 });
     let sql = if let Some(id) = id {
         sql_values.push(SqlValue::Integer(id));
         sql_values.extend(values);
-        format!(
-            "INSERT INTO qsos (ID, {}) VALUES (?, {}) ON CONFLICT(ID) DO UPDATE SET {}",
-            QSO_COLUMNS.join(", "),
-            placeholders,
-            update_assignments,
-        )
+        UPSERT_QSO_SQL
     } else {
         sql_values.extend(values);
-        format!(
-            "INSERT INTO qsos ({}) VALUES ({})",
-            QSO_COLUMNS.join(", "),
-            placeholders
-        )
+        INSERT_QSO_SQL
     };
 
-    connection.execute(&sql, rusqlite::params_from_iter(sql_values))?;
+    let mut statement = connection.prepare_cached(sql)?;
+    statement.execute(rusqlite::params_from_iter(sql_values))?;
     Ok(id.unwrap_or_else(|| connection.last_insert_rowid()))
 }
 
@@ -692,5 +823,120 @@ fn json_string(value: Option<&Value>) -> Option<String> {
         Value::Number(number) => Some(number.to_string()),
         Value::Bool(value) => Some(value.to_string()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn test_database() -> Database {
+        Database::open(":memory:").expect("in-memory database opens")
+    }
+
+    fn create_test_log(database: &Database) -> Log {
+        database
+            .create_log(NewLog {
+                name: "Test log".to_string(),
+                contest_id: "test-contest".to_string(),
+                station_callsign: "N0CALL".to_string(),
+                contest_params: Value::Object(Map::new()),
+            })
+            .expect("test log is created")
+    }
+
+    fn base_contact() -> Contact {
+        Map::from_iter([
+            ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
+            ("STATION_CALLSIGN".to_string(), json!("N0CALL")),
+            ("CALL".to_string(), json!("K1ABC")),
+            ("BAND".to_string(), json!("20m")),
+            ("FREQ".to_string(), json!(14_074_000_i64)),
+            ("MODE".to_string(), json!("FT8")),
+        ])
+    }
+
+    #[test]
+    fn upsert_contacts_inserts_contact() {
+        let database = test_database();
+        let log = create_test_log(&database);
+
+        let saved = database
+            .upsert_contacts(log.id, vec![base_contact()])
+            .expect("contact is inserted");
+
+        assert_eq!(saved.len(), 1);
+        assert!(saved[0].get("_id").and_then(Value::as_i64).is_some());
+        assert_eq!(
+            saved[0].get("_log_id").and_then(Value::as_i64),
+            Some(log.id)
+        );
+        assert_eq!(saved[0].get("CALL").and_then(Value::as_str), Some("K1ABC"));
+
+        let contacts = database.contacts(log.id).expect("contacts are listed");
+        assert_eq!(contacts.len(), 1);
+    }
+
+    #[test]
+    fn upsert_contacts_updates_existing_contact() {
+        let database = test_database();
+        let log = create_test_log(&database);
+        let inserted = database
+            .upsert_contacts(log.id, vec![base_contact()])
+            .expect("contact is inserted");
+        let contact_id = inserted[0]
+            .get("_id")
+            .and_then(Value::as_i64)
+            .expect("inserted contact has an id");
+
+        let mut updated_contact = base_contact();
+        updated_contact.insert("_id".to_string(), json!(contact_id));
+        updated_contact.insert("CALL".to_string(), json!("W9XYZ"));
+        updated_contact.insert("COMMENT".to_string(), json!("updated"));
+
+        let updated = database
+            .upsert_contacts(log.id, vec![updated_contact])
+            .expect("contact is updated");
+
+        assert_eq!(updated.len(), 1);
+        assert_eq!(
+            updated[0].get("_id").and_then(Value::as_i64),
+            Some(contact_id)
+        );
+        assert_eq!(
+            updated[0].get("CALL").and_then(Value::as_str),
+            Some("W9XYZ")
+        );
+        assert_eq!(
+            updated[0].get("COMMENT").and_then(Value::as_str),
+            Some("updated")
+        );
+
+        let contacts = database.contacts(log.id).expect("contacts are listed");
+        assert_eq!(contacts.len(), 1);
+        assert_eq!(
+            contacts[0].get("CALL").and_then(Value::as_str),
+            Some("W9XYZ")
+        );
+    }
+
+    #[test]
+    fn upsert_contacts_treats_sql_like_values_as_data() {
+        let database = test_database();
+        let log = create_test_log(&database);
+        let mut contact = base_contact();
+        let sql_like_call = "K1ABC'); DROP TABLE logs; --";
+        contact.insert("CALL".to_string(), json!(sql_like_call));
+
+        let saved = database
+            .upsert_contacts(log.id, vec![contact])
+            .expect("contact with sql-like value is inserted");
+
+        assert_eq!(
+            saved[0].get("CALL").and_then(Value::as_str),
+            Some(sql_like_call)
+        );
+        assert_eq!(database.logs().expect("logs table still exists").len(), 1);
     }
 }
