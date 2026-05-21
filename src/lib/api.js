@@ -14,9 +14,8 @@ export async function apiJson(path, options = {}) {
   return response.json();
 }
 
-export async function supercheckpartial(query) {
-  const search = new URLSearchParams({ query });
-  return apiJson(`/supercheckpartial?${search.toString()}`);
+export async function supercheckpartial() {
+  return apiJson('/supercheckpartial');
 }
 
 export function websocketUrl(params) {

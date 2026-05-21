@@ -110,6 +110,7 @@ function MainWindow({
   const [repeatRunF1, setRepeatRunF1] = useState(false);
   const [activeCwKeys, setActiveCwKeys] = useState(() => new Set());
   const [activeCompletionField, setActiveCompletionField] = useState(null);
+  const [supercheckpartialCallsigns, setSupercheckpartialCallsigns] = useState([]);
   const [supercheckpartialMatches, setSupercheckpartialMatches] = useState([]);
   const [cwWpm, setCwWpm] = useState(() => {
     const storedWpm = Number.parseInt(localStorage.getItem(CW_WPM_STORAGE_KEY) ?? '', 10);
@@ -174,34 +175,42 @@ function MainWindow({
   }, [callSign]);
 
   useEffect(() => {
-    if (activeCompletionField !== 'CALL') {
-      setSupercheckpartialMatches([]);
-      return undefined;
-    }
-
-    const query = callSign.trim().toUpperCase();
-    if (query.length < 3) {
-      setSupercheckpartialMatches([]);
-      return undefined;
-    }
-
     let cancelled = false;
-    supercheckpartial(query)
+    supercheckpartial()
       .then((result) => {
         if (!cancelled) {
-          setSupercheckpartialMatches(result.callsigns ?? []);
+          setSupercheckpartialCallsigns(Array.isArray(result.callsigns) ? result.callsigns : []);
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setSupercheckpartialMatches([]);
+          setSupercheckpartialCallsigns([]);
         }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [activeCompletionField, callSign]);
+  }, []);
+
+  useEffect(() => {
+    if (activeCompletionField !== 'CALL') {
+      setSupercheckpartialMatches([]);
+      return;
+    }
+
+    const query = callSign.trim().toUpperCase();
+    if (query.length < 3) {
+      setSupercheckpartialMatches([]);
+      return;
+    }
+
+    setSupercheckpartialMatches(
+      supercheckpartialCallsigns
+        .filter((callsign) => callsign.includes(query))
+        .slice(0, MAX_COMPLETION_MATCHES),
+    );
+  }, [activeCompletionField, callSign, supercheckpartialCallsigns]);
 
   const cwModeKey = operatingMode === 'Run' ? 'run' : 's&p';
   const activeCwLabels = cwLabels?.[cwModeKey] ?? DEFAULT_CW_LABELS[cwModeKey];

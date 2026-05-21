@@ -4,8 +4,6 @@ use std::{
     path::Path,
 };
 
-const MAX_MATCHES: usize = 100;
-
 #[derive(Clone, Debug, Default)]
 pub struct SuperCheckPartial {
     callsigns: Vec<String>,
@@ -34,17 +32,7 @@ impl SuperCheckPartial {
         self.callsigns.len()
     }
 
-    pub fn matches(&self, query: &str) -> Vec<String> {
-        let query = query.trim().to_uppercase();
-        if query.len() < 3 {
-            return Vec::new();
-        }
-
-        self.callsigns
-            .iter()
-            .filter(|callsign| callsign.contains(&query))
-            .take(MAX_MATCHES)
-            .cloned()
-            .collect()
+    pub fn callsigns(&self) -> &[String] {
+        &self.callsigns
     }
 }

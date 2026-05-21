@@ -425,11 +425,6 @@ struct ContestSettingsQuery {
     contest_id: Option<String>,
 }
 
-#[derive(Debug, serde::Deserialize)]
-struct SuperCheckPartialQuery {
-    query: Option<String>,
-}
-
 async fn list_contest_rules(
     State(app_state): State<AppState>,
 ) -> Json<Vec<contest_rules::ContestSummary>> {
@@ -450,17 +445,8 @@ async fn contest_settings(
     Json(rules)
 }
 
-async fn supercheckpartial_matches(
-    State(app_state): State<AppState>,
-    Query(query): Query<SuperCheckPartialQuery>,
-) -> Json<serde_json::Value> {
-    let matches = query
-        .query
-        .as_deref()
-        .map(|query| app_state.supercheckpartial.matches(query))
-        .unwrap_or_default();
-
-    Json(serde_json::json!({ "ok": true, "callsigns": matches }))
+async fn supercheckpartial_matches(State(app_state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "ok": true, "callsigns": app_state.supercheckpartial.callsigns() }))
 }
 
 async fn config(State(app_state): State<AppState>) -> Json<serde_json::Value> {
