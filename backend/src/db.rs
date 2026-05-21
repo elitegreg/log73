@@ -483,17 +483,14 @@ impl Database {
         Ok(committed)
     }
 
+    pub fn contact_log_id(&self, id: i64) -> rusqlite::Result<Option<i64>> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        select_contact_log_id(&connection, id)
+    }
+
     pub fn delete_contact(&self, id: i64) -> rusqlite::Result<Option<i64>> {
         let connection = self.connection.lock().expect("database mutex poisoned");
-        let log_id = connection
-            .query_row(
-                "SELECT LOG_ID FROM qsos WHERE ID = ?1",
-                params![id],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?;
-
-        let Some(log_id) = log_id else {
+        let Some(log_id) = select_contact_log_id(&connection, id)? else {
             return Ok(None);
         };
 
@@ -640,8 +637,29 @@ fn select_contact(connection: &Connection, id: i64) -> rusqlite::Result<Option<C
         .optional()
 }
 
+fn select_contact_log_id(connection: &Connection, id: i64) -> rusqlite::Result<Option<i64>> {
+    connection
+        .query_row(
+            "SELECT LOG_ID FROM qsos WHERE ID = ?1",
+            params![id],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()
+}
+
 fn upsert_contact(connection: &Connection, contact: Contact) -> rusqlite::Result<i64> {
     let id = json_i64(contact.get("_id")).or_else(|| json_i64(contact.get("ID")));
+    let requested_log_id = json_i64(contact.get("_log_id")).unwrap_or(1);
+
+    if let Some(id) = id
+        && let Some(existing_log_id) = select_contact_log_id(connection, id)?
+        && existing_log_id != requested_log_id
+    {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "contact id {id} belongs to log {existing_log_id}, cannot write to log {requested_log_id}",
+        )));
+    }
+
     let values = contact_to_sql_values(&contact);
     let mut sql_values = Vec::with_capacity(values.len() + if id.is_some() { 1 } else { 0 });
     let sql = if let Some(id) = id {
@@ -718,10 +736,10 @@ fn row_to_contact(row: &rusqlite::Row<'_>) -> rusqlite::Result<Contact> {
     let mut contact = Map::new();
 
     let extra_json: Option<String> = row.get("JSON")?;
-    if let Some(extra_json) = extra_json {
-        if let Ok(Value::Object(extra)) = serde_json::from_str::<Value>(&extra_json) {
-            contact.extend(extra);
-        }
+    if let Some(extra_json) = extra_json
+        && let Ok(Value::Object(extra)) = serde_json::from_str::<Value>(&extra_json)
+    {
+        contact.extend(extra);
     }
 
     let id: i64 = row.get("ID")?;
@@ -938,5 +956,49 @@ mod tests {
             Some(sql_like_call)
         );
         assert_eq!(database.logs().expect("logs table still exists").len(), 1);
+    }
+
+    #[test]
+    fn upsert_contacts_rejects_existing_contact_id_from_different_log() {
+        let database = test_database();
+        let first_log = create_test_log(&database);
+        let second_log = database
+            .create_log(NewLog {
+                name: "Second test log".to_string(),
+                contest_id: "test-contest".to_string(),
+                station_callsign: "N0CALL".to_string(),
+                contest_params: Value::Object(Map::new()),
+            })
+            .expect("second test log is created");
+        let inserted = database
+            .upsert_contacts(first_log.id, vec![base_contact()])
+            .expect("contact is inserted");
+        let contact_id = inserted[0]
+            .get("_id")
+            .and_then(Value::as_i64)
+            .expect("inserted contact has an id");
+
+        let mut attempted_update = base_contact();
+        attempted_update.insert("_id".to_string(), json!(contact_id));
+        attempted_update.insert("CALL".to_string(), json!("W9XYZ"));
+
+        let error = database
+            .upsert_contacts(second_log.id, vec![attempted_update])
+            .expect_err("cross-log overwrite should be rejected");
+        assert!(error.to_string().contains("belongs to log"));
+
+        let first_log_contacts = database
+            .contacts(first_log.id)
+            .expect("first-log contacts are listed");
+        assert_eq!(first_log_contacts.len(), 1);
+        assert_eq!(
+            first_log_contacts[0].get("CALL").and_then(Value::as_str),
+            Some("K1ABC")
+        );
+
+        let second_log_contacts = database
+            .contacts(second_log.id)
+            .expect("second-log contacts are listed");
+        assert!(second_log_contacts.is_empty());
     }
 }

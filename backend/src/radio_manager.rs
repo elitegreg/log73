@@ -93,8 +93,14 @@ impl RadioManager {
                     let task_current = current.clone();
                     let task_updates = updates.clone();
                     let task = tokio::spawn(async move {
-                        run_managed_radio(config, task_current, task_updates, command_rx, shutdown_rx)
-                            .await;
+                        run_managed_radio(
+                            config,
+                            task_current,
+                            task_updates,
+                            command_rx,
+                            shutdown_rx,
+                        )
+                        .await;
                     });
 
                     radios.insert(
@@ -155,7 +161,10 @@ impl RadioManager {
                         }
                     }
                     ManagedRadioSlot::ShuttingDown { .. } => {
-                        debug!(radio_id, "release ignored; managed radio already shutting down");
+                        debug!(
+                            radio_id,
+                            "release ignored; managed radio already shutting down"
+                        );
                     }
                 }
             }
@@ -170,7 +179,10 @@ impl RadioManager {
         if let Some(done) = done {
             done.notify_waiters();
             let mut radios = self.radios.lock().await;
-            if matches!(radios.get(&radio_id), Some(ManagedRadioSlot::ShuttingDown { .. })) {
+            if matches!(
+                radios.get(&radio_id),
+                Some(ManagedRadioSlot::ShuttingDown { .. })
+            ) {
                 radios.remove(&radio_id);
             }
         }
@@ -691,10 +703,10 @@ impl CwController {
     }
 
     async fn close(&mut self) {
-        if let Some(mut winkeyer) = self.winkeyer.take() {
-            if let Err(error) = winkeyer.close().await {
-                warn!(radio_id = self.radio_id, %error, "failed to close winkeyer");
-            }
+        if let Some(mut winkeyer) = self.winkeyer.take()
+            && let Err(error) = winkeyer.close().await
+        {
+            warn!(radio_id = self.radio_id, %error, "failed to close winkeyer");
         }
     }
 }

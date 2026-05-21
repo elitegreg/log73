@@ -242,8 +242,8 @@ async fn handle_socket(
     info!(session_id, radio_id, "backend websocket connected");
     let (mut sender, mut receiver) = socket.split();
 
-    if let Some(current) = radio_handle.current_message().await {
-        if sender
+    if let Some(current) = radio_handle.current_message().await
+        && sender
             .send(Message::Text(
                 serde_json::to_string(&current)
                     .expect("radio state should serialize")
@@ -251,27 +251,26 @@ async fn handle_socket(
             ))
             .await
             .is_err()
+    {
+        app_state.radio_manager.release(radio_id).await;
+        return;
+    }
+
+    if let Some(log_id) = log_id
+        && let Some(totals) = app_state.score_tracker.totals(log_id)
+    {
+        let score_update = score_update_message(log_id, &totals);
+        if sender
+            .send(Message::Text(
+                serde_json::to_string(&score_update)
+                    .expect("score update should serialize")
+                    .into(),
+            ))
+            .await
+            .is_err()
         {
             app_state.radio_manager.release(radio_id).await;
             return;
-        }
-    }
-
-    if let Some(log_id) = log_id {
-        if let Some(totals) = app_state.score_tracker.totals(log_id) {
-            let score_update = score_update_message(log_id, &totals);
-            if sender
-                .send(Message::Text(
-                    serde_json::to_string(&score_update)
-                        .expect("score update should serialize")
-                        .into(),
-                ))
-                .await
-                .is_err()
-            {
-                app_state.radio_manager.release(radio_id).await;
-                return;
-            }
         }
     }
 
@@ -486,7 +485,7 @@ async fn update_config(
     State(app_state): State<AppState>,
     Json(payload): Json<UpdateConfigPayload>,
 ) -> Json<serde_json::Value> {
-    debug!(payload = %pretty_json(&payload), "update config PUT body");
+    debug!("update config PUT request");
     if let Err(error) = validation::validate_auth_config(
         &payload.login_user,
         &payload.login_password,
@@ -495,9 +494,14 @@ async fn update_config(
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
 
+    let login_password = match auth::hash_password(&payload.login_password) {
+        Ok(login_password) => login_password,
+        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
+    };
+
     match app_state.db.update_auth_config(db::UpdateAuthConfig {
         login_user: payload.login_user,
-        login_password: payload.login_password,
+        login_password,
     }) {
         Ok(()) => match app_state.db.auth_config_view() {
             Ok(config) => Json(serde_json::json!({ "ok": true, "config": config })),
@@ -842,14 +846,14 @@ fn scored_contacts_for_log(app_state: &AppState, log_id: i64) -> Result<ScoredLo
         .contacts(log_id)
         .map_err(|error| error.to_string())?;
 
-    contacts.sort_by(|left, right| contact_score_order(left).cmp(&contact_score_order(right)));
+    contacts.sort_by_key(contact_score_order);
     let module = app_state
         .scoring_modules
         .get(rules, log.contest_params.clone());
     let totals = app_state
         .score_tracker
         .reset_log(log_id, module, &mut contacts);
-    contacts.sort_by(|left, right| contact_display_order(right).cmp(&contact_display_order(left)));
+    contacts.sort_by_key(|contact| std::cmp::Reverse(contact_display_order(contact)));
     Ok(ScoredLogSnapshot { contacts, totals })
 }
 

@@ -142,6 +142,18 @@ pub fn validate_contacts(
     for (index, contact) in contacts.iter().enumerate() {
         validate_contact(rules, log_id, contact)
             .map_err(|error| format!("contact {}: {error}", index + 1))?;
+
+        if let Some(contact_id) = contact_id(contact)
+            && let Some(existing_log_id) = database
+                .contact_log_id(contact_id)
+                .map_err(|error| format!("contact {}: {error}", index + 1))?
+            && existing_log_id != log_id
+        {
+            return Err(format!(
+                "contact {}: contact id {contact_id} belongs to log {existing_log_id}",
+                index + 1
+            ));
+        }
     }
 
     Ok(())
