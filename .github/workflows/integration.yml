@@ -1,0 +1,19 @@
+name: Integration
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  backend-lint:
+    uses: ./.github/workflows/backend-lint.yml
+
+  frontend-lint:
+    uses: ./.github/workflows/frontend-lint.yml
+
+  backend-test:
+    uses: ./.github/workflows/backend-test.yml
+
+  frontend-test:
+    uses: ./.github/workflows/frontend-test.yml
