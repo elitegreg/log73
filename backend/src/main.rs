@@ -9,6 +9,7 @@ mod radio_manager;
 mod scoring;
 mod static_assets;
 mod supercheckpartial;
+mod validation;
 
 use axum::{
     Json, Router,
@@ -318,6 +319,10 @@ async fn handle_socket(
                     session_id,
                     radio_id, frequency_hz, "websocket set_frequency command received"
                 );
+                if let Err(error) = validation::validate_radio_frequency_hz(frequency_hz) {
+                    warn!(session_id, radio_id, frequency_hz, %error, "invalid websocket set_frequency command");
+                    continue;
+                }
                 let _ = radio_handle
                     .send_command(RadioCommand::SetFrequency(frequency_hz))
                     .await;
@@ -327,6 +332,10 @@ async fn handle_socket(
                     session_id,
                     radio_id, mode, "websocket set_mode command received"
                 );
+                if let Err(error) = validation::validate_radio_mode(&mode) {
+                    warn!(session_id, radio_id, mode, %error, "invalid websocket set_mode command");
+                    continue;
+                }
                 let _ = radio_handle.send_command(RadioCommand::SetMode(mode)).await;
             }
             Ok(ClientMessage::SendCw {
@@ -339,6 +348,12 @@ async fn handle_socket(
                     session_id,
                     radio_id, request_id, mode, key, "websocket send_cw command received"
                 );
+                if let Err(error) =
+                    validation::validate_cw_request(&request_id, &mode, &key, &fields)
+                {
+                    warn!(session_id, radio_id, request_id, mode, key, %error, "invalid websocket send_cw command");
+                    continue;
+                }
                 let (completed_tx, completed_rx) = oneshot::channel();
                 let command_result = radio_handle
                     .send_command(RadioCommand::SendCw {
@@ -409,6 +424,10 @@ async fn handle_socket(
                     session_id,
                     radio_id, wpm, "websocket set_wpm command received"
                 );
+                if let Err(error) = validation::validate_cw_wpm(wpm) {
+                    warn!(session_id, radio_id, wpm, %error, "invalid websocket set_wpm command");
+                    continue;
+                }
                 let _ = radio_handle.send_command(RadioCommand::SetWpm(wpm)).await;
             }
             Err(error) => warn!(session_id, radio_id, %error, "invalid websocket message"),
@@ -468,8 +487,12 @@ async fn update_config(
     Json(payload): Json<UpdateConfigPayload>,
 ) -> Json<serde_json::Value> {
     debug!(payload = %pretty_json(&payload), "update config PUT body");
-    if payload.login_password != payload.login_password_confirm {
-        return Json(serde_json::json!({ "ok": false, "error": "passwords do not match" }));
+    if let Err(error) = validation::validate_auth_config(
+        &payload.login_user,
+        &payload.login_password,
+        &payload.login_password_confirm,
+    ) {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
     }
 
     match app_state.db.update_auth_config(db::UpdateAuthConfig {
@@ -504,7 +527,7 @@ async fn create_log(
     Json(payload): Json<NewLog>,
 ) -> Json<serde_json::Value> {
     debug!(payload = %pretty_json(&payload), "create log POST body");
-    if let Err(error) = validate_log_params(&app_state.contest_rules, &payload) {
+    if let Err(error) = validation::validate_new_log(&app_state.contest_rules, &payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     match app_state.db.create_log(payload) {
@@ -513,52 +536,15 @@ async fn create_log(
     }
 }
 
-fn validate_log_params(contest_rules: &ContestRulesStore, payload: &NewLog) -> Result<(), String> {
-    let rules = contest_rules
-        .get(&payload.contest_id)
-        .ok_or_else(|| format!("unknown contest: {}", payload.contest_id))?;
-    for param in &rules.log_params {
-        if param.required == Some(false) {
-            continue;
-        }
-        let value = payload
-            .contest_params
-            .get(&param.name)
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .trim();
-        if value.is_empty() {
-            return Err(format!("{} is required", param.label));
-        }
-        if !param.valid_values.is_empty()
-            && !param
-                .valid_values
-                .iter()
-                .any(|valid_value| valid_value.eq_ignore_ascii_case(value))
-        {
-            return Err(format!(
-                "{} must be one of: {}",
-                param.label,
-                param.valid_values.join(", ")
-            ));
-        }
-        if let Some(pattern) = &param.regex {
-            let regex = regex::Regex::new(pattern)
-                .map_err(|error| format!("invalid regex for {}: {error}", param.label))?;
-            if !regex.is_match(value) {
-                return Err(format!("{} is invalid", param.label));
-            }
-        }
-    }
-    Ok(())
-}
-
 async fn update_log(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
     Json(payload): Json<UpdateLog>,
 ) -> Json<serde_json::Value> {
     debug!(id, payload = %pretty_json(&payload), "update log PUT body");
+    if let Err(error) = validation::validate_update_log(&payload) {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
     match app_state.db.update_log(id, payload) {
         Ok(Some(log)) => Json(serde_json::json!({ "ok": true, "log": log })),
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
@@ -611,6 +597,9 @@ async fn create_radio(
     Json(payload): Json<NewRadio>,
 ) -> Json<serde_json::Value> {
     debug!(payload = %pretty_json(&payload), "create radio POST body");
+    if let Err(error) = validation::validate_radio(&payload) {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
     match app_state.db.create_radio(payload) {
         Ok(radio) => Json(serde_json::json!({ "ok": true, "radio": radio })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
@@ -623,6 +612,9 @@ async fn update_radio(
     Json(payload): Json<NewRadio>,
 ) -> Json<serde_json::Value> {
     debug!(id, payload = %pretty_json(&payload), "update radio PUT body");
+    if let Err(error) = validation::validate_radio(&payload) {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
     match app_state.db.update_radio(id, payload) {
         Ok(Some(radio)) => {
             let active = app_state.radio_manager.is_active(id).await;
@@ -688,6 +680,14 @@ async fn commit_contact(
         Ok(contacts) => contacts,
         Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
     };
+    if let Err(error) = validation::validate_contacts(
+        &app_state.db,
+        &app_state.contest_rules,
+        log_id,
+        &input_contacts,
+    ) {
+        return Json(serde_json::json!({ "ok": false, "error": error, "status": "failed" }));
+    }
     let session_ids = input_contacts
         .iter()
         .map(contact_session_id)

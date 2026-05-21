@@ -170,6 +170,19 @@ function contactKey(entry, index) {
   return String(entry._id ?? entry._client_id ?? `${entry.QSO_DATE_TIME_ON ?? entry.TIME_ON ?? entry.Time ?? 'row'}-${entry.CALL ?? entry.Call ?? index}`);
 }
 
+function contactRowClassName(entry, isSelected) {
+  const classes = [];
+  if (entry._status === 'Failed') classes.push('failed-contact');
+  else if (entry._status !== 'Committed') classes.push('uncommitted-contact');
+  if (isSelected) classes.push('selected-contact');
+  return classes.join(' ') || undefined;
+}
+
+function contactRowTitle(entry) {
+  if (entry._status !== 'Failed') return undefined;
+  return entry._error ? `Contact upload failed: ${entry._error}` : 'Contact upload failed.';
+}
+
 function editableFieldForColumn(column, columnFieldMap) {
   if (READ_ONLY_COLUMNS.has(column)) return null;
   if (column === 'Date/Time (UTC)') return 'QSO_DATE_TIME_ON';
@@ -409,7 +422,8 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
             return (
               <tr
                 key={key}
-                className={`${entry._status !== 'Committed' ? 'uncommitted-contact' : ''}${isSelected ? ' selected-contact' : ''}`.trim() || undefined}
+                className={contactRowClassName(entry, isSelected)}
+                title={contactRowTitle(entry)}
                 onClick={(event) => selectRow(event, index, key)}
               >
                 {columns.map((column) => {

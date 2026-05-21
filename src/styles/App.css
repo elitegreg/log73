@@ -308,10 +308,15 @@
   background-color: #fff8c6;
 }
 
+.log-table tbody tr.failed-contact {
+  background-color: #ffd1d1;
+}
+
 .log-table tbody tr.selected-contact,
 .log-table tbody tr.selected-contact:nth-child(odd),
 .log-table tbody tr.selected-contact:nth-child(even),
-.log-table tbody tr.selected-contact.uncommitted-contact {
+.log-table tbody tr.selected-contact.uncommitted-contact,
+.log-table tbody tr.selected-contact.failed-contact {
   background-color: #2f6fd6;
 }
 

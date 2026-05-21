@@ -1,0 +1,825 @@
+use crate::bands::{USA_AMATEUR_BANDS, band_for_frequency};
+use crate::contest_rules::{ContestParam, ContestRules, ContestRulesStore, ExchangeField};
+use crate::db::{Contact, Database, NewLog, NewRadio, UpdateLog};
+use crate::frequency::Frequency;
+use regex::Regex;
+use serde_json::Value;
+use std::collections::HashSet;
+
+const MAX_LOG_NAME_LEN: usize = 100;
+const MAX_CONTEST_ID_LEN: usize = 100;
+const MAX_CALLSIGN_LEN: usize = 12;
+const MAX_RADIO_NAME_LEN: usize = 100;
+const MAX_RIGCTLD_HOST_LEN: usize = 255;
+const MAX_SERIAL_PORT_LEN: usize = 255;
+const MIN_RADIO_SECONDS: f64 = 0.01;
+const MAX_RADIO_SECONDS: f64 = 3600.0;
+const MAX_LOGIN_USER_LEN: usize = 64;
+const MAX_LOGIN_PASSWORD_LEN: usize = 256;
+const MAX_CONTACTS_PER_UPLOAD: usize = 100;
+const MAX_CONTACT_FIELDS: usize = 100;
+const MAX_CONTACT_KEY_LEN: usize = 64;
+const MAX_CONTACT_STRING_LEN: usize = 1024;
+const MAX_CONTACT_ARRAY_ITEMS: usize = 100;
+const MAX_CONTACT_OBJECT_FIELDS: usize = 100;
+const MAX_CONTACT_JSON_DEPTH: usize = 4;
+const MIN_QSO_EPOCH: i64 = 0;
+const MAX_QSO_EPOCH: i64 = 4_102_444_800; // 2100-01-01T00:00:00Z
+const MAX_RADIO_FREQUENCY_HZ: u64 = 500_000_000;
+const MIN_CW_WPM: u8 = 5;
+const MAX_CW_WPM: u8 = 60;
+const MAX_CW_REQUEST_ID_LEN: usize = 64;
+const MAX_WS_FIELDS: usize = 100;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedFieldType {
+    kind: String,
+    max_length: usize,
+}
+
+pub fn validate_new_log(contest_rules: &ContestRulesStore, payload: &NewLog) -> Result<(), String> {
+    validate_required_text("log name", &payload.name, MAX_LOG_NAME_LEN)?;
+    validate_callsign("station callsign", &payload.station_callsign)?;
+
+    let contest_id = payload.contest_id.trim();
+    validate_required_text("contest", contest_id, MAX_CONTEST_ID_LEN)?;
+    let rules = contest_rules
+        .get(contest_id)
+        .ok_or_else(|| format!("unknown contest: {contest_id}"))?;
+    validate_log_params(rules, &payload.contest_params)
+}
+
+pub fn validate_update_log(payload: &UpdateLog) -> Result<(), String> {
+    validate_required_text("log name", &payload.name, MAX_LOG_NAME_LEN)?;
+    validate_callsign("station callsign", &payload.station_callsign)
+}
+
+pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
+    validate_required_text("radio name", &payload.name, MAX_RADIO_NAME_LEN)?;
+    validate_required_text("rigctld host", &payload.rigctld_host, MAX_RIGCTLD_HOST_LEN)?;
+    validate_host("rigctld host", &payload.rigctld_host)?;
+
+    validate_seconds("poll frequency", payload.poll_frequency)?;
+    validate_seconds("rigctld timeout", payload.rigctld_timeout)?;
+
+    if payload.winkeyer_enabled {
+        validate_required_text(
+            "Winkeyer serial port",
+            &payload.winkeyer_serial_port,
+            MAX_SERIAL_PORT_LEN,
+        )?;
+    } else if payload.winkeyer_serial_port.chars().count() > MAX_SERIAL_PORT_LEN {
+        return Err(format!(
+            "Winkeyer serial port must be at most {MAX_SERIAL_PORT_LEN} characters"
+        ));
+    }
+    validate_serial_port("Winkeyer serial port", &payload.winkeyer_serial_port)
+}
+
+pub fn validate_auth_config(
+    login_user: &str,
+    login_password: &str,
+    login_password_confirm: &str,
+) -> Result<(), String> {
+    if login_password != login_password_confirm {
+        return Err("passwords do not match".to_string());
+    }
+
+    if login_user.chars().count() > MAX_LOGIN_USER_LEN {
+        return Err(format!(
+            "username must be at most {MAX_LOGIN_USER_LEN} characters"
+        ));
+    }
+    if login_password.chars().count() > MAX_LOGIN_PASSWORD_LEN {
+        return Err(format!(
+            "password must be at most {MAX_LOGIN_PASSWORD_LEN} characters"
+        ));
+    }
+
+    let trimmed_user = login_user.trim();
+    if !trimmed_user.is_empty() {
+        if trimmed_user.contains(':') {
+            return Err("username cannot contain ':'".to_string());
+        }
+        if trimmed_user.chars().any(char::is_control) {
+            return Err("username cannot contain control characters".to_string());
+        }
+    }
+
+    if login_password.chars().any(char::is_control) {
+        return Err("password cannot contain control characters".to_string());
+    }
+
+    Ok(())
+}
+
+pub fn validate_contacts(
+    database: &Database,
+    contest_rules: &ContestRulesStore,
+    log_id: i64,
+    contacts: &[Contact],
+) -> Result<(), String> {
+    if log_id <= 0 {
+        return Err("log id must be positive".to_string());
+    }
+    if contacts.is_empty() {
+        return Err("contacts payload must contain at least one contact".to_string());
+    }
+    if contacts.len() > MAX_CONTACTS_PER_UPLOAD {
+        return Err(format!(
+            "contacts payload cannot contain more than {MAX_CONTACTS_PER_UPLOAD} contacts"
+        ));
+    }
+
+    let log = database
+        .log(log_id)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("log {log_id} not found"))?;
+    let rules = contest_rules
+        .get(&log.contest_id)
+        .ok_or_else(|| format!("unknown contest: {}", log.contest_id))?;
+
+    for (index, contact) in contacts.iter().enumerate() {
+        validate_contact(rules, log_id, contact)
+            .map_err(|error| format!("contact {}: {error}", index + 1))?;
+    }
+
+    Ok(())
+}
+
+pub fn validate_radio_frequency_hz(frequency_hz: u64) -> Result<(), String> {
+    if frequency_hz == 0 || frequency_hz > MAX_RADIO_FREQUENCY_HZ {
+        return Err(format!(
+            "frequency must be between 1 and {MAX_RADIO_FREQUENCY_HZ} Hz"
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_radio_mode(mode: &str) -> Result<(), String> {
+    let mode = mode.trim().to_uppercase();
+    if matches!(mode.as_str(), "CW" | "SSB" | "USB" | "LSB" | "FM") {
+        Ok(())
+    } else {
+        Err("mode must be one of: CW, SSB, USB, LSB, FM".to_string())
+    }
+}
+
+pub fn validate_cw_request(
+    request_id: &str,
+    mode: &str,
+    key: &str,
+    fields: &serde_json::Map<String, Value>,
+) -> Result<(), String> {
+    validate_required_text("CW request id", request_id, MAX_CW_REQUEST_ID_LEN)?;
+
+    let normalized_mode = mode.trim().to_lowercase();
+    if normalized_mode != "run" && normalized_mode != "s&p" && normalized_mode != "sp" {
+        return Err("CW mode must be run or s&p".to_string());
+    }
+
+    let normalized_key = key.trim().to_uppercase();
+    if !matches!(
+        normalized_key.as_str(),
+        "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12"
+    ) {
+        return Err("CW key must be F1 through F12".to_string());
+    }
+
+    if fields.len() > MAX_WS_FIELDS {
+        return Err(format!(
+            "CW fields cannot contain more than {MAX_WS_FIELDS} entries"
+        ));
+    }
+    for (key, value) in fields {
+        validate_contact_key(key)?;
+        validate_json_value_size(value, 0).map_err(|error| format!("{key}: {error}"))?;
+    }
+
+    Ok(())
+}
+
+pub fn validate_cw_wpm(wpm: u8) -> Result<(), String> {
+    if !(MIN_CW_WPM..=MAX_CW_WPM).contains(&wpm) {
+        return Err(format!(
+            "CW WPM must be between {MIN_CW_WPM} and {MAX_CW_WPM}"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_log_params(rules: &ContestRules, contest_params: &Value) -> Result<(), String> {
+    let empty_params = serde_json::Map::new();
+    let params = match contest_params.as_object() {
+        Some(params) => params,
+        None if contest_params.is_null() => &empty_params,
+        None => return Err("contest parameters must be an object".to_string()),
+    };
+    let known_params = rules
+        .log_params
+        .iter()
+        .map(|param| param.name.as_str())
+        .collect::<HashSet<_>>();
+
+    for key in params.keys() {
+        if !known_params.contains(key.as_str()) {
+            return Err(format!("unknown contest parameter: {key}"));
+        }
+        validate_contact_key(key)?;
+    }
+
+    for param in &rules.log_params {
+        validate_contest_param(param, params.get(&param.name))?;
+    }
+
+    Ok(())
+}
+
+fn validate_contest_param(param: &ContestParam, value: Option<&Value>) -> Result<(), String> {
+    let label = param.label.as_str();
+    let value = json_trimmed_string(value).unwrap_or_default();
+
+    if value.is_empty() {
+        if param.required == Some(false) {
+            return Ok(());
+        }
+        return Err(format!("{label} is required"));
+    }
+
+    validate_typed_field(
+        label,
+        &param.field_type,
+        &value,
+        &param.valid_values,
+        param.regex.as_deref(),
+        "CW",
+    )
+}
+
+fn validate_contact(rules: &ContestRules, log_id: i64, contact: &Contact) -> Result<(), String> {
+    validate_contact_shape(contact)?;
+
+    if let Some(id) = contact_id(contact)
+        && id <= 0
+    {
+        return Err("contact id must be positive".to_string());
+    }
+
+    if let Some(contact_log_id) = json_i64(contact.get("_log_id"))
+        && contact_log_id != log_id
+    {
+        return Err("contact log id does not match request log id".to_string());
+    }
+
+    if let Some(contest_id) = json_trimmed_string(contact.get("CONTEST_ID"))
+        && !contest_id.eq_ignore_ascii_case(&rules.contest)
+    {
+        return Err("contact contest id does not match log contest".to_string());
+    }
+
+    validate_qso_epoch(contact)?;
+    validate_callsign_value("station callsign", contact.get("STATION_CALLSIGN"))?;
+    if let Some(operator) = json_trimmed_string(contact.get("OPERATOR"))
+        && !operator.is_empty()
+    {
+        validate_callsign("operator callsign", &operator)?;
+    }
+    validate_callsign_value("callsign", contact.get("CALL"))?;
+    validate_contact_band_and_frequency(rules, contact)?;
+    let mode = validate_contact_mode(rules, contact)?;
+
+    if let Some(client_id) = json_trimmed_string(contact.get("_client_id")) {
+        validate_required_text("client id", &client_id, MAX_CW_REQUEST_ID_LEN)?;
+    }
+    if let Some(session_id) = json_trimmed_string(contact.get("_session_id")) {
+        validate_required_text("session id", &session_id, MAX_CONTACT_STRING_LEN)?;
+    }
+
+    for field in &rules.exchange {
+        validate_exchange_field(field, contact, &mode)?;
+    }
+
+    Ok(())
+}
+
+fn validate_contact_shape(contact: &Contact) -> Result<(), String> {
+    if contact.len() > MAX_CONTACT_FIELDS {
+        return Err(format!(
+            "contact cannot contain more than {MAX_CONTACT_FIELDS} fields"
+        ));
+    }
+
+    for (key, value) in contact {
+        validate_contact_key(key)?;
+        validate_json_value_size(value, 0).map_err(|error| format!("{key}: {error}"))?;
+    }
+
+    Ok(())
+}
+
+fn validate_contact_key(key: &str) -> Result<(), String> {
+    if key.is_empty() {
+        return Err("field names cannot be empty".to_string());
+    }
+    if key.chars().count() > MAX_CONTACT_KEY_LEN {
+        return Err(format!(
+            "field name {key} must be at most {MAX_CONTACT_KEY_LEN} characters"
+        ));
+    }
+    if key.chars().any(char::is_control) {
+        return Err(format!(
+            "field name {key} cannot contain control characters"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_json_value_size(value: &Value, depth: usize) -> Result<(), String> {
+    if depth > MAX_CONTACT_JSON_DEPTH {
+        return Err(format!(
+            "nested JSON cannot be deeper than {MAX_CONTACT_JSON_DEPTH} levels"
+        ));
+    }
+
+    match value {
+        Value::String(value) => {
+            if value.chars().count() > MAX_CONTACT_STRING_LEN {
+                Err(format!(
+                    "string value must be at most {MAX_CONTACT_STRING_LEN} characters"
+                ))
+            } else {
+                Ok(())
+            }
+        }
+        Value::Array(values) => {
+            if values.len() > MAX_CONTACT_ARRAY_ITEMS {
+                return Err(format!(
+                    "array value cannot contain more than {MAX_CONTACT_ARRAY_ITEMS} items"
+                ));
+            }
+            for value in values {
+                validate_json_value_size(value, depth + 1)?;
+            }
+            Ok(())
+        }
+        Value::Object(values) => {
+            if values.len() > MAX_CONTACT_OBJECT_FIELDS {
+                return Err(format!(
+                    "object value cannot contain more than {MAX_CONTACT_OBJECT_FIELDS} fields"
+                ));
+            }
+            for (key, value) in values {
+                validate_contact_key(key)?;
+                validate_json_value_size(value, depth + 1)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_qso_epoch(contact: &Contact) -> Result<(), String> {
+    let epoch = json_i64(contact.get("QSO_DATE_TIME_ON")).or_else(|| legacy_epoch(contact));
+    let Some(epoch) = epoch else {
+        return Err("QSO date/time is required".to_string());
+    };
+
+    if !(MIN_QSO_EPOCH..=MAX_QSO_EPOCH).contains(&epoch) {
+        return Err("QSO date/time is out of range".to_string());
+    }
+
+    Ok(())
+}
+
+fn validate_contact_band_and_frequency(
+    rules: &ContestRules,
+    contact: &Contact,
+) -> Result<(), String> {
+    let band_text = json_trimmed_string(contact.get("BAND")).unwrap_or_default();
+    if band_text.is_empty() {
+        return Err("band is required".to_string());
+    }
+    let band_meters = band_meters(&band_text).ok_or_else(|| "band is invalid".to_string())?;
+    if !rules.allowed_bands.is_empty() && !rules.allowed_bands.contains(&band_meters) {
+        return Err(format!("band must be one of: {}", allowed_bands(rules)));
+    }
+
+    let frequency_hz = contact_frequency_hz(contact.get("FREQ"))
+        .ok_or_else(|| "frequency is required".to_string())?;
+    validate_radio_frequency_hz(frequency_hz)?;
+    let frequency_band = band_for_frequency(Frequency::from_hz(frequency_hz))
+        .ok_or_else(|| "frequency is outside supported amateur bands".to_string())?;
+    if frequency_band.meters != band_meters {
+        return Err("frequency does not match band".to_string());
+    }
+
+    Ok(())
+}
+
+fn validate_contact_mode(rules: &ContestRules, contact: &Contact) -> Result<String, String> {
+    let mode = json_trimmed_string(contact.get("MODE")).unwrap_or_default();
+    if mode.is_empty() {
+        return Err("mode is required".to_string());
+    }
+    let mode = mode.to_uppercase();
+    if !rules.allowed_modes.is_empty()
+        && !rules
+            .allowed_modes
+            .iter()
+            .any(|allowed_mode| allowed_mode.eq_ignore_ascii_case(&mode))
+    {
+        return Err(format!(
+            "mode must be one of: {}",
+            rules.allowed_modes.join(", ")
+        ));
+    }
+    Ok(mode)
+}
+
+fn validate_exchange_field(
+    field: &ExchangeField,
+    contact: &Contact,
+    radio_mode: &str,
+) -> Result<(), String> {
+    let value = json_trimmed_string(contact.get(&field.adif)).unwrap_or_default();
+    if value.is_empty() {
+        return Err(format!("{} is required", field.name));
+    }
+    validate_typed_field(
+        &field.name,
+        &field.field_type,
+        &value,
+        &field.valid_values,
+        field.regex.as_deref(),
+        radio_mode,
+    )
+}
+
+fn validate_typed_field(
+    label: &str,
+    field_type: &str,
+    value: &str,
+    valid_values: &[String],
+    pattern: Option<&str>,
+    radio_mode: &str,
+) -> Result<(), String> {
+    let normalized_value = value.trim().to_uppercase();
+    if normalized_value.is_empty() {
+        return Err(format!("{label} is required"));
+    }
+
+    let parsed = parse_field_type(field_type, radio_mode);
+    if normalized_value.chars().count() > parsed.max_length {
+        return Err(format!(
+            "{label} must be at most {} characters",
+            parsed.max_length
+        ));
+    }
+
+    if parsed.kind == "RST" {
+        let expected_length = if radio_mode.eq_ignore_ascii_case("CW") {
+            3
+        } else {
+            2
+        };
+        if !is_valid_rst(&normalized_value, expected_length) {
+            return Err(format!(
+                "{label} must be a valid {expected_length}-digit RST"
+            ));
+        }
+    } else if parsed.kind == "NUMERIC"
+        && !normalized_value
+            .chars()
+            .all(|character| character.is_ascii_digit())
+    {
+        return Err(format!("{label} must be numeric"));
+    }
+
+    if !valid_values.is_empty()
+        && !valid_values
+            .iter()
+            .any(|valid_value| valid_value.eq_ignore_ascii_case(&normalized_value))
+    {
+        return Err(format!(
+            "{label} must be one of: {}",
+            valid_values.join(", ")
+        ));
+    }
+
+    if let Some(pattern) = pattern {
+        let regex =
+            Regex::new(pattern).map_err(|error| format!("invalid regex for {label}: {error}"))?;
+        if !regex.is_match(&normalized_value) {
+            return Err(format!("{label} is invalid"));
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_field_type(field_type: &str, radio_mode: &str) -> ParsedFieldType {
+    let mut parts = field_type.split(':');
+    let kind = parts.next().unwrap_or("STRING").trim().to_uppercase();
+    let raw_length = parts.next().unwrap_or("8");
+    let max_length = if kind == "RST" {
+        if radio_mode.eq_ignore_ascii_case("CW") {
+            3
+        } else {
+            2
+        }
+    } else {
+        raw_length
+            .parse::<usize>()
+            .ok()
+            .filter(|length| *length > 0)
+            .unwrap_or(8)
+    };
+
+    ParsedFieldType { kind, max_length }
+}
+
+fn is_valid_rst(value: &str, expected_length: usize) -> bool {
+    value.len() == expected_length
+        && value.len() >= 2
+        && value.len() <= 3
+        && value.as_bytes()[0].is_ascii_digit()
+        && (b'1'..=b'5').contains(&value.as_bytes()[0])
+        && value.as_bytes()[1..]
+            .iter()
+            .all(|digit| (b'1'..=b'9').contains(digit))
+}
+
+fn validate_required_text(label: &str, value: &str, max_length: usize) -> Result<(), String> {
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(format!("{label} is required"));
+    }
+    if value.chars().count() > max_length {
+        return Err(format!("{label} must be at most {max_length} characters"));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(format!("{label} cannot contain control characters"));
+    }
+    Ok(())
+}
+
+fn validate_callsign_value(label: &str, value: Option<&Value>) -> Result<(), String> {
+    let value = json_trimmed_string(value).unwrap_or_default();
+    validate_callsign(label, &value)
+}
+
+fn validate_callsign(label: &str, value: &str) -> Result<(), String> {
+    let value = value.trim();
+    validate_required_text(label, value, MAX_CALLSIGN_LEN)?;
+    if !value
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || character == '/')
+    {
+        return Err(format!(
+            "{label} can only contain letters, numbers, and '/'"
+        ));
+    }
+    if !value
+        .chars()
+        .any(|character| character.is_ascii_alphabetic())
+        || !value.chars().any(|character| character.is_ascii_digit())
+    {
+        return Err(format!("{label} must include letters and numbers"));
+    }
+    Ok(())
+}
+
+fn validate_host(label: &str, value: &str) -> Result<(), String> {
+    let value = value.trim();
+    if value
+        .chars()
+        .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return Err(format!(
+            "{label} cannot contain whitespace or control characters"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_serial_port(label: &str, value: &str) -> Result<(), String> {
+    if value.chars().any(char::is_control) {
+        return Err(format!("{label} cannot contain control characters"));
+    }
+    Ok(())
+}
+
+fn validate_seconds(label: &str, value: f64) -> Result<(), String> {
+    if !value.is_finite() || !(MIN_RADIO_SECONDS..=MAX_RADIO_SECONDS).contains(&value) {
+        return Err(format!(
+            "{label} must be between {MIN_RADIO_SECONDS} and {MAX_RADIO_SECONDS} seconds"
+        ));
+    }
+    Ok(())
+}
+
+fn allowed_bands(rules: &ContestRules) -> String {
+    rules
+        .allowed_bands
+        .iter()
+        .map(|meters| format!("{meters}m"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn band_meters(value: &str) -> Option<u16> {
+    let normalized = value.trim().to_lowercase();
+    USA_AMATEUR_BANDS
+        .iter()
+        .find(|band| band.name.eq_ignore_ascii_case(&normalized))
+        .map(|band| band.meters)
+        .or_else(|| {
+            normalized
+                .strip_suffix('m')
+                .unwrap_or(&normalized)
+                .parse::<u16>()
+                .ok()
+        })
+}
+
+fn contact_frequency_hz(value: Option<&Value>) -> Option<u64> {
+    match value? {
+        Value::Number(number) => number
+            .as_u64()
+            .or_else(|| number.as_i64().and_then(|value| u64::try_from(value).ok()))
+            .or_else(|| number.as_f64().and_then(decimal_frequency_to_hz)),
+        Value::String(string) => {
+            let string = string.trim();
+            if string.contains('.') {
+                string.parse::<f64>().ok().and_then(decimal_frequency_to_hz)
+            } else {
+                string.parse::<u64>().ok()
+            }
+        }
+        _ => None,
+    }
+}
+
+fn decimal_frequency_to_hz(value: f64) -> Option<u64> {
+    if !value.is_finite() || value <= 0.0 {
+        return None;
+    }
+    let hz = if value.abs() < 1_000_000.0 {
+        value * 1_000_000.0
+    } else {
+        value
+    };
+    if hz > u64::MAX as f64 {
+        None
+    } else {
+        Some(hz.round() as u64)
+    }
+}
+
+fn contact_id(contact: &Contact) -> Option<i64> {
+    contact
+        .get("_id")
+        .or_else(|| contact.get("ID"))
+        .and_then(json_i64_value)
+}
+
+fn json_i64(value: Option<&Value>) -> Option<i64> {
+    value.and_then(json_i64_value)
+}
+
+fn json_i64_value(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok())),
+        Value::String(string) => string.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+}
+
+fn json_trimmed_string(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::String(string) => Some(string.trim().to_string()),
+        Value::Number(number) => Some(number.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn legacy_epoch(contact: &Contact) -> Option<i64> {
+    let date = contact.get("QSO_DATE")?.as_str()?;
+    let time = contact.get("TIME_ON")?.as_str()?;
+    if date.len() != 8 || time.len() != 6 {
+        return None;
+    }
+    let year = date[0..4].parse::<i32>().ok()?;
+    let month = date[4..6].parse::<u32>().ok()?;
+    let day = date[6..8].parse::<u32>().ok()?;
+    let hour = time[0..2].parse::<u32>().ok()?;
+    let minute = time[2..4].parse::<u32>().ok()?;
+    let second = time[4..6].parse::<u32>().ok()?;
+    let days = days_from_civil(year, month, day)?;
+    Some(days * 86_400 + i64::from(hour * 3_600 + minute * 60 + second))
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let year = year - i32::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let yoe = year - era * 400;
+    let month = month as i32;
+    let day = day as i32;
+    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some(i64::from(era * 146_097 + doe - 719_468))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Map, json};
+
+    fn test_rules() -> ContestRules {
+        ContestRules {
+            contest: "TEST".to_string(),
+            display_name: "Test".to_string(),
+            allowed_bands: vec![20],
+            allowed_modes: vec!["CW".to_string(), "SSB".to_string()],
+            define: Vec::new(),
+            exchange: vec![ExchangeField {
+                name: "RST(r)".to_string(),
+                field_type: "RST".to_string(),
+                adif: "RST_RCVD".to_string(),
+                fixed: None,
+                default: None,
+                source_param: None,
+                regex: None,
+                in_sets: Vec::new(),
+                valid_values: Vec::new(),
+                is_sent: false,
+            }],
+            qso_columns: Vec::new(),
+            qso_column_fields: Default::default(),
+            log_params: Vec::new(),
+            qso_points: None,
+            dupe_key: Vec::new(),
+            multipliers: Vec::new(),
+            bonus_points: Vec::new(),
+            metadata: None,
+        }
+    }
+
+    fn test_contact() -> Contact {
+        Map::from_iter([
+            ("_log_id".to_string(), json!(1)),
+            ("CONTEST_ID".to_string(), json!("TEST")),
+            ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
+            ("STATION_CALLSIGN".to_string(), json!("N0CALL")),
+            ("CALL".to_string(), json!("K1ABC")),
+            ("BAND".to_string(), json!("20m")),
+            ("FREQ".to_string(), json!(14_074_000_i64)),
+            ("MODE".to_string(), json!("CW")),
+            ("RST_RCVD".to_string(), json!(599)),
+        ])
+    }
+
+    #[test]
+    fn validates_typed_fields_like_frontend() {
+        assert!(validate_typed_field("RST", "RST", "599", &[], None, "CW").is_ok());
+        assert!(validate_typed_field("RST", "RST", "59", &[], None, "CW").is_err());
+        assert!(validate_typed_field("Serial", "Numeric:3", "123", &[], None, "CW").is_ok());
+        assert!(validate_typed_field("Serial", "Numeric:3", "12A", &[], None, "CW").is_err());
+        assert!(
+            validate_typed_field("Section", "String:3", "SC", &["SC".to_string()], None, "CW")
+                .is_ok()
+        );
+        assert!(
+            validate_typed_field("Section", "String:3", "GA", &["SC".to_string()], None, "CW")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn validates_contact_payload() {
+        let rules = test_rules();
+        assert!(validate_contact(&rules, 1, &test_contact()).is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_contact_exchange() {
+        let rules = test_rules();
+        let mut contact = test_contact();
+        contact.insert("RST_RCVD".to_string(), json!(59));
+        assert!(validate_contact(&rules, 1, &contact).is_err());
+    }
+
+    #[test]
+    fn rejects_mismatched_contact_frequency_and_band() {
+        let rules = test_rules();
+        let mut contact = test_contact();
+        contact.insert("BAND".to_string(), json!("40m"));
+        assert!(validate_contact(&rules, 1, &contact).is_err());
+    }
+}

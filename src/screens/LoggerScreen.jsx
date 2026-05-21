@@ -55,7 +55,7 @@ function normalizeContact(contact) {
   return nextContact;
 }
 
-function shouldPersistLocally(contact) { return contact._status === 'Pending' || contact._status === 'Updating'; }
+function shouldPersistLocally(contact) { return contact._status === 'Pending' || contact._status === 'Updating' || contact._status === 'Failed'; }
 function contactStorageKey(logId) { return `${CONTACTS_STORAGE_KEY}.${logId}`; }
 
 function loadLocalContacts(logId) {
@@ -99,8 +99,16 @@ function mergeContact(contacts, contact) {
   const index = contacts.findIndex((currentContact) => contactMatches(currentContact, contact));
   if (index === -1) return sortContacts([...contacts, committedContact]);
   const nextContacts = [...contacts];
-  nextContacts[index] = { ...nextContacts[index], ...committedContact };
+  nextContacts[index] = { ...nextContacts[index], ...committedContact, _error: undefined };
   return sortContacts(nextContacts);
+}
+
+function markContactFailed(contacts, failedContact, error) {
+  return sortContacts(contacts.map((contact) => (
+    contactMatches(contact, failedContact)
+      ? { ...contact, _status: 'Failed', _error: error }
+      : contact
+  )));
 }
 
 function LoggerScreen() {
@@ -288,8 +296,22 @@ function LoggerScreen() {
           method: 'POST',
           body: JSON.stringify({ ...contact, _log_id: numericLogId }),
         });
+        if (!responseBody.ok) {
+          setContacts((currentContacts) => markContactFailed(
+            currentContacts,
+            contact,
+            responseBody.error ?? 'Contact upload failed.',
+          ));
+          return;
+        }
         if (responseBody.contact) {
           setContacts((currentContacts) => mergeContact(currentContacts, { ...responseBody.contact, _client_id: contact._client_id }));
+        } else {
+          setContacts((currentContacts) => markContactFailed(
+            currentContacts,
+            contact,
+            'Contact upload failed: server response did not include a committed contact.',
+          ));
         }
       } catch (error) {
         console.error('Unable to commit contact', error);
@@ -352,7 +374,8 @@ function LoggerScreen() {
       return {
         ...contact,
         [field]: value,
-        _status: contact._status === 'Pending' ? 'Pending' : 'Updating',
+        _status: contact._id === undefined ? 'Pending' : 'Updating',
+        _error: undefined,
       };
     })));
   }
