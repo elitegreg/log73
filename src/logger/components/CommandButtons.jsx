@@ -5,6 +5,8 @@ function CommandButtons({
   resetEntryFields,
   logContact,
   onRescore,
+  isRescoreLoading,
+  disableRescore,
   handleQrzClick,
 }) {
   return (
@@ -23,8 +25,13 @@ function CommandButtons({
       <button className="cmd-btn" onClick={() => logContact(false)}>
         Log it
       </button>
-      <button className="cmd-btn" type="button" onClick={onRescore}>
-        Rescore
+      <button
+        className="cmd-btn"
+        type="button"
+        onClick={onRescore}
+        disabled={disableRescore}
+      >
+        {isRescoreLoading ? 'Rescoring...' : 'Rescore'}
       </button>
       <button className="cmd-btn">Mark</button>
       <button className="cmd-btn">Store</button>

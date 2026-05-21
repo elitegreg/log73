@@ -310,6 +310,7 @@ function LogWindow({
   settings,
   contacts,
   log,
+  contactsLoadState,
   radioMode = 'CW',
   onDeleteContacts,
   onUpdateContacts,
@@ -327,6 +328,14 @@ function LogWindow({
   const inputRef = useRef(null);
   const editingCellKey = editingCell?.key;
   const editingCellColumn = editingCell?.column;
+  const contactsLoadMessage =
+    contactsLoadState === 'initial-loading'
+      ? 'Loading contacts...'
+      : contactsLoadState === 'refreshing'
+        ? 'Refreshing contacts...'
+        : contactsLoadState === 'retrying'
+          ? 'Retrying contact load...'
+          : '';
 
   useEffect(() => {
     const validKeys = new Set(contacts.map(contactKey));
@@ -469,6 +478,9 @@ function LogWindow({
       <div className="log-title-bar">
         Log: {log?.name ?? 'Loading log...'} -{' '}
         {settings?.contest ?? 'Loading contest...'}
+        {contactsLoadMessage ? (
+          <span className="log-title-status"> ({contactsLoadMessage})</span>
+        ) : null}
       </div>
       <div className="log-table-scroll">
         <table className="log-table">
@@ -556,7 +568,7 @@ function LogWindow({
             {contacts.length === 0 && (
               <tr>
                 <td colSpan={Math.max(columns.length, 1)} className="empty-log">
-                  No contacts loaded.
+                  {contactsLoadMessage || 'No contacts loaded.'}
                 </td>
               </tr>
             )}

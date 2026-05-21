@@ -506,6 +506,16 @@
   gap: 8px;
 }
 
+.logger-loading-status {
+  margin-left: auto;
+  white-space: nowrap;
+  font-weight: normal;
+}
+
+.log-title-status {
+  font-weight: normal;
+}
+
 .title-button {
   background-color: #c0c0c0;
   border: 1px solid #808080;

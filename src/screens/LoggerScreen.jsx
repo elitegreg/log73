@@ -55,6 +55,9 @@ function LoggerScreen() {
   const [backendSocketStatus, setBackendSocketStatus] =
     useState('disconnected');
   const [scoreSummary, setScoreSummary] = useState(EMPTY_SCORE_SUMMARY);
+  const [isContextLoading, setIsContextLoading] = useState(true);
+  const [contactsLoadState, setContactsLoadState] = useState('initial-loading');
+  const [isRescoreLoading, setIsRescoreLoading] = useState(false);
   const backendSocketRef = useRef(null);
   const committingContactIdsRef = useRef(new Set());
   const refreshContactsRef = useRef(() => {});
@@ -84,7 +87,10 @@ function LoggerScreen() {
   }, [numericLogId]);
 
   useEffect(() => {
+    let isCancelled = false;
+
     async function loadContext() {
+      setIsContextLoading(true);
       const [logResult, radioResult, cwLabelsResult] = await Promise.all([
         apiJson(`/logs/${numericLogId}`),
         apiJson(`/radios/${numericRadioId}`),
@@ -96,6 +102,7 @@ function LoggerScreen() {
       const contestSettings = await apiJson(
         `/contest-settings?contest_id=${encodeURIComponent(logResult.log.contest_id)}`,
       );
+      if (isCancelled) return;
       setSettings(contestSettings);
       setLog(logResult.log);
       setRadio(radioResult.radio);
@@ -105,7 +112,8 @@ function LoggerScreen() {
           current || promptForOperatorCallsign(logResult.log.station_callsign),
       );
     }
-    loadContext().catch((error) =>
+    const loadContextPromise = loadContext();
+    loadContextPromise.catch((error) =>
       notifyOperationalError(
         'LoggerScreen.loadContext',
         'Unable to load logger context.',
@@ -113,6 +121,12 @@ function LoggerScreen() {
         { logId: numericLogId, radioId: numericRadioId },
       ),
     );
+    loadContextPromise.finally(() => {
+      if (!isCancelled) setIsContextLoading(false);
+    });
+    return () => {
+      isCancelled = true;
+    };
   }, [numericLogId, numericRadioId, notifyOperationalError]);
 
   useEffect(() => {
@@ -245,61 +259,82 @@ function LoggerScreen() {
     let shouldRetryContactsLoad = true;
     let contactsLoadRetryDelayMs = CONTACTS_LOAD_INITIAL_RETRY_DELAY_MS;
     let contactsLoadRetryTimerId;
+    let contactsLoadInFlightPromise = null;
 
     function scheduleContactsLoadRetry() {
-      if (!shouldRetryContactsLoad || contactsLoadRetryTimerId !== undefined)
-        return;
+      if (!shouldRetryContactsLoad) return false;
+      if (contactsLoadRetryTimerId !== undefined) return true;
       contactsLoadRetryTimerId = window.setTimeout(() => {
         contactsLoadRetryTimerId = undefined;
-        loadContacts();
+        loadContacts({ mode: 'retry' });
       }, contactsLoadRetryDelayMs);
       contactsLoadRetryDelayMs = Math.min(
         contactsLoadRetryDelayMs * 2,
         CONTACTS_LOAD_MAX_RETRY_DELAY_MS,
       );
+      return true;
     }
 
-    async function loadContacts() {
-      try {
-        const backendContacts = [];
-        let offset = 0;
+    function loadContacts({ mode = 'refresh' } = {}) {
+      if (contactsLoadInFlightPromise) return contactsLoadInFlightPromise;
+      setContactsLoadState((currentState) => {
+        if (mode === 'retry') return 'retrying';
+        if (mode === 'initial') return 'initial-loading';
+        if (currentState === 'initial-loading') return 'initial-loading';
+        return 'refreshing';
+      });
 
-        while (true) {
-          const page = await apiJson(
-            `/logs/${numericLogId}/contacts?limit=${CONTACTS_PAGE_SIZE}&offset=${offset}`,
-          );
-          const committedPage = page.map(committedBackendContact);
-          backendContacts.push(...committedPage);
-          if (committedPage.length < CONTACTS_PAGE_SIZE) {
-            break;
+      contactsLoadInFlightPromise = (async () => {
+        try {
+          const backendContacts = [];
+          let offset = 0;
+
+          while (true) {
+            const page = await apiJson(
+              `/logs/${numericLogId}/contacts?limit=${CONTACTS_PAGE_SIZE}&offset=${offset}`,
+            );
+            const committedPage = page.map(committedBackendContact);
+            backendContacts.push(...committedPage);
+            if (committedPage.length < CONTACTS_PAGE_SIZE) {
+              break;
+            }
+            offset += CONTACTS_PAGE_SIZE;
           }
-          offset += CONTACTS_PAGE_SIZE;
-        }
 
-        const localUncommittedContacts = loadLocalContacts(logId).filter(
-          (contact) => contact._status !== 'Committed',
-        );
-        setContacts(
-          sortContacts([...backendContacts, ...localUncommittedContacts]),
-        );
-        shouldRetryContactsLoad = false;
-        contactsLoadErrorNotifiedRef.current = false;
-      } catch (error) {
-        if (!contactsLoadErrorNotifiedRef.current) {
-          contactsLoadErrorNotifiedRef.current = true;
-          notifyOperationalError(
-            'LoggerScreen.loadContacts',
-            'Unable to load backend contacts. Using local contacts and retrying.',
-            error,
-            { logId: numericLogId },
+          const localUncommittedContacts = loadLocalContacts(logId).filter(
+            (contact) => contact._status !== 'Committed',
           );
+          setContacts(
+            sortContacts([...backendContacts, ...localUncommittedContacts]),
+          );
+          shouldRetryContactsLoad = false;
+          contactsLoadErrorNotifiedRef.current = false;
+          setContactsLoadState('idle');
+          return true;
+        } catch (error) {
+          if (!contactsLoadErrorNotifiedRef.current) {
+            contactsLoadErrorNotifiedRef.current = true;
+            notifyOperationalError(
+              'LoggerScreen.loadContacts',
+              'Unable to load backend contacts. Using local contacts and retrying.',
+              error,
+              { logId: numericLogId },
+            );
+          }
+          const retryScheduled = scheduleContactsLoadRetry();
+          setContactsLoadState(retryScheduled ? 'retrying' : 'idle');
+          return false;
+        } finally {
+          contactsLoadInFlightPromise = null;
         }
-        scheduleContactsLoadRetry();
-      }
+      })();
+
+      return contactsLoadInFlightPromise;
     }
 
     refreshContactsRef.current = loadContacts;
-    loadContacts();
+    setContactsLoadState('initial-loading');
+    loadContacts({ mode: 'initial' });
     return () => {
       refreshContactsRef.current = () => {};
       shouldRetryContactsLoad = false;
@@ -411,6 +446,16 @@ function LoggerScreen() {
       socket.send(JSON.stringify(message));
   }
 
+  async function handleRescore() {
+    if (isRescoreLoading || contactsLoadState !== 'idle') return;
+    setIsRescoreLoading(true);
+    try {
+      await refreshContactsRef.current({ mode: 'refresh' });
+    } finally {
+      setIsRescoreLoading(false);
+    }
+  }
+
   async function deleteContacts(contactsToDelete) {
     if (contactsToDelete.length === 0) return;
 
@@ -510,6 +555,8 @@ function LoggerScreen() {
         settings={settings}
         log={log}
         radio={radio}
+        isContextLoading={isContextLoading}
+        contactsLoadState={contactsLoadState}
         stationCallsign={log?.station_callsign ?? ''}
         operatorCallsign={operatorCallsign}
         radioState={radioState}
@@ -532,7 +579,8 @@ function LoggerScreen() {
             sortContacts([...currentContacts, contact]),
           )
         }
-        onRescore={() => refreshContactsRef.current()}
+        onRescore={handleRescore}
+        isRescoreLoading={isRescoreLoading}
         scoreSummary={scoreSummary}
         onExit={exitLogger}
       />
@@ -540,6 +588,7 @@ function LoggerScreen() {
         settings={settings}
         contacts={contacts}
         log={log}
+        contactsLoadState={contactsLoadState}
         radioMode={radioState?.mode ?? 'CW'}
         onDeleteContacts={deleteContacts}
         onUpdateContacts={updateContacts}

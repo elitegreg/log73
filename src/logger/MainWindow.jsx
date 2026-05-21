@@ -43,6 +43,8 @@ function MainWindow({
   settings,
   log,
   radio,
+  isContextLoading,
+  contactsLoadState,
   stationCallsign,
   operatorCallsign,
   radioState,
@@ -58,6 +60,7 @@ function MainWindow({
   onSetCwWpm,
   onLogContact,
   onRescore,
+  isRescoreLoading,
   scoreSummary,
   onExit,
 }) {
@@ -100,6 +103,16 @@ function MainWindow({
     ? allowedBands.includes(currentBand.meters)
     : false;
   const bandOptions = allowedBands.map(bandByMeters).filter(Boolean);
+  const loadingStatus =
+    isContextLoading
+      ? 'Loading logger context...'
+      : contactsLoadState === 'initial-loading'
+        ? 'Loading contacts...'
+        : contactsLoadState === 'refreshing'
+          ? 'Refreshing contacts...'
+          : contactsLoadState === 'retrying'
+            ? 'Retrying contact load...'
+            : '';
 
   if (
     currentBand &&
@@ -537,6 +550,9 @@ function MainWindow({
           {settings?.contest ?? 'Loading...'} | Mode: {radioMode}, Freq:{' '}
           {formatFrequency(radioFrequencyHz)}
         </span>
+        {loadingStatus ? (
+          <span className="logger-loading-status">{loadingStatus}</span>
+        ) : null}
         <button className="title-button" onClick={onExit}>
           Exit Logger
         </button>
@@ -592,6 +608,8 @@ function MainWindow({
         resetEntryFields={resetEntryFields}
         logContact={logContact}
         onRescore={onRescore}
+        isRescoreLoading={isRescoreLoading}
+        disableRescore={isContextLoading || contactsLoadState !== 'idle'}
         handleQrzClick={handleQrzClick}
       />
       <StatusBar
