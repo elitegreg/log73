@@ -4,14 +4,14 @@ use crate::radio::{RadioCommand, RadioState, ServerMessage, mode_for_request, no
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock, broadcast, mpsc, oneshot};
+use tokio::sync::{Mutex, Notify, RwLock, broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, trace, warn};
 
 #[derive(Clone)]
 pub struct RadioManager {
     db: Database,
-    radios: Arc<Mutex<HashMap<i64, ManagedRadio>>>,
+    radios: Arc<Mutex<HashMap<i64, ManagedRadioSlot>>>,
 }
 
 #[derive(Clone)]
@@ -21,12 +21,17 @@ pub struct RadioHandle {
     commands: mpsc::Sender<RadioCommand>,
 }
 
+enum ManagedRadioSlot {
+    Active(ManagedRadio),
+    ShuttingDown { done: Arc<Notify> },
+}
+
 struct ManagedRadio {
     current: Arc<RwLock<Option<RadioState>>>,
     updates: broadcast::Sender<RadioState>,
     commands: mpsc::Sender<RadioCommand>,
     shutdown: Option<oneshot::Sender<()>>,
-    _task: JoinHandle<()>,
+    task: Option<JoinHandle<()>>,
     refcount: usize,
 }
 
@@ -39,102 +44,152 @@ impl RadioManager {
     }
 
     pub async fn acquire(&self, radio_id: i64) -> Result<RadioHandle, String> {
-        let mut radios = self.radios.lock().await;
+        loop {
+            let mut wait_for_shutdown = None;
+            {
+                let mut radios = self.radios.lock().await;
 
-        if let Some(radio) = radios.get_mut(&radio_id) {
-            radio.refcount += 1;
-            debug!(
-                radio_id,
-                refcount = radio.refcount,
-                "acquired existing managed radio"
-            );
-            return Ok(RadioHandle {
-                current: radio.current.clone(),
-                updates: radio.updates.clone(),
-                commands: radio.commands.clone(),
-            });
+                if let Some(slot) = radios.get_mut(&radio_id) {
+                    match slot {
+                        ManagedRadioSlot::Active(radio) => {
+                            radio.refcount += 1;
+                            debug!(
+                                radio_id,
+                                refcount = radio.refcount,
+                                "acquired existing managed radio"
+                            );
+                            return Ok(RadioHandle {
+                                current: radio.current.clone(),
+                                updates: radio.updates.clone(),
+                                commands: radio.commands.clone(),
+                            });
+                        }
+                        ManagedRadioSlot::ShuttingDown { done } => {
+                            wait_for_shutdown = Some(done.clone());
+                        }
+                    }
+                }
+
+                if wait_for_shutdown.is_none() {
+                    let config = self
+                        .db
+                        .radio(radio_id)
+                        .map_err(|error| error.to_string())?
+                        .ok_or_else(|| format!("radio not found: {radio_id}"))?;
+                    debug!(
+                        radio_id,
+                        host = %config.rigctld_host,
+                        port = config.rigctld_port,
+                        poll_frequency = config.poll_frequency,
+                        rigctld_timeout = config.rigctld_timeout,
+                        winkeyer_enabled = config.winkeyer_enabled,
+                        winkeyer_serial_port = %config.winkeyer_serial_port,
+                        "starting managed radio"
+                    );
+                    let current = Arc::new(RwLock::new(None));
+                    let (updates, _) = broadcast::channel(32);
+                    let (commands, command_rx) = mpsc::channel(32);
+                    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+                    let task_current = current.clone();
+                    let task_updates = updates.clone();
+                    let task = tokio::spawn(async move {
+                        run_managed_radio(config, task_current, task_updates, command_rx, shutdown_rx)
+                            .await;
+                    });
+
+                    radios.insert(
+                        radio_id,
+                        ManagedRadioSlot::Active(ManagedRadio {
+                            current: current.clone(),
+                            updates: updates.clone(),
+                            commands: commands.clone(),
+                            shutdown: Some(shutdown_tx),
+                            task: Some(task),
+                            refcount: 1,
+                        }),
+                    );
+
+                    return Ok(RadioHandle {
+                        current,
+                        updates,
+                        commands,
+                    });
+                }
+            }
+
+            if let Some(done) = wait_for_shutdown {
+                debug!(radio_id, "waiting for managed radio shutdown to complete");
+                done.notified().await;
+            }
         }
-
-        let config = self
-            .db
-            .radio(radio_id)
-            .map_err(|error| error.to_string())?
-            .ok_or_else(|| format!("radio not found: {radio_id}"))?;
-        debug!(
-            radio_id,
-            host = %config.rigctld_host,
-            port = config.rigctld_port,
-            poll_frequency = config.poll_frequency,
-            rigctld_timeout = config.rigctld_timeout,
-            winkeyer_enabled = config.winkeyer_enabled,
-            winkeyer_serial_port = %config.winkeyer_serial_port,
-            "starting managed radio"
-        );
-        let current = Arc::new(RwLock::new(None));
-        let (updates, _) = broadcast::channel(32);
-        let (commands, command_rx) = mpsc::channel(32);
-        let (shutdown_tx, shutdown_rx) = oneshot::channel();
-        let task_current = current.clone();
-        let task_updates = updates.clone();
-        let task = tokio::spawn(async move {
-            run_managed_radio(config, task_current, task_updates, command_rx, shutdown_rx).await;
-        });
-
-        radios.insert(
-            radio_id,
-            ManagedRadio {
-                current: current.clone(),
-                updates: updates.clone(),
-                commands: commands.clone(),
-                shutdown: Some(shutdown_tx),
-                _task: task,
-                refcount: 1,
-            },
-        );
-
-        Ok(RadioHandle {
-            current,
-            updates,
-            commands,
-        })
     }
 
     pub async fn release(&self, radio_id: i64) {
-        let mut removed = None;
+        let mut shutdown = None;
+        let mut task = None;
+        let mut done = None;
+
         {
             let mut radios = self.radios.lock().await;
-            if let Some(radio) = radios.get_mut(&radio_id) {
-                radio.refcount = radio.refcount.saturating_sub(1);
-                debug!(
-                    radio_id,
-                    refcount = radio.refcount,
-                    "released managed radio reference"
-                );
-                if radio.refcount == 0 {
-                    removed = radios.remove(&radio_id);
+            if let Some(slot) = radios.get_mut(&radio_id) {
+                match slot {
+                    ManagedRadioSlot::Active(radio) => {
+                        radio.refcount = radio.refcount.saturating_sub(1);
+                        debug!(
+                            radio_id,
+                            refcount = radio.refcount,
+                            "released managed radio reference"
+                        );
+                        if radio.refcount == 0 {
+                            debug!(
+                                radio_id,
+                                "releasing final radio reference; shutting down managed radio"
+                            );
+                            let shutdown_done = Arc::new(Notify::new());
+                            done = Some(shutdown_done.clone());
+                            shutdown = radio.shutdown.take();
+                            task = radio.task.take();
+                            *slot = ManagedRadioSlot::ShuttingDown {
+                                done: shutdown_done,
+                            };
+                        }
+                    }
+                    ManagedRadioSlot::ShuttingDown { .. } => {
+                        debug!(radio_id, "release ignored; managed radio already shutting down");
+                    }
                 }
             }
         }
 
-        if let Some(mut radio) = removed {
-            debug!(
-                radio_id,
-                "releasing final radio reference; shutting down managed radio"
-            );
-            if let Some(shutdown) = radio.shutdown.take() {
-                let _ = shutdown.send(());
+        if let Some(shutdown) = shutdown {
+            let _ = shutdown.send(());
+        }
+        if let Some(task) = task {
+            let _ = task.await;
+        }
+        if let Some(done) = done {
+            done.notify_waiters();
+            let mut radios = self.radios.lock().await;
+            if matches!(radios.get(&radio_id), Some(ManagedRadioSlot::ShuttingDown { .. })) {
+                radios.remove(&radio_id);
             }
         }
     }
 
     pub async fn is_active(&self, radio_id: i64) -> bool {
-        self.radios.lock().await.contains_key(&radio_id)
+        matches!(
+            self.radios.lock().await.get(&radio_id),
+            Some(ManagedRadioSlot::Active(_))
+        )
     }
 
     pub async fn reload_config(&self, radio_id: i64, config: RadioConfig) -> Result<(), String> {
         let command_sender = {
             let radios = self.radios.lock().await;
-            radios.get(&radio_id).map(|radio| radio.commands.clone())
+            match radios.get(&radio_id) {
+                Some(ManagedRadioSlot::Active(radio)) => Some(radio.commands.clone()),
+                Some(ManagedRadioSlot::ShuttingDown { .. }) | None => None,
+            }
         };
 
         let Some(command_sender) = command_sender else {
