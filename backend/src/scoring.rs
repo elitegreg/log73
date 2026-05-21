@@ -541,3 +541,207 @@ fn json_string(value: Option<&Value>) -> Option<String> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contest_rules::{BonusPointRule, ContestRules, QsoPointRule, QsoPoints};
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    fn test_rules(
+        qso_points: QsoPoints,
+        dupe_key: Vec<&str>,
+        multipliers: Vec<MultiplierRule>,
+        bonus_points: Vec<BonusPointRule>,
+    ) -> ContestRules {
+        ContestRules {
+            contest: "TEST".to_string(),
+            display_name: "Test".to_string(),
+            allowed_bands: Vec::new(),
+            allowed_modes: Vec::new(),
+            define: Vec::new(),
+            exchange: Vec::new(),
+            qso_columns: Vec::new(),
+            qso_column_fields: BTreeMap::new(),
+            log_params: Vec::new(),
+            qso_points: Some(qso_points),
+            dupe_key: dupe_key.into_iter().map(str::to_string).collect(),
+            multipliers,
+            bonus_points,
+            metadata: None,
+        }
+    }
+
+    fn fixed_points(points: i64) -> QsoPoints {
+        QsoPoints {
+            points: Some(points),
+            rules: Vec::new(),
+        }
+    }
+
+    fn mode_points() -> QsoPoints {
+        QsoPoints {
+            points: None,
+            rules: vec![
+                QsoPointRule {
+                    when: Some(ScoringCondition {
+                        field: "MODE".to_string(),
+                        in_set: None,
+                        in_sets: Vec::new(),
+                        values: vec!["SSB".to_string()],
+                        valid_values: Vec::new(),
+                    }),
+                    points: 1,
+                },
+                QsoPointRule {
+                    when: None,
+                    points: 2,
+                },
+            ],
+        }
+    }
+
+    fn state_multiplier() -> MultiplierRule {
+        MultiplierRule {
+            name: "State".to_string(),
+            field: "STATE".to_string(),
+            key: vec!["STATE".to_string()],
+            in_sets: Vec::new(),
+            valid_values: Vec::new(),
+        }
+    }
+
+    fn bonus_station(points: i64) -> BonusPointRule {
+        BonusPointRule {
+            name: "Bonus Station".to_string(),
+            field: "CALL".to_string(),
+            key: vec!["CALL".to_string(), "BAND".to_string()],
+            values: BTreeMap::from([("W4CAE".to_string(), points)]),
+        }
+    }
+
+    fn contact(fields: Vec<(&str, Value)>) -> Contact {
+        fields
+            .into_iter()
+            .map(|(key, value)| (key.to_string(), value))
+            .collect()
+    }
+
+    #[test]
+    fn scores_without_multipliers_use_qso_points_directly() {
+        let rules = test_rules(
+            mode_points(),
+            vec!["CALL", "BAND", "MODE"],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = vec![
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("SSB")),
+            ]),
+            contact(vec![
+                ("CALL", json!("N1XYZ")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+            ]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_count, 2);
+        assert_eq!(totals.qso_points, 3);
+        assert_eq!(totals.multipliers, 0);
+        assert_eq!(totals.score, 3);
+        assert_eq!(contacts[0].get("_pts"), Some(&json!(1)));
+        assert_eq!(contacts[1].get("_pts"), Some(&json!(2)));
+    }
+
+    #[test]
+    fn scores_with_multipliers_multiply_qso_points_by_multiplier_count() {
+        let rules = test_rules(
+            fixed_points(2),
+            Vec::new(),
+            vec![state_multiplier()],
+            Vec::new(),
+        );
+        let mut contacts = vec![
+            contact(vec![("STATE", json!("SC"))]),
+            contact(vec![("STATE", json!("NC"))]),
+            contact(vec![("STATE", json!("SC"))]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 6);
+        assert_eq!(totals.multipliers, 2);
+        assert_eq!(totals.score, 12);
+        assert_eq!(contacts[0].get("_mult"), Some(&json!(1)));
+        assert_eq!(contacts[1].get("_mult"), Some(&json!(1)));
+        assert_eq!(contacts[2].get("_mult"), Some(&json!(0)));
+    }
+
+    #[test]
+    fn duplicate_qsos_score_zero() {
+        let rules = test_rules(
+            fixed_points(2),
+            vec!["CALL", "BAND", "MODE"],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = vec![
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+            ]),
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+            ]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_count, 2);
+        assert_eq!(totals.qso_points, 2);
+        assert_eq!(totals.score, 2);
+        assert_eq!(contacts[0].get("_dupe"), Some(&json!(false)));
+        assert_eq!(contacts[1].get("_dupe"), Some(&json!(true)));
+        assert_eq!(contacts[1].get("_pts"), Some(&json!(0)));
+    }
+
+    #[test]
+    fn bonus_points_are_awarded_once_per_bonus_key() {
+        let rules = test_rules(
+            fixed_points(2),
+            Vec::new(),
+            vec![state_multiplier()],
+            vec![bonus_station(350)],
+        );
+        let mut contacts = vec![
+            contact(vec![
+                ("CALL", json!("W4CAE")),
+                ("BAND", json!("20m")),
+                ("STATE", json!("SC")),
+            ]),
+            contact(vec![
+                ("CALL", json!("W4CAE")),
+                ("BAND", json!("20m")),
+                ("STATE", json!("NC")),
+            ]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 4);
+        assert_eq!(totals.multipliers, 2);
+        assert_eq!(totals.bonus_points, 350);
+        assert_eq!(totals.score, 358);
+        assert_eq!(contacts[0].get("_bonus"), Some(&json!(350)));
+        assert_eq!(contacts[1].get("_bonus"), Some(&json!(0)));
+    }
+}

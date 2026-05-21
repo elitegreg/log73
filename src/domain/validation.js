@@ -1,4 +1,4 @@
-import { parseFieldType } from './contactFields';
+import { parseFieldType } from './contactFields.js';
 
 export function fieldValueLabel(field) {
   return field?.label ?? field?.name ?? 'Field';

@@ -173,3 +173,57 @@ fn normalize_mode(mode: &str) -> String {
         _ => "s&p".to_string(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    const TEST_MESSAGES: &str = r#"
+# RUN Messages
+F1 Cq,CQ {STATION_CALLSIGN}
+F2 Exch,{SENTRSTCUT} {EXCH} {CALL}
+# S&P Messages
+F1 His Call,{CALL}
+"#;
+
+    #[test]
+    fn parses_cw_labels_by_mode() {
+        let labels = labels(TEST_MESSAGES);
+
+        assert_eq!(labels.run.len(), 2);
+        assert_eq!(labels.run[0].key, "F1");
+        assert_eq!(labels.run[0].label, "Cq");
+        assert_eq!(labels.search_and_pounce.len(), 1);
+        assert_eq!(labels.search_and_pounce[0].key, "F1");
+        assert_eq!(labels.search_and_pounce[0].label, "His Call");
+    }
+
+    #[test]
+    fn renders_cw_template_fields() {
+        let fields = json!({
+            "STATION_CALLSIGN": "N0CALL",
+            "CALL": "K1ABC",
+            "STX_STRING": "SC",
+            "RST_SENT": 599
+        })
+        .as_object()
+        .expect("test fields should be an object")
+        .clone();
+
+        assert_eq!(
+            render(TEST_MESSAGES, "run", "F2", &fields),
+            Some("5NN SC K1ABC".to_string())
+        );
+        assert_eq!(
+            render(TEST_MESSAGES, "s&p", "F1", &fields),
+            Some("K1ABC".to_string())
+        );
+    }
+
+    #[test]
+    fn render_returns_none_for_missing_key() {
+        let fields = Map::new();
+        assert_eq!(render(TEST_MESSAGES, "run", "F12", &fields), None);
+    }
+}

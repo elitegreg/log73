@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { callsignCompletionMatches, exchangeCompletionMatches } from '../domain/completions';
 import { fieldDefault, parseFieldType, sanitizeCallsign, sanitizeExchangeValue } from '../domain/contactFields';
 import { validateExchangeField } from '../domain/validation';
 import { supercheckpartial } from '../lib/api';
@@ -11,7 +12,6 @@ const DEFAULT_CW_LABELS = {
   's&p': Array.from({ length: 12 }, (_, index) => ({ key: `F${index + 1}`, label: '-' })),
 };
 const CALLSIGN_FIELD_WIDTH_CHARS = 13;
-const MAX_COMPLETION_MATCHES = 100;
 const AMATEUR_BANDS = [
   { meters: 160, name: '160m', lowerHz: 1800000, upperHz: 2000000 },
   { meters: 80, name: '80m', lowerHz: 3500000, upperHz: 4000000 },
@@ -70,16 +70,6 @@ function createCwRequestId() {
 
 function isEmptyCwButton(button) {
   return String(button?.label ?? '').trim() === '-';
-}
-
-function exchangeCompletionMatches(field, value) {
-  const query = String(value ?? '').trim().toUpperCase();
-  if (query.length < 1 || (field?.valid_values ?? []).length === 0) return [];
-
-  return field.valid_values
-    .map((validValue) => String(validValue).toUpperCase())
-    .filter((validValue) => validValue.includes(query))
-    .slice(0, MAX_COMPLETION_MATCHES);
 }
 
 function MainWindow({
@@ -205,11 +195,7 @@ function MainWindow({
       return;
     }
 
-    setSupercheckpartialMatches(
-      supercheckpartialCallsigns
-        .filter((callsign) => callsign.includes(query))
-        .slice(0, MAX_COMPLETION_MATCHES),
-    );
+    setSupercheckpartialMatches(callsignCompletionMatches(supercheckpartialCallsigns, query));
   }, [activeCompletionField, callSign, supercheckpartialCallsigns]);
 
   const cwModeKey = operatingMode === 'Run' ? 'run' : 's&p';
