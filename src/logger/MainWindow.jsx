@@ -1,6 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { callsignCompletionMatches, exchangeCompletionMatches } from '../domain/completions';
-import { fieldDefault, sanitizeCallsign, sanitizeExchangeValue } from '../domain/contactFields';
+import {
+  callsignCompletionMatches,
+  exchangeCompletionMatches,
+} from '../domain/completions';
+import {
+  fieldDefault,
+  sanitizeCallsign,
+  sanitizeExchangeValue,
+} from '../domain/contactFields';
 import { validateExchangeField } from '../domain/validation';
 import { supercheckpartial } from '../lib/api';
 import {
@@ -60,10 +67,15 @@ function MainWindow({
   const [repeatRunF1, setRepeatRunF1] = useState(false);
   const [activeCwKeys, setActiveCwKeys] = useState(() => new Set());
   const [activeCompletionField, setActiveCompletionField] = useState(null);
-  const [supercheckpartialCallsigns, setSupercheckpartialCallsigns] = useState([]);
+  const [supercheckpartialCallsigns, setSupercheckpartialCallsigns] = useState(
+    [],
+  );
   const [supercheckpartialMatches, setSupercheckpartialMatches] = useState([]);
   const [cwWpm, setCwWpm] = useState(() => {
-    const storedWpm = Number.parseInt(localStorage.getItem(CW_WPM_STORAGE_KEY) ?? '', 10);
+    const storedWpm = Number.parseInt(
+      localStorage.getItem(CW_WPM_STORAGE_KEY) ?? '',
+      10,
+    );
     return Number.isFinite(storedWpm) ? storedWpm : DEFAULT_CW_WPM;
   });
   const callSignRef = useRef(null);
@@ -79,23 +91,27 @@ function MainWindow({
   const exchangeInputRefs = useRef({});
   const callSignEditedAtRef = useRef(new Date());
   const radioMode = radioState?.mode ?? 'CW';
-  const radioFrequencyHz = radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
+  const radioFrequencyHz =
+    radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
   const allowedBands = settings?.allowed_bands ?? [];
   const currentBand = bandForFrequency(radioFrequencyHz);
   const currentBandValue = currentBand ? String(currentBand.meters) : 'unknown';
   const currentBandAllowed = currentBand
     ? allowedBands.includes(currentBand.meters)
     : false;
-  const bandOptions = allowedBands
-    .map(bandByMeters)
-    .filter(Boolean);
+  const bandOptions = allowedBands.map(bandByMeters).filter(Boolean);
 
-  if (currentBand && !bandOptions.some((band) => band.meters === currentBand.meters)) {
+  if (
+    currentBand &&
+    !bandOptions.some((band) => band.meters === currentBand.meters)
+  ) {
     bandOptions.push(currentBand);
   }
 
   useEffect(() => {
-    setExchangeValues(exchangeDefaults(settings, radioMode, log?.contest_params ?? {}));
+    setExchangeValues(
+      exchangeDefaults(settings, radioMode, log?.contest_params ?? {}),
+    );
   }, [settings, radioMode, log]);
 
   useEffect(() => {
@@ -129,7 +145,9 @@ function MainWindow({
     supercheckpartial()
       .then((result) => {
         if (!cancelled) {
-          setSupercheckpartialCallsigns(Array.isArray(result.callsigns) ? result.callsigns : []);
+          setSupercheckpartialCallsigns(
+            Array.isArray(result.callsigns) ? result.callsigns : [],
+          );
         }
       })
       .catch(() => {
@@ -155,7 +173,9 @@ function MainWindow({
       return;
     }
 
-    setSupercheckpartialMatches(callsignCompletionMatches(supercheckpartialCallsigns, query));
+    setSupercheckpartialMatches(
+      callsignCompletionMatches(supercheckpartialCallsigns, query),
+    );
   }, [activeCompletionField, callSign, supercheckpartialCallsigns]);
 
   const cwModeKey = operatingMode === 'Run' ? 'run' : 's&p';
@@ -163,12 +183,13 @@ function MainWindow({
   const activeExchangeCompletionField = (settings?.exchange ?? []).find(
     (field) => field.name === activeCompletionField && field.fixed !== true,
   );
-  const completionMatches = activeCompletionField === 'CALL'
-    ? supercheckpartialMatches
-    : exchangeCompletionMatches(
-      activeExchangeCompletionField,
-      exchangeValues[activeExchangeCompletionField?.name],
-    );
+  const completionMatches =
+    activeCompletionField === 'CALL'
+      ? supercheckpartialMatches
+      : exchangeCompletionMatches(
+          activeExchangeCompletionField,
+          exchangeValues[activeExchangeCompletionField?.name],
+        );
 
   function currentCwFields() {
     const fields = {
@@ -177,7 +198,12 @@ function MainWindow({
     };
 
     for (const field of settings?.exchange ?? []) {
-      fields[field.adif] = String(exchangeValues[field.name] ?? fieldDefault(field, radioMode, log?.contest_params ?? {})).trim().toUpperCase();
+      fields[field.adif] = String(
+        exchangeValues[field.name] ??
+          fieldDefault(field, radioMode, log?.contest_params ?? {}),
+      )
+        .trim()
+        .toUpperCase();
     }
 
     return fields;
@@ -195,8 +221,13 @@ function MainWindow({
   function markCwKeyActive(requestId, key) {
     activeCwRequestsRef.current.set(requestId, key);
     setActiveCwKeys((current) => new Set(current).add(key));
-    const timeoutMs = radio?.winkeyer_enabled ? CW_ACTIVE_TIMEOUT_WIKEYER_MS : CW_ACTIVE_TIMEOUT_NO_WIKEYER_MS;
-    const timeoutId = window.setTimeout(() => clearCwRequest(requestId), timeoutMs);
+    const timeoutMs = radio?.winkeyer_enabled
+      ? CW_ACTIVE_TIMEOUT_WIKEYER_MS
+      : CW_ACTIVE_TIMEOUT_NO_WIKEYER_MS;
+    const timeoutId = window.setTimeout(
+      () => clearCwRequest(requestId),
+      timeoutMs,
+    );
     activeCwTimeoutsRef.current.set(requestId, timeoutId);
   }
 
@@ -210,7 +241,9 @@ function MainWindow({
       activeCwTimeoutsRef.current.delete(requestId);
     }
     setActiveCwKeys((current) => {
-      const stillActive = [...activeCwRequestsRef.current.values()].includes(key);
+      const stillActive = [...activeCwRequestsRef.current.values()].includes(
+        key,
+      );
       if (stillActive) return current;
       const next = new Set(current);
       next.delete(key);
@@ -219,7 +252,9 @@ function MainWindow({
   }
 
   function sendSingleCwKey(key, mode = cwModeKey) {
-    const button = (cwLabels?.[mode] ?? DEFAULT_CW_LABELS[mode]).find((label) => label.key === key);
+    const button = (cwLabels?.[mode] ?? DEFAULT_CW_LABELS[mode]).find(
+      (label) => label.key === key,
+    );
     if (isEmptyCwButton(button)) return null;
     const requestId = createCwRequestId();
     markCwKeyActive(requestId, key);
@@ -258,18 +293,26 @@ function MainWindow({
     onStopCw?.();
   }
 
-  useEffect(() => () => {
-    stopRepeat();
-    for (const timeoutId of activeCwTimeoutsRef.current.values()) {
-      window.clearTimeout(timeoutId);
-    }
-    activeCwTimeoutsRef.current.clear();
-    activeCwRequestsRef.current.clear();
-  }, []);
+  useEffect(
+    () => () => {
+      stopRepeat();
+      for (const timeoutId of activeCwTimeoutsRef.current.values()) {
+        window.clearTimeout(timeoutId);
+      }
+      activeCwTimeoutsRef.current.clear();
+      activeCwRequestsRef.current.clear();
+    },
+    [],
+  );
 
   useEffect(() => {
     if (cwSentEvent?.requestId) clearCwRequest(cwSentEvent.requestId);
-    if (!repeatActiveRef.current || !cwSentEvent?.requestId || cwSentEvent.requestId !== repeatRequestIdRef.current) return;
+    if (
+      !repeatActiveRef.current ||
+      !cwSentEvent?.requestId ||
+      cwSentEvent.requestId !== repeatRequestIdRef.current
+    )
+      return;
     repeatTimeoutRef.current = window.setTimeout(() => {
       repeatTimeoutRef.current = null;
       if (!repeatActiveRef.current || callSignValueRef.current.trim() !== '') {
@@ -317,7 +360,10 @@ function MainWindow({
   }
 
   function exchangeValue(field) {
-    return exchangeValues[field.name] ?? fieldDefault(field, radioMode, log?.contest_params ?? {});
+    return (
+      exchangeValues[field.name] ??
+      fieldDefault(field, radioMode, log?.contest_params ?? {})
+    );
   }
 
   function exchangeValidation(field) {
@@ -325,14 +371,18 @@ function MainWindow({
   }
 
   function firstInvalidExchangeField() {
-    return (settings?.exchange ?? []).find((field) => !exchangeValidation(field).ok);
+    return (settings?.exchange ?? []).find(
+      (field) => !exchangeValidation(field).ok,
+    );
   }
 
   function allRequiredFieldsFilled() {
     return (
       Boolean(settings?.exchange) &&
       callSign.trim() !== '' &&
-      settings.exchange.every((field) => String(exchangeValue(field)).trim() !== '')
+      settings.exchange.every(
+        (field) => String(exchangeValue(field)).trim() !== '',
+      )
     );
   }
 
@@ -342,7 +392,9 @@ function MainWindow({
 
   function resetEntryFields() {
     setCallSign('');
-    setExchangeValues(exchangeDefaults(settings, radioMode, log?.contest_params ?? {}));
+    setExchangeValues(
+      exchangeDefaults(settings, radioMode, log?.contest_params ?? {}),
+    );
     callSignEditedAtRef.current = new Date();
     callSignRef.current?.focus();
   }
@@ -392,7 +444,9 @@ function MainWindow({
         editable: field.fixed !== true,
       })),
     ];
-    const currentIndex = fields.findIndex((field) => field.name === currentFieldName);
+    const currentIndex = fields.findIndex(
+      (field) => field.name === currentFieldName,
+    );
     const nextEmptyField = fields
       .slice(currentIndex + 1)
       .find((field) => field.editable && String(field.value).trim() === '');
@@ -478,9 +532,14 @@ function MainWindow({
     <div className="window">
       <div className="title-bar logger-title-bar">
         <span>
-          Log73 | Log: {log?.name ?? 'Loading...'} | Radio: {radio?.name ?? 'Loading...'} | Contest: {settings?.contest ?? 'Loading...'} | Mode: {radioMode}, Freq: {formatFrequency(radioFrequencyHz)}
+          Log73 | Log: {log?.name ?? 'Loading...'} | Radio:{' '}
+          {radio?.name ?? 'Loading...'} | Contest:{' '}
+          {settings?.contest ?? 'Loading...'} | Mode: {radioMode}, Freq:{' '}
+          {formatFrequency(radioFrequencyHz)}
         </span>
-        <button className="title-button" onClick={onExit}>Exit Logger</button>
+        <button className="title-button" onClick={onExit}>
+          Exit Logger
+        </button>
       </div>
       <RadioControls
         operatingMode={operatingMode}

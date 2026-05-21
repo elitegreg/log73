@@ -25,12 +25,15 @@ import {
 let promptedOperatorCallsign;
 
 function promptForOperatorCallsign(defaultCallsign) {
-  const enteredCallsign = window.prompt('Operator Callsign', promptedOperatorCallsign ?? defaultCallsign);
-  if (enteredCallsign === null) return promptedOperatorCallsign ?? defaultCallsign;
+  const enteredCallsign = window.prompt(
+    'Operator Callsign',
+    promptedOperatorCallsign ?? defaultCallsign,
+  );
+  if (enteredCallsign === null)
+    return promptedOperatorCallsign ?? defaultCallsign;
   promptedOperatorCallsign = enteredCallsign.toUpperCase();
   return promptedOperatorCallsign;
 }
-
 
 function LoggerScreen() {
   const { logId, radioId } = useParams();
@@ -46,13 +49,16 @@ function LoggerScreen() {
   const [operatorCallsign, setOperatorCallsign] = useState('');
   const [sessionId] = useState(getSessionId);
   const [radioState, setRadioState] = useState(DEFAULT_RADIO_STATE);
-  const [backendSocketStatus, setBackendSocketStatus] = useState('disconnected');
+  const [backendSocketStatus, setBackendSocketStatus] =
+    useState('disconnected');
   const [scoreSummary, setScoreSummary] = useState(EMPTY_SCORE_SUMMARY);
   const backendSocketRef = useRef(null);
   const committingContactIdsRef = useRef(new Set());
   const refreshContactsRef = useRef(() => {});
 
-  useEffect(() => { saveLocalContacts(logId, contacts); }, [contacts, logId]);
+  useEffect(() => {
+    saveLocalContacts(logId, contacts);
+  }, [contacts, logId]);
 
   useEffect(() => {
     setScoreSummary(EMPTY_SCORE_SUMMARY);
@@ -66,22 +72,37 @@ function LoggerScreen() {
         apiJson(`/radios/${numericRadioId}/cw-labels`),
       ]);
       if (!logResult.ok) throw new Error(logResult.error ?? 'Log not found');
-      if (!radioResult.ok) throw new Error(radioResult.error ?? 'Radio not found');
-      const contestSettings = await apiJson(`/contest-settings?contest_id=${encodeURIComponent(logResult.log.contest_id)}`);
+      if (!radioResult.ok)
+        throw new Error(radioResult.error ?? 'Radio not found');
+      const contestSettings = await apiJson(
+        `/contest-settings?contest_id=${encodeURIComponent(logResult.log.contest_id)}`,
+      );
       setSettings(contestSettings);
       setLog(logResult.log);
       setRadio(radioResult.radio);
       if (cwLabelsResult.ok) setCwLabels(cwLabelsResult.labels);
-      setOperatorCallsign((current) => current || promptForOperatorCallsign(logResult.log.station_callsign));
+      setOperatorCallsign(
+        (current) =>
+          current || promptForOperatorCallsign(logResult.log.station_callsign),
+      );
     }
-    loadContext().catch((error) => alert(`Unable to load logger context.\n\n${error.message}`));
+    loadContext().catch((error) =>
+      alert(`Unable to load logger context.\n\n${error.message}`),
+    );
   }, [numericLogId, numericRadioId]);
 
   useEffect(() => {
     function handleKeyDown(event) {
-      if (event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === 'o') {
+      if (
+        event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        event.key.toLowerCase() === 'o'
+      ) {
         event.preventDefault();
-        setOperatorCallsign(promptForOperatorCallsign(log?.station_callsign ?? ''));
+        setOperatorCallsign(
+          promptForOperatorCallsign(log?.station_callsign ?? ''),
+        );
       }
     }
     window.addEventListener('keydown', handleKeyDown);
@@ -99,12 +120,19 @@ function LoggerScreen() {
         reconnectTimerId = undefined;
         connectBackendSocket();
       }, reconnectDelayMs);
-      reconnectDelayMs = Math.min(reconnectDelayMs * 2, BACKEND_WS_MAX_RECONNECT_DELAY_MS);
+      reconnectDelayMs = Math.min(
+        reconnectDelayMs * 2,
+        BACKEND_WS_MAX_RECONNECT_DELAY_MS,
+      );
     }
 
     function connectBackendSocket() {
       if (!shouldReconnect) return;
-      const url = websocketUrl({ session_id: sessionId, log_id: numericLogId, radio_id: numericRadioId });
+      const url = websocketUrl({
+        session_id: sessionId,
+        log_id: numericLogId,
+        radio_id: numericRadioId,
+      });
       setBackendSocketStatus('connecting');
       const socket = new WebSocket(url);
       backendSocketRef.current = socket;
@@ -119,14 +147,36 @@ function LoggerScreen() {
         try {
           const message = JSON.parse(event.data);
           if (message.type === 'radio_state') {
-            setRadioState({ frequency_hz: message.frequency_hz, mode: message.mode });
+            setRadioState({
+              frequency_hz: message.frequency_hz,
+              mode: message.mode,
+            });
           } else if (message.type === 'cw_sent') {
-            setCwSentEvent({ requestId: message.request_id, sequence: Date.now() });
-          } else if (message.type === 'log_entry' && message.contact?._session_id !== sessionId && Number(message.contact?._log_id) === numericLogId) {
-            setContacts((currentContacts) => mergeContact(currentContacts, message.contact));
-          } else if (message.type === 'contact_deleted' && Number(message.log_id) === numericLogId) {
-            setContacts((currentContacts) => currentContacts.filter((contact) => String(contact._id) !== String(message.id)));
-          } else if (message.type === 'score_update' && Number(message.log_id) === numericLogId) {
+            setCwSentEvent({
+              requestId: message.request_id,
+              sequence: Date.now(),
+            });
+          } else if (
+            message.type === 'log_entry' &&
+            message.contact?._session_id !== sessionId &&
+            Number(message.contact?._log_id) === numericLogId
+          ) {
+            setContacts((currentContacts) =>
+              mergeContact(currentContacts, message.contact),
+            );
+          } else if (
+            message.type === 'contact_deleted' &&
+            Number(message.log_id) === numericLogId
+          ) {
+            setContacts((currentContacts) =>
+              currentContacts.filter(
+                (contact) => String(contact._id) !== String(message.id),
+              ),
+            );
+          } else if (
+            message.type === 'score_update' &&
+            Number(message.log_id) === numericLogId
+          ) {
             setScoreSummary({
               qsoCount: Number(message.qso_count ?? 0),
               multipliers: Number(message.multipliers ?? 0),
@@ -168,12 +218,16 @@ function LoggerScreen() {
     let contactsLoadRetryTimerId;
 
     function scheduleContactsLoadRetry() {
-      if (!shouldRetryContactsLoad || contactsLoadRetryTimerId !== undefined) return;
+      if (!shouldRetryContactsLoad || contactsLoadRetryTimerId !== undefined)
+        return;
       contactsLoadRetryTimerId = window.setTimeout(() => {
         contactsLoadRetryTimerId = undefined;
         loadContacts();
       }, contactsLoadRetryDelayMs);
-      contactsLoadRetryDelayMs = Math.min(contactsLoadRetryDelayMs * 2, CONTACTS_LOAD_MAX_RETRY_DELAY_MS);
+      contactsLoadRetryDelayMs = Math.min(
+        contactsLoadRetryDelayMs * 2,
+        CONTACTS_LOAD_MAX_RETRY_DELAY_MS,
+      );
     }
 
     async function loadContacts() {
@@ -193,11 +247,18 @@ function LoggerScreen() {
           offset += CONTACTS_PAGE_SIZE;
         }
 
-        const localUncommittedContacts = loadLocalContacts(logId).filter((contact) => contact._status !== 'Committed');
-        setContacts(sortContacts([...backendContacts, ...localUncommittedContacts]));
+        const localUncommittedContacts = loadLocalContacts(logId).filter(
+          (contact) => contact._status !== 'Committed',
+        );
+        setContacts(
+          sortContacts([...backendContacts, ...localUncommittedContacts]),
+        );
         shouldRetryContactsLoad = false;
       } catch (error) {
-        console.error('Unable to load backend contacts; using local contacts', error);
+        console.error(
+          'Unable to load backend contacts; using local contacts',
+          error,
+        );
         scheduleContactsLoadRetry();
       }
     }
@@ -207,13 +268,18 @@ function LoggerScreen() {
     return () => {
       refreshContactsRef.current = () => {};
       shouldRetryContactsLoad = false;
-      if (contactsLoadRetryTimerId !== undefined) window.clearTimeout(contactsLoadRetryTimerId);
+      if (contactsLoadRetryTimerId !== undefined)
+        window.clearTimeout(contactsLoadRetryTimerId);
     };
   }, [numericLogId, logId]);
 
   useEffect(() => {
     const pendingContact = contacts.find((contact) => {
-      if (contact._status === 'Pending') return contact._client_id && !committingContactIdsRef.current.has(contact._client_id);
+      if (contact._status === 'Pending')
+        return (
+          contact._client_id &&
+          !committingContactIdsRef.current.has(contact._client_id)
+        );
       if (contact._status === 'Updating') {
         const updateKey = contact._id ?? contact._client_id;
         return updateKey && !committingContactIdsRef.current.has(updateKey);
@@ -222,7 +288,10 @@ function LoggerScreen() {
     });
     if (!pendingContact) return;
 
-    const commitKey = pendingContact._status === 'Pending' ? pendingContact._client_id : pendingContact._id ?? pendingContact._client_id;
+    const commitKey =
+      pendingContact._status === 'Pending'
+        ? pendingContact._client_id
+        : (pendingContact._id ?? pendingContact._client_id);
     committingContactIdsRef.current.add(commitKey);
 
     async function commitContact(contact) {
@@ -232,21 +301,30 @@ function LoggerScreen() {
           body: JSON.stringify({ ...contact, _log_id: numericLogId }),
         });
         if (!responseBody.ok) {
-          setContacts((currentContacts) => markContactFailed(
-            currentContacts,
-            contact,
-            responseBody.error ?? 'Contact upload failed.',
-          ));
+          setContacts((currentContacts) =>
+            markContactFailed(
+              currentContacts,
+              contact,
+              responseBody.error ?? 'Contact upload failed.',
+            ),
+          );
           return;
         }
         if (responseBody.contact) {
-          setContacts((currentContacts) => mergeContact(currentContacts, { ...responseBody.contact, _client_id: contact._client_id }));
+          setContacts((currentContacts) =>
+            mergeContact(currentContacts, {
+              ...responseBody.contact,
+              _client_id: contact._client_id,
+            }),
+          );
         } else {
-          setContacts((currentContacts) => markContactFailed(
-            currentContacts,
-            contact,
-            'Contact upload failed: server response did not include a committed contact.',
-          ));
+          setContacts((currentContacts) =>
+            markContactFailed(
+              currentContacts,
+              contact,
+              'Contact upload failed: server response did not include a committed contact.',
+            ),
+          );
         }
       } catch (error) {
         console.error('Unable to commit contact', error);
@@ -264,16 +342,22 @@ function LoggerScreen() {
 
   function sendRadioMessage(message) {
     const socket = backendSocketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(message));
+    if (socket?.readyState === WebSocket.OPEN)
+      socket.send(JSON.stringify(message));
   }
 
   async function deleteContacts(contactsToDelete) {
     if (contactsToDelete.length === 0) return;
 
-    const qsoLabel = contactsToDelete.length === 1 ? '1 QSO' : `${contactsToDelete.length} QSOs`;
+    const qsoLabel =
+      contactsToDelete.length === 1
+        ? '1 QSO'
+        : `${contactsToDelete.length} QSOs`;
     if (!window.confirm(`Are you sure you want to delete ${qsoLabel}?`)) return;
 
-    const committedContacts = contactsToDelete.filter((contact) => contact._id !== undefined);
+    const committedContacts = contactsToDelete.filter(
+      (contact) => contact._id !== undefined,
+    );
     const localContactIdentifiers = contactsToDelete
       .filter((contact) => contact._id === undefined)
       .map(contactIdentifier)
@@ -281,44 +365,61 @@ function LoggerScreen() {
     const successfullyDeletedIds = [];
     const results = await Promise.allSettled(
       committedContacts.map(async (contact) => {
-        const result = await apiJson(`/contacts/${contact._id}`, { method: 'DELETE' });
-        if (!result.ok) throw new Error(result.error ?? 'Unable to delete contact');
+        const result = await apiJson(`/contacts/${contact._id}`, {
+          method: 'DELETE',
+        });
+        if (!result.ok)
+          throw new Error(result.error ?? 'Unable to delete contact');
         if (result.deleted) successfullyDeletedIds.push(String(contact._id));
       }),
     );
-    const failureCount = results.filter((result) => result.status === 'rejected').length;
+    const failureCount = results.filter(
+      (result) => result.status === 'rejected',
+    ).length;
     const deletedIdentifiers = new Set([
       ...successfullyDeletedIds.map((id) => `id:${id}`),
       ...localContactIdentifiers,
     ]);
 
-    setContacts((currentContacts) => currentContacts.filter((contact) => {
-      const identifier = contactIdentifier(contact);
-      return !identifier || !deletedIdentifiers.has(identifier);
-    }));
+    setContacts((currentContacts) =>
+      currentContacts.filter((contact) => {
+        const identifier = contactIdentifier(contact);
+        return !identifier || !deletedIdentifiers.has(identifier);
+      }),
+    );
 
     if (failureCount > 0) {
-      window.alert(`Unable to delete ${failureCount === 1 ? '1 QSO' : `${failureCount} QSOs`}.`);
+      window.alert(
+        `Unable to delete ${failureCount === 1 ? '1 QSO' : `${failureCount} QSOs`}.`,
+      );
     }
   }
 
   function updateContacts(contactsToUpdate, field, value) {
-    const identifiers = new Set(contactsToUpdate.map(contactIdentifier).filter(Boolean));
+    const identifiers = new Set(
+      contactsToUpdate.map(contactIdentifier).filter(Boolean),
+    );
     if (identifiers.size === 0) return;
 
-    setContacts((currentContacts) => sortContacts(currentContacts.map((contact) => {
-      const identifier = contactIdentifier(contact);
-      if (!identifier || !identifiers.has(identifier)) return contact;
-      return {
-        ...contact,
-        [field]: value,
-        _status: contact._id === undefined ? 'Pending' : 'Updating',
-        _error: undefined,
-      };
-    })));
+    setContacts((currentContacts) =>
+      sortContacts(
+        currentContacts.map((contact) => {
+          const identifier = contactIdentifier(contact);
+          if (!identifier || !identifiers.has(identifier)) return contact;
+          return {
+            ...contact,
+            [field]: value,
+            _status: contact._id === undefined ? 'Pending' : 'Updating',
+            _error: undefined,
+          };
+        }),
+      ),
+    );
   }
 
-  function exitLogger() { navigate('/ui/open_log'); }
+  function exitLogger() {
+    navigate('/ui/open_log');
+  }
 
   return (
     <div className="app-container">
@@ -334,12 +435,20 @@ function LoggerScreen() {
         cwSentEvent={cwSentEvent}
         sessionId={sessionId}
         logId={numericLogId}
-        onSetRadioFrequency={(frequencyHz) => sendRadioMessage({ type: 'set_frequency', frequency_hz: frequencyHz })}
+        onSetRadioFrequency={(frequencyHz) =>
+          sendRadioMessage({ type: 'set_frequency', frequency_hz: frequencyHz })
+        }
         onSetRadioMode={(mode) => sendRadioMessage({ type: 'set_mode', mode })}
-        onSendCw={(payload) => sendRadioMessage({ type: 'send_cw', ...payload })}
+        onSendCw={(payload) =>
+          sendRadioMessage({ type: 'send_cw', ...payload })
+        }
         onStopCw={() => sendRadioMessage({ type: 'stop_cw' })}
         onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}
-        onLogContact={(contact) => setContacts((currentContacts) => sortContacts([...currentContacts, contact]))}
+        onLogContact={(contact) =>
+          setContacts((currentContacts) =>
+            sortContacts([...currentContacts, contact]),
+          )
+        }
         onRescore={() => refreshContactsRef.current()}
         scoreSummary={scoreSummary}
         onExit={exitLogger}

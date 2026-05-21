@@ -14,7 +14,8 @@ function ConfigScreen({ theme, onSetTheme }) {
   useEffect(() => {
     apiJson('/config')
       .then((result) => {
-        if (!result.ok) throw new Error(result.error ?? 'Unable to load config');
+        if (!result.ok)
+          throw new Error(result.error ?? 'Unable to load config');
         setLoginUser(result.config.login_user ?? '');
         setLoginEnabled(Boolean(result.config.login_enabled));
       })
@@ -49,32 +50,65 @@ function ConfigScreen({ theme, onSetTheme }) {
   return (
     <form className="form-window" onSubmit={saveConfig}>
       <div className="title-bar">Log73 - Configure Login</div>
-      <div className="selection-actions" style={{ justifyContent: 'space-between', padding: '8px 12px 0' }}>
+      <div
+        className="selection-actions"
+        style={{ justifyContent: 'space-between', padding: '8px 12px 0' }}
+      >
         <label className="theme-selector">
           Theme:
-          <select value={theme} onChange={(event) => onSetTheme?.(event.target.value)}>
+          <select
+            value={theme}
+            onChange={(event) => onSetTheme?.(event.target.value)}
+          >
             {THEME_OPTIONS.map((themeOption) => (
-              <option key={themeOption.id} value={themeOption.id}>{themeOption.label}</option>
+              <option key={themeOption.id} value={themeOption.id}>
+                {themeOption.label}
+              </option>
             ))}
           </select>
         </label>
         <span>{loginEnabled ? 'Login is enabled.' : 'Login is disabled.'}</span>
       </div>
       {error && <div className="error-message">{error}</div>}
-      <label>Username
-        <input value={loginUser} onChange={(event) => setLoginUser(event.target.value)} />
+      <label>
+        Username
+        <input
+          value={loginUser}
+          onChange={(event) => setLoginUser(event.target.value)}
+        />
       </label>
-      <label>Password
-        <input type="password" value={loginPassword} onChange={(event) => setLoginPassword(event.target.value)} />
+      <label>
+        Password
+        <input
+          type="password"
+          value={loginPassword}
+          onChange={(event) => setLoginPassword(event.target.value)}
+        />
       </label>
-      <label>Confirm Password
-        <input type="password" value={loginPasswordConfirm} onChange={(event) => setLoginPasswordConfirm(event.target.value)} />
+      <label>
+        Confirm Password
+        <input
+          type="password"
+          value={loginPasswordConfirm}
+          onChange={(event) => setLoginPasswordConfirm(event.target.value)}
+        />
       </label>
       <div className="selection-actions">
-        <button className="cmd-btn primary" type="submit">Save</button>
-        <button className="cmd-btn" type="button" onClick={() => navigate('/ui/open_log')}>Cancel</button>
+        <button className="cmd-btn primary" type="submit">
+          Save
+        </button>
+        <button
+          className="cmd-btn"
+          type="button"
+          onClick={() => navigate('/ui/open_log')}
+        >
+          Cancel
+        </button>
       </div>
-      <div className="selection-actions" style={{ justifyContent: 'flex-start', padding: '0 12px 10px' }}>
+      <div
+        className="selection-actions"
+        style={{ justifyContent: 'flex-start', padding: '0 12px 10px' }}
+      >
         <span>Leave both password fields blank to disable login.</span>
       </div>
     </form>

@@ -3,8 +3,14 @@ import { fieldDefault } from '../domain/contactFields';
 export const MODE_OPTIONS = ['CW', 'SSB', 'FM'];
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
 export const DEFAULT_CW_LABELS = {
-  run: Array.from({ length: 12 }, (_, index) => ({ key: `F${index + 1}`, label: '-' })),
-  's&p': Array.from({ length: 12 }, (_, index) => ({ key: `F${index + 1}`, label: '-' })),
+  run: Array.from({ length: 12 }, (_, index) => ({
+    key: `F${index + 1}`,
+    label: '-',
+  })),
+  's&p': Array.from({ length: 12 }, (_, index) => ({
+    key: `F${index + 1}`,
+    label: '-',
+  })),
 };
 
 export const DEFAULT_CW_WPM = 20;
@@ -38,7 +44,10 @@ const AMATEUR_BANDS = [
 
 export function exchangeDefaults(settings, radioMode, contestParams = {}) {
   return Object.fromEntries(
-    (settings?.exchange ?? []).map((field) => [field.name, fieldDefault(field, radioMode, contestParams)]),
+    (settings?.exchange ?? []).map((field) => [
+      field.name,
+      fieldDefault(field, radioMode, contestParams),
+    ]),
   );
 }
 
@@ -51,7 +60,9 @@ export function isFrequencyInput(value) {
 }
 
 export function bandForFrequency(frequencyHz) {
-  return AMATEUR_BANDS.find((band) => frequencyHz >= band.lowerHz && frequencyHz <= band.upperHz);
+  return AMATEUR_BANDS.find(
+    (band) => frequencyHz >= band.lowerHz && frequencyHz <= band.upperHz,
+  );
 }
 
 export function bandByMeters(meters) {

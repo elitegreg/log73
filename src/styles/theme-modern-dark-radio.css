@@ -1,47 +1,126 @@
 /* Modern Dark Radio Console theme overrides. */
-body.theme-modern-dark-radio { --invalid-border-color: #fb923c; --invalid-background-color: #7c2d12; --invalid-text-color: #ffedd5; }
-body.theme-modern-dark-radio .app-container { background-color: #111827; color: #f9fafb; }
+body.theme-modern-dark-radio {
+  --invalid-border-color: #fb923c;
+  --invalid-background-color: #7c2d12;
+  --invalid-text-color: #ffedd5;
+}
+body.theme-modern-dark-radio .app-container {
+  background-color: #111827;
+  color: #f9fafb;
+}
 body.theme-modern-dark-radio .window,
 body.theme-modern-dark-radio .log-window,
 body.theme-modern-dark-radio .selection-window,
-body.theme-modern-dark-radio .form-window { border-color: #4b5563; background-color: #1f2937; box-shadow: 0 0 16px rgba(0, 0, 0, 0.65); }
+body.theme-modern-dark-radio .form-window {
+  border-color: #4b5563;
+  background-color: #1f2937;
+  box-shadow: 0 0 16px rgba(0, 0, 0, 0.65);
+}
 body.theme-modern-dark-radio .title-bar,
-body.theme-modern-dark-radio .log-title-bar { background-color: #0f172a; color: #f9fafb; }
+body.theme-modern-dark-radio .log-title-bar {
+  background-color: #0f172a;
+  color: #f9fafb;
+}
 body.theme-modern-dark-radio .radio-controls,
 body.theme-modern-dark-radio .status-bar,
-body.theme-modern-dark-radio .log-table th { background-color: #374151; color: #f9fafb; }
-body.theme-modern-dark-radio .radio-control.unsupported { color: #f87171; }
+body.theme-modern-dark-radio .log-table th {
+  background-color: #374151;
+  color: #f9fafb;
+}
+body.theme-modern-dark-radio .radio-control.unsupported {
+  color: #f87171;
+}
 body.theme-modern-dark-radio .entry-fields input,
 body.theme-modern-dark-radio .form-window input,
 body.theme-modern-dark-radio .form-window select,
 body.theme-modern-dark-radio .log-cell-editor,
 body.theme-modern-dark-radio .selection-list,
-body.theme-modern-dark-radio .supercheckpartial-box { border-color: #6b7280; background-color: #111827; color: #f9fafb; }
-body.theme-modern-dark-radio .entry-fields input:read-only { background-color: #374151; color: #d1d5db; }
+body.theme-modern-dark-radio .supercheckpartial-box {
+  border-color: #6b7280;
+  background-color: #111827;
+  color: #f9fafb;
+}
+body.theme-modern-dark-radio .entry-fields input:read-only {
+  background-color: #374151;
+  color: #d1d5db;
+}
 body.theme-modern-dark-radio .f-key,
 body.theme-modern-dark-radio .cmd-btn,
 body.theme-modern-dark-radio .title-button,
-body.theme-modern-dark-radio .window-controls button { border-color: #6b7280; background-color: #374151; color: #f9fafb; }
+body.theme-modern-dark-radio .window-controls button {
+  border-color: #6b7280;
+  background-color: #374151;
+  color: #f9fafb;
+}
 body.theme-modern-dark-radio .f-key.active,
-body.theme-modern-dark-radio .cmd-btn.primary { background-color: #f59e0b; color: #111827; }
-body.theme-modern-dark-radio .log-table { background-color: #111827; }
+body.theme-modern-dark-radio .cmd-btn.primary {
+  background-color: #f59e0b;
+  color: #111827;
+}
+body.theme-modern-dark-radio .log-table {
+  background-color: #111827;
+}
 body.theme-modern-dark-radio .log-table th,
-body.theme-modern-dark-radio .log-table td { border-color: #4b5563; }
-body.theme-modern-dark-radio .log-table tbody tr:nth-child(odd) { background-color: #1f2937; }
-body.theme-modern-dark-radio .log-table tbody tr:nth-child(even) { background-color: #111827; }
-body.theme-modern-dark-radio .log-table tbody tr.uncommitted-contact { background-color: #451a03; }
+body.theme-modern-dark-radio .log-table td {
+  border-color: #4b5563;
+}
+body.theme-modern-dark-radio .log-table tbody tr:nth-child(odd) {
+  background-color: #1f2937;
+}
+body.theme-modern-dark-radio .log-table tbody tr:nth-child(even) {
+  background-color: #111827;
+}
+body.theme-modern-dark-radio .log-table tbody tr.uncommitted-contact {
+  background-color: #451a03;
+}
 body.theme-modern-dark-radio .log-table tbody tr.selected-contact,
-body.theme-modern-dark-radio .log-table tbody tr.selected-contact:nth-child(odd),
-body.theme-modern-dark-radio .log-table tbody tr.selected-contact:nth-child(even),
-body.theme-modern-dark-radio .log-table tbody tr.selected-contact.uncommitted-contact { background-color: #2563eb; }
+body.theme-modern-dark-radio
+  .log-table
+  tbody
+  tr.selected-contact:nth-child(odd),
+body.theme-modern-dark-radio
+  .log-table
+  tbody
+  tr.selected-contact:nth-child(even),
+body.theme-modern-dark-radio
+  .log-table
+  tbody
+  tr.selected-contact.uncommitted-contact {
+  background-color: #2563eb;
+}
 body.theme-modern-dark-radio .log-table td,
-body.theme-modern-dark-radio .log-table tbody tr.selected-contact td { color: #f9fafb; }
-body.theme-modern-dark-radio .log-table tbody tr.selected-contact td.invalid-cell { background-color: #fed7aa; color: #431407; }
-body.theme-modern-dark-radio .empty-log { color: #d1d5db; }
+body.theme-modern-dark-radio .log-table tbody tr.selected-contact td {
+  color: #f9fafb;
+}
+body.theme-modern-dark-radio
+  .log-table
+  tbody
+  tr.selected-contact
+  td.invalid-cell {
+  background-color: #fed7aa;
+  color: #431407;
+}
+body.theme-modern-dark-radio .empty-log {
+  color: #d1d5db;
+}
 body.theme-modern-dark-radio .log-context-menu,
-body.theme-modern-dark-radio .error-message { border-color: #6b7280; background-color: #1f2937; color: #f9fafb; }
-body.theme-modern-dark-radio .log-context-menu button { color: #f9fafb; }
-body.theme-modern-dark-radio .log-context-menu button:hover:not(:disabled) { background-color: #2563eb; }
-body.theme-modern-dark-radio .log-context-menu button:disabled { color: #9ca3af; }
-body.theme-modern-dark-radio .backend-socket-light.connected { background-color: #22c55e; }
-body.theme-modern-dark-radio .backend-socket-light.disconnected { background-color: #ef4444; }
+body.theme-modern-dark-radio .error-message {
+  border-color: #6b7280;
+  background-color: #1f2937;
+  color: #f9fafb;
+}
+body.theme-modern-dark-radio .log-context-menu button {
+  color: #f9fafb;
+}
+body.theme-modern-dark-radio .log-context-menu button:hover:not(:disabled) {
+  background-color: #2563eb;
+}
+body.theme-modern-dark-radio .log-context-menu button:disabled {
+  color: #9ca3af;
+}
+body.theme-modern-dark-radio .backend-socket-light.connected {
+  background-color: #22c55e;
+}
+body.theme-modern-dark-radio .backend-socket-light.disconnected {
+  background-color: #ef4444;
+}

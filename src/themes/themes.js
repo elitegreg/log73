@@ -9,12 +9,14 @@ export const THEME_OPTIONS = [
   { id: 'high-contrast', label: 'High Contrast' },
 ];
 
-export const THEME_CLASS_NAMES = THEME_OPTIONS
-  .filter((theme) => theme.id !== 'default')
-  .map((theme) => `theme-${theme.id}`);
+export const THEME_CLASS_NAMES = THEME_OPTIONS.filter(
+  (theme) => theme.id !== 'default',
+).map((theme) => `theme-${theme.id}`);
 
 export function normalizeTheme(theme) {
-  return THEME_OPTIONS.some((option) => option.id === theme) ? theme : 'default';
+  return THEME_OPTIONS.some((option) => option.id === theme)
+    ? theme
+    : 'default';
 }
 
 export function loadTheme() {

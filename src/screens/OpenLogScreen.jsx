@@ -27,7 +27,9 @@ function OpenLogScreen() {
 
   async function deleteLog() {
     if (!selectedLogId) return;
-    const result = await apiJson(`/logs/${selectedLogId}`, { method: 'DELETE' });
+    const result = await apiJson(`/logs/${selectedLogId}`, {
+      method: 'DELETE',
+    });
     if (!result.ok) {
       setError(result.error ?? 'Unable to delete log');
       return;
@@ -38,7 +40,9 @@ function OpenLogScreen() {
 
   async function deleteRadio() {
     if (!selectedRadioId) return;
-    const result = await apiJson(`/radios/${selectedRadioId}`, { method: 'DELETE' });
+    const result = await apiJson(`/radios/${selectedRadioId}`, {
+      method: 'DELETE',
+    });
     if (!result.ok) {
       setError(result.error ?? 'Unable to delete radio');
       return;
@@ -59,42 +63,94 @@ function OpenLogScreen() {
   return (
     <div className="selection-window">
       <div className="title-bar">Log73 - Open Log</div>
-      <div className="selection-actions" style={{ justifyContent: 'space-between', padding: '8px 12px 0' }}>
-        <Link className="cmd-btn" to="/ui/config">Configure Log73</Link>
+      <div
+        className="selection-actions"
+        style={{ justifyContent: 'space-between', padding: '8px 12px 0' }}
+      >
+        <Link className="cmd-btn" to="/ui/config">
+          Configure Log73
+        </Link>
       </div>
       {error && <div className="error-message">{error}</div>}
       <div className="selection-grid">
         <section>
           <h2>Logs</h2>
-          <select className="selection-list" size={10} value={selectedLogId} onChange={(event) => setSelectedLogId(event.target.value)}>
+          <select
+            className="selection-list"
+            size={10}
+            value={selectedLogId}
+            onChange={(event) => setSelectedLogId(event.target.value)}
+          >
             {logs.map((log) => (
-              <option key={log.id} value={log.id}>{log.name} - {log.station_callsign} - {log.contest_id}</option>
-            ))}
-          </select>
-          <div className="selection-buttons">
-            <Link className="cmd-btn" to="/ui/create_log">Create</Link>
-            <Link className={`cmd-btn${selectedLogId ? '' : ' disabled'}`} to={selectedLogId ? `/ui/edit_log/${selectedLogId}` : '#'} onClick={(event) => { if (!selectedLogId) event.preventDefault(); }}>Edit</Link>
-            <button className="cmd-btn" onClick={deleteLog} disabled={!selectedLogId}>Delete</button>
-          </div>
-        </section>
-        <section>
-          <h2>Radios</h2>
-          <select className="selection-list" size={10} value={selectedRadioId} onChange={(event) => setSelectedRadioId(event.target.value)}>
-            {radios.map((radio) => (
-              <option key={radio.id} value={radio.id}>
-                {radio.name} - {radio.rigctld_host}:{radio.rigctld_port} - poll {radio.poll_frequency}s timeout {radio.rigctld_timeout}s
+              <option key={log.id} value={log.id}>
+                {log.name} - {log.station_callsign} - {log.contest_id}
               </option>
             ))}
           </select>
           <div className="selection-buttons">
-            <Link className="cmd-btn" to="/ui/create_radio">Create</Link>
-            <Link className={`cmd-btn${selectedRadioId ? '' : ' disabled'}`} to={selectedRadioId ? `/ui/edit_radio/${selectedRadioId}` : '#'} onClick={(event) => { if (!selectedRadioId) event.preventDefault(); }}>Edit</Link>
-            <button className="cmd-btn" onClick={deleteRadio} disabled={!selectedRadioId}>Delete</button>
+            <Link className="cmd-btn" to="/ui/create_log">
+              Create
+            </Link>
+            <Link
+              className={`cmd-btn${selectedLogId ? '' : ' disabled'}`}
+              to={selectedLogId ? `/ui/edit_log/${selectedLogId}` : '#'}
+              onClick={(event) => {
+                if (!selectedLogId) event.preventDefault();
+              }}
+            >
+              Edit
+            </Link>
+            <button
+              className="cmd-btn"
+              onClick={deleteLog}
+              disabled={!selectedLogId}
+            >
+              Delete
+            </button>
+          </div>
+        </section>
+        <section>
+          <h2>Radios</h2>
+          <select
+            className="selection-list"
+            size={10}
+            value={selectedRadioId}
+            onChange={(event) => setSelectedRadioId(event.target.value)}
+          >
+            {radios.map((radio) => (
+              <option key={radio.id} value={radio.id}>
+                {radio.name} - {radio.rigctld_host}:{radio.rigctld_port} - poll{' '}
+                {radio.poll_frequency}s timeout {radio.rigctld_timeout}s
+              </option>
+            ))}
+          </select>
+          <div className="selection-buttons">
+            <Link className="cmd-btn" to="/ui/create_radio">
+              Create
+            </Link>
+            <Link
+              className={`cmd-btn${selectedRadioId ? '' : ' disabled'}`}
+              to={selectedRadioId ? `/ui/edit_radio/${selectedRadioId}` : '#'}
+              onClick={(event) => {
+                if (!selectedRadioId) event.preventDefault();
+              }}
+            >
+              Edit
+            </Link>
+            <button
+              className="cmd-btn"
+              onClick={deleteRadio}
+              disabled={!selectedRadioId}
+            >
+              Delete
+            </button>
           </div>
         </section>
       </div>
       <div className="selection-actions">
-        <button className="cmd-btn primary" onClick={openLogger}>Open</button>
+        <button className="cmd-btn primary" onClick={openLogger}>
+          Open
+        </button>
       </div>
     </div>
   );

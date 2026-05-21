@@ -53,7 +53,9 @@ function CreateRadioScreen() {
       }),
     });
     if (!result.ok) {
-      setError(result.error ?? `Unable to ${isEditing ? 'update' : 'create'} radio`);
+      setError(
+        result.error ?? `Unable to ${isEditing ? 'update' : 'create'} radio`,
+      );
       return;
     }
     navigate('/ui/open_log');
@@ -61,33 +63,88 @@ function CreateRadioScreen() {
 
   return (
     <form className="form-window" onSubmit={saveRadio}>
-      <div className="title-bar">Log73 - {isEditing ? 'Edit' : 'Create'} Radio</div>
+      <div className="title-bar">
+        Log73 - {isEditing ? 'Edit' : 'Create'} Radio
+      </div>
       {error && <div className="error-message">{error}</div>}
-      <label>Name
-        <input value={name} onChange={(event) => setName(event.target.value)} required />
+      <label>
+        Name
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+          required
+        />
       </label>
-      <label>rigctld Host
-        <input value={host} onChange={(event) => setHost(event.target.value)} required />
+      <label>
+        rigctld Host
+        <input
+          value={host}
+          onChange={(event) => setHost(event.target.value)}
+          required
+        />
       </label>
-      <label>rigctld Port
-        <input type="number" min="0" max="65535" value={port} onChange={(event) => setPort(event.target.value)} required />
+      <label>
+        rigctld Port
+        <input
+          type="number"
+          min="0"
+          max="65535"
+          value={port}
+          onChange={(event) => setPort(event.target.value)}
+          required
+        />
       </label>
-      <label>Poll Frequency (seconds)
-        <input type="number" min="0.01" step="0.01" value={pollFrequency} onChange={(event) => setPollFrequency(event.target.value)} required />
+      <label>
+        Poll Frequency (seconds)
+        <input
+          type="number"
+          min="0.01"
+          step="0.01"
+          value={pollFrequency}
+          onChange={(event) => setPollFrequency(event.target.value)}
+          required
+        />
       </label>
-      <label>rigctld Timeout (seconds)
-        <input type="number" min="0.01" step="0.01" value={rigctldTimeout} onChange={(event) => setRigctldTimeout(event.target.value)} required />
+      <label>
+        rigctld Timeout (seconds)
+        <input
+          type="number"
+          min="0.01"
+          step="0.01"
+          value={rigctldTimeout}
+          onChange={(event) => setRigctldTimeout(event.target.value)}
+          required
+        />
       </label>
       <label className="checkbox-label">
-        <input type="checkbox" checked={winkeyerEnabled} onChange={(event) => setWinkeyerEnabled(event.target.checked)} />
+        <input
+          type="checkbox"
+          checked={winkeyerEnabled}
+          onChange={(event) => setWinkeyerEnabled(event.target.checked)}
+        />
         <span>Enable Winkeyer</span>
       </label>
-      <label>Winkeyer Serial Port
-        <input value={winkeyerSerialPort} onChange={(event) => setWinkeyerSerialPort(event.target.value)} required={winkeyerEnabled} disabled={!winkeyerEnabled} placeholder="/dev/ttyUSB0" />
+      <label>
+        Winkeyer Serial Port
+        <input
+          value={winkeyerSerialPort}
+          onChange={(event) => setWinkeyerSerialPort(event.target.value)}
+          required={winkeyerEnabled}
+          disabled={!winkeyerEnabled}
+          placeholder="/dev/ttyUSB0"
+        />
       </label>
       <div className="selection-actions">
-        <button className="cmd-btn primary" type="submit">{isEditing ? 'Save' : 'Create'}</button>
-        <button className="cmd-btn" type="button" onClick={() => navigate('/ui/open_log')}>Cancel</button>
+        <button className="cmd-btn primary" type="submit">
+          {isEditing ? 'Save' : 'Create'}
+        </button>
+        <button
+          className="cmd-btn"
+          type="button"
+          onClick={() => navigate('/ui/open_log')}
+        >
+          Cancel
+        </button>
       </div>
     </form>
   );

@@ -1,10 +1,17 @@
 export const MAX_COMPLETION_MATCHES = 100;
 
 function normalizedQuery(value) {
-  return String(value ?? '').trim().toUpperCase();
+  return String(value ?? '')
+    .trim()
+    .toUpperCase();
 }
 
-function matchingValues(values, query, minimumLength, maxMatches = MAX_COMPLETION_MATCHES) {
+function matchingValues(
+  values,
+  query,
+  minimumLength,
+  maxMatches = MAX_COMPLETION_MATCHES,
+) {
   const normalized = normalizedQuery(query);
   if (normalized.length < minimumLength) return [];
 
@@ -14,10 +21,18 @@ function matchingValues(values, query, minimumLength, maxMatches = MAX_COMPLETIO
     .slice(0, maxMatches);
 }
 
-export function callsignCompletionMatches(callsigns, query, maxMatches = MAX_COMPLETION_MATCHES) {
+export function callsignCompletionMatches(
+  callsigns,
+  query,
+  maxMatches = MAX_COMPLETION_MATCHES,
+) {
   return matchingValues(callsigns, query, 3, maxMatches);
 }
 
-export function exchangeCompletionMatches(field, value, maxMatches = MAX_COMPLETION_MATCHES) {
+export function exchangeCompletionMatches(
+  field,
+  value,
+  maxMatches = MAX_COMPLETION_MATCHES,
+) {
   return matchingValues(field?.valid_values ?? [], value, 1, maxMatches);
 }

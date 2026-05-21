@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { parseFieldType, sanitizeCallsign, sanitizeExchangeValue } from '../domain/contactFields';
+import {
+  parseFieldType,
+  sanitizeCallsign,
+  sanitizeExchangeValue,
+} from '../domain/contactFields';
 import { validateExchangeField } from '../domain/validation';
-
 
 const READ_ONLY_COLUMNS = new Set(['Mult', 'Pts']);
 const COLUMN_PADDING_CHARS = 2;
@@ -71,22 +74,21 @@ function formatDateTime(entry) {
 
 function formatFrequency(entry, field = 'FREQ') {
   const frequency = entry[field] ?? entry.FREQ ?? entry.Freq;
-  const parsedFrequency = typeof frequency === 'number'
-    ? frequency
-    : Number.parseFloat(String(frequency));
+  const parsedFrequency =
+    typeof frequency === 'number'
+      ? frequency
+      : Number.parseFloat(String(frequency));
 
   if (!Number.isFinite(parsedFrequency)) {
     return '';
   }
 
-  const frequencyHz = Math.abs(parsedFrequency) < 1000000
-    ? parsedFrequency * 1000000
-    : parsedFrequency;
+  const frequencyHz =
+    Math.abs(parsedFrequency) < 1000000
+      ? parsedFrequency * 1000000
+      : parsedFrequency;
 
-  return (frequencyHz / 1000)
-    .toFixed(3)
-    .replace(/0+$/, '')
-    .replace(/\.$/, '');
+  return (frequencyHz / 1000).toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
 }
 
 function fieldMapFromSettings(settings) {
@@ -113,10 +115,14 @@ function columnWidthChars(settings, column, radioMode) {
 
 function columnWidthPercent(settings, column, radioMode, columns) {
   const totalWidthChars = columns.reduce(
-    (total, currentColumn) => total + columnWidthChars(settings, currentColumn, radioMode) + COLUMN_PADDING_CHARS,
+    (total, currentColumn) =>
+      total +
+      columnWidthChars(settings, currentColumn, radioMode) +
+      COLUMN_PADDING_CHARS,
     0,
   );
-  const widthChars = columnWidthChars(settings, column, radioMode) + COLUMN_PADDING_CHARS;
+  const widthChars =
+    columnWidthChars(settings, column, radioMode) + COLUMN_PADDING_CHARS;
   return `${(widthChars / Math.max(totalWidthChars, 1)) * 100}%`;
 }
 
@@ -167,7 +173,11 @@ function formatCell(column, entry, columnFieldMap) {
 }
 
 function contactKey(entry, index) {
-  return String(entry._id ?? entry._client_id ?? `${entry.QSO_DATE_TIME_ON ?? entry.TIME_ON ?? entry.Time ?? 'row'}-${entry.CALL ?? entry.Call ?? index}`);
+  return String(
+    entry._id ??
+      entry._client_id ??
+      `${entry.QSO_DATE_TIME_ON ?? entry.TIME_ON ?? entry.Time ?? 'row'}-${entry.CALL ?? entry.Call ?? index}`,
+  );
 }
 
 function contactRowClassName(entry, isSelected) {
@@ -180,7 +190,9 @@ function contactRowClassName(entry, isSelected) {
 
 function contactRowTitle(entry) {
   if (entry._status !== 'Failed') return undefined;
-  return entry._error ? `Contact upload failed: ${entry._error}` : 'Contact upload failed.';
+  return entry._error
+    ? `Contact upload failed: ${entry._error}`
+    : 'Contact upload failed.';
 }
 
 function editableFieldForColumn(column, columnFieldMap) {
@@ -190,10 +202,13 @@ function editableFieldForColumn(column, columnFieldMap) {
 }
 
 function parseDateTimeUtc(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(value.trim());
+  const match = /^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2}):(\d{2})$/.exec(
+    value.trim(),
+  );
   if (!match) return null;
 
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText] = match;
+  const [, yearText, monthText, dayText, hourText, minuteText, secondText] =
+    match;
   const year = Number.parseInt(yearText, 10);
   const month = Number.parseInt(monthText, 10);
   const day = Number.parseInt(dayText, 10);
@@ -204,12 +219,12 @@ function parseDateTimeUtc(value) {
   const date = new Date(milliseconds);
 
   if (
-    date.getUTCFullYear() !== year
-    || date.getUTCMonth() !== month - 1
-    || date.getUTCDate() !== day
-    || date.getUTCHours() !== hour
-    || date.getUTCMinutes() !== minute
-    || date.getUTCSeconds() !== second
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day ||
+    date.getUTCHours() !== hour ||
+    date.getUTCMinutes() !== minute ||
+    date.getUTCSeconds() !== second
   ) {
     return null;
   }
@@ -223,7 +238,8 @@ function exchangeFieldForColumn(settings, column) {
 
 function sanitizeUpdateInput(settings, column, value, radioMode) {
   const exchangeField = exchangeFieldForColumn(settings, column);
-  if (exchangeField) return sanitizeExchangeValue(exchangeField, value, radioMode);
+  if (exchangeField)
+    return sanitizeExchangeValue(exchangeField, value, radioMode);
   if (column === 'Call') return sanitizeCallsign(value);
   if (column === 'Mode') return value.toUpperCase();
   return value;
@@ -233,7 +249,10 @@ function parseUpdateValue(settings, column, value, radioMode, entry = null) {
   if (column === 'Date/Time (UTC)') {
     const epoch = parseDateTimeUtc(value);
     if (epoch === null) {
-      return { ok: false, error: 'Enter date/time as YYYY-MM-DD HH:MM:SS in UTC.' };
+      return {
+        ok: false,
+        error: 'Enter date/time as YYYY-MM-DD HH:MM:SS in UTC.',
+      };
     }
 
     return { ok: true, value: epoch };
@@ -253,27 +272,52 @@ function parseUpdateValue(settings, column, value, radioMode, entry = null) {
 
   if (column === 'Mode') {
     const mode = value.trim().toUpperCase();
-    if ((settings?.allowed_modes ?? []).length > 0 && !settings.allowed_modes.includes(mode)) {
-      return { ok: false, error: `Enter one of: ${settings.allowed_modes.join(', ')}.` };
+    if (
+      (settings?.allowed_modes ?? []).length > 0 &&
+      !settings.allowed_modes.includes(mode)
+    ) {
+      return {
+        ok: false,
+        error: `Enter one of: ${settings.allowed_modes.join(', ')}.`,
+      };
     }
 
     return { ok: true, value: mode };
   }
 
   const validationMode = entry ? contactMode(entry, radioMode) : radioMode;
-  const sanitizedValue = sanitizeUpdateInput(settings, column, value, validationMode).trim();
+  const sanitizedValue = sanitizeUpdateInput(
+    settings,
+    column,
+    value,
+    validationMode,
+  ).trim();
   const exchangeField = exchangeFieldForColumn(settings, column);
   if (exchangeField && !exchangeField.is_sent) {
-    const validation = validateExchangeField(exchangeField, sanitizedValue, validationMode);
+    const validation = validateExchangeField(
+      exchangeField,
+      sanitizedValue,
+      validationMode,
+    );
     if (!validation.ok) return { ok: false, error: validation.error };
   }
 
   return { ok: true, value: sanitizedValue };
 }
 
-function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts, onUpdateContacts }) {
+function LogWindow({
+  settings,
+  contacts,
+  log,
+  radioMode = 'CW',
+  onDeleteContacts,
+  onUpdateContacts,
+}) {
   const columns = settings?.qso_columns ?? [];
-  const columnFieldMap = useMemo(() => fieldMapFromSettings(settings), [settings]);
+  const columnFieldMap = useMemo(
+    () => fieldMapFromSettings(settings),
+    [settings],
+  );
   const [selectedKeys, setSelectedKeys] = useState(() => new Set());
   const [contextMenu, setContextMenu] = useState(null);
   const [editingCell, setEditingCell] = useState(null);
@@ -285,13 +329,17 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
   useEffect(() => {
     const validKeys = new Set(contacts.map(contactKey));
     setSelectedKeys((currentKeys) => {
-      const nextKeys = new Set([...currentKeys].filter((key) => validKeys.has(key)));
+      const nextKeys = new Set(
+        [...currentKeys].filter((key) => validKeys.has(key)),
+      );
       return nextKeys.size === currentKeys.size ? currentKeys : nextKeys;
     });
   }, [contacts]);
 
   useEffect(() => {
-    function closeContextMenu() { setContextMenu(null); }
+    function closeContextMenu() {
+      setContextMenu(null);
+    }
     window.addEventListener('click', closeContextMenu);
     window.addEventListener('keydown', closeContextMenu);
     return () => {
@@ -307,7 +355,9 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
   }, [editingCellKey, editingCellColumn]);
 
   function selectedContacts() {
-    return contacts.filter((entry, index) => selectedKeys.has(contactKey(entry, index)));
+    return contacts.filter((entry, index) =>
+      selectedKeys.has(contactKey(entry, index)),
+    );
   }
 
   function selectRow(event, index, key) {
@@ -362,13 +412,17 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
     if (!contextMenu) return;
     const field = editableFieldForColumn(contextMenu.column, columnFieldMap);
     if (!field) return;
-    const contactIndex = contacts.findIndex((entry, index) => contactKey(entry, index) === contextMenu.contactKey);
+    const contactIndex = contacts.findIndex(
+      (entry, index) => contactKey(entry, index) === contextMenu.contactKey,
+    );
     if (contactIndex === -1) return;
 
     setEditingCell({
       key: contextMenu.contactKey,
       column: contextMenu.column,
-      value: String(formatCell(contextMenu.column, contacts[contactIndex], columnFieldMap)),
+      value: String(
+        formatCell(contextMenu.column, contacts[contactIndex], columnFieldMap),
+      ),
     });
     setContextMenu(null);
   }
@@ -384,9 +438,17 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
     const field = editableFieldForColumn(editingCell.column, columnFieldMap);
     if (!field) return;
 
-    const contactIndex = contacts.findIndex((entry, index) => contactKey(entry, index) === editingCell.key);
+    const contactIndex = contacts.findIndex(
+      (entry, index) => contactKey(entry, index) === editingCell.key,
+    );
     const editingContact = contactIndex === -1 ? null : contacts[contactIndex];
-    const parsed = parseUpdateValue(settings, editingCell.column, editingCell.value, radioMode, editingContact);
+    const parsed = parseUpdateValue(
+      settings,
+      editingCell.column,
+      editingCell.value,
+      radioMode,
+      editingContact,
+    );
     if (!parsed.ok) {
       window.alert(parsed.error);
       inputRef.current?.focus();
@@ -400,12 +462,18 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
 
   return (
     <div className="log-window">
-      <div className="log-title-bar">Log: {log?.name ?? 'Loading log...'} - {settings?.contest ?? 'Loading contest...'}</div>
+      <div className="log-title-bar">
+        Log: {log?.name ?? 'Loading log...'} -{' '}
+        {settings?.contest ?? 'Loading contest...'}
+      </div>
       <div className="log-table-scroll">
         <table className="log-table">
           <colgroup>
             {columns.map((column) => (
-              <col key={column} style={columnWidthStyle(settings, column, radioMode, columns)} />
+              <col
+                key={column}
+                style={columnWidthStyle(settings, column, radioMode, columns)}
+              />
             ))}
           </colgroup>
           <thead>
@@ -416,60 +484,78 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
             </tr>
           </thead>
           <tbody>
-          {contacts.map((entry, index) => {
-            const key = contactKey(entry, index);
-            const isSelected = selectedKeys.has(key);
-            return (
-              <tr
-                key={key}
-                className={contactRowClassName(entry, isSelected)}
-                title={contactRowTitle(entry)}
-                onClick={(event) => selectRow(event, index, key)}
-              >
-                {columns.map((column) => {
-                  const isEditing = editingCell?.key === key && editingCell.column === column;
-                  const validation = cellValidation(settings, column, entry, columnFieldMap, radioMode);
-                  return (
-                    <td
-                      key={column}
-                      className={validation.ok ? undefined : 'invalid-cell'}
-                      title={validation.ok ? undefined : validation.error}
-                      onContextMenu={(event) => openContextMenu(event, entry, index, column)}
-                    >
-                      {isEditing ? (
-                        <input
-                          ref={inputRef}
-                          className={`log-cell-editor ${parseUpdateValue(settings, editingCell.column, editingCell.value, radioMode, entry).ok ? '' : 'invalid-field'}`.trim()}
-                          value={editingCell.value}
-                          onChange={(event) => setEditingCell({
-                            ...editingCell,
-                            value: sanitizeUpdateInput(settings, editingCell.column, event.target.value, radioMode),
-                          })}
-                          onClick={(event) => event.stopPropagation()}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') {
-                              event.preventDefault();
-                              finishUpdate();
-                            } else if (event.key === 'Escape') {
-                              event.preventDefault();
-                              setEditingCell(null);
+            {contacts.map((entry, index) => {
+              const key = contactKey(entry, index);
+              const isSelected = selectedKeys.has(key);
+              return (
+                <tr
+                  key={key}
+                  className={contactRowClassName(entry, isSelected)}
+                  title={contactRowTitle(entry)}
+                  onClick={(event) => selectRow(event, index, key)}
+                >
+                  {columns.map((column) => {
+                    const isEditing =
+                      editingCell?.key === key && editingCell.column === column;
+                    const validation = cellValidation(
+                      settings,
+                      column,
+                      entry,
+                      columnFieldMap,
+                      radioMode,
+                    );
+                    return (
+                      <td
+                        key={column}
+                        className={validation.ok ? undefined : 'invalid-cell'}
+                        title={validation.ok ? undefined : validation.error}
+                        onContextMenu={(event) =>
+                          openContextMenu(event, entry, index, column)
+                        }
+                      >
+                        {isEditing ? (
+                          <input
+                            ref={inputRef}
+                            className={`log-cell-editor ${parseUpdateValue(settings, editingCell.column, editingCell.value, radioMode, entry).ok ? '' : 'invalid-field'}`.trim()}
+                            value={editingCell.value}
+                            onChange={(event) =>
+                              setEditingCell({
+                                ...editingCell,
+                                value: sanitizeUpdateInput(
+                                  settings,
+                                  editingCell.column,
+                                  event.target.value,
+                                  radioMode,
+                                ),
+                              })
                             }
-                          }}
-                        />
-                      ) : formatCell(column, entry, columnFieldMap)}
-                    </td>
-                  );
-                })}
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                event.preventDefault();
+                                finishUpdate();
+                              } else if (event.key === 'Escape') {
+                                event.preventDefault();
+                                setEditingCell(null);
+                              }
+                            }}
+                          />
+                        ) : (
+                          formatCell(column, entry, columnFieldMap)
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+            {contacts.length === 0 && (
+              <tr>
+                <td colSpan={Math.max(columns.length, 1)} className="empty-log">
+                  No contacts loaded.
+                </td>
               </tr>
-            );
-          })}
-          {contacts.length === 0 && (
-            <tr>
-              <td colSpan={Math.max(columns.length, 1)} className="empty-log">
-                No contacts loaded.
-              </td>
-            </tr>
-          )}
+            )}
           </tbody>
         </table>
       </div>
@@ -481,13 +567,21 @@ function LogWindow({ settings, contacts, log, radioMode = 'CW', onDeleteContacts
         >
           <button
             type="button"
-            disabled={!editableFieldForColumn(contextMenu.column, columnFieldMap)}
+            disabled={
+              !editableFieldForColumn(contextMenu.column, columnFieldMap)
+            }
             onClick={beginUpdate}
           >
-            Update selected {contextMenu.selectedCount === 1 ? 'QSO' : `${contextMenu.selectedCount} QSOs`}
+            Update selected{' '}
+            {contextMenu.selectedCount === 1
+              ? 'QSO'
+              : `${contextMenu.selectedCount} QSOs`}
           </button>
           <button type="button" onClick={deleteSelected}>
-            Delete selected {contextMenu.selectedCount === 1 ? 'QSO' : `${contextMenu.selectedCount} QSOs`}
+            Delete selected{' '}
+            {contextMenu.selectedCount === 1
+              ? 'QSO'
+              : `${contextMenu.selectedCount} QSOs`}
           </button>
         </div>
       )}

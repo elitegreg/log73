@@ -9,20 +9,38 @@ test('fieldValueLabel uses label, name, then Field fallback', () => {
 });
 
 test('validateExchangeField requires non-empty values', () => {
-  const result = validateExchangeField({ label: 'Section', type: 'String:3' }, '');
+  const result = validateExchangeField(
+    { label: 'Section', type: 'String:3' },
+    '',
+  );
   assert.equal(result.ok, false);
   assert.match(result.error, /Section is required/);
 });
 
 test('validateExchangeField validates RST by mode', () => {
-  assert.equal(validateExchangeField({ name: 'RST', type: 'RST' }, '599', 'CW').ok, true);
-  assert.equal(validateExchangeField({ name: 'RST', type: 'RST' }, '59', 'CW').ok, false);
-  assert.equal(validateExchangeField({ name: 'RST', type: 'RST' }, '59', 'SSB').ok, true);
+  assert.equal(
+    validateExchangeField({ name: 'RST', type: 'RST' }, '599', 'CW').ok,
+    true,
+  );
+  assert.equal(
+    validateExchangeField({ name: 'RST', type: 'RST' }, '59', 'CW').ok,
+    false,
+  );
+  assert.equal(
+    validateExchangeField({ name: 'RST', type: 'RST' }, '59', 'SSB').ok,
+    true,
+  );
 });
 
 test('validateExchangeField validates numeric fields', () => {
-  assert.equal(validateExchangeField({ name: 'Serial', type: 'Numeric:3' }, '123').ok, true);
-  assert.equal(validateExchangeField({ name: 'Serial', type: 'Numeric:3' }, '12A').ok, false);
+  assert.equal(
+    validateExchangeField({ name: 'Serial', type: 'Numeric:3' }, '123').ok,
+    true,
+  );
+  assert.equal(
+    validateExchangeField({ name: 'Serial', type: 'Numeric:3' }, '12A').ok,
+    false,
+  );
 });
 
 test('validateExchangeField validates configured values case-insensitively', () => {
@@ -38,7 +56,10 @@ test('validateExchangeField validates regex patterns', () => {
 });
 
 test('validateExchangeField reports invalid regex patterns', () => {
-  const result = validateExchangeField({ name: 'Field', type: 'String:3', regex: '[' }, 'ABC');
+  const result = validateExchangeField(
+    { name: 'Field', type: 'String:3', regex: '[' },
+    'ABC',
+  );
   assert.equal(result.ok, false);
   assert.match(result.error, /invalid validation pattern/);
 });

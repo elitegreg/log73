@@ -7,10 +7,16 @@ export const CONTACTS_LOAD_MAX_RETRY_DELAY_MS = 16000;
 export const CONTACTS_PAGE_SIZE = 200;
 export const CONTACT_COMMIT_RETRY_DELAY_MS = 5000;
 export const DEFAULT_RADIO_STATE = { mode: 'CW', frequency_hz: 14000000 };
-export const EMPTY_SCORE_SUMMARY = { qsoCount: 0, multipliers: 0, bonusPoints: 0, score: 0 };
+export const EMPTY_SCORE_SUMMARY = {
+  qsoCount: 0,
+  multipliers: 0,
+  bonusPoints: 0,
+  score: 0,
+};
 
 export function contactSortValue(contact) {
-  if (typeof contact.QSO_DATE_TIME_ON === 'number') return contact.QSO_DATE_TIME_ON;
+  if (typeof contact.QSO_DATE_TIME_ON === 'number')
+    return contact.QSO_DATE_TIME_ON;
   if (typeof contact._time_on_epoch === 'number') return contact._time_on_epoch;
   const date = String(contact.QSO_DATE ?? '');
   const time = String(contact.TIME_ON ?? '');
@@ -25,7 +31,11 @@ export function contactSortValue(contact) {
   return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
 }
 
-export function sortContacts(contacts) { return [...contacts].sort((a, b) => contactSortValue(b) - contactSortValue(a)); }
+export function sortContacts(contacts) {
+  return [...contacts].sort(
+    (a, b) => contactSortValue(b) - contactSortValue(a),
+  );
+}
 
 export function normalizeContact(contact) {
   const nextContact = { ...contact };
@@ -36,7 +46,10 @@ export function normalizeContact(contact) {
   }
   if (nextContact.FREQ !== undefined) {
     const frequency = Number.parseFloat(String(nextContact.FREQ));
-    if (Number.isFinite(frequency)) nextContact.FREQ = Math.round(Math.abs(frequency) < 1000000 ? frequency * 1000000 : frequency);
+    if (Number.isFinite(frequency))
+      nextContact.FREQ = Math.round(
+        Math.abs(frequency) < 1000000 ? frequency * 1000000 : frequency,
+      );
   }
   delete nextContact.QSO_DATE;
   delete nextContact.TIME_ON;
@@ -44,13 +57,25 @@ export function normalizeContact(contact) {
   return nextContact;
 }
 
-export function shouldPersistLocally(contact) { return contact._status === 'Pending' || contact._status === 'Updating' || contact._status === 'Failed'; }
-export function contactStorageKey(logId) { return `${CONTACTS_STORAGE_KEY}.${logId}`; }
+export function shouldPersistLocally(contact) {
+  return (
+    contact._status === 'Pending' ||
+    contact._status === 'Updating' ||
+    contact._status === 'Failed'
+  );
+}
+export function contactStorageKey(logId) {
+  return `${CONTACTS_STORAGE_KEY}.${logId}`;
+}
 
 export function loadLocalContacts(logId) {
   try {
-    const parsed = JSON.parse(localStorage.getItem(contactStorageKey(logId)) ?? '[]');
-    return Array.isArray(parsed) ? sortContacts(parsed.map(normalizeContact).filter(shouldPersistLocally)) : [];
+    const parsed = JSON.parse(
+      localStorage.getItem(contactStorageKey(logId)) ?? '[]',
+    );
+    return Array.isArray(parsed)
+      ? sortContacts(parsed.map(normalizeContact).filter(shouldPersistLocally))
+      : [];
   } catch (error) {
     console.error('Unable to load locally stored contacts', error);
     return [];
@@ -58,11 +83,23 @@ export function loadLocalContacts(logId) {
 }
 
 export function saveLocalContacts(logId, contacts) {
-  localStorage.setItem(contactStorageKey(logId), JSON.stringify(contacts.filter(shouldPersistLocally)));
+  localStorage.setItem(
+    contactStorageKey(logId),
+    JSON.stringify(contacts.filter(shouldPersistLocally)),
+  );
 }
 
-export function committedBackendContact(contact) { return normalizeContact({ ...contact, _status: contact._status ?? 'Committed' }); }
-export function createSessionId() { return window.crypto?.randomUUID ? window.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`; }
+export function committedBackendContact(contact) {
+  return normalizeContact({
+    ...contact,
+    _status: contact._status ?? 'Committed',
+  });
+}
+export function createSessionId() {
+  return window.crypto?.randomUUID
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 export function getSessionId() {
   const existingSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
   if (existingSessionId) return existingSessionId;
@@ -72,8 +109,10 @@ export function getSessionId() {
 }
 
 export function contactMatches(left, right) {
-  if (left._id !== undefined && right._id !== undefined) return String(left._id) === String(right._id);
-  if (left._client_id && right._client_id) return left._client_id === right._client_id;
+  if (left._id !== undefined && right._id !== undefined)
+    return String(left._id) === String(right._id);
+  if (left._client_id && right._client_id)
+    return left._client_id === right._client_id;
   return false;
 }
 
@@ -85,17 +124,25 @@ export function contactIdentifier(contact) {
 
 export function mergeContact(contacts, contact) {
   const committedContact = committedBackendContact(contact);
-  const index = contacts.findIndex((currentContact) => contactMatches(currentContact, contact));
+  const index = contacts.findIndex((currentContact) =>
+    contactMatches(currentContact, contact),
+  );
   if (index === -1) return sortContacts([...contacts, committedContact]);
   const nextContacts = [...contacts];
-  nextContacts[index] = { ...nextContacts[index], ...committedContact, _error: undefined };
+  nextContacts[index] = {
+    ...nextContacts[index],
+    ...committedContact,
+    _error: undefined,
+  };
   return sortContacts(nextContacts);
 }
 
 export function markContactFailed(contacts, failedContact, error) {
-  return sortContacts(contacts.map((contact) => (
-    contactMatches(contact, failedContact)
-      ? { ...contact, _status: 'Failed', _error: error }
-      : contact
-  )));
+  return sortContacts(
+    contacts.map((contact) =>
+      contactMatches(contact, failedContact)
+        ? { ...contact, _status: 'Failed', _error: error }
+        : contact,
+    ),
+  );
 }

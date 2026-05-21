@@ -1,47 +1,124 @@
 /* Classic Terminal theme overrides. */
-body.theme-classic-terminal { --invalid-border-color: #ff4040; --invalid-background-color: #3a0000; --invalid-text-color: #ffe0e0; }
-body.theme-classic-terminal .app-container { background-color: #000000; color: #33ff66; font-family: 'Courier New', monospace; }
+body.theme-classic-terminal {
+  --invalid-border-color: #ff4040;
+  --invalid-background-color: #3a0000;
+  --invalid-text-color: #ffe0e0;
+}
+body.theme-classic-terminal .app-container {
+  background-color: #000000;
+  color: #33ff66;
+  font-family: 'Courier New', monospace;
+}
 body.theme-classic-terminal .window,
 body.theme-classic-terminal .log-window,
 body.theme-classic-terminal .selection-window,
-body.theme-classic-terminal .form-window { border-color: #33ff66; background-color: #050805; box-shadow: 0 0 12px rgba(51, 255, 102, 0.25); }
+body.theme-classic-terminal .form-window {
+  border-color: #33ff66;
+  background-color: #050805;
+  box-shadow: 0 0 12px rgba(51, 255, 102, 0.25);
+}
 body.theme-classic-terminal .title-bar,
 body.theme-classic-terminal .log-title-bar,
 body.theme-classic-terminal .radio-controls,
 body.theme-classic-terminal .status-bar,
-body.theme-classic-terminal .log-table th { background-color: #001b08; color: #33ff66; }
-body.theme-classic-terminal .radio-control.unsupported { color: #ff4040; }
+body.theme-classic-terminal .log-table th {
+  background-color: #001b08;
+  color: #33ff66;
+}
+body.theme-classic-terminal .radio-control.unsupported {
+  color: #ff4040;
+}
 body.theme-classic-terminal .entry-fields input,
 body.theme-classic-terminal .form-window input,
 body.theme-classic-terminal .form-window select,
 body.theme-classic-terminal .log-cell-editor,
 body.theme-classic-terminal .selection-list,
-body.theme-classic-terminal .supercheckpartial-box { border-color: #33ff66; background-color: #000000; color: #b6ffbf; }
-body.theme-classic-terminal .entry-fields input:read-only { background-color: #071407; color: #7cff8f; }
+body.theme-classic-terminal .supercheckpartial-box {
+  border-color: #33ff66;
+  background-color: #000000;
+  color: #b6ffbf;
+}
+body.theme-classic-terminal .entry-fields input:read-only {
+  background-color: #071407;
+  color: #7cff8f;
+}
 body.theme-classic-terminal .f-key,
 body.theme-classic-terminal .cmd-btn,
 body.theme-classic-terminal .title-button,
-body.theme-classic-terminal .window-controls button { border-color: #33ff66; background-color: #001b08; color: #33ff66; }
+body.theme-classic-terminal .window-controls button {
+  border-color: #33ff66;
+  background-color: #001b08;
+  color: #33ff66;
+}
 body.theme-classic-terminal .f-key.active,
-body.theme-classic-terminal .cmd-btn.primary { background-color: #33ff66; color: #000000; }
-body.theme-classic-terminal .log-table { background-color: #000000; }
+body.theme-classic-terminal .cmd-btn.primary {
+  background-color: #33ff66;
+  color: #000000;
+}
+body.theme-classic-terminal .log-table {
+  background-color: #000000;
+}
 body.theme-classic-terminal .log-table th,
-body.theme-classic-terminal .log-table td { border-color: #176b29; }
-body.theme-classic-terminal .log-table tbody tr:nth-child(odd) { background-color: #020902; }
-body.theme-classic-terminal .log-table tbody tr:nth-child(even) { background-color: #000000; }
-body.theme-classic-terminal .log-table tbody tr.uncommitted-contact { background-color: #333000; }
+body.theme-classic-terminal .log-table td {
+  border-color: #176b29;
+}
+body.theme-classic-terminal .log-table tbody tr:nth-child(odd) {
+  background-color: #020902;
+}
+body.theme-classic-terminal .log-table tbody tr:nth-child(even) {
+  background-color: #000000;
+}
+body.theme-classic-terminal .log-table tbody tr.uncommitted-contact {
+  background-color: #333000;
+}
 body.theme-classic-terminal .log-table tbody tr.selected-contact,
 body.theme-classic-terminal .log-table tbody tr.selected-contact:nth-child(odd),
-body.theme-classic-terminal .log-table tbody tr.selected-contact:nth-child(even),
-body.theme-classic-terminal .log-table tbody tr.selected-contact.uncommitted-contact { background-color: #33ff66; }
-body.theme-classic-terminal .log-table td { color: #b6ffbf; }
-body.theme-classic-terminal .log-table tbody tr.selected-contact td { color: #000000; }
-body.theme-classic-terminal .log-table tbody tr.selected-contact td.invalid-cell { background-color: #ffb3b3; color: #3a0000; }
-body.theme-classic-terminal .empty-log { color: #7cff8f; }
+body.theme-classic-terminal
+  .log-table
+  tbody
+  tr.selected-contact:nth-child(even),
+body.theme-classic-terminal
+  .log-table
+  tbody
+  tr.selected-contact.uncommitted-contact {
+  background-color: #33ff66;
+}
+body.theme-classic-terminal .log-table td {
+  color: #b6ffbf;
+}
+body.theme-classic-terminal .log-table tbody tr.selected-contact td {
+  color: #000000;
+}
+body.theme-classic-terminal
+  .log-table
+  tbody
+  tr.selected-contact
+  td.invalid-cell {
+  background-color: #ffb3b3;
+  color: #3a0000;
+}
+body.theme-classic-terminal .empty-log {
+  color: #7cff8f;
+}
 body.theme-classic-terminal .log-context-menu,
-body.theme-classic-terminal .error-message { border-color: #33ff66; background-color: #000000; color: #33ff66; }
-body.theme-classic-terminal .log-context-menu button { color: #33ff66; }
-body.theme-classic-terminal .log-context-menu button:hover:not(:disabled) { background-color: #33ff66; color: #000000; }
-body.theme-classic-terminal .log-context-menu button:disabled { color: #176b29; }
-body.theme-classic-terminal .backend-socket-light.connected { background-color: #33ff66; }
-body.theme-classic-terminal .backend-socket-light.disconnected { background-color: #ff4040; }
+body.theme-classic-terminal .error-message {
+  border-color: #33ff66;
+  background-color: #000000;
+  color: #33ff66;
+}
+body.theme-classic-terminal .log-context-menu button {
+  color: #33ff66;
+}
+body.theme-classic-terminal .log-context-menu button:hover:not(:disabled) {
+  background-color: #33ff66;
+  color: #000000;
+}
+body.theme-classic-terminal .log-context-menu button:disabled {
+  color: #176b29;
+}
+body.theme-classic-terminal .backend-socket-light.connected {
+  background-color: #33ff66;
+}
+body.theme-classic-terminal .backend-socket-light.disconnected {
+  background-color: #ff4040;
+}
