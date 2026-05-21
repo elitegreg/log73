@@ -45,6 +45,24 @@ pub struct RadioConfig {
     pub cw_messages: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct AuthConfigView {
+    pub login_user: String,
+    pub login_enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuthConfig {
+    pub login_user: String,
+    pub login_password: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UpdateAuthConfig {
+    pub login_user: String,
+    pub login_password: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct NewRadio {
     pub name: String,
@@ -187,6 +205,59 @@ impl Database {
         select_radio(&connection, id)
     }
 
+    pub fn auth_config(&self) -> rusqlite::Result<AuthConfig> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        match connection
+            .query_row(
+                "SELECT LOGIN_USER, LOGIN_PASSWORD FROM config LIMIT 1",
+                [],
+                |row| {
+                    Ok(AuthConfig {
+                        login_user: row.get(0)?,
+                        login_password: row.get(1)?,
+                    })
+                },
+            )
+            .optional()
+        {
+            Ok(Some(config)) => Ok(config),
+            Ok(None) => Ok(AuthConfig {
+                login_user: String::new(),
+                login_password: String::new(),
+            }),
+            Err(error) if is_missing_config_column(&error) => Ok(AuthConfig {
+                login_user: String::new(),
+                login_password: String::new(),
+            }),
+            Err(error) => Err(error),
+        }
+    }
+
+    pub fn auth_config_view(&self) -> rusqlite::Result<AuthConfigView> {
+        let config = self.auth_config()?;
+        let login_enabled =
+            !config.login_user.trim().is_empty() && !config.login_password.is_empty();
+        Ok(AuthConfigView {
+            login_user: config.login_user,
+            login_enabled,
+        })
+    }
+
+    pub fn update_auth_config(&self, config: UpdateAuthConfig) -> rusqlite::Result<()> {
+        let connection = self.connection.lock().expect("database mutex poisoned");
+        let updated = connection.execute(
+            "UPDATE config SET LOGIN_USER = ?1, LOGIN_PASSWORD = ?2",
+            params![config.login_user.trim(), config.login_password],
+        )?;
+        if updated == 0 {
+            connection.execute(
+                "INSERT INTO config (version, LOGIN_USER, LOGIN_PASSWORD) VALUES (1, ?1, ?2)",
+                params![config.login_user.trim(), config.login_password],
+            )?;
+        }
+        Ok(())
+    }
+
     pub fn create_radio(&self, radio: NewRadio) -> rusqlite::Result<RadioConfig> {
         let connection = self.connection.lock().expect("database mutex poisoned");
         connection.execute(
@@ -285,7 +356,9 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
     connection.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS config (
-            version INTEGER NOT NULL
+            version INTEGER NOT NULL,
+            LOGIN_USER TEXT NOT NULL DEFAULT '',
+            LOGIN_PASSWORD TEXT NOT NULL DEFAULT ''
         ) STRICT;
 
         CREATE TABLE IF NOT EXISTS logs (
@@ -352,6 +425,10 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
     }
 
     Ok(())
+}
+
+fn is_missing_config_column(error: &rusqlite::Error) -> bool {
+    error.to_string().contains("no such column")
 }
 
 fn select_log(connection: &Connection, id: i64) -> rusqlite::Result<Option<Log>> {

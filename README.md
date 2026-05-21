@@ -41,16 +41,12 @@ Log73 is under active development. Contest definitions are loaded from YAML rule
 
 ## Authentication
 
-The app uses HTTP Basic Auth.
+The app can use HTTP Basic Auth.
 
-Development credentials:
+Login is disabled by default: if either login field is blank, the app is accessible without authentication.
+Use **Configure** from the main screen to set a username and password.
 
-```text
-username: log73
-password: hamradio
-```
-
-Authentication protects the frontend, `/api/*`, and `/ws`.
+When login is enabled, authentication protects the frontend, `/api/*`, and `/ws`.
 
 ## Prerequisites
 
@@ -112,12 +108,13 @@ npm run dev
 
 In development, Rsbuild proxies `/api` and `/ws` to the backend on port `7300`.
 
-Open the app, authenticate with the Basic Auth credentials above, then:
+Open the app, then:
 
 1. Open `/ui/open_log`.
-2. Create or select a log.
-3. Create or select a radio.
-4. Open the logger.
+2. Optionally use **Configure** to enable login.
+3. Create or select a log.
+4. Create or select a radio.
+5. Open the logger.
 
 ## Production build
 
@@ -204,6 +201,7 @@ backend/src/frequency.rs              frequency type and macros
 ```text
 /                         redirects to /ui/open_log
 /ui/open_log              select/create/delete logs and radios
+/ui/config                configure login credentials
 /ui/create_log            create a log
 /ui/create_radio          create a radio
 /ui/logger/:logId/:radioId logger for selected log and radio

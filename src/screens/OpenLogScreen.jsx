@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { apiJson } from '../lib/api';
-import { THEME_OPTIONS } from '../themes/themes';
 
-function OpenLogScreen({ theme, onSetTheme }) {
+function OpenLogScreen() {
   const navigate = useNavigate();
   const [logs, setLogs] = useState([]);
   const [radios, setRadios] = useState([]);
@@ -60,14 +59,9 @@ function OpenLogScreen({ theme, onSetTheme }) {
   return (
     <div className="selection-window">
       <div className="title-bar">Log73 - Open Log</div>
-      <label className="theme-selector">
-        Theme:
-        <select value={theme} onChange={(event) => onSetTheme?.(event.target.value)}>
-          {THEME_OPTIONS.map((themeOption) => (
-            <option key={themeOption.id} value={themeOption.id}>{themeOption.label}</option>
-          ))}
-        </select>
-      </label>
+      <div className="selection-actions" style={{ justifyContent: 'space-between', padding: '8px 12px 0' }}>
+        <Link className="cmd-btn" to="/ui/config">Configure Log73</Link>
+      </div>
       {error && <div className="error-message">{error}</div>}
       <div className="selection-grid">
         <section>

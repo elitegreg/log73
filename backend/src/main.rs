@@ -160,6 +160,7 @@ async fn main() {
     let api = Router::new()
         .route("/contest-rules", get(list_contest_rules))
         .route("/contest-settings", get(contest_settings))
+        .route("/config", get(config).put(update_config))
         .route("/supercheckpartial", get(supercheckpartial_matches))
         .route("/logs", get(logs).post(create_log))
         .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
@@ -179,8 +180,8 @@ async fn main() {
         .nest("/api", api)
         .route("/ws", get(ws_handler))
         .fallback(static_assets::static_handler)
-        .with_state(app_state)
-        .layer(middleware::from_fn(auth::basic_auth))
+        .with_state(app_state.clone())
+        .layer(middleware::from_fn_with_state(app_state, auth::basic_auth))
         .layer(request_trace_layer)
         .layer(CorsLayer::permissive());
 
@@ -431,6 +432,41 @@ async fn supercheckpartial_matches(
         .unwrap_or_default();
 
     Json(serde_json::json!({ "ok": true, "callsigns": matches }))
+}
+
+async fn config(State(app_state): State<AppState>) -> Json<serde_json::Value> {
+    match app_state.db.auth_config_view() {
+        Ok(config) => Json(serde_json::json!({ "ok": true, "config": config })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
+struct UpdateConfigPayload {
+    login_user: String,
+    login_password: String,
+    login_password_confirm: String,
+}
+
+async fn update_config(
+    State(app_state): State<AppState>,
+    Json(payload): Json<UpdateConfigPayload>,
+) -> Json<serde_json::Value> {
+    debug!(payload = %pretty_json(&payload), "update config PUT body");
+    if payload.login_password != payload.login_password_confirm {
+        return Json(serde_json::json!({ "ok": false, "error": "passwords do not match" }));
+    }
+
+    match app_state.db.update_auth_config(db::UpdateAuthConfig {
+        login_user: payload.login_user,
+        login_password: payload.login_password,
+    }) {
+        Ok(()) => match app_state.db.auth_config_view() {
+            Ok(config) => Json(serde_json::json!({ "ok": true, "config": config })),
+            Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        },
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
 }
 
 async fn logs(State(app_state): State<AppState>) -> Json<Vec<db::Log>> {
