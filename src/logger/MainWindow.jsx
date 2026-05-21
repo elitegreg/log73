@@ -683,7 +683,7 @@ function MainWindow({
           {stationCallsign} / Op: {operatorCallsign}
         </span>
         <span>
-          QSOs: {scoreSummary?.qsoCount ?? 0}  Mults: {scoreSummary?.multipliers ?? 0}  Score: {scoreSummary?.score ?? 0}
+          QSOs: {scoreSummary?.qsoCount ?? 0}  Mults: {scoreSummary?.multipliers ?? 0}{scoreSummary?.bonusPoints ? `  Bonus: ${scoreSummary.bonusPoints}` : ''}  Score: {scoreSummary?.score ?? 0}
         </span>
       </div>
     </div>

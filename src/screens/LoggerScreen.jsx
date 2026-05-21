@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiJson, websocketUrl } from '../lib/api';
 import LogWindow from '../logger/LogWindow';
@@ -103,24 +103,6 @@ function mergeContact(contacts, contact) {
   return sortContacts(nextContacts);
 }
 
-function scoreNumber(value) {
-  const number = Number(value ?? 0);
-  return Number.isFinite(number) ? number : 0;
-}
-
-function scoreSummary(contacts) {
-  const qsoPoints = contacts.reduce((total, contact) => total + scoreNumber(contact._pts), 0);
-  const multipliers = contacts.reduce((total, contact) => total + scoreNumber(contact._mult), 0);
-  const bonusPoints = contacts.reduce((total, contact) => total + scoreNumber(contact._bonus), 0);
-  return {
-    qsoCount: contacts.length,
-    qsoPoints,
-    multipliers,
-    bonusPoints,
-    score: qsoPoints * multipliers + bonusPoints,
-  };
-}
-
 function LoggerScreen() {
   const { logId, radioId } = useParams();
   const navigate = useNavigate();
@@ -136,12 +118,16 @@ function LoggerScreen() {
   const [sessionId] = useState(getSessionId);
   const [radioState, setRadioState] = useState({ mode: 'CW', frequency_hz: 14025000 });
   const [backendSocketStatus, setBackendSocketStatus] = useState('disconnected');
+  const [scoreSummary, setScoreSummary] = useState({ qsoCount: 0, multipliers: 0, bonusPoints: 0, score: 0 });
   const backendSocketRef = useRef(null);
   const committingContactIdsRef = useRef(new Set());
   const refreshContactsRef = useRef(() => {});
-  const currentScoreSummary = useMemo(() => scoreSummary(contacts), [contacts]);
 
   useEffect(() => { saveLocalContacts(logId, contacts); }, [contacts, logId]);
+
+  useEffect(() => {
+    setScoreSummary({ qsoCount: 0, multipliers: 0, bonusPoints: 0, score: 0 });
+  }, [numericLogId]);
 
   useEffect(() => {
     async function loadContext() {
@@ -211,6 +197,13 @@ function LoggerScreen() {
             setContacts((currentContacts) => mergeContact(currentContacts, message.contact));
           } else if (message.type === 'contact_deleted' && Number(message.log_id) === numericLogId) {
             setContacts((currentContacts) => currentContacts.filter((contact) => String(contact._id) !== String(message.id)));
+          } else if (message.type === 'score_update' && Number(message.log_id) === numericLogId) {
+            setScoreSummary({
+              qsoCount: Number(message.qso_count ?? 0),
+              multipliers: Number(message.multipliers ?? 0),
+              bonusPoints: Number(message.bonus_points ?? 0),
+              score: Number(message.total_score ?? 0),
+            });
           }
         } catch (error) {
           console.error('Unable to process backend websocket message', error);
@@ -387,7 +380,7 @@ function LoggerScreen() {
         onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}
         onLogContact={(contact) => setContacts((currentContacts) => sortContacts([...currentContacts, contact]))}
         onRescore={() => refreshContactsRef.current()}
-        scoreSummary={currentScoreSummary}
+        scoreSummary={scoreSummary}
         onExit={exitLogger}
       />
       <LogWindow

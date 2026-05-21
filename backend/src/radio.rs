@@ -14,6 +14,13 @@ pub enum ServerMessage {
         id: i64,
         log_id: i64,
     },
+    ScoreUpdate {
+        log_id: i64,
+        qso_count: usize,
+        multipliers: i64,
+        bonus_points: i64,
+        total_score: i64,
+    },
     CwSent {
         request_id: String,
     },

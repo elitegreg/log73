@@ -35,6 +35,170 @@ fn scoring_module_key(contest_id: &str, contest_params: &Value) -> String {
     )
 }
 
+#[derive(Clone, Default)]
+pub struct ContestScoreTracker {
+    logs: Arc<Mutex<HashMap<i64, TrackedLogScore>>>,
+}
+
+#[derive(Clone)]
+struct TrackedLogScore {
+    contacts: Vec<Contact>,
+    scorer: ContestScorer,
+    totals: ScoreTotals,
+}
+
+impl ContestScoreTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn reset_log(
+        &self,
+        log_id: i64,
+        module: Arc<ContestScoringModule>,
+        contacts: &mut [Contact],
+    ) -> ScoreTotals {
+        let mut scorer = module.scorer();
+        scorer.reset();
+        for contact in contacts.iter_mut() {
+            scorer.add_qso(contact);
+        }
+        let totals = scorer.totals();
+
+        let mut logs = self.logs.lock().expect("score tracker mutex poisoned");
+        logs.insert(
+            log_id,
+            TrackedLogScore {
+                contacts: contacts.to_vec(),
+                scorer,
+                totals: totals.clone(),
+            },
+        );
+
+        totals
+    }
+
+    pub fn totals(&self, log_id: i64) -> Option<ScoreTotals> {
+        let logs = self.logs.lock().expect("score tracker mutex poisoned");
+        logs.get(&log_id).map(|score| score.totals.clone())
+    }
+
+    pub fn contact(&self, log_id: i64, contact_id: i64) -> Option<Contact> {
+        let logs = self.logs.lock().expect("score tracker mutex poisoned");
+        logs.get(&log_id).and_then(|score| {
+            score
+                .contacts
+                .iter()
+                .find(|contact| contact_id_for(contact) == Some(contact_id))
+                .cloned()
+        })
+    }
+
+    pub fn contacts(&self, log_id: i64) -> Vec<Contact> {
+        let logs = self.logs.lock().expect("score tracker mutex poisoned");
+        logs.get(&log_id)
+            .map(|score| score.contacts.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn can_append(&self, log_id: i64, contact: &Contact) -> bool {
+        let logs = self.logs.lock().expect("score tracker mutex poisoned");
+        let Some(score) = logs.get(&log_id) else {
+            return false;
+        };
+        score
+            .contacts
+            .last()
+            .map(|last_contact| contact_score_order(last_contact) <= contact_score_order(contact))
+            .unwrap_or(true)
+    }
+
+    pub fn removing_contact_affects_dupes(&self, log_id: i64, contact: &Contact) -> bool {
+        if contact
+            .get("_dupe")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return false;
+        }
+
+        let logs = self.logs.lock().expect("score tracker mutex poisoned");
+        let Some(score) = logs.get(&log_id) else {
+            return true;
+        };
+        let Some(contact_key) = score.scorer.dupe_key(contact) else {
+            return false;
+        };
+        let contact_id = contact_id_for(contact);
+
+        score.contacts.iter().any(|other| {
+            contact_id_for(other) != contact_id
+                && score.scorer.dupe_key(other).as_deref() == Some(contact_key.as_str())
+        })
+    }
+
+    pub fn is_last_contact(&self, log_id: i64, contact: &Contact) -> bool {
+        let contact_id = contact_id_for(contact);
+        let logs = self.logs.lock().expect("score tracker mutex poisoned");
+        logs.get(&log_id)
+            .and_then(|score| score.contacts.last())
+            .map(|last_contact| contact_id_for(last_contact) == contact_id)
+            .unwrap_or(false)
+    }
+
+    pub fn add_incremental(
+        &self,
+        log_id: i64,
+        mut contact: Contact,
+    ) -> Option<(Contact, ScoreTotals)> {
+        let mut logs = self.logs.lock().expect("score tracker mutex poisoned");
+        let score = logs.get_mut(&log_id)?;
+
+        score.scorer.add_qso(&mut contact);
+        score.contacts.push(contact.clone());
+        score.totals = score.scorer.totals();
+
+        Some((contact, score.totals.clone()))
+    }
+
+    pub fn replace_incremental(
+        &self,
+        log_id: i64,
+        mut contact: Contact,
+    ) -> Option<(Contact, ScoreTotals)> {
+        let contact_id = contact_id_for(&contact)?;
+        let mut logs = self.logs.lock().expect("score tracker mutex poisoned");
+        let score = logs.get_mut(&log_id)?;
+        let index = score
+            .contacts
+            .iter()
+            .position(|current| contact_id_for(current) == Some(contact_id))?;
+
+        let old_contact = score.contacts[index].clone();
+        score.scorer.remove_scored_qso(&old_contact);
+        score.scorer.add_qso(&mut contact);
+        score.contacts[index] = contact.clone();
+        score.totals = score.scorer.totals();
+
+        Some((contact, score.totals.clone()))
+    }
+
+    pub fn delete_incremental(&self, log_id: i64, contact_id: i64) -> Option<ScoreTotals> {
+        let mut logs = self.logs.lock().expect("score tracker mutex poisoned");
+        let score = logs.get_mut(&log_id)?;
+        let index = score
+            .contacts
+            .iter()
+            .position(|current| contact_id_for(current) == Some(contact_id))?;
+
+        let old_contact = score.contacts.remove(index);
+        score.scorer.remove_scored_qso(&old_contact);
+        score.totals = score.scorer.totals();
+
+        Some(score.totals.clone())
+    }
+}
+
 pub struct ContestScoringModule {
     rules: ContestRules,
     #[allow(dead_code)]
@@ -50,10 +214,10 @@ pub struct ScoreTotals {
     pub score: i64,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ContestScorer {
     module: Arc<ContestScoringModule>,
-    dupe_keys: HashSet<String>,
+    dupe_keys: HashMap<String, usize>,
     multiplier_keys: HashSet<String>,
     bonus_keys: HashSet<String>,
     totals: ScoreTotals,
@@ -124,13 +288,23 @@ impl ContestScorer {
         self.totals.qso_points += points;
         self.totals.multipliers += mults;
         self.totals.bonus_points += bonus;
-        self.totals.score =
-            self.totals.qso_points * self.totals.multipliers + self.totals.bonus_points;
+        self.recalculate_score();
 
         contact.insert("_pts".to_string(), Value::Number(points.into()));
         contact.insert("_mult".to_string(), Value::Number(mults.into()));
         contact.insert("_bonus".to_string(), Value::Number(bonus.into()));
+        contact.insert("_dupe".to_string(), Value::Bool(is_dupe));
 
+        self.totals.clone()
+    }
+
+    pub fn remove_scored_qso(&mut self, contact: &Contact) -> ScoreTotals {
+        self.totals.qso_count = self.totals.qso_count.saturating_sub(1);
+        self.totals.qso_points -= scored_i64(contact, "_pts");
+        self.totals.multipliers -= scored_i64(contact, "_mult");
+        self.totals.bonus_points -= scored_i64(contact, "_bonus");
+        self.remove_dupe_key(contact);
+        self.recalculate_score();
         self.totals.clone()
     }
 
@@ -139,14 +313,47 @@ impl ContestScorer {
         self.totals.clone()
     }
 
-    fn is_dupe(&mut self, contact: &Contact) -> bool {
+    pub fn dupe_key(&self, contact: &Contact) -> Option<String> {
         let dupe_key = &self.module.rules.dupe_key;
         if dupe_key.is_empty() {
-            return false;
+            return None;
         }
 
-        let key = self.key(contact, dupe_key);
-        !self.dupe_keys.insert(key)
+        Some(self.key(contact, dupe_key))
+    }
+
+    fn recalculate_score(&mut self) {
+        self.totals.score = if self.module.rules.multipliers.is_empty() {
+            self.totals.qso_points + self.totals.bonus_points
+        } else {
+            self.totals.qso_points * self.totals.multipliers + self.totals.bonus_points
+        };
+    }
+
+    fn is_dupe(&mut self, contact: &Contact) -> bool {
+        let Some(key) = self.dupe_key(contact) else {
+            return false;
+        };
+
+        let count = self.dupe_keys.entry(key).or_insert(0);
+        let is_dupe = *count > 0;
+        *count += 1;
+        is_dupe
+    }
+
+    fn remove_dupe_key(&mut self, contact: &Contact) {
+        let Some(key) = self.dupe_key(contact) else {
+            return;
+        };
+        let Some(count) = self.dupe_keys.get_mut(&key) else {
+            return;
+        };
+
+        if *count <= 1 {
+            self.dupe_keys.remove(&key);
+        } else {
+            *count -= 1;
+        }
     }
 
     fn qso_points(&self, contact: &Contact) -> i64 {
@@ -303,6 +510,27 @@ fn normalized_callsign(callsign: &str) -> String {
         .split_once('/')
         .map(|(base, _)| base.to_string())
         .unwrap_or_else(|| callsign.to_string())
+}
+
+fn scored_i64(contact: &Contact, field: &str) -> i64 {
+    contact.get(field).and_then(Value::as_i64).unwrap_or(0)
+}
+
+fn contact_id_for(contact: &Contact) -> Option<i64> {
+    contact
+        .get("_id")
+        .or_else(|| contact.get("ID"))
+        .and_then(Value::as_i64)
+}
+
+fn contact_score_order(contact: &Contact) -> (i64, i64) {
+    (
+        contact
+            .get("QSO_DATE_TIME_ON")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+        contact_id_for(contact).unwrap_or(0),
+    )
 }
 
 fn json_string(value: Option<&Value>) -> Option<String> {
