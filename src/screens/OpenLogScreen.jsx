@@ -1,14 +1,30 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { apiJson } from '../lib/api';
+import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
+import { useNotifications } from '../lib/notificationsContext';
 
 function OpenLogScreen() {
   const navigate = useNavigate();
+  const { notifyError } = useNotifications();
   const [logs, setLogs] = useState([]);
   const [radios, setRadios] = useState([]);
   const [selectedLogId, setSelectedLogId] = useState('');
   const [selectedRadioId, setSelectedRadioId] = useState('');
-  const [error, setError] = useState('');
+
+  const notifyOperationalError = useCallback(
+    (source, fallback, error, details = {}) => {
+      const message = errorMessage(error, fallback);
+      notifyError(message, { dedupeKey: `${source}:${message}` });
+      reportClientErrorLater({
+        source,
+        message,
+        error,
+        details,
+      });
+    },
+    [notifyError],
+  );
 
   async function load() {
     const [nextLogs, nextRadios] = await Promise.all([
@@ -22,8 +38,14 @@ function OpenLogScreen() {
   }
 
   useEffect(() => {
-    load().catch((err) => setError(err.message));
-  }, []);
+    load().catch((error) =>
+      notifyOperationalError(
+        'OpenLogScreen.load',
+        'Unable to load logs and radios.',
+        error,
+      ),
+    );
+  }, [notifyOperationalError]);
 
   async function deleteLog() {
     if (!selectedLogId) return;
@@ -31,11 +53,23 @@ function OpenLogScreen() {
       method: 'DELETE',
     });
     if (!result.ok) {
-      setError(result.error ?? 'Unable to delete log');
+      notifyOperationalError(
+        'OpenLogScreen.deleteLog',
+        'Unable to delete log.',
+        result.error,
+        { selectedLogId },
+      );
       return;
     }
     setSelectedLogId('');
-    await load();
+    await load().catch((error) =>
+      notifyOperationalError(
+        'OpenLogScreen.deleteLog.reload',
+        'Unable to refresh logs after delete.',
+        error,
+        { selectedLogId },
+      ),
+    );
   }
 
   async function deleteRadio() {
@@ -44,17 +78,30 @@ function OpenLogScreen() {
       method: 'DELETE',
     });
     if (!result.ok) {
-      setError(result.error ?? 'Unable to delete radio');
+      notifyOperationalError(
+        'OpenLogScreen.deleteRadio',
+        'Unable to delete radio.',
+        result.error,
+        { selectedRadioId },
+      );
       return;
     }
     setSelectedRadioId('');
-    await load();
+    await load().catch((error) =>
+      notifyOperationalError(
+        'OpenLogScreen.deleteRadio.reload',
+        'Unable to refresh radios after delete.',
+        error,
+        { selectedRadioId },
+      ),
+    );
   }
 
   function openLogger() {
-    setError('');
     if (!selectedLogId || !selectedRadioId) {
-      setError('Select both a log and a radio before opening the logger.');
+      notifyError('Select both a log and a radio before opening the logger.', {
+        dedupeKey: 'OpenLogScreen.openLogger.selection',
+      });
       return;
     }
     navigate(`/ui/logger/${selectedLogId}/${selectedRadioId}`);
@@ -71,7 +118,6 @@ function OpenLogScreen() {
           Configure Log73
         </Link>
       </div>
-      {error && <div className="error-message">{error}</div>}
       <div className="selection-grid">
         <section>
           <h2>Logs</h2>

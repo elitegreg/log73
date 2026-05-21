@@ -1,6 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiJson, websocketUrl } from '../lib/api';
+import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
+import { useNotifications } from '../lib/notificationsContext';
 import LogWindow from '../logger/LogWindow';
 import MainWindow from '../logger/MainWindow';
 import {
@@ -38,6 +40,7 @@ function promptForOperatorCallsign(defaultCallsign) {
 function LoggerScreen() {
   const { logId, radioId } = useParams();
   const navigate = useNavigate();
+  const { notifyError } = useNotifications();
   const numericLogId = Number(logId);
   const numericRadioId = Number(radioId);
   const [settings, setSettings] = useState(null);
@@ -55,6 +58,22 @@ function LoggerScreen() {
   const backendSocketRef = useRef(null);
   const committingContactIdsRef = useRef(new Set());
   const refreshContactsRef = useRef(() => {});
+  const contactsLoadErrorNotifiedRef = useRef(false);
+  const commitContactErrorNotifiedRef = useRef(false);
+
+  const notifyOperationalError = useCallback(
+    (source, fallback, error, details = {}) => {
+      const message = errorMessage(error, fallback);
+      notifyError(message, { dedupeKey: `${source}:${message}` });
+      reportClientErrorLater({
+        source,
+        message,
+        error,
+        details,
+      });
+    },
+    [notifyError],
+  );
 
   useEffect(() => {
     saveLocalContacts(logId, contacts);
@@ -87,9 +106,14 @@ function LoggerScreen() {
       );
     }
     loadContext().catch((error) =>
-      alert(`Unable to load logger context.\n\n${error.message}`),
+      notifyOperationalError(
+        'LoggerScreen.loadContext',
+        'Unable to load logger context.',
+        error,
+        { logId: numericLogId, radioId: numericRadioId },
+      ),
     );
-  }, [numericLogId, numericRadioId]);
+  }, [numericLogId, numericRadioId, notifyOperationalError]);
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -185,7 +209,12 @@ function LoggerScreen() {
             });
           }
         } catch (error) {
-          console.error('Unable to process backend websocket message', error);
+          reportClientErrorLater({
+            source: 'LoggerScreen.websocketMessage',
+            message: 'Unable to process backend websocket message.',
+            error,
+            details: { logId: numericLogId, radioId: numericRadioId },
+          });
         }
       });
       socket.addEventListener('close', () => {
@@ -254,11 +283,17 @@ function LoggerScreen() {
           sortContacts([...backendContacts, ...localUncommittedContacts]),
         );
         shouldRetryContactsLoad = false;
+        contactsLoadErrorNotifiedRef.current = false;
       } catch (error) {
-        console.error(
-          'Unable to load backend contacts; using local contacts',
-          error,
-        );
+        if (!contactsLoadErrorNotifiedRef.current) {
+          contactsLoadErrorNotifiedRef.current = true;
+          notifyOperationalError(
+            'LoggerScreen.loadContacts',
+            'Unable to load backend contacts. Using local contacts and retrying.',
+            error,
+            { logId: numericLogId },
+          );
+        }
         scheduleContactsLoadRetry();
       }
     }
@@ -271,7 +306,7 @@ function LoggerScreen() {
       if (contactsLoadRetryTimerId !== undefined)
         window.clearTimeout(contactsLoadRetryTimerId);
     };
-  }, [numericLogId, logId]);
+  }, [numericLogId, logId, notifyOperationalError]);
 
   useEffect(() => {
     const pendingContact = contacts.find((contact) => {
@@ -301,6 +336,15 @@ function LoggerScreen() {
           body: JSON.stringify({ ...contact, _log_id: numericLogId }),
         });
         if (!responseBody.ok) {
+          notifyOperationalError(
+            'LoggerScreen.commitContactRejected',
+            responseBody.error ?? 'Contact upload failed.',
+            responseBody.error,
+            {
+              logId: numericLogId,
+              contactId: contact._id ?? contact._client_id ?? null,
+            },
+          );
           setContacts((currentContacts) =>
             markContactFailed(
               currentContacts,
@@ -311,6 +355,7 @@ function LoggerScreen() {
           return;
         }
         if (responseBody.contact) {
+          commitContactErrorNotifiedRef.current = false;
           setContacts((currentContacts) =>
             mergeContact(currentContacts, {
               ...responseBody.contact,
@@ -318,6 +363,15 @@ function LoggerScreen() {
             }),
           );
         } else {
+          notifyOperationalError(
+            'LoggerScreen.commitContactMissing',
+            'Contact upload failed: server response did not include a committed contact.',
+            null,
+            {
+              logId: numericLogId,
+              contactId: contact._id ?? contact._client_id ?? null,
+            },
+          );
           setContacts((currentContacts) =>
             markContactFailed(
               currentContacts,
@@ -327,7 +381,18 @@ function LoggerScreen() {
           );
         }
       } catch (error) {
-        console.error('Unable to commit contact', error);
+        if (!commitContactErrorNotifiedRef.current) {
+          commitContactErrorNotifiedRef.current = true;
+          notifyOperationalError(
+            'LoggerScreen.commitContactRetry',
+            'Unable to commit contact. Retrying.',
+            error,
+            {
+              logId: numericLogId,
+              contactId: contact._id ?? contact._client_id ?? null,
+            },
+          );
+        }
         window.setTimeout(
           () => setContacts((currentContacts) => sortContacts(currentContacts)),
           CONTACT_COMMIT_RETRY_DELAY_MS,
@@ -338,7 +403,7 @@ function LoggerScreen() {
     }
 
     commitContact(pendingContact);
-  }, [contacts, numericLogId]);
+  }, [contacts, numericLogId, notifyOperationalError]);
 
   function sendRadioMessage(message) {
     const socket = backendSocketRef.current;
@@ -376,6 +441,15 @@ function LoggerScreen() {
     const failureCount = results.filter(
       (result) => result.status === 'rejected',
     ).length;
+    const deleteFailures = results
+      .map((result, index) => {
+        if (result.status !== 'rejected') return null;
+        return {
+          id: committedContacts[index]?._id ?? null,
+          error: errorMessage(result.reason, 'Unable to delete contact'),
+        };
+      })
+      .filter(Boolean);
     const deletedIdentifiers = new Set([
       ...successfullyDeletedIds.map((id) => `id:${id}`),
       ...localContactIdentifiers,
@@ -389,9 +463,18 @@ function LoggerScreen() {
     );
 
     if (failureCount > 0) {
-      window.alert(
-        `Unable to delete ${failureCount === 1 ? '1 QSO' : `${failureCount} QSOs`}.`,
-      );
+      const message = `Unable to delete ${failureCount === 1 ? '1 QSO' : `${failureCount} QSOs`}.`;
+      notifyError(message, {
+        dedupeKey: `LoggerScreen.deleteContacts:${failureCount}`,
+      });
+      reportClientErrorLater({
+        source: 'LoggerScreen.deleteContacts',
+        message,
+        details: {
+          logId: numericLogId,
+          failures: deleteFailures,
+        },
+      });
     }
   }
 

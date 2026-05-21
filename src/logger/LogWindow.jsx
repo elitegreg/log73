@@ -5,6 +5,7 @@ import {
   sanitizeExchangeValue,
 } from '../domain/contactFields';
 import { validateExchangeField } from '../domain/validation';
+import { useNotifications } from '../lib/notificationsContext';
 
 const READ_ONLY_COLUMNS = new Set(['Mult', 'Pts']);
 const COLUMN_PADDING_CHARS = 2;
@@ -313,6 +314,7 @@ function LogWindow({
   onDeleteContacts,
   onUpdateContacts,
 }) {
+  const { notifyError } = useNotifications();
   const columns = settings?.qso_columns ?? [];
   const columnFieldMap = useMemo(
     () => fieldMapFromSettings(settings),
@@ -450,7 +452,9 @@ function LogWindow({
       editingContact,
     );
     if (!parsed.ok) {
-      window.alert(parsed.error);
+      notifyError(parsed.error, {
+        dedupeKey: `LogWindow.inlineEdit:${editingCell.column}:${parsed.error}`,
+      });
       inputRef.current?.focus();
       return;
     }

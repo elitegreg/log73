@@ -1,3 +1,5 @@
+import { reportClientErrorLater } from '../lib/errorReporting';
+
 export const CONTACTS_STORAGE_KEY = 'log73.contacts';
 export const SESSION_STORAGE_KEY = 'log73.session_id';
 export const BACKEND_WS_INITIAL_RECONNECT_DELAY_MS = 2000;
@@ -77,7 +79,12 @@ export function loadLocalContacts(logId) {
       ? sortContacts(parsed.map(normalizeContact).filter(shouldPersistLocally))
       : [];
   } catch (error) {
-    console.error('Unable to load locally stored contacts', error);
+    reportClientErrorLater({
+      source: 'loggerScreenHelpers.loadLocalContacts',
+      message: 'Unable to load locally stored contacts.',
+      error,
+      details: { logId },
+    });
     return [];
   }
 }

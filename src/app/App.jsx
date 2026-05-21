@@ -11,6 +11,7 @@ import {
   THEME_CLASS_NAMES,
   THEME_STORAGE_KEY,
 } from '../themes/themes';
+import { NotificationsProvider } from '../lib/notifications';
 import '../styles/App.css';
 import '../styles/theme-modern-dark-radio.css';
 import '../styles/theme-classic-terminal.css';
@@ -29,25 +30,30 @@ function App() {
   }, [theme]);
 
   return (
-    <div className="app-container">
-      <Routes>
-        <Route path="/" element={<Navigate to="/ui/open_log" replace />} />
-        <Route
-          path="/ui/open_log"
-          element={<OpenLogScreen theme={theme} onSetTheme={setTheme} />}
-        />
-        <Route
-          path="/ui/config"
-          element={<ConfigScreen theme={theme} onSetTheme={setTheme} />}
-        />
-        <Route path="/ui/create_log" element={<CreateLogScreen />} />
-        <Route path="/ui/edit_log/:logId" element={<CreateLogScreen />} />
-        <Route path="/ui/create_radio" element={<CreateRadioScreen />} />
-        <Route path="/ui/edit_radio/:radioId" element={<CreateRadioScreen />} />
-        <Route path="/ui/logger/:logId/:radioId" element={<LoggerScreen />} />
-        <Route path="*" element={<Navigate to="/ui/open_log" replace />} />
-      </Routes>
-    </div>
+    <NotificationsProvider>
+      <div className="app-container">
+        <Routes>
+          <Route path="/" element={<Navigate to="/ui/open_log" replace />} />
+          <Route
+            path="/ui/open_log"
+            element={<OpenLogScreen theme={theme} onSetTheme={setTheme} />}
+          />
+          <Route
+            path="/ui/config"
+            element={<ConfigScreen theme={theme} onSetTheme={setTheme} />}
+          />
+          <Route path="/ui/create_log" element={<CreateLogScreen />} />
+          <Route path="/ui/edit_log/:logId" element={<CreateLogScreen />} />
+          <Route path="/ui/create_radio" element={<CreateRadioScreen />} />
+          <Route
+            path="/ui/edit_radio/:radioId"
+            element={<CreateRadioScreen />}
+          />
+          <Route path="/ui/logger/:logId/:radioId" element={<LoggerScreen />} />
+          <Route path="*" element={<Navigate to="/ui/open_log" replace />} />
+        </Routes>
+      </div>
+    </NotificationsProvider>
   );
 }
 

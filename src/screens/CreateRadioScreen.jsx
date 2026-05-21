@@ -1,10 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiJson } from '../lib/api';
+import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
+import { useNotifications } from '../lib/notificationsContext';
 
 function CreateRadioScreen() {
   const navigate = useNavigate();
   const { radioId } = useParams();
+  const { notifyError } = useNotifications();
   const isEditing = Boolean(radioId);
   const [name, setName] = useState('');
   const [host, setHost] = useState('127.0.0.1');
@@ -13,7 +16,20 @@ function CreateRadioScreen() {
   const [rigctldTimeout, setRigctldTimeout] = useState(2);
   const [winkeyerEnabled, setWinkeyerEnabled] = useState(false);
   const [winkeyerSerialPort, setWinkeyerSerialPort] = useState('');
-  const [error, setError] = useState('');
+
+  const notifyOperationalError = useCallback(
+    (source, fallback, error, details = {}) => {
+      const message = errorMessage(error, fallback);
+      notifyError(message, { dedupeKey: `${source}:${message}` });
+      reportClientErrorLater({
+        source,
+        message,
+        error,
+        details,
+      });
+    },
+    [notifyError],
+  );
 
   useEffect(() => {
     if (isEditing) {
@@ -28,18 +44,24 @@ function CreateRadioScreen() {
           setWinkeyerEnabled(Boolean(result.radio.winkeyer_enabled));
           setWinkeyerSerialPort(result.radio.winkeyer_serial_port ?? '');
         })
-        .catch((err) => setError(err.message));
+        .catch((error) =>
+          notifyOperationalError(
+            'CreateRadioScreen.loadRadio',
+            'Unable to load radio.',
+            error,
+            { radioId },
+          ),
+        );
       return;
     }
 
     apiJson('/radios')
       .then((radios) => setPort(4532 + radios.length))
       .catch(() => setPort(4532));
-  }, [isEditing, radioId]);
+  }, [isEditing, notifyOperationalError, radioId]);
 
   async function saveRadio(event) {
     event.preventDefault();
-    setError('');
     const result = await apiJson(isEditing ? `/radios/${radioId}` : '/radios', {
       method: isEditing ? 'PUT' : 'POST',
       body: JSON.stringify({
@@ -53,8 +75,14 @@ function CreateRadioScreen() {
       }),
     });
     if (!result.ok) {
-      setError(
-        result.error ?? `Unable to ${isEditing ? 'update' : 'create'} radio`,
+      notifyOperationalError(
+        'CreateRadioScreen.saveRadio',
+        `Unable to ${isEditing ? 'update' : 'create'} radio.`,
+        result.error,
+        {
+          isEditing,
+          radioId,
+        },
       );
       return;
     }
@@ -66,7 +94,6 @@ function CreateRadioScreen() {
       <div className="title-bar">
         Log73 - {isEditing ? 'Edit' : 'Create'} Radio
       </div>
-      {error && <div className="error-message">{error}</div>}
       <label>
         Name
         <input

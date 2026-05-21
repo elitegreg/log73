@@ -1,7 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { parseFieldType, sanitizeExchangeValue } from '../domain/contactFields';
 import { apiJson } from '../lib/api';
+import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
+import { useNotifications } from '../lib/notificationsContext';
 
 function paramsObject(params) {
   return Object.fromEntries(
@@ -24,13 +26,27 @@ function defaultParamValues(contest) {
 function CreateLogScreen() {
   const navigate = useNavigate();
   const { logId } = useParams();
+  const { notifyError } = useNotifications();
   const isEditing = Boolean(logId);
   const [name, setName] = useState('');
   const [stationCallsign, setStationCallsign] = useState('');
   const [contestId, setContestId] = useState('');
   const [contestRules, setContestRules] = useState([]);
   const [contestParams, setContestParams] = useState({});
-  const [error, setError] = useState('');
+
+  const notifyOperationalError = useCallback(
+    (source, fallback, error, details = {}) => {
+      const message = errorMessage(error, fallback);
+      notifyError(message, { dedupeKey: `${source}:${message}` });
+      reportClientErrorLater({
+        source,
+        message,
+        error,
+        details,
+      });
+    },
+    [notifyError],
+  );
 
   const selectedContest = useMemo(
     () => contestRules.find((contest) => contest.contest === contestId),
@@ -49,8 +65,14 @@ function CreateLogScreen() {
           );
         }
       })
-      .catch((err) => setError(err.message));
-  }, [isEditing]);
+      .catch((error) =>
+        notifyOperationalError(
+          'CreateLogScreen.loadContestRules',
+          'Unable to load contest rules.',
+          error,
+        ),
+      );
+  }, [isEditing, notifyOperationalError]);
 
   useEffect(() => {
     if (!isEditing) return;
@@ -62,8 +84,15 @@ function CreateLogScreen() {
         setContestId(result.log.contest_id ?? '');
         setContestParams(result.log.contest_params ?? {});
       })
-      .catch((err) => setError(err.message));
-  }, [isEditing, logId]);
+      .catch((error) =>
+        notifyOperationalError(
+          'CreateLogScreen.loadLog',
+          'Unable to load log.',
+          error,
+          { logId },
+        ),
+      );
+  }, [isEditing, logId, notifyOperationalError]);
 
   useEffect(() => {
     if (isEditing || !selectedContest) return;
@@ -79,7 +108,6 @@ function CreateLogScreen() {
 
   async function saveLog(event) {
     event.preventDefault();
-    setError('');
     const normalizedParams = paramsObject(contestParams);
     if (!isEditing) {
       const missingParam = (selectedContest?.log_params ?? []).find(
@@ -88,7 +116,9 @@ function CreateLogScreen() {
           String(normalizedParams[param.name] ?? '').trim() === '',
       );
       if (missingParam) {
-        setError(`${missingParam.label ?? missingParam.name} is required.`);
+        notifyError(`${missingParam.label ?? missingParam.name} is required.`, {
+          dedupeKey: `CreateLogScreen.required:${missingParam.name}`,
+        });
         return;
       }
     }
@@ -107,8 +137,15 @@ function CreateLogScreen() {
       ),
     });
     if (!result.ok) {
-      setError(
-        result.error ?? `Unable to ${isEditing ? 'update' : 'create'} log`,
+      notifyOperationalError(
+        'CreateLogScreen.saveLog',
+        `Unable to ${isEditing ? 'update' : 'create'} log.`,
+        result.error,
+        {
+          isEditing,
+          logId,
+          contestId,
+        },
       );
       return;
     }
@@ -120,7 +157,6 @@ function CreateLogScreen() {
       <div className="title-bar">
         Log73 - {isEditing ? 'Edit' : 'Create'} Log
       </div>
-      {error && <div className="error-message">{error}</div>}
       <label>
         Contest
         <select

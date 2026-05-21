@@ -1,15 +1,31 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { apiJson } from '../lib/api';
+import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
+import { useNotifications } from '../lib/notificationsContext';
 import { THEME_OPTIONS } from '../themes/themes';
 
 function ConfigScreen({ theme, onSetTheme }) {
   const navigate = useNavigate();
+  const { notifyError } = useNotifications();
   const [loginUser, setLoginUser] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginPasswordConfirm, setLoginPasswordConfirm] = useState('');
   const [loginEnabled, setLoginEnabled] = useState(false);
-  const [error, setError] = useState('');
+
+  const notifyOperationalError = useCallback(
+    (source, fallback, error, details = {}) => {
+      const message = errorMessage(error, fallback);
+      notifyError(message, { dedupeKey: `${source}:${message}` });
+      reportClientErrorLater({
+        source,
+        message,
+        error,
+        details,
+      });
+    },
+    [notifyError],
+  );
 
   useEffect(() => {
     apiJson('/config')
@@ -19,14 +35,21 @@ function ConfigScreen({ theme, onSetTheme }) {
         setLoginUser(result.config.login_user ?? '');
         setLoginEnabled(Boolean(result.config.login_enabled));
       })
-      .catch((err) => setError(err.message));
-  }, []);
+      .catch((error) =>
+        notifyOperationalError(
+          'ConfigScreen.loadConfig',
+          'Unable to load config.',
+          error,
+        ),
+      );
+  }, [notifyOperationalError]);
 
   async function saveConfig(event) {
     event.preventDefault();
-    setError('');
     if (loginPassword !== loginPasswordConfirm) {
-      setError('Passwords do not match.');
+      notifyError('Passwords do not match.', {
+        dedupeKey: 'ConfigScreen.passwordMismatch',
+      });
       return;
     }
 
@@ -40,7 +63,11 @@ function ConfigScreen({ theme, onSetTheme }) {
     });
 
     if (!result.ok) {
-      setError(result.error ?? 'Unable to save config');
+      notifyOperationalError(
+        'ConfigScreen.saveConfig',
+        'Unable to save config.',
+        result.error,
+      );
       return;
     }
 
@@ -69,7 +96,6 @@ function ConfigScreen({ theme, onSetTheme }) {
         </label>
         <span>{loginEnabled ? 'Login is enabled.' : 'Login is disabled.'}</span>
       </div>
-      {error && <div className="error-message">{error}</div>}
       <label>
         Username
         <input

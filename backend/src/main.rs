@@ -20,7 +20,7 @@ use axum::{
     http::{HeaderMap, Request, header},
     middleware,
     response::IntoResponse,
-    routing::{delete, get},
+    routing::{delete, get, post},
 };
 use clap::Parser;
 use contest_rules::{ContestRules, ContestRulesStore};
@@ -51,6 +51,9 @@ struct AppState {
     score_tracker: ContestScoreTracker,
     supercheckpartial: SuperCheckPartial,
 }
+
+const MAX_CLIENT_ERROR_TEXT_LENGTH: usize = 4096;
+const MAX_CLIENT_ERROR_JSON_LENGTH: usize = 8192;
 
 fn init_tracing(cli: &Cli) -> std::io::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
     let filter = EnvFilter::try_new(&cli.log_level).unwrap_or_else(|_| EnvFilter::new("info"));
@@ -169,6 +172,7 @@ async fn main() {
         .route("/contest-rules", get(list_contest_rules))
         .route("/contest-settings", get(contest_settings))
         .route("/config", get(config).put(update_config))
+        .route("/client-errors", post(report_client_error))
         .route("/supercheckpartial", get(supercheckpartial_matches))
         .route("/logs", get(logs).post(create_log))
         .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
@@ -479,6 +483,91 @@ struct UpdateConfigPayload {
     login_user: String,
     login_password: String,
     login_password_confirm: String,
+}
+
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+struct ClientErrorPayload {
+    name: Option<String>,
+    message: Option<String>,
+    stack: Option<String>,
+}
+
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+struct ClientErrorReportPayload {
+    source: Option<String>,
+    message: Option<String>,
+    url: Option<String>,
+    user_agent: Option<String>,
+    error: Option<ClientErrorPayload>,
+    details: Option<serde_json::Value>,
+}
+
+fn truncate_text(value: &str, max_len: usize) -> String {
+    if value.chars().count() <= max_len {
+        return value.to_string();
+    }
+    value.chars().take(max_len).collect()
+}
+
+fn normalized_text(value: Option<&str>, max_len: usize) -> Option<String> {
+    let text = value.unwrap_or("").trim();
+    if text.is_empty() {
+        return None;
+    }
+    Some(truncate_text(text, max_len))
+}
+
+fn normalized_json_text(value: Option<&serde_json::Value>, max_len: usize) -> Option<String> {
+    let value = value?;
+    let serialized = serde_json::to_string(value)
+        .unwrap_or_else(|error| format!("<unable to serialize client error details: {error}>"));
+    Some(truncate_text(&serialized, max_len))
+}
+
+async fn report_client_error(
+    Json(payload): Json<ClientErrorReportPayload>,
+) -> Json<serde_json::Value> {
+    let source = normalized_text(payload.source.as_deref(), MAX_CLIENT_ERROR_TEXT_LENGTH)
+        .unwrap_or_else(|| "frontend".to_string());
+    let message = normalized_text(payload.message.as_deref(), MAX_CLIENT_ERROR_TEXT_LENGTH);
+    let url = normalized_text(payload.url.as_deref(), MAX_CLIENT_ERROR_TEXT_LENGTH);
+    let user_agent = normalized_text(payload.user_agent.as_deref(), MAX_CLIENT_ERROR_TEXT_LENGTH);
+    let error_name = normalized_text(
+        payload
+            .error
+            .as_ref()
+            .and_then(|error| error.name.as_deref()),
+        MAX_CLIENT_ERROR_TEXT_LENGTH,
+    );
+    let error_message = normalized_text(
+        payload
+            .error
+            .as_ref()
+            .and_then(|error| error.message.as_deref()),
+        MAX_CLIENT_ERROR_TEXT_LENGTH,
+    );
+    let error_stack = normalized_text(
+        payload
+            .error
+            .as_ref()
+            .and_then(|error| error.stack.as_deref()),
+        MAX_CLIENT_ERROR_JSON_LENGTH,
+    );
+    let details = normalized_json_text(payload.details.as_ref(), MAX_CLIENT_ERROR_JSON_LENGTH);
+
+    error!(
+        source = %source,
+        client_message = message.as_deref().unwrap_or(""),
+        url = url.as_deref().unwrap_or(""),
+        user_agent = user_agent.as_deref().unwrap_or(""),
+        error_name = error_name.as_deref().unwrap_or(""),
+        error_message = error_message.as_deref().unwrap_or(""),
+        error_stack = error_stack.as_deref().unwrap_or(""),
+        details = details.as_deref().unwrap_or(""),
+        "frontend client error reported"
+    );
+
+    Json(serde_json::json!({ "ok": true }))
 }
 
 async fn update_config(
