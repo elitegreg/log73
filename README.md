@@ -234,6 +234,7 @@ POST   /api/logs
 GET    /api/logs/:id
 PUT    /api/logs/:id
 DELETE /api/logs/:id
+POST   /api/logs/:id/adif
 POST   /api/logs/:id/cabrillo
 
 GET    /api/logs/:log_id/contacts
@@ -415,6 +416,7 @@ Committed contacts are loaded from the backend. Pending/updating contacts are ca
 Contest rules are loaded from YAML files in `contest-rules/` by default. The backend option `--contest-rules-dir` can point at another directory.
 Scoring-related YAML settings live under a `scoring` block (`qso_points`, `dupe_key`, `multipliers`, `bonus_points`).
 Contest-specific Cabrillo metadata lives under a `cabrillo` block (`fixed_fields`, `log_fields`, `export_fields`).
+ADIF export uses committed QSO data from the database and derives `QSO_DATE` and `TIME_ON` from the stored `QSO_DATE_TIME_ON` epoch.
 
 Current SC QSO Party rule IDs:
 

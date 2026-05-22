@@ -171,7 +171,7 @@ function ExportLogScreen() {
       />
       <div className="selection-actions">
         <button className="cmd-btn primary" type="submit">
-          Export
+          Export Cabrillo
         </button>
         <button
           className="cmd-btn"

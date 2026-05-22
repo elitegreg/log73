@@ -1,3 +1,4 @@
+mod adif;
 mod auth;
 mod bands;
 mod cabrillo;
@@ -177,6 +178,7 @@ async fn main() {
         .route("/supercheckpartial", get(supercheckpartial_matches))
         .route("/logs", get(logs).post(create_log))
         .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
+        .route("/logs/{id}/adif", post(export_adif))
         .route("/logs/{id}/cabrillo", post(export_cabrillo))
         .route(
             "/logs/{log_id}/contacts",
@@ -738,12 +740,68 @@ async fn export_cabrillo(
         }
     };
 
-    let filename = cabrillo::export_filename(&log);
-    let mut response = text.into_response();
-    response.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/plain; charset=utf-8"),
-    );
+    download_response(
+        text,
+        "text/plain; charset=utf-8",
+        &cabrillo::export_filename(&log),
+    )
+}
+
+async fn export_adif(State(app_state): State<AppState>, Path(id): Path<i64>) -> impl IntoResponse {
+    let log = match app_state.db.log(id).await {
+        Ok(Some(log)) => log,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "ok": false, "error": "not found" })),
+            )
+                .into_response();
+        }
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+            )
+                .into_response();
+        }
+    };
+
+    let contacts = match app_state.db.contacts(id).await {
+        Ok(contacts) => contacts,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+            )
+                .into_response();
+        }
+    };
+
+    let text = match adif::render_log(&log, &contacts) {
+        Ok(text) => text,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "error": error })),
+            )
+                .into_response();
+        }
+    };
+
+    download_response(
+        text,
+        "text/plain; charset=utf-8",
+        &adif::export_filename(&log),
+    )
+}
+
+fn download_response(body: String, content_type: &str, filename: &str) -> axum::response::Response {
+    let mut response = body.into_response();
+    if let Ok(content_type) = HeaderValue::from_str(content_type) {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_TYPE, content_type);
+    }
     if let Ok(disposition) = HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
     {
         response

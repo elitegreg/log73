@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { apiJson } from '../lib/api';
+import { apiDownload, apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
 
@@ -107,6 +107,36 @@ function OpenLogScreen() {
     navigate(`/ui/logger/${selectedLogId}/${selectedRadioId}`);
   }
 
+  async function exportAdif() {
+    if (!selectedLogId) return;
+
+    try {
+      const { blob, filename } = await apiDownload(
+        `/logs/${selectedLogId}/adif`,
+        {
+          method: 'POST',
+        },
+      );
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => {
+        URL.revokeObjectURL(url);
+      }, 0);
+    } catch (error) {
+      notifyOperationalError(
+        'OpenLogScreen.exportAdif',
+        'Unable to export ADIF file.',
+        error,
+        { selectedLogId },
+      );
+    }
+  }
+
   return (
     <div className="selection-window">
       <div className="title-bar">Log73 - Open Log</div>
@@ -160,8 +190,15 @@ function OpenLogScreen() {
                 if (!selectedLogId) event.preventDefault();
               }}
             >
-              Export
+              Export Cabrillo
             </Link>
+            <button
+              className="cmd-btn"
+              onClick={exportAdif}
+              disabled={!selectedLogId}
+            >
+              Export ADIF
+            </button>
           </div>
         </section>
         <section>
