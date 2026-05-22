@@ -3,12 +3,16 @@ use crate::db::{Database, RadioConfig};
 use crate::radio::{
     RadioCommand, RadioState, RadioStatus, ServerMessage, mode_for_request, normalize_mode,
 };
+use backon::{BackoffBuilder, ExponentialBuilder};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, Notify, RwLock, broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, trace, warn};
+
+const RIGCTLD_RECONNECT_MIN_DELAY: Duration = Duration::from_secs(1);
+const RIGCTLD_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub struct RadioManager {
@@ -316,9 +320,44 @@ async fn run_managed_radio(
     mut commands: mpsc::Receiver<RadioCommand>,
     mut shutdown: oneshot::Receiver<()>,
 ) {
+    let mut reconnect_backoff = rigctld_reconnect_backoff().build();
+    let mut reconnect_deadline = None;
+
     loop {
         let poll_interval = Duration::from_secs_f64(config.poll_frequency);
         let rigctld_timeout = Duration::from_secs_f64(config.rigctld_timeout);
+
+        if let Some(deadline) = reconnect_deadline {
+            loop {
+                tokio::select! {
+                    _ = &mut shutdown => return,
+                    command = commands.recv() => {
+                        match command {
+                            Some(RadioCommand::ReloadConfig(new_config)) => {
+                                info!(radio_id = new_config.id, "reloading radio config while waiting to reconnect rigctld");
+                                config = new_config;
+                                reconnect_backoff = rigctld_reconnect_backoff().build();
+                                reconnect_deadline = None;
+                                break;
+                            }
+                            Some(command) => {
+                                warn!(radio_id = config.id, ?command, "dropping radio command while waiting to reconnect rigctld");
+                            }
+                            None => return,
+                        }
+                    }
+                    _ = tokio::time::sleep_until(deadline) => {
+                        reconnect_deadline = None;
+                        break;
+                    }
+                }
+            }
+
+            if reconnect_deadline.is_some() {
+                continue;
+            }
+        }
+
         debug!(
             radio_id = config.id,
             host = %config.rigctld_host,
@@ -349,6 +388,7 @@ async fn run_managed_radio(
             result = rig.connect() => {
                 if let Err(error) = result {
                     set_radio_status(&current_status, &status_updates, false).await;
+                    reconnect_deadline = Some(next_rigctld_reconnect_deadline(&mut reconnect_backoff));
                     warn!(
                         radio_id = config.id,
                         host = %config.rigctld_host,
@@ -356,12 +396,12 @@ async fn run_managed_radio(
                         %error,
                         "failed to connect to rigctld"
                     );
-                    tokio::time::sleep(poll_interval).await;
                     continue;
                 }
             }
         }
 
+        reconnect_backoff = rigctld_reconnect_backoff().build();
         info!(
             radio_id = config.id,
             host = %config.rigctld_host,
@@ -404,6 +444,7 @@ async fn run_managed_radio(
                         }
                         Err(error) => {
                             set_radio_status(&current_status, &status_updates, false).await;
+                            reconnect_deadline = Some(next_rigctld_reconnect_deadline(&mut reconnect_backoff));
                             warn!(radio_id = config.id, %error, "failed to poll rigctld");
                             let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
                             let _ = cw_task.await;
@@ -459,6 +500,7 @@ async fn run_managed_radio(
                             debug!(radio_id = config.id, ?command, last_frequency_hz, "applying rigctld command");
                             if let Err(error) = apply_command(&mut rig, command, last_frequency_hz).await {
                                 set_radio_status(&current_status, &status_updates, false).await;
+                                reconnect_deadline = Some(next_rigctld_reconnect_deadline(&mut reconnect_backoff));
                                 error!(radio_id = config.id, %error, "failed to apply radio command");
                                 let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
                                 let _ = cw_task.await;
@@ -484,6 +526,22 @@ async fn set_radio_status(
     }
     status.online = online;
     let _ = status_updates.send(status.clone());
+}
+
+fn rigctld_reconnect_backoff() -> ExponentialBuilder {
+    ExponentialBuilder::default()
+        .with_min_delay(RIGCTLD_RECONNECT_MIN_DELAY)
+        .with_max_delay(RIGCTLD_RECONNECT_MAX_DELAY)
+        .without_max_times()
+}
+
+fn next_rigctld_reconnect_deadline(
+    reconnect_backoff: &mut impl Iterator<Item = Duration>,
+) -> tokio::time::Instant {
+    let delay = reconnect_backoff
+        .next()
+        .unwrap_or(RIGCTLD_RECONNECT_MAX_DELAY);
+    tokio::time::Instant::now() + delay
 }
 
 enum CwTaskCommand {
@@ -828,5 +886,36 @@ async fn apply_command(
         | RadioCommand::StopCw
         | RadioCommand::SetWpm(_)
         | RadioCommand::ReloadConfig(_) => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rigctld_reconnect_backoff_starts_at_one_second() {
+        let mut backoff = rigctld_reconnect_backoff().build();
+        assert_eq!(backoff.next(), Some(Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn rigctld_reconnect_backoff_caps_at_max_delay() {
+        let mut backoff = rigctld_reconnect_backoff().build();
+        let delays = (0..6)
+            .map(|_| backoff.next().expect("backoff should continue"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            delays,
+            vec![
+                Duration::from_secs(1),
+                Duration::from_secs(2),
+                Duration::from_secs(4),
+                Duration::from_secs(8),
+                Duration::from_secs(10),
+                Duration::from_secs(10),
+            ]
+        );
     }
 }

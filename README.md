@@ -365,6 +365,7 @@ cw_messages: built-in default Run/S&P function-key messages
 Radio connections are lazy. Opening a logger with `radio_id=X` starts or reuses that radio's managed connection. Closing the logger releases it. When the reference count reaches zero, the backend disconnects and removes the managed radio.
 
 Each radio has one async command queue, so CAT commands for that radio are serialized.
+If rigctld is offline, reconnect attempts back off exponentially from `1s` to a `10s` maximum instead of retrying at the poll interval.
 
 ## Radio behavior
 
