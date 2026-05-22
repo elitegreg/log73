@@ -45,6 +45,30 @@ pub struct ContestParam {
     pub in_sets: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub valid_values: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widget: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub help_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_lines: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preserve_case: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CabrilloFixedField {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CabrilloRules {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fixed_fields: Vec<CabrilloFixedField>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub log_fields: Vec<ContestParam>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub export_fields: Vec<ContestParam>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -131,6 +155,8 @@ pub struct ContestRules {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bonus_points: Vec<BonusPointRule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cabrillo: Option<CabrilloRules>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<ContestMetadata>,
 }
 
@@ -173,6 +199,8 @@ struct RawContestRules {
     #[serde(default)]
     log_params: Option<Vec<ContestParam>>,
     #[serde(default)]
+    cabrillo: Option<RawCabrilloRules>,
+    #[serde(default)]
     scoring: Option<RawScoringRules>,
     #[serde(default)]
     qso_points: Option<QsoPoints>,
@@ -184,6 +212,16 @@ struct RawContestRules {
     bonus_points: Option<Vec<BonusPointRule>>,
     #[serde(default)]
     metadata: Option<ContestMetadata>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct RawCabrilloRules {
+    #[serde(default)]
+    fixed_fields: Option<Vec<CabrilloFixedField>>,
+    #[serde(default)]
+    log_fields: Option<Vec<ContestParam>>,
+    #[serde(default)]
+    export_fields: Option<Vec<ContestParam>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -320,6 +358,18 @@ fn prepend_standard_qso_columns(contest: &mut ContestRules) {
         .collect();
 }
 
+fn apply_field_valid_values(
+    fields: &mut [ContestParam],
+    define: &[ValueSet],
+) -> Result<(), String> {
+    for field in fields {
+        if !field.in_sets.is_empty() {
+            field.valid_values = defined_values(define, &field.in_sets)?;
+        }
+    }
+    Ok(())
+}
+
 fn apply_scoring_rules(contest: &mut ContestRules, scoring: &RawScoringRules) {
     if let Some(qso_points) = &scoring.qso_points {
         contest.qso_points = Some(qso_points.clone());
@@ -335,12 +385,21 @@ fn apply_scoring_rules(contest: &mut ContestRules, scoring: &RawScoringRules) {
     }
 }
 
-fn resolve_in_sets(contest: &mut ContestRules) -> Result<(), String> {
-    for param in &mut contest.log_params {
-        if !param.in_sets.is_empty() {
-            param.valid_values = defined_values(&contest.define, &param.in_sets)?;
-        }
+fn apply_cabrillo_rules(contest: &mut ContestRules, cabrillo: &RawCabrilloRules) {
+    let current = contest.cabrillo.get_or_insert_with(CabrilloRules::default);
+    if let Some(fixed_fields) = &cabrillo.fixed_fields {
+        current.fixed_fields = fixed_fields.clone();
     }
+    if let Some(log_fields) = &cabrillo.log_fields {
+        current.log_fields = log_fields.clone();
+    }
+    if let Some(export_fields) = &cabrillo.export_fields {
+        current.export_fields = export_fields.clone();
+    }
+}
+
+fn resolve_in_sets(contest: &mut ContestRules) -> Result<(), String> {
+    apply_field_valid_values(&mut contest.log_params, &contest.define)?;
 
     for field in &mut contest.exchange {
         if !field.in_sets.is_empty() {
@@ -360,6 +419,11 @@ fn resolve_in_sets(contest: &mut ContestRules) -> Result<(), String> {
         if !multiplier.in_sets.is_empty() {
             multiplier.valid_values = defined_values(&contest.define, &multiplier.in_sets)?;
         }
+    }
+
+    if let Some(cabrillo) = &mut contest.cabrillo {
+        apply_field_valid_values(&mut cabrillo.log_fields, &contest.define)?;
+        apply_field_valid_values(&mut cabrillo.export_fields, &contest.define)?;
     }
 
     Ok(())
@@ -403,6 +467,7 @@ fn resolve_contest(
             dupe_key: Vec::new(),
             multipliers: Vec::new(),
             bonus_points: Vec::new(),
+            cabrillo: None,
             metadata: None,
         }
     };
@@ -433,6 +498,9 @@ fn resolve_contest(
     }
     if let Some(log_params) = &raw.log_params {
         contest.log_params = log_params.clone();
+    }
+    if let Some(cabrillo) = &raw.cabrillo {
+        apply_cabrillo_rules(&mut contest, cabrillo);
     }
     apply_scoring_rules(
         &mut contest,
@@ -561,5 +629,56 @@ contests:
             contest.dupe_key,
             vec!["CALL".to_string(), "BAND".to_string()]
         );
+    }
+
+    #[test]
+    fn cabrillo_fields_inherit_and_resolve_valid_values() {
+        let contest = resolve_yaml_contest(
+            r#"
+contests:
+  - id: BASE
+    allowed_bands: [20]
+    allowed_modes: ['CW']
+    define:
+      - name: 'Modes'
+        values: ['CW', 'SSB']
+    exchange: []
+    qso_columns: []
+    qso_column_fields: {}
+    cabrillo:
+      fixed_fields:
+        - name: 'CATEGORY-BAND'
+          value: 'ALL'
+      log_fields:
+        - name: 'CATEGORY-MODE'
+          label: 'Category Mode'
+          type: 'String:8'
+          widget: 'select'
+          in_sets: ['Modes']
+      export_fields:
+        - name: 'NAME'
+          label: 'Name'
+          type: 'String:75'
+          preserve_case: true
+  - id: CHILD
+    extends: BASE
+    cabrillo:
+      export_fields:
+        - name: 'EMAIL'
+          label: 'Email'
+          type: 'String:75'
+"#,
+            "CHILD",
+        );
+
+        let cabrillo = contest.cabrillo.expect("cabrillo should exist");
+        assert_eq!(cabrillo.fixed_fields.len(), 1);
+        assert_eq!(cabrillo.log_fields.len(), 1);
+        assert_eq!(
+            cabrillo.log_fields[0].valid_values,
+            vec!["CW".to_string(), "SSB".to_string()]
+        );
+        assert_eq!(cabrillo.export_fields.len(), 1);
+        assert_eq!(cabrillo.export_fields[0].name, "EMAIL");
     }
 }

@@ -1,5 +1,6 @@
 mod auth;
 mod bands;
+mod cabrillo;
 mod contest_rules;
 mod cw;
 mod db;
@@ -17,7 +18,7 @@ use axum::{
         Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{HeaderMap, Request, header},
+    http::{HeaderMap, HeaderValue, Request, StatusCode, header},
     middleware,
     response::IntoResponse,
     routing::{delete, get, post},
@@ -28,7 +29,7 @@ use db::{Contact, Database, NewLog, NewRadio, UpdateLog};
 use futures_util::{SinkExt, StreamExt};
 use radio::{ClientMessage, RadioCommand, ServerMessage};
 use radio_manager::RadioManager;
-use scoring::{ContestScoreTracker, ScoreTotals, ScoringModules};
+use scoring::{ContestScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use std::{
     collections::{HashMap, HashSet},
     fs::OpenOptions,
@@ -176,6 +177,7 @@ async fn main() {
         .route("/supercheckpartial", get(supercheckpartial_matches))
         .route("/logs", get(logs).post(create_log))
         .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
+        .route("/logs/{id}/cabrillo", post(export_cabrillo))
         .route(
             "/logs/{log_id}/contacts",
             get(contacts).post(commit_contact),
@@ -502,6 +504,12 @@ struct ClientErrorReportPayload {
     details: Option<serde_json::Value>,
 }
 
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+struct CabrilloExportPayload {
+    #[serde(default)]
+    export_params: serde_json::Value,
+}
+
 fn truncate_text(value: &str, max_len: usize) -> String {
     if value.chars().count() <= max_len {
         return value.to_string();
@@ -642,7 +650,17 @@ async fn update_log(
     Json(payload): Json<UpdateLog>,
 ) -> Json<serde_json::Value> {
     debug!(id, payload = %pretty_json(&payload), "update log PUT body");
-    if let Err(error) = validation::validate_update_log(&payload) {
+    let log = match app_state.db.log(id).await {
+        Ok(Some(log)) => log,
+        Ok(None) => return Json(serde_json::json!({ "ok": false, "error": "not found" })),
+        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    };
+    let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
+        return Json(
+            serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id) }),
+        );
+    };
+    if let Err(error) = validation::validate_update_log(rules, &payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     match app_state.db.update_log(id, payload).await {
@@ -650,6 +668,89 @@ async fn update_log(
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
+}
+
+async fn export_cabrillo(
+    State(app_state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(payload): Json<CabrilloExportPayload>,
+) -> impl IntoResponse {
+    let log = match app_state.db.log(id).await {
+        Ok(Some(log)) => log,
+        Ok(None) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "ok": false, "error": "not found" })),
+            )
+                .into_response();
+        }
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+            )
+                .into_response();
+        }
+    };
+    let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id) })),
+        )
+            .into_response();
+    };
+    if let Err(error) = validation::validate_cabrillo_export_params(rules, &payload.export_params) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "ok": false, "error": error })),
+        )
+            .into_response();
+    }
+
+    let mut contacts = match app_state.db.contacts(id).await {
+        Ok(contacts) => contacts,
+        Err(error) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+            )
+                .into_response();
+        }
+    };
+    contacts.sort_by_key(contact_score_order);
+    let mut scored_contacts = contacts.clone();
+    let claimed_score =
+        score_contacts(rules, log.contest_params.clone(), &mut scored_contacts).score;
+    let text = match cabrillo::render_log(
+        rules,
+        &log,
+        &contacts,
+        &payload.export_params,
+        claimed_score,
+    ) {
+        Ok(text) => text,
+        Err(error) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({ "ok": false, "error": error })),
+            )
+                .into_response();
+        }
+    };
+
+    let filename = cabrillo::export_filename(&log);
+    let mut response = text.into_response();
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/plain; charset=utf-8"),
+    );
+    if let Ok(disposition) = HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
+    {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_DISPOSITION, disposition);
+    }
+    response
 }
 
 async fn delete_log(

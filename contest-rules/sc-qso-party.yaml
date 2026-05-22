@@ -38,6 +38,62 @@ contests:
             W4CAE: 350
             WW4SF: 250
             K4YTZ: 250
+    cabrillo:
+      fixed_fields:
+        - name: 'CATEGORY-BAND'
+          value: 'ALL'
+      log_fields:
+        - name: 'CATEGORY-MODE'
+          label: 'Category Mode'
+          type: 'String:16'
+          widget: 'select'
+          valid_values: ['CW', 'FM', 'SSB', 'MIXED']
+        - name: 'CATEGORY-OPERATOR'
+          label: 'Category Operator'
+          type: 'String:16'
+          widget: 'select'
+          valid_values: ['SINGLE-OP', 'MULTI-OP', 'CHECKLOG']
+        - name: 'CATEGORY-STATION'
+          label: 'Category Station'
+          type: 'String:16'
+          widget: 'select'
+          valid_values: ['FIXED', 'MOBILE', 'PORTABLE']
+        - name: 'CATEGORY-TRANSMITTER'
+          label: 'Category Transmitter'
+          type: 'String:16'
+          widget: 'select'
+          valid_values: ['ONE', 'TWO', 'LIMITED', 'UNLIMITED']
+      export_fields:
+        - name: 'CLUB'
+          label: 'Club'
+          type: 'String:75'
+          required: false
+          preserve_case: true
+        - name: 'EMAIL'
+          label: 'Email'
+          type: 'String:75'
+          regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
+          preserve_case: true
+        - name: 'LOCATION'
+          label: 'Location'
+          type: 'String:32'
+          help_text: 'State, province, county or DX'
+        - name: 'NAME'
+          label: 'Name'
+          type: 'String:75'
+          preserve_case: true
+        - name: 'ADDRESS'
+          label: 'Address'
+          type: 'String:45'
+          widget: 'textarea'
+          max_lines: 6
+          preserve_case: true
+        - name: 'SOAPBOX'
+          label: 'Soapbox'
+          type: 'String:75'
+          widget: 'textarea'
+          required: false
+          preserve_case: true
     define:
       - name: 'DX'
         values:
@@ -212,6 +268,7 @@ contests:
         label: 'State'
         type: 'String:4'
         required: true
+        in_sets: ['States', 'DX']
     exchange:
       - name: 'RST(s)'
         type: 'RST'
@@ -228,6 +285,7 @@ contests:
       - name: 'RST(r)'
         type: 'RST'
         adif: 'RST_RCVD'
+        default: 599
         is_sent: false
       - name: 'County'
         type: 'String:4'

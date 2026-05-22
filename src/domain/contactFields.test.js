@@ -4,6 +4,7 @@ import {
   fieldDefault,
   parseFieldType,
   sanitizeCallsign,
+  sanitizeConfiguredValue,
   sanitizeExchangeValue,
   sanitizeRST,
 } from './contactFields.js';
@@ -39,6 +40,21 @@ test('sanitizeExchangeValue applies type-specific normalization', () => {
   assert.equal(sanitizeExchangeValue({ type: 'Numeric:3' }, '123A'), '123');
   assert.equal(sanitizeExchangeValue({ type: 'String:4' }, 'scqp'), 'SCQP');
   assert.equal(sanitizeExchangeValue({ type: 'RST' }, '599', 'SSB'), '59');
+});
+
+test('sanitizeConfiguredValue preserves case and line structure for textarea fields', () => {
+  assert.equal(
+    sanitizeConfiguredValue(
+      {
+        type: 'String:5',
+        widget: 'textarea',
+        preserve_case: true,
+        max_lines: 2,
+      },
+      'Alpha\nBravo\nCharlie',
+    ),
+    'Alpha\nBravo',
+  );
 });
 
 test('fieldDefault reads source params and sanitizes RST defaults', () => {

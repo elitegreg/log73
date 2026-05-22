@@ -31,6 +31,8 @@ pub struct NewLog {
 pub struct UpdateLog {
     pub name: String,
     pub station_callsign: String,
+    #[serde(default)]
+    pub contest_params: Value,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -596,10 +598,11 @@ fn db_update_log(
     log: UpdateLog,
 ) -> rusqlite::Result<Option<Log>> {
     let updated = connection.execute(
-        "UPDATE logs SET NAME = ?1, STATION_CALLSIGN = ?2 WHERE ID = ?3",
+        "UPDATE logs SET NAME = ?1, STATION_CALLSIGN = ?2, CONTEST_PARAMS_JSON = ?3 WHERE ID = ?4",
         params![
             log.name.trim(),
             log.station_callsign.trim().to_uppercase(),
+            log.contest_params.to_string(),
             id
         ],
     )?;
@@ -1279,5 +1282,41 @@ mod tests {
             .await
             .expect("second-log contacts are listed");
         assert!(second_log_contacts.is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_log_updates_contest_params() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+
+        let updated = database
+            .update_log(
+                log.id,
+                UpdateLog {
+                    name: "Updated log".to_string(),
+                    station_callsign: "K4ABC".to_string(),
+                    contest_params: json!({
+                        "CATEGORY-MODE": "MIXED",
+                        "NAME": "Greg"
+                    }),
+                },
+            )
+            .await
+            .expect("log update succeeds")
+            .expect("log should exist");
+
+        assert_eq!(updated.name, "Updated log");
+        assert_eq!(updated.station_callsign, "K4ABC");
+        assert_eq!(
+            updated
+                .contest_params
+                .get("CATEGORY-MODE")
+                .and_then(Value::as_str),
+            Some("MIXED")
+        );
+        assert_eq!(
+            updated.contest_params.get("NAME").and_then(Value::as_str),
+            Some("Greg")
+        );
     }
 }

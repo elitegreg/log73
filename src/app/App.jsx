@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import ConfigScreen from '../screens/ConfigScreen';
 import CreateLogScreen from '../screens/CreateLogScreen';
 import CreateRadioScreen from '../screens/CreateRadioScreen';
+import ExportLogScreen from '../screens/ExportLogScreen';
 import LoggerScreen from '../screens/LoggerScreen';
 import OpenLogScreen from '../screens/OpenLogScreen';
 import {
@@ -44,6 +45,7 @@ function App() {
           />
           <Route path="/ui/create_log" element={<CreateLogScreen />} />
           <Route path="/ui/edit_log/:logId" element={<CreateLogScreen />} />
+          <Route path="/ui/export_log/:logId" element={<ExportLogScreen />} />
           <Route path="/ui/create_radio" element={<CreateRadioScreen />} />
           <Route
             path="/ui/edit_radio/:radioId"

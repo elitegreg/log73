@@ -4,15 +4,10 @@ export function fieldValueLabel(field) {
   return field?.label ?? field?.name ?? 'Field';
 }
 
-export function validateExchangeField(field, value, radioMode = 'CW') {
+function validateSingleValue(field, value, radioMode) {
   const label = fieldValueLabel(field);
-  const normalizedValue = String(value ?? '')
-    .trim()
-    .toUpperCase();
-
-  if (normalizedValue === '') {
-    return { ok: false, error: `${label} is required.` };
-  }
+  const trimmedValue = String(value ?? '').trim();
+  const normalizedValue = trimmedValue.toUpperCase();
 
   const { kind } = parseFieldType(field?.type, radioMode);
   if (kind === 'RST') {
@@ -45,7 +40,7 @@ export function validateExchangeField(field, value, radioMode = 'CW') {
   if (field?.regex) {
     try {
       const regex = new RegExp(field.regex);
-      if (!regex.test(normalizedValue)) {
+      if (!regex.test(trimmedValue)) {
         return { ok: false, error: `${label} is invalid.` };
       }
     } catch {
@@ -57,4 +52,45 @@ export function validateExchangeField(field, value, radioMode = 'CW') {
   }
 
   return { ok: true, error: '' };
+}
+
+export function validateConfiguredField(field, value, radioMode = 'CW') {
+  const label = fieldValueLabel(field);
+  const normalizedValue = String(value ?? '').trim();
+  const multiline =
+    String(field?.widget ?? '').toLowerCase() === 'textarea' ||
+    Number.isInteger(field?.max_lines);
+
+  if (normalizedValue === '') {
+    if (field?.required === false) {
+      return { ok: true, error: '' };
+    }
+    return { ok: false, error: `${label} is required.` };
+  }
+
+  if (multiline) {
+    const lines = normalizedValue
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .filter((line) => line.trim() !== '');
+    if (Number.isInteger(field?.max_lines) && lines.length > field.max_lines) {
+      return {
+        ok: false,
+        error: `${label} must be at most ${field.max_lines} lines.`,
+      };
+    }
+    for (const line of lines) {
+      const result = validateSingleValue(field, line, radioMode);
+      if (!result.ok) {
+        return result;
+      }
+    }
+    return { ok: true, error: '' };
+  }
+
+  return validateSingleValue(field, normalizedValue, radioMode);
+}
+
+export function validateExchangeField(field, value, radioMode = 'CW') {
+  return validateConfiguredField(field, value, radioMode);
 }

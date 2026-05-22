@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { fieldValueLabel, validateExchangeField } from './validation.js';
+import {
+  fieldValueLabel,
+  validateConfiguredField,
+  validateExchangeField,
+} from './validation.js';
 
 test('fieldValueLabel uses label, name, then Field fallback', () => {
   assert.equal(fieldValueLabel({ label: 'Section', name: 'Sect' }), 'Section');
@@ -62,4 +66,34 @@ test('validateExchangeField reports invalid regex patterns', () => {
   );
   assert.equal(result.ok, false);
   assert.match(result.error, /invalid validation pattern/);
+});
+
+test('validateConfiguredField supports optional and multiline fields', () => {
+  assert.equal(
+    validateConfiguredField(
+      {
+        name: 'Soapbox',
+        type: 'String:75',
+        widget: 'textarea',
+        required: false,
+        max_lines: 2,
+        preserve_case: true,
+      },
+      '',
+    ).ok,
+    true,
+  );
+
+  const tooManyLines = validateConfiguredField(
+    {
+      name: 'Address',
+      type: 'String:45',
+      widget: 'textarea',
+      max_lines: 2,
+      preserve_case: true,
+    },
+    'Line 1\nLine 2\nLine 3',
+  );
+  assert.equal(tooManyLines.ok, false);
+  assert.match(tooManyLines.error, /at most 2 lines/);
 });

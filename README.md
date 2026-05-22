@@ -223,7 +223,7 @@ Operator callsign is contest/QSO metadata, not an authentication identity.
 
 ## Backend API
 
-All JSON API routes are under `/api`.
+All JSON API routes are under `/api`. The Cabrillo download endpoint also lives under `/api`.
 
 ```text
 GET    /api/contest-rules
@@ -232,7 +232,9 @@ GET    /api/contest-settings?contest_id=<contest_id>
 GET    /api/logs
 POST   /api/logs
 GET    /api/logs/:id
+PUT    /api/logs/:id
 DELETE /api/logs/:id
+POST   /api/logs/:id/cabrillo
 
 GET    /api/logs/:log_id/contacts
 POST   /api/logs/:log_id/contacts
@@ -412,6 +414,7 @@ Committed contacts are loaded from the backend. Pending/updating contacts are ca
 
 Contest rules are loaded from YAML files in `contest-rules/` by default. The backend option `--contest-rules-dir` can point at another directory.
 Scoring-related YAML settings live under a `scoring` block (`qso_points`, `dupe_key`, `multipliers`, `bonus_points`).
+Contest-specific Cabrillo metadata lives under a `cabrillo` block (`fixed_fields`, `log_fields`, `export_fields`).
 
 Current SC QSO Party rule IDs:
 
@@ -427,7 +430,7 @@ Log creation dynamically requests required rule parameters:
 - `SC-QSO-PARTY`: `State`
 - `SC-QSO-PARTY (In State)`: `County`
 
-Those values populate fixed sent exchange fields in the logger. The previous `BERK` default is no longer used.
+Those values populate fixed sent exchange fields in the logger. The previous `BERK` default is no longer used. The SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
 For `SC-QSO-PARTY (In State)`, the received value is labeled `Exchange` because it may be a county, state/province, or `DX`.
 
 ## UI themes

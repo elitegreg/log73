@@ -280,6 +280,7 @@ impl Default for ContestScoringModule {
                 dupe_key: Vec::new(),
                 multipliers: Vec::new(),
                 bonus_points: Vec::new(),
+                cabrillo: None,
                 metadata: None,
             },
             contest_params: Value::Null,
@@ -593,6 +594,7 @@ mod tests {
             dupe_key: dupe_key.into_iter().map(str::to_string).collect(),
             multipliers,
             bonus_points,
+            cabrillo: None,
             metadata: None,
         }
     }

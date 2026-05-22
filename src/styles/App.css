@@ -417,9 +417,16 @@
 }
 
 .form-window input,
-.form-window select {
+.form-window select,
+.form-window textarea {
   font-size: 16px;
   padding: 4px;
+}
+
+.form-window textarea {
+  min-height: 96px;
+  resize: vertical;
+  font: inherit;
 }
 
 .form-window label.checkbox-label {
@@ -432,6 +439,19 @@
 .form-window label.checkbox-label input {
   width: auto;
   margin: 0;
+}
+
+.field-help,
+.form-note {
+  padding: 0 12px;
+  color: #333;
+  font-size: 11px;
+  font-weight: normal;
+  line-height: 1.35;
+}
+
+.field-help {
+  padding: 0;
 }
 
 .error-message {

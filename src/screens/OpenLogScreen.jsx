@@ -153,6 +153,15 @@ function OpenLogScreen() {
             >
               Delete
             </button>
+            <Link
+              className={`cmd-btn${selectedLogId ? '' : ' disabled'}`}
+              to={selectedLogId ? `/ui/export_log/${selectedLogId}` : '#'}
+              onClick={(event) => {
+                if (!selectedLogId) event.preventDefault();
+              }}
+            >
+              Export
+            </Link>
           </div>
         </section>
         <section>

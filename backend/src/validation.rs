@@ -46,12 +46,20 @@ pub fn validate_new_log(contest_rules: &ContestRulesStore, payload: &NewLog) -> 
     let rules = contest_rules
         .get(contest_id)
         .ok_or_else(|| format!("unknown contest: {contest_id}"))?;
-    validate_log_params(rules, &payload.contest_params)
+    validate_persisted_log_params(rules, &payload.contest_params)
 }
 
-pub fn validate_update_log(payload: &UpdateLog) -> Result<(), String> {
+pub fn validate_update_log(rules: &ContestRules, payload: &UpdateLog) -> Result<(), String> {
     validate_required_text("log name", &payload.name, MAX_LOG_NAME_LEN)?;
-    validate_callsign("station callsign", &payload.station_callsign)
+    validate_callsign("station callsign", &payload.station_callsign)?;
+    validate_persisted_log_params(rules, &payload.contest_params)
+}
+
+pub fn validate_cabrillo_export_params(
+    rules: &ContestRules,
+    export_params: &Value,
+) -> Result<(), String> {
+    validate_configured_params(cabrillo_export_fields(rules), export_params)
 }
 
 pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
@@ -222,15 +230,40 @@ pub fn validate_cw_wpm(wpm: u8) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_log_params(rules: &ContestRules, contest_params: &Value) -> Result<(), String> {
+fn persisted_log_fields(rules: &ContestRules) -> Vec<&ContestParam> {
+    let mut fields = rules.log_params.iter().collect::<Vec<_>>();
+    if let Some(cabrillo) = &rules.cabrillo {
+        fields.extend(cabrillo.log_fields.iter());
+    }
+    fields
+}
+
+fn cabrillo_export_fields(rules: &ContestRules) -> Vec<&ContestParam> {
+    rules
+        .cabrillo
+        .as_ref()
+        .map(|cabrillo| cabrillo.export_fields.iter().collect())
+        .unwrap_or_default()
+}
+
+fn validate_persisted_log_params(
+    rules: &ContestRules,
+    contest_params: &Value,
+) -> Result<(), String> {
+    validate_configured_params(persisted_log_fields(rules), contest_params)
+}
+
+fn validate_configured_params(
+    fields: Vec<&ContestParam>,
+    contest_params: &Value,
+) -> Result<(), String> {
     let empty_params = serde_json::Map::new();
     let params = match contest_params.as_object() {
         Some(params) => params,
         None if contest_params.is_null() => &empty_params,
         None => return Err("contest parameters must be an object".to_string()),
     };
-    let known_params = rules
-        .log_params
+    let known_params = fields
         .iter()
         .map(|param| param.name.as_str())
         .collect::<HashSet<_>>();
@@ -242,7 +275,7 @@ fn validate_log_params(rules: &ContestRules, contest_params: &Value) -> Result<(
         validate_contact_key(key)?;
     }
 
-    for param in &rules.log_params {
+    for param in fields {
         validate_contest_param(param, params.get(&param.name))?;
     }
 
@@ -252,12 +285,48 @@ fn validate_log_params(rules: &ContestRules, contest_params: &Value) -> Result<(
 fn validate_contest_param(param: &ContestParam, value: Option<&Value>) -> Result<(), String> {
     let label = param.label.as_str();
     let value = json_trimmed_string(value).unwrap_or_default();
+    let multiline = param
+        .widget
+        .as_deref()
+        .map(|widget| widget.eq_ignore_ascii_case("textarea"))
+        .unwrap_or(false)
+        || param.max_lines.is_some();
 
     if value.is_empty() {
         if param.required == Some(false) {
             return Ok(());
         }
         return Err(format!("{label} is required"));
+    }
+
+    if multiline {
+        let lines = value.lines().collect::<Vec<_>>();
+        if let Some(max_lines) = param.max_lines
+            && lines.len() > max_lines
+        {
+            return Err(format!("{label} must be at most {max_lines} lines"));
+        }
+        for line in lines {
+            if line.trim().is_empty() {
+                return Err(format!("{label} cannot contain blank lines"));
+            }
+            if line.chars().any(char::is_control) {
+                return Err(format!("{label} cannot contain control characters"));
+            }
+            validate_typed_field(
+                label,
+                &param.field_type,
+                line,
+                &param.valid_values,
+                param.regex.as_deref(),
+                "CW",
+            )?;
+        }
+        return Ok(());
+    }
+
+    if value.chars().any(char::is_control) {
+        return Err(format!("{label} cannot contain control characters"));
     }
 
     validate_typed_field(
@@ -781,6 +850,7 @@ mod tests {
             dupe_key: Vec::new(),
             multipliers: Vec::new(),
             bonus_points: Vec::new(),
+            cabrillo: None,
             metadata: None,
         }
     }

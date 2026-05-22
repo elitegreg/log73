@@ -1,24 +1,37 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { parseFieldType, sanitizeExchangeValue } from '../domain/contactFields';
+import ConfiguredFields from '../components/ConfiguredFields';
+import { sanitizeConfiguredValue } from '../domain/contactFields';
+import { validateConfiguredField } from '../domain/validation';
 import { apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
 
-function paramsObject(params) {
-  return Object.fromEntries(
-    Object.entries(params).map(([key, value]) => [
-      key,
-      String(value).trim().toUpperCase(),
-    ]),
-  );
+function createFields(contest) {
+  return [
+    ...(contest?.log_params ?? []),
+    ...(contest?.cabrillo?.log_fields ?? []),
+  ];
 }
 
 function defaultParamValues(contest) {
   return Object.fromEntries(
-    (contest?.log_params ?? []).map((param) => [
-      param.name,
-      param.default ?? '',
+    createFields(contest).map((param) => [param.name, param.default ?? '']),
+  );
+}
+
+function normalizedParamValue(field, value) {
+  const text = String(value ?? '').replace(/\r\n/g, '\n');
+  return String(field.widget ?? '').toLowerCase() === 'textarea'
+    ? text.trim()
+    : text.trim();
+}
+
+function normalizedParamObject(fields, values) {
+  return Object.fromEntries(
+    fields.map((field) => [
+      field.name,
+      normalizedParamValue(field, values[field.name]),
     ]),
   );
 }
@@ -31,7 +44,8 @@ function CreateLogScreen() {
   const [name, setName] = useState('');
   const [stationCallsign, setStationCallsign] = useState('');
   const [contestId, setContestId] = useState('');
-  const [contestRules, setContestRules] = useState([]);
+  const [contestSummaries, setContestSummaries] = useState([]);
+  const [contestSettings, setContestSettings] = useState(null);
   const [contestParams, setContestParams] = useState({});
 
   const notifyOperationalError = useCallback(
@@ -48,15 +62,15 @@ function CreateLogScreen() {
     [notifyError],
   );
 
-  const selectedContest = useMemo(
-    () => contestRules.find((contest) => contest.contest === contestId),
-    [contestRules, contestId],
+  const currentFields = useMemo(
+    () => createFields(contestSettings),
+    [contestSettings],
   );
 
   useEffect(() => {
     apiJson('/contest-rules')
       .then((rules) => {
-        setContestRules(rules);
+        setContestSummaries(rules);
         if (!isEditing && rules.length > 0) {
           setContestId((currentContestId) =>
             rules.some((rule) => rule.contest === currentContestId)
@@ -73,6 +87,23 @@ function CreateLogScreen() {
         ),
       );
   }, [isEditing, notifyOperationalError]);
+
+  useEffect(() => {
+    if (!contestId) {
+      setContestSettings(null);
+      return;
+    }
+    apiJson(`/contest-settings?contest_id=${encodeURIComponent(contestId)}`)
+      .then((settings) => setContestSettings(settings))
+      .catch((error) =>
+        notifyOperationalError(
+          'CreateLogScreen.loadContestSettings',
+          'Unable to load contest settings.',
+          error,
+          { contestId },
+        ),
+      );
+  }, [contestId, notifyOperationalError]);
 
   useEffect(() => {
     if (!isEditing) return;
@@ -95,39 +126,51 @@ function CreateLogScreen() {
   }, [isEditing, logId, notifyOperationalError]);
 
   useEffect(() => {
-    if (isEditing || !selectedContest) return;
-    setContestParams(defaultParamValues(selectedContest));
-  }, [isEditing, selectedContest]);
+    if (!contestSettings) return;
+    const defaults = defaultParamValues(contestSettings);
+    setContestParams((current) => ({ ...defaults, ...current }));
+  }, [contestSettings]);
 
   function updateContestParam(param, value) {
     setContestParams((current) => ({
       ...current,
-      [param.name]: sanitizeExchangeValue({ type: param.type }, value),
+      [param.name]: sanitizeConfiguredValue(param, value),
     }));
   }
 
   async function saveLog(event) {
     event.preventDefault();
-    const normalizedParams = paramsObject(contestParams);
-    if (!isEditing) {
-      const missingParam = (selectedContest?.log_params ?? []).find(
-        (param) =>
-          param.required !== false &&
-          String(normalizedParams[param.name] ?? '').trim() === '',
+    const normalizedParams = normalizedParamObject(
+      currentFields,
+      contestParams,
+    );
+    const invalidField = currentFields.find((field) => {
+      const validation = validateConfiguredField(
+        field,
+        normalizedParams[field.name] ?? '',
       );
-      if (missingParam) {
-        notifyError(`${missingParam.label ?? missingParam.name} is required.`, {
-          dedupeKey: `CreateLogScreen.required:${missingParam.name}`,
-        });
-        return;
-      }
+      return !validation.ok;
+    });
+    if (invalidField) {
+      const validation = validateConfiguredField(
+        invalidField,
+        normalizedParams[invalidField.name] ?? '',
+      );
+      notifyError(validation.error, {
+        dedupeKey: `CreateLogScreen.invalid:${invalidField.name}`,
+      });
+      return;
     }
 
     const result = await apiJson(isEditing ? `/logs/${logId}` : '/logs', {
       method: isEditing ? 'PUT' : 'POST',
       body: JSON.stringify(
         isEditing
-          ? { name, station_callsign: stationCallsign }
+          ? {
+              name,
+              station_callsign: stationCallsign,
+              contest_params: normalizedParams,
+            }
           : {
               name,
               contest_id: contestId,
@@ -164,9 +207,9 @@ function CreateLogScreen() {
           onChange={(event) => setContestId(event.target.value)}
           disabled={isEditing}
         >
-          {contestRules.map((contest) => (
+          {contestSummaries.map((contest) => (
             <option key={contest.contest} value={contest.contest}>
-              {contest.contest}
+              {contest.display_name || contest.contest}
             </option>
           ))}
         </select>
@@ -189,25 +232,11 @@ function CreateLogScreen() {
           required
         />
       </label>
-      {(selectedContest?.log_params ?? []).map((param) => {
-        const { kind, maxLength } = parseFieldType(param.type);
-        return (
-          <label key={param.name}>
-            {param.label ?? param.name}
-            <input
-              value={contestParams[param.name] ?? ''}
-              onChange={(event) =>
-                updateContestParam(param, event.target.value)
-              }
-              required={param.required !== false}
-              pattern={param.regex ?? undefined}
-              inputMode={kind === 'NUMERIC' ? 'numeric' : 'text'}
-              maxLength={maxLength}
-              disabled={isEditing}
-            />
-          </label>
-        );
-      })}
+      <ConfiguredFields
+        fields={currentFields}
+        values={contestParams}
+        onChange={updateContestParam}
+      />
       <div className="selection-actions">
         <button className="cmd-btn primary" type="submit">
           {isEditing ? 'Save' : 'Create'}
