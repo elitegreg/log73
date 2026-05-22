@@ -173,6 +173,8 @@ struct RawContestRules {
     #[serde(default)]
     log_params: Option<Vec<ContestParam>>,
     #[serde(default)]
+    scoring: Option<RawScoringRules>,
+    #[serde(default)]
     qso_points: Option<QsoPoints>,
     #[serde(default)]
     dupe_key: Option<Vec<String>>,
@@ -182,6 +184,18 @@ struct RawContestRules {
     bonus_points: Option<Vec<BonusPointRule>>,
     #[serde(default)]
     metadata: Option<ContestMetadata>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct RawScoringRules {
+    #[serde(default)]
+    qso_points: Option<QsoPoints>,
+    #[serde(default)]
+    dupe_key: Option<Vec<String>>,
+    #[serde(default)]
+    multipliers: Option<Vec<MultiplierRule>>,
+    #[serde(default)]
+    bonus_points: Option<Vec<BonusPointRule>>,
 }
 
 impl ContestRulesStore {
@@ -306,6 +320,21 @@ fn prepend_standard_qso_columns(contest: &mut ContestRules) {
         .collect();
 }
 
+fn apply_scoring_rules(contest: &mut ContestRules, scoring: &RawScoringRules) {
+    if let Some(qso_points) = &scoring.qso_points {
+        contest.qso_points = Some(qso_points.clone());
+    }
+    if let Some(dupe_key) = &scoring.dupe_key {
+        contest.dupe_key = dupe_key.clone();
+    }
+    if let Some(multipliers) = &scoring.multipliers {
+        contest.multipliers = multipliers.clone();
+    }
+    if let Some(bonus_points) = &scoring.bonus_points {
+        contest.bonus_points = bonus_points.clone();
+    }
+}
+
 fn resolve_in_sets(contest: &mut ContestRules) -> Result<(), String> {
     for param in &mut contest.log_params {
         if !param.in_sets.is_empty() {
@@ -405,17 +434,17 @@ fn resolve_contest(
     if let Some(log_params) = &raw.log_params {
         contest.log_params = log_params.clone();
     }
-    if let Some(qso_points) = &raw.qso_points {
-        contest.qso_points = Some(qso_points.clone());
-    }
-    if let Some(dupe_key) = &raw.dupe_key {
-        contest.dupe_key = dupe_key.clone();
-    }
-    if let Some(multipliers) = &raw.multipliers {
-        contest.multipliers = multipliers.clone();
-    }
-    if let Some(bonus_points) = &raw.bonus_points {
-        contest.bonus_points = bonus_points.clone();
+    apply_scoring_rules(
+        &mut contest,
+        &RawScoringRules {
+            qso_points: raw.qso_points.clone(),
+            dupe_key: raw.dupe_key.clone(),
+            multipliers: raw.multipliers.clone(),
+            bonus_points: raw.bonus_points.clone(),
+        },
+    );
+    if let Some(scoring) = &raw.scoring {
+        apply_scoring_rules(&mut contest, scoring);
     }
     if let Some(metadata) = &raw.metadata {
         contest.metadata = Some(metadata.clone());
@@ -427,4 +456,110 @@ fn resolve_contest(
     stack.pop();
     resolved.insert(id.to_string(), contest.clone());
     Ok(contest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn resolve_yaml_contest(yaml: &str, id: &str) -> ContestRules {
+        let rules_file: RulesFile = serde_yaml::from_str(yaml).expect("yaml should parse");
+        let raw_contests = rules_file
+            .contests
+            .into_iter()
+            .map(|contest| (contest.id.clone(), contest))
+            .collect::<BTreeMap<_, _>>();
+
+        resolve_contest(id, &raw_contests, &mut BTreeMap::new(), &mut Vec::new())
+            .expect("contest should resolve")
+    }
+
+    #[test]
+    fn nested_scoring_block_populates_internal_scoring_fields() {
+        let contest = resolve_yaml_contest(
+            r#"
+contests:
+  - id: TEST
+    allowed_bands: [20]
+    allowed_modes: ['CW']
+    define:
+      - name: 'Modes'
+        values: ['CW']
+      - name: 'Sections'
+        values: ['SC']
+    exchange: []
+    qso_columns: []
+    qso_column_fields: {}
+    scoring:
+      qso_points:
+        rules:
+          - when:
+              field: 'MODE'
+              in_set: 'Modes'
+            points: 2
+      dupe_key: ['CALL', 'MODE']
+      multipliers:
+        - name: 'Section'
+          field: 'SECTION'
+          key: ['SECTION']
+          in_sets: ['Sections']
+      bonus_points:
+        - name: 'Bonus Station'
+          field: 'CALL'
+          key: ['CALL']
+          values:
+            W1AW: 100
+"#,
+            "TEST",
+        );
+
+        let qso_points = contest.qso_points.expect("qso points should be set");
+        assert_eq!(qso_points.rules.len(), 1);
+        assert_eq!(qso_points.rules[0].points, 2);
+        assert_eq!(
+            qso_points.rules[0]
+                .when
+                .as_ref()
+                .expect("condition should exist")
+                .valid_values,
+            vec!["CW".to_string()]
+        );
+        assert_eq!(
+            contest.dupe_key,
+            vec!["CALL".to_string(), "MODE".to_string()]
+        );
+        assert_eq!(contest.multipliers.len(), 1);
+        assert_eq!(contest.multipliers[0].valid_values, vec!["SC".to_string()]);
+        assert_eq!(contest.bonus_points.len(), 1);
+        assert_eq!(contest.bonus_points[0].values.get("W1AW"), Some(&100));
+    }
+
+    #[test]
+    fn nested_scoring_fields_override_flat_fields_after_inheritance() {
+        let contest = resolve_yaml_contest(
+            r#"
+contests:
+  - id: BASE
+    allowed_bands: [20]
+    allowed_modes: ['CW']
+    exchange: []
+    qso_columns: []
+    qso_column_fields: {}
+    qso_points:
+      points: 1
+    dupe_key: ['CALL']
+  - id: CHILD
+    extends: BASE
+    scoring:
+      dupe_key: ['CALL', 'BAND']
+"#,
+            "CHILD",
+        );
+
+        assert_eq!(contest.qso_points.and_then(|points| points.points), Some(1));
+        assert_eq!(
+            contest.dupe_key,
+            vec!["CALL".to_string(), "BAND".to_string()]
+        );
+    }
 }

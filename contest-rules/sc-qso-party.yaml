@@ -3,40 +3,41 @@ contests:
     display_name: 'SC QSO Party (In State)'
     allowed_bands: [160, 80, 40, 20, 15, 10, 6, 2]
     allowed_modes: ['SSB', 'FM', 'CW']
-    qso_points:
-      rules:
-        - when:
-            field: 'State'
-            in_set: 'Counties'
-          points: 2
-        - points: 4
-    dupe_key:
-      - 'CALL'
-      - 'BAND'
-      - 'MODE'
-      - 'STX_STRING'
-      - 'SRX_STRING'
-    multipliers:
-      - name: 'Exchange'
-        field: 'SRX_STRING'
-        key:
-          - 'SRX_STRING'
-          - 'STX_STRING'
-          - 'BAND'
-          - 'MODE'
-        in_sets: ['Counties', 'States']
-    bonus_points:
-      - name: 'Bonus Station'
-        field: 'CALL'
-        key:
-          - 'CALL'
-          - 'BAND'
-          - 'MODE'
-          - 'STX_STRING'
-        values:
-          W4CAE: 350
-          WW4SF: 250
-          K4YTZ: 250
+    scoring:
+      qso_points:
+        rules:
+          - when:
+              field: 'Exchange'
+              in_set: 'Counties'
+            points: 2
+          - points: 4
+      dupe_key:
+        - 'CALL'
+        - 'BAND'
+        - 'MODE'
+        - 'STX_STRING'
+        - 'SRX_STRING'
+      multipliers:
+        - name: 'Exchange'
+          field: 'SRX_STRING'
+          key:
+            - 'SRX_STRING'
+            - 'STX_STRING'
+            - 'BAND'
+            - 'MODE'
+          in_sets: ['Counties', 'States']
+      bonus_points:
+        - name: 'Bonus Station'
+          field: 'CALL'
+          key:
+            - 'CALL'
+            - 'BAND'
+            - 'MODE'
+            - 'STX_STRING'
+          values:
+            W4CAE: 350
+            WW4SF: 250
+            K4YTZ: 250
     define:
       - name: 'DX'
         values:
@@ -178,7 +179,7 @@ contests:
         adif: 'RST_RCVD'
         default: 599
         is_sent: false
-      - name: 'State'
+      - name: 'Exchange'
         type: 'String:4'
         adif: 'SRX_STRING'
         is_sent: false
@@ -186,7 +187,7 @@ contests:
     qso_columns:
       - 'RST(s)'
       - 'RST(r)'
-      - 'State'
+      - 'Exchange'
       - 'Mult'
       - 'Pts'
       - 'Op'
@@ -198,13 +199,14 @@ contests:
       'RST(s)': 'RST_SENT'
       County: 'STX_STRING'
       'RST(r)': 'RST_RCVD'
-      State: 'SRX_STRING'
+      Exchange: 'SRX_STRING'
 
   - id: 'SC-QSO-PARTY'
     extends: 'SC-QSO-PARTY (In State)'
     display_name: 'SC QSO Party'
-    qso_points:
-      points: 2
+    scoring:
+      qso_points:
+        points: 2
     log_params:
       - name: 'State'
         label: 'State'

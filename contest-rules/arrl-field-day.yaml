@@ -3,17 +3,18 @@ contests:
     display_name: 'ARRL Field Day'
     allowed_bands: [160, 80, 40, 20, 15, 10, 6, 2]
     allowed_modes: ['SSB', 'FM', 'CW']
-    qso_points:
-      rules:
-        - when:
-            field: 'MODE'
-            values: ['SSB', 'FM']
-          points: 1
-        - points: 2
-    dupe_key:
-      - 'CALL'
-      - 'BAND'
-      - 'MODE'
+    scoring:
+      qso_points:
+        rules:
+          - when:
+              field: 'MODE'
+              values: ['SSB', 'FM']
+            points: 1
+          - points: 2
+      dupe_key:
+        - 'CALL'
+        - 'BAND'
+        - 'MODE'
     define:
       - name: 'Sections'
         values:

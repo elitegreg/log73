@@ -411,6 +411,7 @@ Committed contacts are loaded from the backend. Pending/updating contacts are ca
 ## Contest rules
 
 Contest rules are loaded from YAML files in `contest-rules/` by default. The backend option `--contest-rules-dir` can point at another directory.
+Scoring-related YAML settings live under a `scoring` block (`qso_points`, `dupe_key`, `multipliers`, `bonus_points`).
 
 Current SC QSO Party rule IDs:
 
@@ -427,6 +428,7 @@ Log creation dynamically requests required rule parameters:
 - `SC-QSO-PARTY (In State)`: `County`
 
 Those values populate fixed sent exchange fields in the logger. The previous `BERK` default is no longer used.
+For `SC-QSO-PARTY (In State)`, the received value is labeled `Exchange` because it may be a county, state/province, or `DX`.
 
 ## UI themes
 
