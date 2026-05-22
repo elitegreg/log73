@@ -49,6 +49,24 @@ function OpenLogScreen() {
 
   async function deleteLog() {
     if (!selectedLogId) return;
+
+    const qsoCountResult = await apiJson(`/logs/${selectedLogId}/qso-count`);
+    if (!qsoCountResult.ok) {
+      notifyOperationalError(
+        'OpenLogScreen.deleteLog.qsoCount',
+        'Unable to check log QSO count.',
+        qsoCountResult.error,
+        { selectedLogId },
+      );
+      return;
+    }
+
+    const qsoCount = Number(qsoCountResult.qso_count ?? 0);
+    if (qsoCount > 0) {
+      const qsoLabel = qsoCount === 1 ? '1 QSO' : `${qsoCount} QSOs`;
+      if (!window.confirm(`Delete log containing ${qsoLabel}?`)) return;
+    }
+
     const result = await apiJson(`/logs/${selectedLogId}`, {
       method: 'DELETE',
     });

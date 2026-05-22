@@ -234,6 +234,7 @@ POST   /api/logs
 GET    /api/logs/:id
 PUT    /api/logs/:id
 DELETE /api/logs/:id
+GET    /api/logs/:id/qso-count
 POST   /api/logs/:id/adif
 POST   /api/logs/:id/cabrillo
 
@@ -250,7 +251,7 @@ GET    /api/radios/:id/cw-labels
 
 Deletion rules:
 
-- Logs with QSOs cannot be deleted.
+- Deleting a log also deletes its QSOs.
 - Radios currently used by an active logger websocket cannot be deleted.
 
 ## Websocket API

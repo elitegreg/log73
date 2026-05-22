@@ -178,6 +178,7 @@ async fn main() {
         .route("/supercheckpartial", get(supercheckpartial_matches))
         .route("/logs", get(logs).post(create_log))
         .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
+        .route("/logs/{id}/qso-count", get(log_qso_count))
         .route("/logs/{id}/adif", post(export_adif))
         .route("/logs/{id}/cabrillo", post(export_cabrillo))
         .route(
@@ -816,10 +817,29 @@ async fn delete_log(
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
     match app_state.db.delete_log(id).await {
-        Ok(deleted) => Json(serde_json::json!({ "ok": true, "deleted": deleted })),
-        Err(_) => {
-            Json(serde_json::json!({ "ok": false, "error": "cannot delete a log that has QSOs" }))
+        Ok(deleted) => {
+            if deleted {
+                app_state.score_tracker.remove_log(id);
+            }
+            Json(serde_json::json!({ "ok": true, "deleted": deleted }))
         }
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn log_qso_count(
+    State(app_state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<serde_json::Value> {
+    match app_state.db.log(id).await {
+        Ok(Some(_)) => {}
+        Ok(None) => return Json(serde_json::json!({ "ok": false, "error": "not found" })),
+        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+
+    match app_state.db.log_qso_count(id).await {
+        Ok(qso_count) => Json(serde_json::json!({ "ok": true, "qso_count": qso_count })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
 }
 

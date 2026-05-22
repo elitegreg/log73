@@ -83,6 +83,11 @@ impl ContestScoreTracker {
         logs.get(&log_id).map(|score| score.totals.clone())
     }
 
+    pub fn remove_log(&self, log_id: i64) {
+        let mut logs = self.logs.lock().expect("score tracker mutex poisoned");
+        logs.remove(&log_id);
+    }
+
     pub fn contact(&self, log_id: i64, contact_id: i64) -> Option<Contact> {
         let logs = self.logs.lock().expect("score tracker mutex poisoned");
         logs.get(&log_id).and_then(|score| {

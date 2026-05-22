@@ -294,6 +294,10 @@ enum DbCommand {
         id: i64,
         response: oneshot::Sender<rusqlite::Result<bool>>,
     },
+    LogQsoCount {
+        id: i64,
+        response: oneshot::Sender<rusqlite::Result<usize>>,
+    },
     Radios {
         response: oneshot::Sender<rusqlite::Result<Vec<RadioConfig>>>,
     },
@@ -422,6 +426,11 @@ impl Database {
             .await
     }
 
+    pub async fn log_qso_count(&self, id: i64) -> rusqlite::Result<usize> {
+        self.call(|response| DbCommand::LogQsoCount { id, response })
+            .await
+    }
+
     pub async fn radios(&self) -> rusqlite::Result<Vec<RadioConfig>> {
         self.call(|response| DbCommand::Radios { response }).await
     }
@@ -525,6 +534,9 @@ fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbComm
             DbCommand::DeleteLog { id, response } => {
                 let _ = response.send(db_delete_log(&connection, id));
             }
+            DbCommand::LogQsoCount { id, response } => {
+                let _ = response.send(db_log_qso_count(&connection, id));
+            }
             DbCommand::Radios { response } => {
                 let _ = response.send(db_radios(&connection));
             }
@@ -613,15 +625,15 @@ fn db_update_log(
 }
 
 fn db_delete_log(connection: &Connection, id: i64) -> rusqlite::Result<bool> {
-    let qso_count: i64 = connection.query_row(
+    Ok(connection.execute("DELETE FROM logs WHERE ID = ?1", params![id])? > 0)
+}
+
+fn db_log_qso_count(connection: &Connection, id: i64) -> rusqlite::Result<usize> {
+    connection.query_row(
         "SELECT COUNT(*) FROM qsos WHERE LOG_ID = ?1",
         params![id],
         |row| row.get(0),
-    )?;
-    if qso_count > 0 {
-        return Err(rusqlite::Error::InvalidQuery);
-    }
-    Ok(connection.execute("DELETE FROM logs WHERE ID = ?1", params![id])? > 0)
+    )
 }
 
 fn db_radios(connection: &Connection) -> rusqlite::Result<Vec<RadioConfig>> {
@@ -1318,5 +1330,49 @@ mod tests {
             updated.contest_params.get("NAME").and_then(Value::as_str),
             Some("Greg")
         );
+    }
+
+    #[tokio::test]
+    async fn log_qso_count_returns_committed_qso_total() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+
+        database
+            .upsert_contacts(log.id, vec![base_contact(), base_contact()])
+            .await
+            .expect("contacts are inserted");
+
+        let qso_count = database
+            .log_qso_count(log.id)
+            .await
+            .expect("qso count loads");
+
+        assert_eq!(qso_count, 2);
+    }
+
+    #[tokio::test]
+    async fn delete_log_removes_populated_log_and_cascades_qsos() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+
+        database
+            .upsert_contacts(log.id, vec![base_contact()])
+            .await
+            .expect("contact is inserted");
+
+        let deleted = database
+            .delete_log(log.id)
+            .await
+            .expect("log delete succeeds");
+        assert!(deleted);
+
+        let log_after_delete = database.log(log.id).await.expect("log lookup succeeds");
+        assert!(log_after_delete.is_none());
+
+        let qso_count = database
+            .log_qso_count(log.id)
+            .await
+            .expect("qso count loads after delete");
+        assert_eq!(qso_count, 0);
     }
 }
