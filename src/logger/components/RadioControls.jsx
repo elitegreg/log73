@@ -16,6 +16,7 @@ function RadioControls({
   cwWpmMax,
   handleCwWpmChange,
   backendSocketStatus,
+  catStatus,
 }) {
   return (
     <div className="radio-controls">
@@ -70,15 +71,24 @@ function RadioControls({
           />
         </label>
       )}
-      <div
-        className="backend-socket-status"
-        title={`Server ${backendSocketStatus}`}
-      >
-        <span
-          className={`backend-socket-light ${backendSocketStatus === 'connected' ? 'connected' : 'disconnected'}`}
-          aria-hidden="true"
-        />
-        Server
+      <div className="backend-status-group">
+        <div className="backend-socket-status" title={`CAT ${catStatus}`}>
+          <span
+            className={`backend-socket-light ${catStatus === 'online' ? 'connected' : 'disconnected'}`}
+            aria-hidden="true"
+          />
+          CAT
+        </div>
+        <div
+          className="backend-socket-status"
+          title={`Server ${backendSocketStatus}`}
+        >
+          <span
+            className={`backend-socket-light ${backendSocketStatus === 'connected' ? 'connected' : 'disconnected'}`}
+            aria-hidden="true"
+          />
+          Server
+        </div>
       </div>
     </div>
   );

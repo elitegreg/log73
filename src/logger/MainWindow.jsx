@@ -49,6 +49,7 @@ function MainWindow({
   operatorCallsign,
   radioState,
   backendSocketStatus,
+  catStatus,
   cwLabels,
   cwSentEvent,
   sessionId,
@@ -103,16 +104,15 @@ function MainWindow({
     ? allowedBands.includes(currentBand.meters)
     : false;
   const bandOptions = allowedBands.map(bandByMeters).filter(Boolean);
-  const loadingStatus =
-    isContextLoading
-      ? 'Loading logger context...'
-      : contactsLoadState === 'initial-loading'
-        ? 'Loading contacts...'
-        : contactsLoadState === 'refreshing'
-          ? 'Refreshing contacts...'
-          : contactsLoadState === 'retrying'
-            ? 'Retrying contact load...'
-            : '';
+  const loadingStatus = isContextLoading
+    ? 'Loading logger context...'
+    : contactsLoadState === 'initial-loading'
+      ? 'Loading contacts...'
+      : contactsLoadState === 'refreshing'
+        ? 'Refreshing contacts...'
+        : contactsLoadState === 'retrying'
+          ? 'Retrying contact load...'
+          : '';
 
   if (
     currentBand &&
@@ -572,6 +572,7 @@ function MainWindow({
         cwWpmMax={CW_WPM_MAX}
         handleCwWpmChange={handleCwWpmChange}
         backendSocketStatus={backendSocketStatus}
+        catStatus={catStatus}
       />
       <EntryFields
         settings={settings}

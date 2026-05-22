@@ -68,8 +68,14 @@
   display: flex;
   align-items: center;
   gap: 5px;
-  margin-left: auto;
   font-weight: bold;
+}
+
+.backend-status-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
 }
 
 .backend-socket-light {

@@ -267,8 +267,11 @@ The frontend stores `session_id` in browser local storage and includes it on loc
 Server radio state message:
 
 ```json
+{ "type": "radio_status", "online": true }
 { "type": "radio_state", "frequency_hz": 14025000, "mode": "CW" }
 ```
+
+`radio_status` reports whether CAT/rig control is currently online. It is sent when the websocket starts and whenever the CAT status changes.
 
 Server log/contact messages:
 

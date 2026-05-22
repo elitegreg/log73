@@ -54,6 +54,7 @@ function LoggerScreen() {
   const [radioState, setRadioState] = useState(DEFAULT_RADIO_STATE);
   const [backendSocketStatus, setBackendSocketStatus] =
     useState('disconnected');
+  const [catStatus, setCatStatus] = useState('offline');
   const [scoreSummary, setScoreSummary] = useState(EMPTY_SCORE_SUMMARY);
   const [isContextLoading, setIsContextLoading] = useState(true);
   const [contactsLoadState, setContactsLoadState] = useState('initial-loading');
@@ -172,6 +173,7 @@ function LoggerScreen() {
         radio_id: numericRadioId,
       });
       setBackendSocketStatus('connecting');
+      setCatStatus('offline');
       const socket = new WebSocket(url);
       backendSocketRef.current = socket;
       socket.addEventListener('open', () => {
@@ -184,7 +186,9 @@ function LoggerScreen() {
         if (backendSocketRef.current !== socket) return;
         try {
           const message = JSON.parse(event.data);
-          if (message.type === 'radio_state') {
+          if (message.type === 'radio_status') {
+            setCatStatus(message.online ? 'online' : 'offline');
+          } else if (message.type === 'radio_state') {
             setRadioState({
               frequency_hz: message.frequency_hz,
               mode: message.mode,
@@ -235,12 +239,14 @@ function LoggerScreen() {
         if (backendSocketRef.current === socket) {
           backendSocketRef.current = null;
           setBackendSocketStatus('disconnected');
+          setCatStatus('offline');
           scheduleReconnect();
         }
       });
       socket.addEventListener('error', () => {
         if (backendSocketRef.current !== socket) return;
         setBackendSocketStatus('disconnected');
+        setCatStatus('offline');
         socket.close();
       });
     }
@@ -251,6 +257,7 @@ function LoggerScreen() {
       if (reconnectTimerId !== undefined) window.clearTimeout(reconnectTimerId);
       const socket = backendSocketRef.current;
       backendSocketRef.current = null;
+      setCatStatus('offline');
       socket?.close();
     };
   }, [sessionId, numericLogId, numericRadioId]);
@@ -561,6 +568,7 @@ function LoggerScreen() {
         operatorCallsign={operatorCallsign}
         radioState={radioState}
         backendSocketStatus={backendSocketStatus}
+        catStatus={catStatus}
         cwLabels={cwLabels}
         cwSentEvent={cwSentEvent}
         sessionId={sessionId}

@@ -251,6 +251,20 @@ async fn handle_socket(
     info!(session_id, radio_id, "backend websocket connected");
     let (mut sender, mut receiver) = socket.split();
 
+    let current_status = radio_handle.current_status_message().await;
+    if sender
+        .send(Message::Text(
+            serde_json::to_string(&current_status)
+                .expect("radio status should serialize")
+                .into(),
+        ))
+        .await
+        .is_err()
+    {
+        app_state.radio_manager.release(radio_id).await;
+        return;
+    }
+
     if let Some(current) = radio_handle.current_message().await
         && sender
             .send(Message::Text(
@@ -283,6 +297,7 @@ async fn handle_socket(
         }
     }
 
+    let mut radio_status_updates = radio_handle.subscribe_status();
     let mut radio_updates = radio_handle.subscribe();
     let mut log_events = app_state.log_events.subscribe();
     let (direct_tx, mut direct_rx) = mpsc::channel::<ServerMessage>(32);
@@ -290,6 +305,11 @@ async fn handle_socket(
     let outbound = tokio::spawn(async move {
         loop {
             let message = tokio::select! {
+                status = radio_status_updates.recv() => match status {
+                    Ok(status) => serde_json::to_string(&ServerMessage::RadioStatus(status)).expect("radio status should serialize"),
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
                 update = radio_updates.recv() => match update {
                     Ok(update) => serde_json::to_string(&ServerMessage::RadioState(update)).expect("radio state should serialize"),
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,

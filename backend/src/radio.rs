@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
+    RadioStatus(RadioStatus),
     RadioState(RadioState),
     LogEntry {
         contact: serde_json::Map<String, serde_json::Value>,
@@ -24,6 +25,11 @@ pub enum ServerMessage {
     CwSent {
         request_id: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RadioStatus {
+    pub online: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,5 +98,24 @@ fn ssb_mode_for_frequency(frequency_hz: u64) -> rigctld::Mode {
     match band_for_frequency(frequency).map(|band| band.meters) {
         Some(meters) if meters >= 40 => rigctld::Mode::LSB,
         _ => rigctld::Mode::USB,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_radio_status_server_message() {
+        let message = ServerMessage::RadioStatus(RadioStatus { online: true });
+        let json = serde_json::to_value(message).expect("radio status should serialize");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "radio_status",
+                "online": true
+            })
+        );
     }
 }

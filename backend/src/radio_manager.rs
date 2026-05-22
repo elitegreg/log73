@@ -1,6 +1,8 @@
 use crate::cw;
 use crate::db::{Database, RadioConfig};
-use crate::radio::{RadioCommand, RadioState, ServerMessage, mode_for_request, normalize_mode};
+use crate::radio::{
+    RadioCommand, RadioState, RadioStatus, ServerMessage, mode_for_request, normalize_mode,
+};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,7 +18,9 @@ pub struct RadioManager {
 
 #[derive(Clone)]
 pub struct RadioHandle {
+    current_status: Arc<RwLock<RadioStatus>>,
     current: Arc<RwLock<Option<RadioState>>>,
+    status_updates: broadcast::Sender<RadioStatus>,
     updates: broadcast::Sender<RadioState>,
     commands: mpsc::Sender<RadioCommand>,
 }
@@ -27,7 +31,9 @@ enum ManagedRadioSlot {
 }
 
 struct ManagedRadio {
+    current_status: Arc<RwLock<RadioStatus>>,
     current: Arc<RwLock<Option<RadioState>>>,
+    status_updates: broadcast::Sender<RadioStatus>,
     updates: broadcast::Sender<RadioState>,
     commands: mpsc::Sender<RadioCommand>,
     shutdown: Option<oneshot::Sender<()>>,
@@ -58,7 +64,9 @@ impl RadioManager {
                                 "acquired existing managed radio"
                             );
                             return Ok(RadioHandle {
+                                current_status: radio.current_status.clone(),
                                 current: radio.current.clone(),
+                                status_updates: radio.status_updates.clone(),
                                 updates: radio.updates.clone(),
                                 commands: radio.commands.clone(),
                             });
@@ -97,7 +105,9 @@ impl RadioManager {
                                 "acquired existing managed radio"
                             );
                             return Ok(RadioHandle {
+                                current_status: radio.current_status.clone(),
                                 current: radio.current.clone(),
+                                status_updates: radio.status_updates.clone(),
                                 updates: radio.updates.clone(),
                                 commands: radio.commands.clone(),
                             });
@@ -119,16 +129,22 @@ impl RadioManager {
                         winkeyer_serial_port = %config.winkeyer_serial_port,
                         "starting managed radio"
                     );
+                    let current_status = Arc::new(RwLock::new(RadioStatus { online: false }));
                     let current = Arc::new(RwLock::new(None));
+                    let (status_updates, _) = broadcast::channel(32);
                     let (updates, _) = broadcast::channel(32);
                     let (commands, command_rx) = mpsc::channel(32);
                     let (shutdown_tx, shutdown_rx) = oneshot::channel();
+                    let task_current_status = current_status.clone();
                     let task_current = current.clone();
+                    let task_status_updates = status_updates.clone();
                     let task_updates = updates.clone();
                     let task = tokio::spawn(async move {
                         run_managed_radio(
                             config,
+                            task_current_status,
                             task_current,
+                            task_status_updates,
                             task_updates,
                             command_rx,
                             shutdown_rx,
@@ -139,7 +155,9 @@ impl RadioManager {
                     radios.insert(
                         radio_id,
                         ManagedRadioSlot::Active(ManagedRadio {
+                            current_status: current_status.clone(),
                             current: current.clone(),
+                            status_updates: status_updates.clone(),
                             updates: updates.clone(),
                             commands: commands.clone(),
                             shutdown: Some(shutdown_tx),
@@ -149,7 +167,9 @@ impl RadioManager {
                     );
 
                     return Ok(RadioHandle {
+                        current_status,
                         current,
+                        status_updates,
                         updates,
                         commands,
                     });
@@ -259,6 +279,10 @@ impl RadioManager {
 }
 
 impl RadioHandle {
+    pub async fn current_status_message(&self) -> ServerMessage {
+        ServerMessage::RadioStatus(self.current_status.read().await.clone())
+    }
+
     pub async fn current_message(&self) -> Option<ServerMessage> {
         self.current
             .read()
@@ -271,6 +295,10 @@ impl RadioHandle {
         self.updates.subscribe()
     }
 
+    pub fn subscribe_status(&self) -> broadcast::Receiver<RadioStatus> {
+        self.status_updates.subscribe()
+    }
+
     pub async fn send_command(
         &self,
         command: RadioCommand,
@@ -281,7 +309,9 @@ impl RadioHandle {
 
 async fn run_managed_radio(
     mut config: RadioConfig,
+    current_status: Arc<RwLock<RadioStatus>>,
     current: Arc<RwLock<Option<RadioState>>>,
+    status_updates: broadcast::Sender<RadioStatus>,
     updates: broadcast::Sender<RadioState>,
     mut commands: mpsc::Receiver<RadioCommand>,
     mut shutdown: oneshot::Receiver<()>,
@@ -318,6 +348,7 @@ async fn run_managed_radio(
             }
             result = rig.connect() => {
                 if let Err(error) = result {
+                    set_radio_status(&current_status, &status_updates, false).await;
                     warn!(
                         radio_id = config.id,
                         host = %config.rigctld_host,
@@ -337,6 +368,7 @@ async fn run_managed_radio(
             port = config.rigctld_port,
             "connected to rigctld"
         );
+        set_radio_status(&current_status, &status_updates, true).await;
         let (cw_tx, cw_rx) = mpsc::channel(32);
         let cw_config = config.clone();
         let cw_task = tokio::spawn(async move { run_cw_task(cw_config, cw_rx).await });
@@ -371,6 +403,7 @@ async fn run_managed_radio(
                             let _ = updates.send(state);
                         }
                         Err(error) => {
+                            set_radio_status(&current_status, &status_updates, false).await;
                             warn!(radio_id = config.id, %error, "failed to poll rigctld");
                             let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
                             let _ = cw_task.await;
@@ -413,6 +446,7 @@ async fn run_managed_radio(
                                 winkeyer_serial_port = %new_config.winkeyer_serial_port,
                                 "reloading active radio config"
                             );
+                            set_radio_status(&current_status, &status_updates, false).await;
                             debug!(radio_id = config.id, "shutting down cw task for radio config reload");
                             let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
                             let _ = cw_task.await;
@@ -424,6 +458,7 @@ async fn run_managed_radio(
                         command => {
                             debug!(radio_id = config.id, ?command, last_frequency_hz, "applying rigctld command");
                             if let Err(error) = apply_command(&mut rig, command, last_frequency_hz).await {
+                                set_radio_status(&current_status, &status_updates, false).await;
                                 error!(radio_id = config.id, %error, "failed to apply radio command");
                                 let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
                                 let _ = cw_task.await;
@@ -436,6 +471,19 @@ async fn run_managed_radio(
             }
         }
     }
+}
+
+async fn set_radio_status(
+    current_status: &Arc<RwLock<RadioStatus>>,
+    status_updates: &broadcast::Sender<RadioStatus>,
+    online: bool,
+) {
+    let mut status = current_status.write().await;
+    if status.online == online {
+        return;
+    }
+    status.online = online;
+    let _ = status_updates.send(status.clone());
 }
 
 enum CwTaskCommand {
