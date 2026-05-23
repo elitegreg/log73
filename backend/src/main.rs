@@ -5,7 +5,6 @@ mod cabrillo;
 mod contest_rules;
 mod cw;
 mod db;
-mod frequency;
 mod radio;
 mod radio_manager;
 mod scoring;
@@ -30,6 +29,7 @@ use db::{Contact, Database, NewLog, NewRadio, UpdateLog};
 use futures_util::{SinkExt, StreamExt};
 use radio::{ClientMessage, RadioCommand, ServerMessage};
 use radio_manager::RadioManager;
+use radio_cat_rs::supported_radio_kinds;
 use scoring::{ContestScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use std::{
     collections::{HashMap, HashSet},
@@ -186,6 +186,7 @@ async fn main() {
             get(contacts).post(commit_contact),
         )
         .route("/contacts/{id}", delete(delete_contact))
+        .route("/radio-kinds", get(radio_kinds))
         .route("/radios", get(radios).post(create_radio))
         .route(
             "/radios/{id}",
@@ -871,6 +872,15 @@ async fn radios(State(app_state): State<AppState>) -> Json<Vec<db::RadioConfig>>
             Json(Vec::new())
         }
     }
+}
+
+async fn radio_kinds() -> Json<Vec<String>> {
+    Json(
+        supported_radio_kinds()
+            .iter()
+            .map(|kind| kind.as_str().to_string())
+            .collect(),
+    )
 }
 
 async fn radio(State(app_state): State<AppState>, Path(id): Path<i64>) -> Json<serde_json::Value> {

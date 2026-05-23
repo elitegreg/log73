@@ -2,13 +2,13 @@
 
 Log73 is an amateur radio contest logger prototype. It uses a React/Rsbuild browser frontend and a Rust/Axum backend in a single deployable application.
 
-The current architecture supports multiple logs, multiple radios, browser clients, SQLite storage, and lazy connections to one or more existing `rigctld` instances.
+The current architecture supports multiple logs, multiple radios, browser clients, SQLite storage, and lazy CAT connections created through `radio-cat-rs`.
 
 ```text
 Browser UI
   -> Rust backend
   -> SQLite database
-  -> rigctld instances
+  -> radio-cat-rs transports
   -> radios
 ```
 
@@ -24,15 +24,15 @@ Log73 is under active development. Contest definitions are loaded from YAML rule
 - Separate frontend/backend development mode with Rsbuild proxying `/api` and `/ws`.
 - Multi-log selection and creation.
 - Multi-radio selection and creation.
-- Per-radio `rigctld` settings:
-  - host
-  - port
+- Per-radio CAT settings:
+  - radio kind
+  - TCP host and port, or serial port and baud rate
   - poll frequency
-  - rigctld communication timeout
+  - CAT communication timeout
 - Optional per-radio Winkeyer CW keying settings.
 - Run and S&P CW function-key labels/messages.
 - Selectable UI themes, persisted in browser local storage.
-- Lazy radio connections: a `rigctld` connection opens only when a logger websocket uses that radio.
+- Lazy radio connections: a CAT connection opens only when a logger websocket uses that radio.
 - Reference-counted radio use: when the last logger websocket for a radio closes, the backend disconnects that radio.
 - Per-radio serialized CAT command queue.
 - Realtime radio state updates over websocket.
@@ -52,17 +52,17 @@ When login is enabled, authentication protects the frontend, `/api/*`, and `/ws`
 
 - Node.js / npm
 - Rust toolchain
-- One or more externally running `rigctld` instances
+- A CAT-capable radio or CAT TCP endpoint supported by `radio-cat-rs`
 
-The backend does **not** start `rigctld`.
+The backend does **not** start or supervise external CAT daemons.
 
-Example `rigctld` setup:
+Current `radio-cat-rs` support is factory-driven. Today that means `generic-elecraft` plus its accepted aliases (`elecraft`, `k4`), over either TCP or serial transport.
+
+Example TCP CAT target:
 
 ```bash
-rigctld -m <MODEL> -r <DEVICE> -t 4532
+127.0.0.1:5002
 ```
-
-For multiple radios, run multiple `rigctld` instances on different ports.
 
 ## Quick start: development
 
@@ -174,7 +174,7 @@ src/index.jsx                         frontend entry point
 src/app/App.jsx                       frontend routes and theme application
 src/screens/OpenLogScreen.jsx         log/radio selection screen and theme picker
 src/screens/CreateLogScreen.jsx       create log screen
-src/screens/CreateRadioScreen.jsx     create radio screen, rigctld, and Winkeyer settings
+src/screens/CreateRadioScreen.jsx     create radio screen, CAT transport, and Winkeyer settings
 src/screens/LoggerScreen.jsx          logger state, websocket, contact commit flow
 src/logger/MainWindow.jsx             main logger entry/radio/CW-control UI
 src/logger/LogWindow.jsx              QSO table
@@ -244,6 +244,7 @@ DELETE /api/contacts/:id
 
 GET    /api/radios
 POST   /api/radios
+GET    /api/radio-kinds
 GET    /api/radios/:id
 DELETE /api/radios/:id
 GET    /api/radios/:id/cw-labels
@@ -323,7 +324,7 @@ qsos
 Important schema notes:
 
 - `logs` stores log name, contest id, station callsign, and contest parameter JSON.
-- `radios` stores rigctld host, port, poll frequency, rigctld timeout, Winkeyer settings, and CW message text.
+- `radios` stores radio kind, CAT transport settings, poll frequency, CAT timeout, Winkeyer settings, and CW message text.
 - `qsos.LOG_ID` references `logs.ID`.
 - `idx_qsos_log_id` indexes `qsos(LOG_ID)`.
 - Foreign keys are enabled.
@@ -337,10 +338,14 @@ Each radio row contains:
 
 ```text
 name
-rigctld_host
-rigctld_port
+radio_kind
+transport_kind
+tcp_host
+tcp_port
+serial_port
+serial_baud_rate
 poll_frequency
-rigctld_timeout
+cat_timeout
 winkeyer_enabled
 winkeyer_serial_port
 cw_messages
@@ -349,10 +354,14 @@ cw_messages
 Create-radio defaults:
 
 ```text
-rigctld_host: 127.0.0.1
-rigctld_port: 4532 + existing_radio_count
+radio_kind: generic-elecraft
+transport_kind: tcp
+tcp_host: 127.0.0.1
+tcp_port: 5002
+serial_port: ""
+serial_baud_rate: 115200
 poll_frequency: 0.25
-rigctld_timeout: 2
+cat_timeout: 2
 winkeyer_enabled: false
 winkeyer_serial_port: ""
 cw_messages: built-in default Run/S&P function-key messages
@@ -360,12 +369,12 @@ cw_messages: built-in default Run/S&P function-key messages
 
 `poll_frequency` controls how often the backend polls frequency/mode.
 
-`rigctld_timeout` controls the communication timeout for individual rigctld commands. This should usually be larger than `poll_frequency`; `2` seconds is the default.
+`cat_timeout` controls the communication timeout for individual CAT transport operations. This should usually be larger than `poll_frequency`; `2` seconds is the default.
 
 Radio connections are lazy. Opening a logger with `radio_id=X` starts or reuses that radio's managed connection. Closing the logger releases it. When the reference count reaches zero, the backend disconnects and removes the managed radio.
 
 Each radio has one async command queue, so CAT commands for that radio are serialized.
-If rigctld is offline, reconnect attempts back off exponentially from `1s` to a `10s` maximum instead of retrying at the poll interval.
+If CAT is offline, reconnect attempts back off exponentially from `1s` to a `10s` maximum instead of retrying at the poll interval.
 
 ## Radio behavior
 
@@ -376,7 +385,7 @@ frequency_hz
 mode
 ```
 
-`USB` and `LSB` from rigctld are normalized to frontend mode `SSB`.
+`USB` and `LSB` from `radio-cat-rs` are normalized to frontend mode `SSB`.
 
 When the frontend asks for `SSB`, the backend chooses:
 
@@ -483,6 +492,6 @@ High Contrast
 - Contest scoring and validation are still incomplete; YAML metadata is loaded for future validation work.
 - Basic Auth credentials are static development credentials.
 - No database migrations yet.
-- Backend does not start or supervise `rigctld`.
-- No hamlib rig model configuration yet.
+- Backend does not start or supervise external CAT daemons.
+- Radio support is currently limited by the `radio-cat-rs` factory. Today that is `generic-elecraft` over TCP or serial.
 - No cluster, band map, SO2R, or multi-transmitter rule enforcement yet.

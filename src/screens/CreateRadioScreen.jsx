@@ -4,16 +4,24 @@ import { apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
 
+const DEFAULT_RADIO_KIND = 'generic-elecraft';
+const DEFAULT_TRANSPORT_KIND = 'tcp';
+
 function CreateRadioScreen() {
   const navigate = useNavigate();
   const { radioId } = useParams();
   const { notifyError } = useNotifications();
   const isEditing = Boolean(radioId);
+  const [radioKinds, setRadioKinds] = useState([DEFAULT_RADIO_KIND]);
   const [name, setName] = useState('');
-  const [host, setHost] = useState('127.0.0.1');
-  const [port, setPort] = useState(4532);
+  const [radioKind, setRadioKind] = useState(DEFAULT_RADIO_KIND);
+  const [transportKind, setTransportKind] = useState(DEFAULT_TRANSPORT_KIND);
+  const [tcpHost, setTcpHost] = useState('127.0.0.1');
+  const [tcpPort, setTcpPort] = useState(5002);
+  const [serialPort, setSerialPort] = useState('');
+  const [serialBaudRate, setSerialBaudRate] = useState(115200);
   const [pollFrequency, setPollFrequency] = useState(0.25);
-  const [rigctldTimeout, setRigctldTimeout] = useState(2);
+  const [catTimeout, setCatTimeout] = useState(2);
   const [winkeyerEnabled, setWinkeyerEnabled] = useState(false);
   const [winkeyerSerialPort, setWinkeyerSerialPort] = useState('');
 
@@ -32,32 +40,63 @@ function CreateRadioScreen() {
   );
 
   useEffect(() => {
-    if (isEditing) {
-      apiJson(`/radios/${radioId}`)
-        .then((result) => {
-          if (!result.ok) throw new Error(result.error ?? 'Radio not found');
-          setName(result.radio.name ?? '');
-          setHost(result.radio.rigctld_host ?? '127.0.0.1');
-          setPort(result.radio.rigctld_port ?? 4532);
-          setPollFrequency(result.radio.poll_frequency ?? 0.25);
-          setRigctldTimeout(result.radio.rigctld_timeout ?? 2);
-          setWinkeyerEnabled(Boolean(result.radio.winkeyer_enabled));
-          setWinkeyerSerialPort(result.radio.winkeyer_serial_port ?? '');
-        })
-        .catch((error) =>
-          notifyOperationalError(
-            'CreateRadioScreen.loadRadio',
-            'Unable to load radio.',
-            error,
-            { radioId },
-          ),
+    let isCancelled = false;
+
+    async function loadContext() {
+      let kinds = [DEFAULT_RADIO_KIND];
+
+      try {
+        const result = await apiJson('/radio-kinds');
+        if (Array.isArray(result) && result.length > 0) {
+          kinds = result;
+        }
+      } catch (error) {
+        notifyOperationalError(
+          'CreateRadioScreen.loadRadioKinds',
+          'Unable to load supported radio kinds.',
+          error,
         );
-      return;
+      }
+
+      if (isCancelled) return;
+      setRadioKinds(kinds);
+
+      if (!isEditing) {
+        setRadioKind(kinds[0] || DEFAULT_RADIO_KIND);
+        return;
+      }
+
+      const result = await apiJson(`/radios/${radioId}`);
+      if (!result.ok) throw new Error(result.error ?? 'Radio not found');
+      if (isCancelled) return;
+
+      setName(result.radio.name ?? '');
+      setRadioKind(result.radio.radio_kind ?? kinds[0] ?? DEFAULT_RADIO_KIND);
+      setTransportKind(
+        result.radio.transport_kind ?? DEFAULT_TRANSPORT_KIND,
+      );
+      setTcpHost(result.radio.tcp_host ?? '127.0.0.1');
+      setTcpPort(result.radio.tcp_port ?? 5002);
+      setSerialPort(result.radio.serial_port ?? '');
+      setSerialBaudRate(result.radio.serial_baud_rate ?? 115200);
+      setPollFrequency(result.radio.poll_frequency ?? 0.25);
+      setCatTimeout(result.radio.cat_timeout ?? 2);
+      setWinkeyerEnabled(Boolean(result.radio.winkeyer_enabled));
+      setWinkeyerSerialPort(result.radio.winkeyer_serial_port ?? '');
     }
 
-    apiJson('/radios')
-      .then((radios) => setPort(4532 + radios.length))
-      .catch(() => setPort(4532));
+    loadContext().catch((error) =>
+      notifyOperationalError(
+        'CreateRadioScreen.loadContext',
+        'Unable to load radio settings.',
+        error,
+        { radioId, isEditing },
+      ),
+    );
+
+    return () => {
+      isCancelled = true;
+    };
   }, [isEditing, notifyOperationalError, radioId]);
 
   async function saveRadio(event) {
@@ -66,10 +105,14 @@ function CreateRadioScreen() {
       method: isEditing ? 'PUT' : 'POST',
       body: JSON.stringify({
         name,
-        rigctld_host: host,
-        rigctld_port: Number(port),
+        radio_kind: radioKind,
+        transport_kind: transportKind,
+        tcp_host: tcpHost,
+        tcp_port: Number(tcpPort),
+        serial_port: serialPort,
+        serial_baud_rate: Number(serialBaudRate),
         poll_frequency: Number(pollFrequency),
-        rigctld_timeout: Number(rigctldTimeout),
+        cat_timeout: Number(catTimeout),
         winkeyer_enabled: winkeyerEnabled,
         winkeyer_serial_port: winkeyerEnabled ? winkeyerSerialPort : '',
       }),
@@ -95,6 +138,20 @@ function CreateRadioScreen() {
         Log73 - {isEditing ? 'Edit' : 'Create'} Radio
       </div>
       <label>
+        Radio Type
+        <select
+          value={radioKind}
+          onChange={(event) => setRadioKind(event.target.value)}
+          required
+        >
+          {[...new Set([radioKind, ...radioKinds])].map((kind) => (
+            <option key={kind} value={kind}>
+              {kind}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
         Name
         <input
           value={name}
@@ -103,24 +160,61 @@ function CreateRadioScreen() {
         />
       </label>
       <label>
-        rigctld Host
-        <input
-          value={host}
-          onChange={(event) => setHost(event.target.value)}
+        Transport
+        <select
+          value={transportKind}
+          onChange={(event) => setTransportKind(event.target.value)}
           required
-        />
+        >
+          <option value="tcp">TCP</option>
+          <option value="serial">Serial</option>
+        </select>
       </label>
-      <label>
-        rigctld Port
-        <input
-          type="number"
-          min="0"
-          max="65535"
-          value={port}
-          onChange={(event) => setPort(event.target.value)}
-          required
-        />
-      </label>
+      {transportKind === 'tcp' ? (
+        <>
+          <label>
+            TCP Host
+            <input
+              value={tcpHost}
+              onChange={(event) => setTcpHost(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            TCP Port
+            <input
+              type="number"
+              min="1"
+              max="65535"
+              value={tcpPort}
+              onChange={(event) => setTcpPort(event.target.value)}
+              required
+            />
+          </label>
+        </>
+      ) : (
+        <>
+          <label>
+            Serial Port
+            <input
+              value={serialPort}
+              onChange={(event) => setSerialPort(event.target.value)}
+              required
+              placeholder="/dev/ttyUSB0"
+            />
+          </label>
+          <label>
+            Serial Baud Rate
+            <input
+              type="number"
+              min="1"
+              value={serialBaudRate}
+              onChange={(event) => setSerialBaudRate(event.target.value)}
+              required
+            />
+          </label>
+        </>
+      )}
       <label>
         Poll Frequency (seconds)
         <input
@@ -133,13 +227,13 @@ function CreateRadioScreen() {
         />
       </label>
       <label>
-        rigctld Timeout (seconds)
+        CAT Timeout (seconds)
         <input
           type="number"
           min="0.01"
           step="0.01"
-          value={rigctldTimeout}
-          onChange={(event) => setRigctldTimeout(event.target.value)}
+          value={catTimeout}
+          onChange={(event) => setCatTimeout(event.target.value)}
           required
         />
       </label>

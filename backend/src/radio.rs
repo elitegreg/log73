@@ -1,6 +1,6 @@
 use crate::bands::band_for_frequency;
 use crate::db::RadioConfig;
-use crate::frequency::Frequency;
+use radio_cat_rs::{Frequency, Mode};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -74,30 +74,30 @@ pub enum RadioCommand {
     ReloadConfig(RadioConfig),
 }
 
-pub fn normalize_mode(mode: &rigctld::Mode) -> String {
+pub fn normalize_mode(mode: &Mode) -> String {
     match mode {
-        rigctld::Mode::USB | rigctld::Mode::LSB => "SSB".to_string(),
+        Mode::Usb | Mode::Lsb => "SSB".to_string(),
         other => other.to_string(),
     }
 }
 
-pub fn mode_for_request(requested: &str, frequency_hz: u64) -> Option<rigctld::Mode> {
+pub fn mode_for_request(requested: &str, frequency_hz: u64) -> Option<Mode> {
     match requested.to_uppercase().as_str() {
-        "CW" => Some(rigctld::Mode::CW),
-        "FM" => Some(rigctld::Mode::FM),
+        "CW" => Some(Mode::Cw),
+        "FM" => Some(Mode::Fm),
         "SSB" => Some(ssb_mode_for_frequency(frequency_hz)),
-        "USB" => Some(rigctld::Mode::USB),
-        "LSB" => Some(rigctld::Mode::LSB),
+        "USB" => Some(Mode::Usb),
+        "LSB" => Some(Mode::Lsb),
         _ => None,
     }
 }
 
-fn ssb_mode_for_frequency(frequency_hz: u64) -> rigctld::Mode {
+fn ssb_mode_for_frequency(frequency_hz: u64) -> Mode {
     let frequency = Frequency::from_hz(frequency_hz);
 
     match band_for_frequency(frequency).map(|band| band.meters) {
-        Some(meters) if meters >= 40 => rigctld::Mode::LSB,
-        _ => rigctld::Mode::USB,
+        Some(meters) if meters >= 40 => Mode::Lsb,
+        _ => Mode::Usb,
     }
 }
 

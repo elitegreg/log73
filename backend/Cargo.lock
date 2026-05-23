@@ -95,6 +95,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-trait"
+version = "0.1.89"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "atomic-waker"
 version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -799,9 +810,9 @@ dependencies = [
  "futures-util",
  "mime_guess",
  "radif",
+ "radio-cat-rs",
  "rand_core 0.6.4",
  "regex",
- "rigctld",
  "rusqlite",
  "rust-embed",
  "serde",
@@ -1060,6 +1071,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "radio-cat-rs"
+version = "0.1.0"
+source = "git+https://github.com/elitegreg/radio-cat-rs.git#4a4597716e40b2706d3f94aa14abe1958890cc06"
+dependencies = [
+ "async-trait",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-serial",
+]
+
+[[package]]
 name = "rand"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1134,18 +1156,6 @@ name = "regex-syntax"
 version = "0.8.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
-
-[[package]]
-name = "rigctld"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bb5b37ee37b877cff89eb3c181dd3b097658f1ef78e779dd23edaf99d7414466"
-dependencies = [
- "lazy_static",
- "regex",
- "thiserror 1.0.69",
- "tokio",
-]
 
 [[package]]
 name = "rusqlite"

@@ -1,8 +1,8 @@
 use crate::bands::{USA_AMATEUR_BANDS, band_for_frequency};
 use crate::contest_rules::{ContestParam, ContestRules, ContestRulesStore, ExchangeField};
 use crate::db::{Contact, Database, NewLog, NewRadio, UpdateLog};
-use crate::frequency::Frequency;
 use regex::Regex;
+use radio_cat_rs::{Frequency, RadioKind};
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -10,7 +10,7 @@ const MAX_LOG_NAME_LEN: usize = 100;
 const MAX_CONTEST_ID_LEN: usize = 100;
 const MAX_CALLSIGN_LEN: usize = 12;
 const MAX_RADIO_NAME_LEN: usize = 100;
-const MAX_RIGCTLD_HOST_LEN: usize = 255;
+const MAX_RADIO_HOST_LEN: usize = 255;
 const MAX_SERIAL_PORT_LEN: usize = 255;
 const MIN_RADIO_SECONDS: f64 = 0.01;
 const MAX_RADIO_SECONDS: f64 = 3600.0;
@@ -64,11 +64,46 @@ pub fn validate_cabrillo_export_params(
 
 pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
     validate_required_text("radio name", &payload.name, MAX_RADIO_NAME_LEN)?;
-    validate_required_text("rigctld host", &payload.rigctld_host, MAX_RIGCTLD_HOST_LEN)?;
-    validate_host("rigctld host", &payload.rigctld_host)?;
+
+    payload
+        .radio_kind
+        .trim()
+        .parse::<RadioKind>()
+        .map_err(|error| error.to_string())?;
+
+    let transport_kind = payload.transport_kind.trim().to_ascii_lowercase();
+    if !matches!(transport_kind.as_str(), "tcp" | "serial") {
+        return Err("transport kind must be tcp or serial".to_string());
+    }
 
     validate_seconds("poll frequency", payload.poll_frequency)?;
-    validate_seconds("rigctld timeout", payload.rigctld_timeout)?;
+    validate_seconds("CAT timeout", payload.cat_timeout)?;
+
+    match transport_kind.as_str() {
+        "tcp" => {
+            validate_required_text("TCP host", &payload.tcp_host, MAX_RADIO_HOST_LEN)?;
+            validate_host("TCP host", &payload.tcp_host)?;
+            if payload.tcp_port == 0 {
+                return Err("TCP port must be between 1 and 65535".to_string());
+            }
+            if payload.serial_port.chars().count() > MAX_SERIAL_PORT_LEN {
+                return Err(format!(
+                    "serial port must be at most {MAX_SERIAL_PORT_LEN} characters"
+                ));
+            }
+        }
+        "serial" => {
+            validate_required_text("serial port", &payload.serial_port, MAX_SERIAL_PORT_LEN)?;
+            validate_serial_port("serial port", &payload.serial_port)?;
+            if payload.serial_baud_rate == 0 {
+                return Err("serial baud rate must be greater than 0".to_string());
+            }
+            if payload.tcp_host.chars().count() > MAX_RADIO_HOST_LEN {
+                return Err(format!("TCP host must be at most {MAX_RADIO_HOST_LEN} characters"));
+            }
+        }
+        _ => unreachable!(),
+    }
 
     if payload.winkeyer_enabled {
         validate_required_text(
@@ -869,6 +904,22 @@ mod tests {
         ])
     }
 
+    fn test_radio() -> NewRadio {
+        NewRadio {
+            name: "Elecraft TCP".to_string(),
+            radio_kind: "generic-elecraft".to_string(),
+            transport_kind: "tcp".to_string(),
+            tcp_host: "127.0.0.1".to_string(),
+            tcp_port: 5002,
+            serial_port: String::new(),
+            serial_baud_rate: 115_200,
+            poll_frequency: 0.25,
+            cat_timeout: 2.0,
+            winkeyer_enabled: false,
+            winkeyer_serial_port: String::new(),
+        }
+    }
+
     #[test]
     fn validates_typed_fields_like_frontend() {
         assert!(validate_typed_field("RST", "RST", "599", &[], None, "CW").is_ok());
@@ -905,5 +956,39 @@ mod tests {
         let mut contact = test_contact();
         contact.insert("BAND".to_string(), json!("40m"));
         assert!(validate_contact(&rules, 1, &contact).is_err());
+    }
+
+    #[test]
+    fn validates_tcp_radio_config() {
+        assert!(validate_radio(&test_radio()).is_ok());
+    }
+
+    #[test]
+    fn validates_serial_radio_config() {
+        let mut radio = test_radio();
+        radio.transport_kind = "serial".to_string();
+        radio.tcp_host = String::new();
+        radio.tcp_port = 0;
+        radio.serial_port = "/dev/ttyUSB0".to_string();
+
+        assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn rejects_unknown_radio_kind() {
+        let mut radio = test_radio();
+        radio.radio_kind = "not-a-radio".to_string();
+
+        let error = validate_radio(&radio).expect_err("radio kind should be rejected");
+        assert!(error.contains("unsupported radio kind"));
+    }
+
+    #[test]
+    fn rejects_tcp_radio_without_host() {
+        let mut radio = test_radio();
+        radio.tcp_host = String::new();
+
+        let error = validate_radio(&radio).expect_err("missing host should fail");
+        assert!(error.contains("TCP host"));
     }
 }

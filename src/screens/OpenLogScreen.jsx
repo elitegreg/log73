@@ -4,6 +4,15 @@ import { apiDownload, apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
 
+function formatRadioSummary(radio) {
+  const connection =
+    radio.transport_kind === 'serial'
+      ? `serial ${radio.serial_port || '(unset)'} @ ${radio.serial_baud_rate}`
+      : `tcp ${radio.tcp_host}:${radio.tcp_port}`;
+
+  return `${radio.name} - ${radio.radio_kind} - ${connection} - poll ${radio.poll_frequency}s timeout ${radio.cat_timeout}s`;
+}
+
 function OpenLogScreen() {
   const navigate = useNavigate();
   const { notifyError } = useNotifications();
@@ -229,8 +238,7 @@ function OpenLogScreen() {
           >
             {radios.map((radio) => (
               <option key={radio.id} value={radio.id}>
-                {radio.name} - {radio.rigctld_host}:{radio.rigctld_port} - poll{' '}
-                {radio.poll_frequency}s timeout {radio.rigctld_timeout}s
+                {formatRadioSummary(radio)}
               </option>
             ))}
           </select>

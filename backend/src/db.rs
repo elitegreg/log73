@@ -39,10 +39,14 @@ pub struct UpdateLog {
 pub struct RadioConfig {
     pub id: i64,
     pub name: String,
-    pub rigctld_host: String,
-    pub rigctld_port: u16,
+    pub radio_kind: String,
+    pub transport_kind: String,
+    pub tcp_host: String,
+    pub tcp_port: u16,
+    pub serial_port: String,
+    pub serial_baud_rate: u32,
     pub poll_frequency: f64,
-    pub rigctld_timeout: f64,
+    pub cat_timeout: f64,
     pub winkeyer_enabled: bool,
     pub winkeyer_serial_port: String,
     pub cw_messages: String,
@@ -69,10 +73,14 @@ pub struct UpdateAuthConfig {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct NewRadio {
     pub name: String,
-    pub rigctld_host: String,
-    pub rigctld_port: u16,
+    pub radio_kind: String,
+    pub transport_kind: String,
+    pub tcp_host: String,
+    pub tcp_port: u16,
+    pub serial_port: String,
+    pub serial_baud_rate: u32,
     pub poll_frequency: f64,
-    pub rigctld_timeout: f64,
+    pub cat_timeout: f64,
     pub winkeyer_enabled: bool,
     pub winkeyer_serial_port: String,
 }
@@ -638,7 +646,7 @@ fn db_log_qso_count(connection: &Connection, id: i64) -> rusqlite::Result<usize>
 
 fn db_radios(connection: &Connection) -> rusqlite::Result<Vec<RadioConfig>> {
     let mut statement = connection.prepare(
-        "SELECT ID, NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES FROM radios ORDER BY ID",
+        "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, POLL_FREQUENCY, CAT_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES FROM radios ORDER BY ID",
     )?;
     let rows = statement.query_map([], row_to_radio)?;
     rows.collect()
@@ -690,13 +698,17 @@ fn db_update_auth_config(
 
 fn db_create_radio(connection: &Connection, radio: NewRadio) -> rusqlite::Result<RadioConfig> {
     connection.execute(
-        "INSERT INTO radios (NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, POLL_FREQUENCY, CAT_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
             radio.name.trim(),
-            radio.rigctld_host.trim(),
-            radio.rigctld_port,
+            radio.radio_kind.trim(),
+            radio.transport_kind.trim(),
+            radio.tcp_host.trim(),
+            radio.tcp_port,
+            radio.serial_port.trim(),
+            radio.serial_baud_rate,
             radio.poll_frequency,
-            radio.rigctld_timeout,
+            radio.cat_timeout,
             radio.winkeyer_enabled,
             radio.winkeyer_serial_port.trim(),
             DEFAULT_CW_MESSAGES
@@ -712,13 +724,17 @@ fn db_update_radio(
     radio: NewRadio,
 ) -> rusqlite::Result<Option<RadioConfig>> {
     let updated = connection.execute(
-        "UPDATE radios SET NAME = ?1, RIGCTLD_HOST = ?2, RIGCTLD_PORT = ?3, POLL_FREQUENCY = ?4, RIGCTLD_TIMEOUT = ?5, WINKEYER_ENABLED = ?6, WINKEYER_SERIAL_PORT = ?7 WHERE ID = ?8",
+        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, POLL_FREQUENCY = ?8, CAT_TIMEOUT = ?9, WINKEYER_ENABLED = ?10, WINKEYER_SERIAL_PORT = ?11 WHERE ID = ?12",
         params![
             radio.name.trim(),
-            radio.rigctld_host.trim(),
-            radio.rigctld_port,
+            radio.radio_kind.trim(),
+            radio.transport_kind.trim(),
+            radio.tcp_host.trim(),
+            radio.tcp_port,
+            radio.serial_port.trim(),
+            radio.serial_baud_rate,
             radio.poll_frequency,
-            radio.rigctld_timeout,
+            radio.cat_timeout,
             radio.winkeyer_enabled,
             radio.winkeyer_serial_port.trim(),
             id
@@ -790,10 +806,14 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS radios (
             ID INTEGER PRIMARY KEY,
             NAME TEXT NOT NULL,
-            RIGCTLD_HOST TEXT NOT NULL,
-            RIGCTLD_PORT INTEGER NOT NULL CHECK (RIGCTLD_PORT >= 0 AND RIGCTLD_PORT <= 65535),
+            RADIO_KIND TEXT NOT NULL,
+            TRANSPORT_KIND TEXT NOT NULL,
+            TCP_HOST TEXT NOT NULL DEFAULT '',
+            TCP_PORT INTEGER NOT NULL DEFAULT 0 CHECK (TCP_PORT >= 0 AND TCP_PORT <= 65535),
+            SERIAL_PORT TEXT NOT NULL DEFAULT '',
+            SERIAL_BAUD_RATE INTEGER NOT NULL DEFAULT 115200 CHECK (SERIAL_BAUD_RATE > 0),
             POLL_FREQUENCY REAL NOT NULL DEFAULT 0.25 CHECK (POLL_FREQUENCY > 0),
-            RIGCTLD_TIMEOUT REAL NOT NULL DEFAULT 2.0 CHECK (RIGCTLD_TIMEOUT > 0),
+            CAT_TIMEOUT REAL NOT NULL DEFAULT 2.0 CHECK (CAT_TIMEOUT > 0),
             WINKEYER_ENABLED INTEGER NOT NULL DEFAULT 0,
             WINKEYER_SERIAL_PORT TEXT NOT NULL DEFAULT '',
             CW_MESSAGES TEXT NOT NULL
@@ -876,7 +896,7 @@ fn row_to_log(row: &rusqlite::Row<'_>) -> rusqlite::Result<Log> {
 fn select_radio(connection: &Connection, id: i64) -> rusqlite::Result<Option<RadioConfig>> {
     connection
         .query_row(
-            "SELECT ID, NAME, RIGCTLD_HOST, RIGCTLD_PORT, POLL_FREQUENCY, RIGCTLD_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES FROM radios WHERE ID = ?1",
+            "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, POLL_FREQUENCY, CAT_TIMEOUT, WINKEYER_ENABLED, WINKEYER_SERIAL_PORT, CW_MESSAGES FROM radios WHERE ID = ?1",
             params![id],
             row_to_radio,
         )
@@ -884,14 +904,19 @@ fn select_radio(connection: &Connection, id: i64) -> rusqlite::Result<Option<Rad
 }
 
 fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioConfig> {
-    let port: i64 = row.get("RIGCTLD_PORT")?;
+    let tcp_port: i64 = row.get("TCP_PORT")?;
+    let serial_baud_rate: i64 = row.get("SERIAL_BAUD_RATE")?;
     Ok(RadioConfig {
         id: row.get("ID")?,
         name: row.get("NAME")?,
-        rigctld_host: row.get("RIGCTLD_HOST")?,
-        rigctld_port: port as u16,
+        radio_kind: row.get("RADIO_KIND")?,
+        transport_kind: row.get("TRANSPORT_KIND")?,
+        tcp_host: row.get("TCP_HOST")?,
+        tcp_port: tcp_port as u16,
+        serial_port: row.get("SERIAL_PORT")?,
+        serial_baud_rate: serial_baud_rate as u32,
         poll_frequency: row.get("POLL_FREQUENCY")?,
-        rigctld_timeout: row.get("RIGCTLD_TIMEOUT")?,
+        cat_timeout: row.get("CAT_TIMEOUT")?,
         winkeyer_enabled: row.get("WINKEYER_ENABLED")?,
         winkeyer_serial_port: row.get("WINKEYER_SERIAL_PORT")?,
         cw_messages: row.get("CW_MESSAGES")?,
@@ -1136,6 +1161,22 @@ mod tests {
             .expect("test log is created")
     }
 
+    fn tcp_radio() -> NewRadio {
+        NewRadio {
+            name: "Elecraft TCP".to_string(),
+            radio_kind: "generic-elecraft".to_string(),
+            transport_kind: "tcp".to_string(),
+            tcp_host: "127.0.0.1".to_string(),
+            tcp_port: 5002,
+            serial_port: String::new(),
+            serial_baud_rate: 115_200,
+            poll_frequency: 0.25,
+            cat_timeout: 2.0,
+            winkeyer_enabled: false,
+            winkeyer_serial_port: String::new(),
+        }
+    }
+
     fn base_contact() -> Contact {
         Map::from_iter([
             ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
@@ -1374,5 +1415,23 @@ mod tests {
             .await
             .expect("qso count loads after delete");
         assert_eq!(qso_count, 0);
+    }
+
+    #[tokio::test]
+    async fn create_radio_persists_transport_specific_fields() {
+        let database = test_database();
+
+        let radio = database
+            .create_radio(tcp_radio())
+            .await
+            .expect("radio is created");
+
+        assert_eq!(radio.radio_kind, "generic-elecraft");
+        assert_eq!(radio.transport_kind, "tcp");
+        assert_eq!(radio.tcp_host, "127.0.0.1");
+        assert_eq!(radio.tcp_port, 5002);
+        assert_eq!(radio.serial_port, "");
+        assert_eq!(radio.serial_baud_rate, 115_200);
+        assert_eq!(radio.cat_timeout, 2.0);
     }
 }

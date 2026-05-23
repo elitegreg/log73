@@ -4,6 +4,7 @@ use crate::radio::{
     RadioCommand, RadioState, RadioStatus, ServerMessage, mode_for_request, normalize_mode,
 };
 use backon::{BackoffBuilder, ExponentialBuilder};
+use radio_cat_rs::{ConnectionConfig, ControllableRadio, RadioKind, create_radio};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -11,8 +12,8 @@ use tokio::sync::{Mutex, Notify, RwLock, broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, trace, warn};
 
-const RIGCTLD_RECONNECT_MIN_DELAY: Duration = Duration::from_secs(1);
-const RIGCTLD_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(10);
+const CAT_RECONNECT_MIN_DELAY: Duration = Duration::from_secs(1);
+const CAT_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(10);
 
 #[derive(Clone)]
 pub struct RadioManager {
@@ -125,10 +126,14 @@ impl RadioManager {
                 if wait_for_shutdown.is_none() {
                     debug!(
                         radio_id,
-                        host = %config.rigctld_host,
-                        port = config.rigctld_port,
+                        radio_kind = %config.radio_kind,
+                        transport_kind = %config.transport_kind,
+                        tcp_host = %config.tcp_host,
+                        tcp_port = config.tcp_port,
+                        serial_port = %config.serial_port,
+                        serial_baud_rate = config.serial_baud_rate,
                         poll_frequency = config.poll_frequency,
-                        rigctld_timeout = config.rigctld_timeout,
+                        cat_timeout = config.cat_timeout,
                         winkeyer_enabled = config.winkeyer_enabled,
                         winkeyer_serial_port = %config.winkeyer_serial_port,
                         "starting managed radio"
@@ -267,10 +272,14 @@ impl RadioManager {
 
         debug!(
             radio_id,
-            host = %config.rigctld_host,
-            port = config.rigctld_port,
+            radio_kind = %config.radio_kind,
+            transport_kind = %config.transport_kind,
+            tcp_host = %config.tcp_host,
+            tcp_port = config.tcp_port,
+            serial_port = %config.serial_port,
+            serial_baud_rate = config.serial_baud_rate,
             poll_frequency = config.poll_frequency,
-            rigctld_timeout = config.rigctld_timeout,
+            cat_timeout = config.cat_timeout,
             winkeyer_enabled = config.winkeyer_enabled,
             winkeyer_serial_port = %config.winkeyer_serial_port,
             "requesting active radio config reload"
@@ -320,12 +329,11 @@ async fn run_managed_radio(
     mut commands: mpsc::Receiver<RadioCommand>,
     mut shutdown: oneshot::Receiver<()>,
 ) {
-    let mut reconnect_backoff = rigctld_reconnect_backoff().build();
+    let mut reconnect_backoff = cat_reconnect_backoff().build();
     let mut reconnect_deadline = None;
 
     loop {
         let poll_interval = Duration::from_secs_f64(config.poll_frequency);
-        let rigctld_timeout = Duration::from_secs_f64(config.rigctld_timeout);
 
         if let Some(deadline) = reconnect_deadline {
             loop {
@@ -334,14 +342,14 @@ async fn run_managed_radio(
                     command = commands.recv() => {
                         match command {
                             Some(RadioCommand::ReloadConfig(new_config)) => {
-                                info!(radio_id = new_config.id, "reloading radio config while waiting to reconnect rigctld");
+                                info!(radio_id = new_config.id, "reloading radio config while waiting to reconnect CAT");
                                 config = new_config;
-                                reconnect_backoff = rigctld_reconnect_backoff().build();
+                                reconnect_backoff = cat_reconnect_backoff().build();
                                 reconnect_deadline = None;
                                 break;
                             }
                             Some(command) => {
-                                warn!(radio_id = config.id, ?command, "dropping radio command while waiting to reconnect rigctld");
+                                warn!(radio_id = config.id, ?command, "dropping radio command while waiting to reconnect CAT");
                             }
                             None => return,
                         }
@@ -358,55 +366,79 @@ async fn run_managed_radio(
             }
         }
 
+        let radio_kind = match radio_kind_for_config(&config) {
+            Ok(radio_kind) => radio_kind,
+            Err(error) => {
+                set_radio_status(&current_status, &status_updates, false).await;
+                reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
+                warn!(radio_id = config.id, %error, "radio config has unsupported radio kind");
+                continue;
+            }
+        };
+        let connection = match connection_config_for(&config) {
+            Ok(connection) => connection,
+            Err(error) => {
+                set_radio_status(&current_status, &status_updates, false).await;
+                reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
+                warn!(radio_id = config.id, %error, "radio config has invalid transport settings");
+                continue;
+            }
+        };
+
         debug!(
             radio_id = config.id,
-            host = %config.rigctld_host,
-            port = config.rigctld_port,
+            radio_kind = %config.radio_kind,
+            transport_kind = %config.transport_kind,
+            tcp_host = %config.tcp_host,
+            tcp_port = config.tcp_port,
+            serial_port = %config.serial_port,
+            serial_baud_rate = config.serial_baud_rate,
             poll_frequency = config.poll_frequency,
-            rigctld_timeout = config.rigctld_timeout,
-            "attempting rigctld connection"
+            cat_timeout = config.cat_timeout,
+            "attempting CAT radio connection"
         );
-        let mut rig = rigctld::Rig::new(&config.rigctld_host, config.rigctld_port);
-        rig.set_communication_timeout(rigctld_timeout);
 
-        tokio::select! {
+        let radio = tokio::select! {
             _ = &mut shutdown => return,
             command = commands.recv() => {
                 match command {
                     Some(RadioCommand::ReloadConfig(new_config)) => {
-                        info!(radio_id = new_config.id, "reloading radio config before rigctld connect");
+                        info!(radio_id = new_config.id, "reloading radio config before CAT connect");
                         config = new_config;
                         continue;
                     }
                     Some(command) => {
-                        warn!(radio_id = config.id, ?command, "dropping radio command while rigctld is disconnected");
+                        warn!(radio_id = config.id, ?command, "dropping radio command while CAT is disconnected");
                         continue;
                     }
                     None => return,
                 }
             }
-            result = rig.connect() => {
-                if let Err(error) = result {
+            result = create_radio(radio_kind, connection) => {
+                match result {
+                    Ok(radio) => radio,
+                    Err(error) => {
                     set_radio_status(&current_status, &status_updates, false).await;
-                    reconnect_deadline = Some(next_rigctld_reconnect_deadline(&mut reconnect_backoff));
+                    reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
                     warn!(
                         radio_id = config.id,
-                        host = %config.rigctld_host,
-                        port = config.rigctld_port,
+                        radio_kind = %config.radio_kind,
+                        transport_kind = %config.transport_kind,
                         %error,
-                        "failed to connect to rigctld"
+                        "failed to connect to CAT radio"
                     );
                     continue;
                 }
             }
-        }
+            }
+        };
 
-        reconnect_backoff = rigctld_reconnect_backoff().build();
+        reconnect_backoff = cat_reconnect_backoff().build();
         info!(
             radio_id = config.id,
-            host = %config.rigctld_host,
-            port = config.rigctld_port,
-            "connected to rigctld"
+            radio_kind = %config.radio_kind,
+            transport_kind = %config.transport_kind,
+            "connected to CAT radio"
         );
         set_radio_status(&current_status, &status_updates, true).await;
         let (cw_tx, cw_rx) = mpsc::channel(32);
@@ -425,12 +457,11 @@ async fn run_managed_radio(
                 _ = &mut shutdown => {
                     let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
                     let _ = cw_task.await;
-                    rig.disconnect();
                     return;
                 }
                 _ = interval.tick() => {
                     trace!(radio_id = config.id, "polling radio state");
-                    match poll_radio(&mut rig).await {
+                    match poll_radio(radio.as_ref()).await {
                         Ok(state) => {
                             last_frequency_hz = state.frequency_hz;
                             *current.write().await = Some(state.clone());
@@ -444,11 +475,10 @@ async fn run_managed_radio(
                         }
                         Err(error) => {
                             set_radio_status(&current_status, &status_updates, false).await;
-                            reconnect_deadline = Some(next_rigctld_reconnect_deadline(&mut reconnect_backoff));
-                            warn!(radio_id = config.id, %error, "failed to poll rigctld");
+                            reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
+                            warn!(radio_id = config.id, %error, "failed to poll CAT radio");
                             let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
                             let _ = cw_task.await;
-                            rig.disconnect();
                             break;
                         }
                     }
@@ -479,10 +509,14 @@ async fn run_managed_radio(
                         RadioCommand::ReloadConfig(new_config) => {
                             info!(
                                 radio_id = new_config.id,
-                                host = %new_config.rigctld_host,
-                                port = new_config.rigctld_port,
+                                radio_kind = %new_config.radio_kind,
+                                transport_kind = %new_config.transport_kind,
+                                tcp_host = %new_config.tcp_host,
+                                tcp_port = new_config.tcp_port,
+                                serial_port = %new_config.serial_port,
+                                serial_baud_rate = new_config.serial_baud_rate,
                                 poll_frequency = new_config.poll_frequency,
-                                rigctld_timeout = new_config.rigctld_timeout,
+                                cat_timeout = new_config.cat_timeout,
                                 winkeyer_enabled = new_config.winkeyer_enabled,
                                 winkeyer_serial_port = %new_config.winkeyer_serial_port,
                                 "reloading active radio config"
@@ -491,20 +525,18 @@ async fn run_managed_radio(
                             debug!(radio_id = config.id, "shutting down cw task for radio config reload");
                             let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
                             let _ = cw_task.await;
-                            debug!(radio_id = config.id, "disconnecting rigctld for radio config reload");
-                            rig.disconnect();
+                            debug!(radio_id = config.id, "dropping CAT radio for config reload");
                             config = new_config;
                             break;
                         }
                         command => {
-                            debug!(radio_id = config.id, ?command, last_frequency_hz, "applying rigctld command");
-                            if let Err(error) = apply_command(&mut rig, command, last_frequency_hz).await {
+                            debug!(radio_id = config.id, ?command, last_frequency_hz, "applying CAT radio command");
+                            if let Err(error) = apply_command(radio.as_ref(), command, last_frequency_hz).await {
                                 set_radio_status(&current_status, &status_updates, false).await;
-                                reconnect_deadline = Some(next_rigctld_reconnect_deadline(&mut reconnect_backoff));
+                                reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
                                 error!(radio_id = config.id, %error, "failed to apply radio command");
                                 let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
                                 let _ = cw_task.await;
-                                rig.disconnect();
                                 break;
                             }
                         }
@@ -522,25 +554,98 @@ async fn set_radio_status(
 ) {
     let mut status = current_status.write().await;
     if status.online == online {
+        trace!(online, "radio status unchanged; not broadcasting");
         return;
     }
+    trace!(
+        previous_online = status.online,
+        next_online = online,
+        "updating and broadcasting radio status"
+    );
     status.online = online;
     let _ = status_updates.send(status.clone());
 }
 
-fn rigctld_reconnect_backoff() -> ExponentialBuilder {
+fn radio_kind_for_config(config: &RadioConfig) -> Result<RadioKind, String> {
+    let parsed = config
+        .radio_kind
+        .trim()
+        .parse::<RadioKind>()
+        .map_err(|error| error.to_string())?;
+    trace!(
+        radio_id = config.id,
+        configured_radio_kind = %config.radio_kind,
+        parsed_radio_kind = parsed.as_str(),
+        "parsed radio kind for CAT factory"
+    );
+    Ok(parsed)
+}
+
+fn connection_config_for(config: &RadioConfig) -> Result<ConnectionConfig, String> {
+    let timeout = Duration::from_secs_f64(config.cat_timeout);
+    trace!(
+        radio_id = config.id,
+        transport_kind = %config.transport_kind,
+        cat_timeout = config.cat_timeout,
+        timeout_ms = timeout.as_millis(),
+        "building CAT connection config"
+    );
+
+    match config.transport_kind.trim().to_ascii_lowercase().as_str() {
+        "tcp" => {
+            let host = config.tcp_host.trim();
+            if host.is_empty() {
+                return Err("TCP host is required".to_string());
+            }
+            if config.tcp_port == 0 {
+                return Err("TCP port must be between 1 and 65535".to_string());
+            }
+            trace!(
+                radio_id = config.id,
+                tcp_host = host,
+                tcp_port = config.tcp_port,
+                timeout_ms = timeout.as_millis(),
+                "built TCP CAT connection config"
+            );
+            Ok(ConnectionConfig::tcp(host, config.tcp_port).with_timeout(timeout))
+        }
+        "serial" => {
+            let serial_port = config.serial_port.trim();
+            if serial_port.is_empty() {
+                return Err("serial port is required".to_string());
+            }
+            if config.serial_baud_rate == 0 {
+                return Err("serial baud rate must be greater than 0".to_string());
+            }
+            trace!(
+                radio_id = config.id,
+                serial_port,
+                serial_baud_rate = config.serial_baud_rate,
+                timeout_ms = timeout.as_millis(),
+                "built serial CAT connection config"
+            );
+            Ok(ConnectionConfig::serial(serial_port, config.serial_baud_rate).with_timeout(timeout))
+        }
+        other => Err(format!("unsupported transport kind `{other}`")),
+    }
+}
+
+fn cat_reconnect_backoff() -> ExponentialBuilder {
     ExponentialBuilder::default()
-        .with_min_delay(RIGCTLD_RECONNECT_MIN_DELAY)
-        .with_max_delay(RIGCTLD_RECONNECT_MAX_DELAY)
+        .with_min_delay(CAT_RECONNECT_MIN_DELAY)
+        .with_max_delay(CAT_RECONNECT_MAX_DELAY)
         .without_max_times()
 }
 
-fn next_rigctld_reconnect_deadline(
+fn next_cat_reconnect_deadline(
     reconnect_backoff: &mut impl Iterator<Item = Duration>,
 ) -> tokio::time::Instant {
-    let delay = reconnect_backoff
-        .next()
-        .unwrap_or(RIGCTLD_RECONNECT_MAX_DELAY);
+    let delay = reconnect_backoff.next().unwrap_or(CAT_RECONNECT_MAX_DELAY);
+    debug!(
+        reconnect_delay_ms = delay.as_millis(),
+        reconnect_delay_secs = delay.as_secs_f64(),
+        "scheduled next CAT reconnect attempt"
+    );
     tokio::time::Instant::now() + delay
 }
 
@@ -850,9 +955,14 @@ impl CwController {
     }
 }
 
-async fn poll_radio(rig: &mut rigctld::Rig) -> Result<RadioState, rigctld::RigError> {
-    let frequency_hz = rig.get_frequency().await?;
-    let (mode, _) = rig.get_mode().await?;
+async fn poll_radio(radio: &dyn ControllableRadio) -> Result<RadioState, radio_cat_rs::RadioError> {
+    let frequency_hz = radio.get_frequency().await?.hz();
+    let mode = radio.get_mode().await?;
+    trace!(
+        frequency_hz,
+        raw_mode = %mode,
+        "polled raw CAT radio state"
+    );
 
     Ok(RadioState {
         frequency_hz,
@@ -861,23 +971,41 @@ async fn poll_radio(rig: &mut rigctld::Rig) -> Result<RadioState, rigctld::RigEr
 }
 
 async fn apply_command(
-    rig: &mut rigctld::Rig,
+    radio: &dyn ControllableRadio,
     command: RadioCommand,
     last_frequency_hz: u64,
-) -> Result<(), rigctld::RigError> {
+) -> Result<(), radio_cat_rs::RadioError> {
     match command {
-        RadioCommand::SetFrequency(frequency_hz) => rig.set_frequency(frequency_hz).await,
+        RadioCommand::SetFrequency(frequency_hz) => {
+            debug!(frequency_hz, "setting CAT radio frequency");
+            radio
+                .set_frequency(radio_cat_rs::Frequency::from_hz(frequency_hz))
+                .await
+        }
         RadioCommand::SetMode(mode) => {
             let frequency_hz = if last_frequency_hz == 0 {
-                rig.get_frequency().await?
+                radio.get_frequency().await?.hz()
             } else {
                 last_frequency_hz
             };
+            trace!(
+                requested_mode = %mode,
+                resolved_frequency_hz = frequency_hz,
+                "translating CAT mode request"
+            );
 
             match mode_for_request(&mode, frequency_hz) {
-                Some(rig_mode) => rig.set_mode(rig_mode, 0).await,
+                Some(radio_mode) => {
+                    debug!(
+                        requested_mode = %mode,
+                        applied_mode = %radio_mode,
+                        resolved_frequency_hz = frequency_hz,
+                        "setting CAT radio mode"
+                    );
+                    radio.set_mode(radio_mode).await
+                }
                 None => {
-                    warn!(mode, "ignoring unsupported radio mode");
+                    debug!(mode, frequency_hz, "ignoring unsupported CAT radio mode");
                     Ok(())
                 }
             }
@@ -893,15 +1021,33 @@ async fn apply_command(
 mod tests {
     use super::*;
 
+    fn test_config() -> RadioConfig {
+        RadioConfig {
+            id: 1,
+            name: "Test".to_string(),
+            radio_kind: "generic-elecraft".to_string(),
+            transport_kind: "tcp".to_string(),
+            tcp_host: "127.0.0.1".to_string(),
+            tcp_port: 5002,
+            serial_port: String::new(),
+            serial_baud_rate: 115_200,
+            poll_frequency: 0.25,
+            cat_timeout: 2.0,
+            winkeyer_enabled: false,
+            winkeyer_serial_port: String::new(),
+            cw_messages: String::new(),
+        }
+    }
+
     #[test]
-    fn rigctld_reconnect_backoff_starts_at_one_second() {
-        let mut backoff = rigctld_reconnect_backoff().build();
+    fn cat_reconnect_backoff_starts_at_one_second() {
+        let mut backoff = cat_reconnect_backoff().build();
         assert_eq!(backoff.next(), Some(Duration::from_secs(1)));
     }
 
     #[test]
-    fn rigctld_reconnect_backoff_caps_at_max_delay() {
-        let mut backoff = rigctld_reconnect_backoff().build();
+    fn cat_reconnect_backoff_caps_at_max_delay() {
+        let mut backoff = cat_reconnect_backoff().build();
         let delays = (0..6)
             .map(|_| backoff.next().expect("backoff should continue"))
             .collect::<Vec<_>>();
@@ -917,5 +1063,50 @@ mod tests {
                 Duration::from_secs(10),
             ]
         );
+    }
+
+    #[test]
+    fn builds_tcp_connection_config_with_timeout() {
+        let config = test_config();
+
+        let connection = connection_config_for(&config).expect("connection should build");
+
+        match connection {
+            ConnectionConfig::Tcp {
+                host,
+                port,
+                timeout,
+            } => {
+                assert_eq!(host, "127.0.0.1");
+                assert_eq!(port, 5002);
+                assert_eq!(timeout, Duration::from_secs(2));
+            }
+            ConnectionConfig::Serial { .. } => panic!("expected tcp config"),
+        }
+    }
+
+    #[test]
+    fn builds_serial_connection_config_with_timeout() {
+        let mut config = test_config();
+        config.transport_kind = "serial".to_string();
+        config.tcp_host = String::new();
+        config.tcp_port = 0;
+        config.serial_port = "/dev/ttyUSB0".to_string();
+        config.serial_baud_rate = 57_600;
+
+        let connection = connection_config_for(&config).expect("connection should build");
+
+        match connection {
+            ConnectionConfig::Serial {
+                path,
+                baud_rate,
+                timeout,
+            } => {
+                assert_eq!(path, std::path::PathBuf::from("/dev/ttyUSB0"));
+                assert_eq!(baud_rate, 57_600);
+                assert_eq!(timeout, Duration::from_secs(2));
+            }
+            ConnectionConfig::Tcp { .. } => panic!("expected serial config"),
+        }
     }
 }

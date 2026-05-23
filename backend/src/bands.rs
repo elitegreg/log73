@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::frequency::Frequency;
+use radio_cat_rs::Frequency;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Band {
