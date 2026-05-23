@@ -5,11 +5,11 @@ pub const DEFAULT_CW_MESSAGES: &str = r#"###################
 #   RUN Messages
 ###################
 F1 Cq,Cq Test {STATION_CALLSIGN}
-F2 Exch,{SENTRSTCUT} {EXCH}
+F2 Exch,{EXCH}
 F3 Tu,Tu
 F4 {STATION_CALLSIGN},{STATION_CALLSIGN}
 F5 His Call,{CALL}
-F6 Repeat, {SENTRSTCUT} {EXCH} {EXCH}
+F6 Repeat,{EXCH} {EXCH}
 F7 ?, ?
 F8 Agn?,Agn?
 F9 Nr?,Nr?
@@ -21,11 +21,11 @@ F12 -,
 #   S&P Messages
 ###################
 F1 Qrl?,Qrl? de {STATION_CALLSIGN}
-F2 Exch,{SENTRSTCUT} {EXCH}
+F2 Exch,{EXCH}
 F3 Tu,Tu
 F4 {STATION_CALLSIGN},{STATION_CALLSIGN}
 F5 His Call,{CALL}
-F6 Repeat, {SENTRSTCUT} {EXCH} {EXCH}
+F6 Repeat,{EXCH} {EXCH}
 F7 ?,?
 F8 Agn?,Agn?
 F9 Nr?,Nr?
@@ -150,12 +150,17 @@ fn render_template(template: &str, fields: &Map<String, Value>) -> String {
             &field_string(fields, "STATION_CALLSIGN"),
         )
         .replace("{CALL}", &field_string(fields, "CALL"))
-        .replace("{EXCH}", &field_string(fields, "STX_STRING"))
+        .replace("{RST_SENT}", &sent_rst_cut(fields))
+        .replace("{EXCH}", &field_string(fields, "EXCH"))
         .replace("{SENTRSTCUT}", &sent_rst_cut(fields))
 }
 
 fn sent_rst_cut(fields: &Map<String, Value>) -> String {
-    field_string(fields, "RST_SENT").replace('9', "N")
+    cut_numbers(&field_string(fields, "RST_SENT"))
+}
+
+fn cut_numbers(value: &str) -> String {
+    value.trim().to_uppercase().replace('9', "N")
 }
 
 fn field_string(fields: &Map<String, Value>, key: &str) -> String {
@@ -182,7 +187,7 @@ mod tests {
     const TEST_MESSAGES: &str = r#"
 # RUN Messages
 F1 Cq,CQ {STATION_CALLSIGN}
-F2 Exch,{SENTRSTCUT} {EXCH} {CALL}
+F2 Exch,{RST_SENT} {EXCH} {CALL}
 # S&P Messages
 F1 His Call,{CALL}
 "#;
@@ -204,7 +209,7 @@ F1 His Call,{CALL}
         let fields = json!({
             "STATION_CALLSIGN": "N0CALL",
             "CALL": "K1ABC",
-            "STX_STRING": "SC",
+            "EXCH": "5NN BERK",
             "RST_SENT": 599
         })
         .as_object()
@@ -213,12 +218,25 @@ F1 His Call,{CALL}
 
         assert_eq!(
             render(TEST_MESSAGES, "run", "F2", &fields),
-            Some("5NN SC K1ABC".to_string())
+            Some("5NN 5NN BERK K1ABC".to_string())
         );
         assert_eq!(
             render(TEST_MESSAGES, "s&p", "F1", &fields),
             Some("K1ABC".to_string())
         );
+    }
+
+    #[test]
+    fn rst_sent_placeholder_uses_cut_numbers() {
+        let fields = json!({
+            "RST_SENT": 599
+        })
+        .as_object()
+        .expect("test fields should be an object")
+        .clone();
+
+        assert_eq!(render_template("{RST_SENT}", &fields), "5NN");
+        assert_eq!(render_template("{SENTRSTCUT}", &fields), "5NN");
     }
 
     #[test]

@@ -2,6 +2,7 @@ mod adif;
 mod auth;
 mod bands;
 mod cabrillo;
+mod cat_keyer;
 mod contest_rules;
 mod cw;
 mod db;
@@ -28,8 +29,8 @@ use contest_rules::{ContestRules, ContestRulesStore};
 use db::{Contact, Database, NewLog, NewRadio, UpdateLog};
 use futures_util::{SinkExt, StreamExt};
 use radio::{ClientMessage, RadioCommand, ServerMessage};
-use radio_manager::RadioManager;
 use radio_cat_rs::supported_radio_kinds;
+use radio_manager::RadioManager;
 use scoring::{ContestScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use std::{
     collections::{HashMap, HashSet},

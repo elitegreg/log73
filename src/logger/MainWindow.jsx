@@ -4,6 +4,7 @@ import {
   exchangeCompletionMatches,
 } from '../domain/completions';
 import {
+  buildSentExchange,
   fieldDefault,
   sanitizeCallsign,
   sanitizeExchangeValue,
@@ -19,7 +20,8 @@ import {
   DEFAULT_RADIO_FREQUENCY_HZ,
   SUPERCHECKPARTIAL_MIN_QUERY_LENGTH,
   CW_ACTIVE_TIMEOUT_WIKEYER_MS,
-  CW_ACTIVE_TIMEOUT_NO_WIKEYER_MS,
+  CW_ACTIVE_TIMEOUT_CAT_MS,
+  CW_ACTIVE_TIMEOUT_NONE_MS,
   CW_REPEAT_DELAY_MS,
   FUNCTION_KEY_PATTERN,
   HZ_PER_KHZ,
@@ -219,6 +221,13 @@ function MainWindow({
         .toUpperCase();
     }
 
+    fields.EXCH = buildSentExchange(
+      settings,
+      exchangeValues,
+      radioMode,
+      log?.contest_params ?? {},
+    );
+
     return fields;
   }
 
@@ -234,9 +243,12 @@ function MainWindow({
   function markCwKeyActive(requestId, key) {
     activeCwRequestsRef.current.set(requestId, key);
     setActiveCwKeys((current) => new Set(current).add(key));
-    const timeoutMs = radio?.winkeyer_enabled
-      ? CW_ACTIVE_TIMEOUT_WIKEYER_MS
-      : CW_ACTIVE_TIMEOUT_NO_WIKEYER_MS;
+    const timeoutMs =
+      radio?.cw_keyer_type === 'winkeyer'
+        ? CW_ACTIVE_TIMEOUT_WIKEYER_MS
+        : radio?.cw_keyer_type === 'cat'
+          ? CW_ACTIVE_TIMEOUT_CAT_MS
+          : CW_ACTIVE_TIMEOUT_NONE_MS;
     const timeoutId = window.setTimeout(
       () => clearCwRequest(requestId),
       timeoutMs,
@@ -262,6 +274,15 @@ function MainWindow({
       next.delete(key);
       return next;
     });
+  }
+
+  function clearAllCwRequests() {
+    for (const timeoutId of activeCwTimeoutsRef.current.values()) {
+      window.clearTimeout(timeoutId);
+    }
+    activeCwTimeoutsRef.current.clear();
+    activeCwRequestsRef.current.clear();
+    setActiveCwKeys(new Set());
   }
 
   function sendSingleCwKey(key, mode = cwModeKey) {
@@ -303,17 +324,14 @@ function MainWindow({
 
   function stopCwSending() {
     stopRepeat();
+    clearAllCwRequests();
     onStopCw?.();
   }
 
   useEffect(
     () => () => {
       stopRepeat();
-      for (const timeoutId of activeCwTimeoutsRef.current.values()) {
-        window.clearTimeout(timeoutId);
-      }
-      activeCwTimeoutsRef.current.clear();
-      activeCwRequestsRef.current.clear();
+      clearAllCwRequests();
     },
     [],
   );

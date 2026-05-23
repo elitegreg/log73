@@ -6,6 +6,7 @@ import { useNotifications } from '../lib/notificationsContext';
 
 const DEFAULT_RADIO_KIND = 'generic-elecraft';
 const DEFAULT_TRANSPORT_KIND = 'tcp';
+const DEFAULT_CW_KEYER_TYPE = 'none';
 
 function CreateRadioScreen() {
   const navigate = useNavigate();
@@ -22,7 +23,7 @@ function CreateRadioScreen() {
   const [serialBaudRate, setSerialBaudRate] = useState(115200);
   const [pollFrequency, setPollFrequency] = useState(0.25);
   const [catTimeout, setCatTimeout] = useState(2);
-  const [winkeyerEnabled, setWinkeyerEnabled] = useState(false);
+  const [cwKeyerType, setCwKeyerType] = useState(DEFAULT_CW_KEYER_TYPE);
   const [winkeyerSerialPort, setWinkeyerSerialPort] = useState('');
 
   const notifyOperationalError = useCallback(
@@ -72,16 +73,14 @@ function CreateRadioScreen() {
 
       setName(result.radio.name ?? '');
       setRadioKind(result.radio.radio_kind ?? kinds[0] ?? DEFAULT_RADIO_KIND);
-      setTransportKind(
-        result.radio.transport_kind ?? DEFAULT_TRANSPORT_KIND,
-      );
+      setTransportKind(result.radio.transport_kind ?? DEFAULT_TRANSPORT_KIND);
       setTcpHost(result.radio.tcp_host ?? '127.0.0.1');
       setTcpPort(result.radio.tcp_port ?? 5002);
       setSerialPort(result.radio.serial_port ?? '');
       setSerialBaudRate(result.radio.serial_baud_rate ?? 115200);
       setPollFrequency(result.radio.poll_frequency ?? 0.25);
       setCatTimeout(result.radio.cat_timeout ?? 2);
-      setWinkeyerEnabled(Boolean(result.radio.winkeyer_enabled));
+      setCwKeyerType(result.radio.cw_keyer_type ?? DEFAULT_CW_KEYER_TYPE);
       setWinkeyerSerialPort(result.radio.winkeyer_serial_port ?? '');
     }
 
@@ -113,8 +112,9 @@ function CreateRadioScreen() {
         serial_baud_rate: Number(serialBaudRate),
         poll_frequency: Number(pollFrequency),
         cat_timeout: Number(catTimeout),
-        winkeyer_enabled: winkeyerEnabled,
-        winkeyer_serial_port: winkeyerEnabled ? winkeyerSerialPort : '',
+        cw_keyer_type: cwKeyerType,
+        winkeyer_serial_port:
+          cwKeyerType === 'winkeyer' ? winkeyerSerialPort : '',
       }),
     });
     if (!result.ok) {
@@ -237,24 +237,29 @@ function CreateRadioScreen() {
           required
         />
       </label>
-      <label className="checkbox-label">
-        <input
-          type="checkbox"
-          checked={winkeyerEnabled}
-          onChange={(event) => setWinkeyerEnabled(event.target.checked)}
-        />
-        <span>Enable Winkeyer</span>
-      </label>
       <label>
-        Winkeyer Serial Port
-        <input
-          value={winkeyerSerialPort}
-          onChange={(event) => setWinkeyerSerialPort(event.target.value)}
-          required={winkeyerEnabled}
-          disabled={!winkeyerEnabled}
-          placeholder="/dev/ttyUSB0"
-        />
+        CW Keying
+        <select
+          value={cwKeyerType}
+          onChange={(event) => setCwKeyerType(event.target.value)}
+          required
+        >
+          <option value="none">None</option>
+          <option value="winkeyer">Winkeyer</option>
+          <option value="cat">CAT</option>
+        </select>
       </label>
+      {cwKeyerType === 'winkeyer' ? (
+        <label>
+          Winkeyer Serial Port
+          <input
+            value={winkeyerSerialPort}
+            onChange={(event) => setWinkeyerSerialPort(event.target.value)}
+            required
+            placeholder="/dev/ttyUSB0"
+          />
+        </label>
+      ) : null}
       <div className="selection-actions">
         <button className="cmd-btn primary" type="submit">
           {isEditing ? 'Save' : 'Create'}

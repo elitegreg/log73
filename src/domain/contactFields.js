@@ -85,3 +85,39 @@ export function fieldDefault(field, radioMode, contestParams = {}) {
   const value = String(rawValue);
   return sanitizeConfiguredValue(field, value, radioMode);
 }
+
+export function cutNumberString(value) {
+  return String(value ?? '').trim().toUpperCase().replaceAll('9', 'N');
+}
+
+export function sentExchangeToken(
+  field,
+  exchangeValues = {},
+  radioMode,
+  contestParams = {},
+) {
+  const value =
+    exchangeValues?.[field?.name] ?? fieldDefault(field, radioMode, contestParams);
+  const normalized = String(value ?? '').trim().toUpperCase();
+
+  if (field?.adif === 'RST_SENT') {
+    return cutNumberString(normalized);
+  }
+
+  return normalized;
+}
+
+export function buildSentExchange(
+  settings,
+  exchangeValues = {},
+  radioMode,
+  contestParams = {},
+) {
+  return (settings?.exchange ?? [])
+    .filter((field) => field.is_sent)
+    .map((field) =>
+      sentExchangeToken(field, exchangeValues, radioMode, contestParams),
+    )
+    .filter((value) => value !== '')
+    .join(' ');
+}

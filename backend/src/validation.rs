@@ -1,8 +1,8 @@
 use crate::bands::{USA_AMATEUR_BANDS, band_for_frequency};
 use crate::contest_rules::{ContestParam, ContestRules, ContestRulesStore, ExchangeField};
 use crate::db::{Contact, Database, NewLog, NewRadio, UpdateLog};
-use regex::Regex;
 use radio_cat_rs::{Frequency, RadioKind};
+use regex::Regex;
 use serde_json::Value;
 use std::collections::HashSet;
 
@@ -30,6 +30,7 @@ const MIN_CW_WPM: u8 = 5;
 const MAX_CW_WPM: u8 = 60;
 const MAX_CW_REQUEST_ID_LEN: usize = 64;
 const MAX_WS_FIELDS: usize = 100;
+const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ParsedFieldType {
@@ -78,6 +79,10 @@ pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
 
     validate_seconds("poll frequency", payload.poll_frequency)?;
     validate_seconds("CAT timeout", payload.cat_timeout)?;
+    let cw_keyer_type = payload.cw_keyer_type.trim().to_ascii_lowercase();
+    if !ALLOWED_CW_KEYER_TYPES.contains(&cw_keyer_type.as_str()) {
+        return Err("CW keyer type must be one of: none, winkeyer, cat".to_string());
+    }
 
     match transport_kind.as_str() {
         "tcp" => {
@@ -99,13 +104,15 @@ pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
                 return Err("serial baud rate must be greater than 0".to_string());
             }
             if payload.tcp_host.chars().count() > MAX_RADIO_HOST_LEN {
-                return Err(format!("TCP host must be at most {MAX_RADIO_HOST_LEN} characters"));
+                return Err(format!(
+                    "TCP host must be at most {MAX_RADIO_HOST_LEN} characters"
+                ));
             }
         }
         _ => unreachable!(),
     }
 
-    if payload.winkeyer_enabled {
+    if cw_keyer_type == "winkeyer" {
         validate_required_text(
             "Winkeyer serial port",
             &payload.winkeyer_serial_port,
@@ -915,7 +922,7 @@ mod tests {
             serial_baud_rate: 115_200,
             poll_frequency: 0.25,
             cat_timeout: 2.0,
-            winkeyer_enabled: false,
+            cw_keyer_type: "none".to_string(),
             winkeyer_serial_port: String::new(),
         }
     }
@@ -990,5 +997,31 @@ mod tests {
 
         let error = validate_radio(&radio).expect_err("missing host should fail");
         assert!(error.contains("TCP host"));
+    }
+
+    #[test]
+    fn validates_cat_cw_keyer_type() {
+        let mut radio = test_radio();
+        radio.cw_keyer_type = "cat".to_string();
+
+        assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn winkeyer_requires_serial_port() {
+        let mut radio = test_radio();
+        radio.cw_keyer_type = "winkeyer".to_string();
+
+        let error = validate_radio(&radio).expect_err("winkeyer port should be required");
+        assert!(error.contains("Winkeyer serial port"));
+    }
+
+    #[test]
+    fn rejects_unknown_cw_keyer_type() {
+        let mut radio = test_radio();
+        radio.cw_keyer_type = "laser".to_string();
+
+        let error = validate_radio(&radio).expect_err("cw keyer type should be rejected");
+        assert!(error.contains("CW keyer type"));
     }
 }

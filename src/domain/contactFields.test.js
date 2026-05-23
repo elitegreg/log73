@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  buildSentExchange,
+  cutNumberString,
   fieldDefault,
   parseFieldType,
   sanitizeCallsign,
@@ -66,4 +68,46 @@ test('fieldDefault reads source params and sanitizes RST defaults', () => {
   );
   assert.equal(fieldDefault({ type: 'RST', default: 599 }, 'SSB'), '59');
   assert.equal(fieldDefault({ type: 'String:4' }, 'CW'), '');
+});
+
+test('cutNumberString applies CW cut numbers for 9', () => {
+  assert.equal(cutNumberString('599'), '5NN');
+  assert.equal(cutNumberString(59), '5N');
+});
+
+test('buildSentExchange uses is_sent fields in order with cut RST and fixed params', () => {
+  const settings = {
+    exchange: [
+      {
+        name: 'RST(s)',
+        type: 'RST',
+        adif: 'RST_SENT',
+        default: 599,
+        is_sent: true,
+      },
+      {
+        name: 'County',
+        type: 'String:4',
+        adif: 'STX_STRING',
+        fixed: true,
+        source_param: 'County',
+        is_sent: true,
+      },
+      {
+        name: 'Exchange',
+        type: 'String:4',
+        adif: 'SRX_STRING',
+        is_sent: false,
+      },
+    ],
+  };
+
+  assert.equal(
+    buildSentExchange(settings, {}, 'CW', { County: 'berk' }),
+    '5NN BERK',
+  );
+  assert.equal(
+    buildSentExchange(settings, { 'RST(s)': '579' }, 'CW', { County: 'berk' }),
+    '57N BERK',
+  );
 });
