@@ -26,6 +26,8 @@ import {
   FUNCTION_KEY_PATTERN,
   HZ_PER_KHZ,
   EPOCH_MS_PER_SECOND,
+  nextCwWpm,
+  typedModeFromCallsignInput,
   exchangeDefaults,
   formatFrequency,
   isFrequencyInput,
@@ -362,6 +364,16 @@ function MainWindow({
         stopCwSending();
         return;
       }
+      if (event.key === 'PageUp') {
+        event.preventDefault();
+        setCwWpm((current) => nextCwWpm(current, 1));
+        return;
+      }
+      if (event.key === 'PageDown') {
+        event.preventDefault();
+        setCwWpm((current) => nextCwWpm(current, -1));
+        return;
+      }
       if (FUNCTION_KEY_PATTERN.test(event.key)) {
         event.preventDefault();
         sendCwKey(event.key);
@@ -512,6 +524,14 @@ function MainWindow({
     if (event.key === 'Enter' && isFrequencyInput(value)) {
       event.preventDefault();
       onSetRadioFrequency?.(Math.round(Number.parseFloat(value) * HZ_PER_KHZ));
+      setCallSign('');
+      return;
+    }
+
+    const typedMode = typedModeFromCallsignInput(value, settings);
+    if (event.key === 'Enter' && typedMode) {
+      event.preventDefault();
+      onSetRadioMode?.(typedMode);
       setCallSign('');
       return;
     }

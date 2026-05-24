@@ -9,7 +9,7 @@
     "dev": "rsbuild dev --open",
     "format": "prettier --write .",
     "lint": "eslint .",
-    "test:frontend": "node --test src/domain/*.test.js",
+    "test:frontend": "node --test src/domain/*.test.js src/logger/*.test.js",
     "preview": "rsbuild preview"
   },
   "dependencies": {

@@ -1,4 +1,4 @@
-import { fieldDefault } from '../domain/contactFields';
+import { fieldDefault } from '../domain/contactFields.js';
 
 export const MODE_OPTIONS = ['CW', 'SSB', 'FM'];
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
@@ -86,4 +86,35 @@ export function createCwRequestId() {
 
 export function isEmptyCwButton(button) {
   return String(button?.label ?? '').trim() === '-';
+}
+
+export function availableModeOptions(settings) {
+  const allowedModes = Array.isArray(settings?.allowed_modes)
+    ? settings.allowed_modes
+    : [];
+  const normalizedAllowedModes = allowedModes
+    .map((mode) => String(mode ?? '').trim().toUpperCase())
+    .filter(Boolean);
+
+  return normalizedAllowedModes.length > 0
+    ? [...new Set(normalizedAllowedModes)]
+    : MODE_OPTIONS;
+}
+
+export function typedModeFromCallsignInput(value, settings) {
+  const normalizedValue = String(value ?? '').trim().toUpperCase();
+  if (!normalizedValue) return null;
+
+  return availableModeOptions(settings).find((mode) => mode === normalizedValue)
+    ?? null;
+}
+
+export function nextCwWpm(currentWpm, delta) {
+  const normalizedCurrentWpm = Number.isFinite(currentWpm)
+    ? currentWpm
+    : DEFAULT_CW_WPM;
+  return Math.min(
+    CW_WPM_MAX,
+    Math.max(CW_WPM_MIN, normalizedCurrentWpm + delta),
+  );
 }
