@@ -116,6 +116,12 @@
   font-size: 11px;
 }
 
+.callsign-dxcc-hint {
+  margin-left: 0.4rem;
+  font-style: italic;
+  font-weight: normal;
+}
+
 :root {
   --invalid-border-color: #b00020;
   --invalid-background-color: #ffd6dd;

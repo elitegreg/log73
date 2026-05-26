@@ -8,6 +8,7 @@ function EntryFields({
   radioMode,
   callSignRef,
   callSign,
+  dxccLabel,
   handleCallsignChange,
   handleCallsignKeyDown,
   setActiveCompletionField,
@@ -24,7 +25,12 @@ function EntryFields({
           flex: `${CALLSIGN_FIELD_WIDTH_CHARS} 1 ${CALLSIGN_FIELD_WIDTH_CHARS}em`,
         }}
       >
-        <span>Callsign</span>
+        <span>
+          Callsign
+          {dxccLabel ? (
+            <span className="callsign-dxcc-hint">{dxccLabel}</span>
+          ) : null}
+        </span>
         <input
           ref={callSignRef}
           type="text"

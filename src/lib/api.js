@@ -53,6 +53,10 @@ export async function supercheckpartial() {
   return apiJson('/supercheckpartial');
 }
 
+export async function dxcc() {
+  return apiJson('/dxcc');
+}
+
 export function websocketUrl(params) {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const search = new URLSearchParams(params);

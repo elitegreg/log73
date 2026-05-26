@@ -9,8 +9,9 @@ import {
   sanitizeCallsign,
   sanitizeExchangeValue,
 } from '../domain/contactFields';
+import { dxccLabel, lookupDxcc } from '../domain/dxcc';
 import { validateExchangeField } from '../domain/validation';
-import { supercheckpartial } from '../lib/api';
+import { dxcc, supercheckpartial } from '../lib/api';
 import {
   CW_WPM_STORAGE_KEY,
   DEFAULT_CW_LABELS,
@@ -79,6 +80,7 @@ function MainWindow({
     [],
   );
   const [supercheckpartialMatches, setSupercheckpartialMatches] = useState([]);
+  const [dxccData, setDxccData] = useState(null);
   const [cwWpm, setCwWpm] = useState(() => {
     const storedWpm = Number.parseInt(
       localStorage.getItem(CW_WPM_STORAGE_KEY) ?? '',
@@ -179,6 +181,25 @@ function MainWindow({
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    dxcc()
+      .then((result) => {
+        if (!cancelled) {
+          setDxccData(result?.ok ? result.dxcc ?? null : null);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDxccData(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (activeCompletionField !== 'CALL') {
       setSupercheckpartialMatches([]);
       return;
@@ -207,6 +228,8 @@ function MainWindow({
           activeExchangeCompletionField,
           exchangeValues[activeExchangeCompletionField?.name],
         );
+  const currentDxccInfo = lookupDxcc(dxccData, callSign);
+  const currentDxccLabel = dxccLabel(currentDxccInfo);
 
   function currentCwFields() {
     const fields = {
@@ -617,6 +640,7 @@ function MainWindow({
         radioMode={radioMode}
         callSignRef={callSignRef}
         callSign={callSign}
+        dxccLabel={currentDxccLabel}
         handleCallsignChange={handleCallsignChange}
         handleCallsignKeyDown={handleCallsignKeyDown}
         setActiveCompletionField={setActiveCompletionField}

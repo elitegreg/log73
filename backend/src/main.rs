@@ -6,6 +6,7 @@ mod cat_keyer;
 mod contest_rules;
 mod cw;
 mod db;
+mod dxcc;
 mod radio;
 mod radio_manager;
 mod scoring;
@@ -53,6 +54,7 @@ struct AppState {
     scoring_modules: ScoringModules,
     score_tracker: ContestScoreTracker,
     supercheckpartial: SuperCheckPartial,
+    dxcc: std::sync::Arc<dxcc::DxccDatabase>,
 }
 
 const MAX_CLIENT_ERROR_TEXT_LENGTH: usize = 4096;
@@ -131,6 +133,20 @@ async fn main() {
         data_dir = %cli.data_dir.display(),
         "loaded supercheckpartial callsigns"
     );
+    let dxcc = dxcc::DxccDatabase::load_dir(&cli.data_dir).unwrap_or_else(|error| {
+        warn!(
+            data_dir = %cli.data_dir.display(),
+            %error,
+            "failed to load cty.dat; DXCC lookup will be unavailable"
+        );
+        dxcc::DxccDatabase::default()
+    });
+    info!(
+        entities = dxcc.entity_count(),
+        rules = dxcc.rule_count(),
+        data_dir = %cli.data_dir.display(),
+        "loaded DXCC country data"
+    );
     let db = Database::open("log73.db").expect("failed to open log73.db");
     let radio_manager = RadioManager::new(db.clone());
     let app_state = AppState {
@@ -141,6 +157,7 @@ async fn main() {
         scoring_modules: ScoringModules::new(),
         score_tracker: ContestScoreTracker::new(),
         supercheckpartial,
+        dxcc: std::sync::Arc::new(dxcc),
     };
 
     let request_trace_layer = TraceLayer::new_for_http()
@@ -177,6 +194,7 @@ async fn main() {
         .route("/config", get(config).put(update_config))
         .route("/client-errors", post(report_client_error))
         .route("/supercheckpartial", get(supercheckpartial_matches))
+        .route("/dxcc", get(dxcc_data))
         .route("/logs", get(logs).post(create_log))
         .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
         .route("/logs/{id}/qso-count", get(log_qso_count))
@@ -516,6 +534,10 @@ async fn contest_settings(
 
 async fn supercheckpartial_matches(State(app_state): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({ "ok": true, "callsigns": app_state.supercheckpartial.callsigns() }))
+}
+
+async fn dxcc_data(State(app_state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "ok": true, "dxcc": app_state.dxcc.as_ref() }))
 }
 
 async fn config(State(app_state): State<AppState>) -> Json<serde_json::Value> {
