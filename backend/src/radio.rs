@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 pub enum ServerMessage {
     RadioStatus(RadioStatus),
     RadioState(RadioState),
+    Pong {
+        request_id: String,
+    },
     LogEntry {
         contact: serde_json::Map<String, serde_json::Value>,
     },
@@ -41,6 +44,9 @@ pub struct RadioState {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
+    Ping {
+        request_id: String,
+    },
     SetFrequency {
         frequency_hz: u64,
     },
@@ -117,5 +123,35 @@ mod tests {
                 "online": true
             })
         );
+    }
+
+    #[test]
+    fn serializes_pong_server_message() {
+        let message = ServerMessage::Pong {
+            request_id: "ping-123".to_string(),
+        };
+        let json = serde_json::to_value(message).expect("pong should serialize");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "pong",
+                "request_id": "ping-123"
+            })
+        );
+    }
+
+    #[test]
+    fn deserializes_ping_client_message() {
+        let message: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "ping",
+            "request_id": "ping-123"
+        }))
+        .expect("ping should deserialize");
+
+        match message {
+            ClientMessage::Ping { request_id } => assert_eq!(request_id, "ping-123"),
+            other => panic!("unexpected client message: {other:?}"),
+        }
     }
 }

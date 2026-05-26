@@ -328,7 +328,12 @@ async fn handle_socket(
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
                 direct = direct_rx.recv() => match direct {
-                    Some(message) => serde_json::to_string(&message).expect("direct message should serialize"),
+                    Some(message) => {
+                        if let ServerMessage::Pong { request_id } = &message {
+                            debug!(session_id = %outbound_session_id, radio_id, request_id, "sending websocket pong");
+                        }
+                        serde_json::to_string(&message).expect("direct message should serialize")
+                    }
                     None => break,
                 }
             };
@@ -344,6 +349,21 @@ async fn handle_socket(
             continue;
         };
         match serde_json::from_str::<ClientMessage>(&text) {
+            Ok(ClientMessage::Ping { request_id }) => {
+                debug!(session_id, radio_id, request_id, "websocket ping received");
+                debug!(session_id, radio_id, request_id, "queueing websocket pong");
+                if direct_tx
+                    .send(ServerMessage::Pong { request_id })
+                    .await
+                    .is_err()
+                {
+                    debug!(
+                        session_id,
+                        radio_id, "failed to queue websocket pong; session closed"
+                    );
+                    break;
+                }
+            }
             Ok(ClientMessage::SetFrequency { frequency_hz }) => {
                 debug!(
                     session_id,
