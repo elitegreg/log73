@@ -56,7 +56,7 @@ When login is enabled, authentication protects the frontend, `/api/*`, and `/ws`
 
 The backend does **not** start or supervise external CAT daemons.
 
-Current `radio-cat-rs` support is factory-driven. Today that means `generic-elecraft` plus its accepted aliases (`elecraft`, `k4`), over either TCP or serial transport.
+Current `radio-cat-rs` support is factory-driven and model-dependent. For Elecraft CAT, use `k4` over either TCP or serial transport.
 
 Example TCP CAT target:
 
@@ -354,7 +354,7 @@ cw_messages
 Create-radio defaults:
 
 ```text
-radio_kind: generic-elecraft
+radio_kind: first value returned by /api/radio-kinds
 transport_kind: tcp
 tcp_host: 127.0.0.1
 tcp_port: 5002
@@ -493,5 +493,5 @@ High Contrast
 - Basic Auth credentials are static development credentials.
 - No database migrations yet.
 - Backend does not start or supervise external CAT daemons.
-- Radio support is currently limited by the `radio-cat-rs` factory. Today that is `generic-elecraft` over TCP or serial.
+- Radio support is limited by the `radio-cat-rs` factory model list (see `/api/radio-kinds`).
 - No cluster, band map, SO2R, or multi-transmitter rule enforcement yet.

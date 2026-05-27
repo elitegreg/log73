@@ -1164,7 +1164,7 @@ mod tests {
     fn tcp_radio() -> NewRadio {
         NewRadio {
             name: "Elecraft TCP".to_string(),
-            radio_kind: "generic-elecraft".to_string(),
+            radio_kind: "k4".to_string(),
             transport_kind: "tcp".to_string(),
             tcp_host: "127.0.0.1".to_string(),
             tcp_port: 5002,
@@ -1426,7 +1426,7 @@ mod tests {
             .await
             .expect("radio is created");
 
-        assert_eq!(radio.radio_kind, "generic-elecraft");
+        assert_eq!(radio.radio_kind, "k4");
         assert_eq!(radio.transport_kind, "tcp");
         assert_eq!(radio.tcp_host, "127.0.0.1");
         assert_eq!(radio.tcp_port, 5002);

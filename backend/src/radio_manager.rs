@@ -1282,7 +1282,7 @@ mod tests {
         RadioConfig {
             id: 1,
             name: "Test".to_string(),
-            radio_kind: "generic-elecraft".to_string(),
+            radio_kind: "k4".to_string(),
             transport_kind: "tcp".to_string(),
             tcp_host: "127.0.0.1".to_string(),
             tcp_port: 5002,

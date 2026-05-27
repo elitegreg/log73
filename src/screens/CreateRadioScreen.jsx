@@ -4,7 +4,6 @@ import { apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
 
-const DEFAULT_RADIO_KIND = 'generic-elecraft';
 const DEFAULT_TRANSPORT_KIND = 'tcp';
 const DEFAULT_CW_KEYER_TYPE = 'none';
 
@@ -13,12 +12,12 @@ function CreateRadioScreen() {
   const { radioId } = useParams();
   const { notifyError } = useNotifications();
   const isEditing = Boolean(radioId);
-  const [radioKinds, setRadioKinds] = useState([DEFAULT_RADIO_KIND]);
+  const [radioKinds, setRadioKinds] = useState([]);
   const [name, setName] = useState('');
-  const [radioKind, setRadioKind] = useState(DEFAULT_RADIO_KIND);
+  const [radioKind, setRadioKind] = useState('');
   const [transportKind, setTransportKind] = useState(DEFAULT_TRANSPORT_KIND);
   const [tcpHost, setTcpHost] = useState('127.0.0.1');
-  const [tcpPort, setTcpPort] = useState(5002);
+  const [tcpPort, setTcpPort] = useState('');
   const [serialPort, setSerialPort] = useState('');
   const [serialBaudRate, setSerialBaudRate] = useState(115200);
   const [pollFrequency, setPollFrequency] = useState(0.25);
@@ -44,11 +43,11 @@ function CreateRadioScreen() {
     let isCancelled = false;
 
     async function loadContext() {
-      let kinds = [DEFAULT_RADIO_KIND];
+      let kinds = [];
 
       try {
         const result = await apiJson('/radio-kinds');
-        if (Array.isArray(result) && result.length > 0) {
+        if (Array.isArray(result)) {
           kinds = result;
         }
       } catch (error) {
@@ -63,7 +62,6 @@ function CreateRadioScreen() {
       setRadioKinds(kinds);
 
       if (!isEditing) {
-        setRadioKind(kinds[0] || DEFAULT_RADIO_KIND);
         return;
       }
 
@@ -72,10 +70,10 @@ function CreateRadioScreen() {
       if (isCancelled) return;
 
       setName(result.radio.name ?? '');
-      setRadioKind(result.radio.radio_kind ?? kinds[0] ?? DEFAULT_RADIO_KIND);
+      setRadioKind(result.radio.radio_kind ?? '');
       setTransportKind(result.radio.transport_kind ?? DEFAULT_TRANSPORT_KIND);
       setTcpHost(result.radio.tcp_host ?? '127.0.0.1');
-      setTcpPort(result.radio.tcp_port ?? 5002);
+      setTcpPort(result.radio.tcp_port);
       setSerialPort(result.radio.serial_port ?? '');
       setSerialBaudRate(result.radio.serial_baud_rate ?? 115200);
       setPollFrequency(result.radio.poll_frequency ?? 0.25);
@@ -104,7 +102,7 @@ function CreateRadioScreen() {
       method: isEditing ? 'PUT' : 'POST',
       body: JSON.stringify({
         name,
-        radio_kind: radioKind,
+        radio_kind: radioKind || radioKinds[0] || '',
         transport_kind: transportKind,
         tcp_host: tcpHost,
         tcp_port: Number(tcpPort),
@@ -140,15 +138,17 @@ function CreateRadioScreen() {
       <label>
         Radio Type
         <select
-          value={radioKind}
+          value={radioKind || radioKinds[0] || ''}
           onChange={(event) => setRadioKind(event.target.value)}
           required
         >
-          {[...new Set([radioKind, ...radioKinds])].map((kind) => (
-            <option key={kind} value={kind}>
-              {kind}
-            </option>
-          ))}
+          {[...new Set([radioKind, ...radioKinds].filter(Boolean))]
+            .sort((a, b) => a.localeCompare(b))
+            .map((kind) => (
+              <option key={kind} value={kind}>
+                {kind}
+              </option>
+            ))}
         </select>
       </label>
       <label>

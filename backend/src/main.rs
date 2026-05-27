@@ -921,7 +921,7 @@ async fn radio_kinds() -> Json<Vec<String>> {
     Json(
         supported_radio_kinds()
             .iter()
-            .map(|kind| kind.as_str().to_string())
+            .map(|kind| kind.display_name())
             .collect(),
     )
 }
