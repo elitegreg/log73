@@ -19,6 +19,7 @@ export const CW_WPM_MAX = 60;
 export const CW_WPM_STEP = 1;
 export const DEFAULT_RADIO_FREQUENCY_HZ = 14000000;
 export const SUPERCHECKPARTIAL_MIN_QUERY_LENGTH = 3;
+export const CALLSIGN_LOOKUP_DEBOUNCE_MS = 500;
 export const CW_ACTIVE_TIMEOUT_WIKEYER_MS = 30000;
 export const CW_ACTIVE_TIMEOUT_CAT_MS = 30000;
 export const CW_ACTIVE_TIMEOUT_NONE_MS = 500;
@@ -93,7 +94,11 @@ export function availableModeOptions(settings) {
     ? settings.allowed_modes
     : [];
   const normalizedAllowedModes = allowedModes
-    .map((mode) => String(mode ?? '').trim().toUpperCase())
+    .map((mode) =>
+      String(mode ?? '')
+        .trim()
+        .toUpperCase(),
+    )
     .filter(Boolean);
 
   return normalizedAllowedModes.length > 0
@@ -102,11 +107,15 @@ export function availableModeOptions(settings) {
 }
 
 export function typedModeFromCallsignInput(value, settings) {
-  const normalizedValue = String(value ?? '').trim().toUpperCase();
+  const normalizedValue = String(value ?? '')
+    .trim()
+    .toUpperCase();
   if (!normalizedValue) return null;
 
-  return availableModeOptions(settings).find((mode) => mode === normalizedValue)
-    ?? null;
+  return (
+    availableModeOptions(settings).find((mode) => mode === normalizedValue) ??
+    null
+  );
 }
 
 export function nextCwWpm(currentWpm, delta) {

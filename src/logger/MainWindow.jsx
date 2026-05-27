@@ -20,6 +20,7 @@ import {
   CW_WPM_MAX,
   DEFAULT_RADIO_FREQUENCY_HZ,
   SUPERCHECKPARTIAL_MIN_QUERY_LENGTH,
+  CALLSIGN_LOOKUP_DEBOUNCE_MS,
   CW_ACTIVE_TIMEOUT_WIKEYER_MS,
   CW_ACTIVE_TIMEOUT_CAT_MS,
   CW_ACTIVE_TIMEOUT_NONE_MS,
@@ -71,6 +72,7 @@ function MainWindow({
   onExit,
 }) {
   const [callSign, setCallSign] = useState('');
+  const [debouncedCallSign, setDebouncedCallSign] = useState('');
   const [exchangeValues, setExchangeValues] = useState({});
   const [operatingMode, setOperatingMode] = useState('S&P');
   const [repeatRunF1, setRepeatRunF1] = useState(false);
@@ -160,6 +162,21 @@ function MainWindow({
   }, [callSign]);
 
   useEffect(() => {
+    if (callSign.trim() === '') {
+      setDebouncedCallSign('');
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedCallSign(callSign);
+    }, CALLSIGN_LOOKUP_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [callSign]);
+
+  useEffect(() => {
     let cancelled = false;
     supercheckpartial()
       .then((result) => {
@@ -205,7 +222,7 @@ function MainWindow({
       return;
     }
 
-    const query = callSign.trim().toUpperCase();
+    const query = debouncedCallSign.trim().toUpperCase();
     if (query.length < SUPERCHECKPARTIAL_MIN_QUERY_LENGTH) {
       setSupercheckpartialMatches([]);
       return;
@@ -214,7 +231,11 @@ function MainWindow({
     setSupercheckpartialMatches(
       callsignCompletionMatches(supercheckpartialCallsigns, query),
     );
-  }, [activeCompletionField, callSign, supercheckpartialCallsigns]);
+  }, [
+    activeCompletionField,
+    debouncedCallSign,
+    supercheckpartialCallsigns,
+  ]);
 
   const cwModeKey = operatingMode === 'Run' ? 'run' : 's&p';
   const activeCwLabels = cwLabels?.[cwModeKey] ?? DEFAULT_CW_LABELS[cwModeKey];
@@ -228,7 +249,7 @@ function MainWindow({
           activeExchangeCompletionField,
           exchangeValues[activeExchangeCompletionField?.name],
         );
-  const currentDxccInfo = lookupDxcc(dxccData, callSign);
+  const currentDxccInfo = lookupDxcc(dxccData, debouncedCallSign);
   const currentDxccLabel = dxccLabel(currentDxccInfo);
 
   function currentCwFields() {
