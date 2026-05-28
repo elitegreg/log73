@@ -1018,6 +1018,7 @@ const MAX_CONTACTS_PAGE_LIMIT: usize = 1000;
 struct ContactsQuery {
     limit: Option<usize>,
     offset: Option<usize>,
+    callsign_prefix: Option<String>,
 }
 
 fn contacts_page(query: &ContactsQuery) -> Option<(usize, usize)> {
@@ -1040,10 +1041,16 @@ async fn contacts(
     Query(query): Query<ContactsQuery>,
 ) -> Json<Vec<Contact>> {
     let (limit, offset) = contacts_page(&query).unwrap_or((usize::MAX, 0));
+    let callsign_prefix = query
+        .callsign_prefix
+        .as_deref()
+        .map(str::trim)
+        .filter(|callsign_prefix| !callsign_prefix.is_empty())
+        .map(str::to_uppercase);
 
     let contacts = match app_state
         .log_cache
-        .contacts_display_page(log_id, offset, limit)
+        .contacts_display_page(log_id, offset, limit, callsign_prefix)
         .await
     {
         Ok(contacts) => contacts,

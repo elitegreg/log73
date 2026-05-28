@@ -2,7 +2,7 @@ use crate::contest_rules::ContestRulesStore;
 use crate::db::{Contact, Database};
 use crate::scoring::{ContestScoringModule, ScoringModules};
 use std::cmp::Reverse;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 pub trait LogCacheProcessor: Send + Sync {
@@ -61,6 +61,8 @@ struct LogCacheInner {
 struct CachedLog {
     module: Arc<ContestScoringModule>,
     contacts: Vec<Contact>,
+    callsign_index: BTreeMap<String, Vec<i64>>,
+    contact_positions: HashMap<i64, usize>,
 }
 
 impl LogCache {
@@ -107,7 +109,7 @@ impl LogCache {
         }
 
         sort_contacts_desc(&mut contacts);
-        logs.insert(log_id, CachedLog { module, contacts });
+        logs.insert(log_id, CachedLog::new(module, contacts));
         Ok(())
     }
 
@@ -116,6 +118,7 @@ impl LogCache {
         log_id: i64,
         offset: usize,
         limit: usize,
+        callsign_prefix: Option<String>,
     ) -> Result<Vec<Contact>, String> {
         if limit == 0 {
             return Ok(Vec::new());
@@ -126,6 +129,27 @@ impl LogCache {
         let Some(cached_log) = logs.get(&log_id) else {
             return Ok(Vec::new());
         };
+
+        let callsign_prefix = normalized_callsign_prefix(callsign_prefix.as_deref());
+        if let Some(callsign_prefix) = callsign_prefix.as_deref() {
+            let matching_ids = cached_log.matching_contact_ids_for_prefix(callsign_prefix);
+            if matching_ids.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let mut matching_positions = matching_ids
+                .into_iter()
+                .filter_map(|contact_id| cached_log.contact_positions.get(&contact_id).copied())
+                .collect::<Vec<_>>();
+            matching_positions.sort_unstable();
+
+            return Ok(matching_positions
+                .into_iter()
+                .skip(offset)
+                .take(limit)
+                .filter_map(|index| cached_log.contacts.get(index).cloned())
+                .collect());
+        }
 
         if offset >= cached_log.contacts.len() {
             return Ok(Vec::new());
@@ -158,13 +182,8 @@ impl LogCache {
         let previous_contacts = committed_contacts
             .iter()
             .map(|committed_contact| {
-                contact_id(committed_contact).and_then(|id| {
-                    cached_log
-                        .contacts
-                        .iter()
-                        .find(|contact| contact_id(contact) == Some(id))
-                        .cloned()
-                })
+                contact_id(committed_contact)
+                    .and_then(|contact_id| cached_log.contact_by_id(contact_id))
             })
             .collect::<Vec<_>>();
 
@@ -172,6 +191,7 @@ impl LogCache {
             merge_contact(&mut cached_log.contacts, committed_contact);
         }
         sort_contacts_desc(&mut cached_log.contacts);
+        cached_log.rebuild_indexes();
 
         let committed_contact_ids = committed_contacts
             .iter()
@@ -189,17 +209,14 @@ impl LogCache {
             ));
         }
 
+        cached_log.rebuild_indexes();
         let changed_contacts = dedupe_contacts(changed_contacts, &committed_contact_ids);
 
         let contacts = committed_contacts
             .iter()
             .filter_map(|committed_contact| {
-                let id = contact_id(committed_contact)?;
-                cached_log
-                    .contacts
-                    .iter()
-                    .find(|contact| contact_id(contact) == Some(id))
-                    .cloned()
+                let contact_id = contact_id(committed_contact)?;
+                cached_log.contact_by_id(contact_id)
             })
             .collect::<Vec<_>>();
 
@@ -250,6 +267,8 @@ impl LogCache {
                 &deleted_contact,
             ));
         }
+
+        cached_log.rebuild_indexes();
 
         Ok(Some(LogCacheDeleteResult {
             log_id,
@@ -319,6 +338,54 @@ impl LogCache {
     }
 }
 
+impl CachedLog {
+    fn new(module: Arc<ContestScoringModule>, contacts: Vec<Contact>) -> Self {
+        let mut cached_log = Self {
+            module,
+            contacts,
+            callsign_index: BTreeMap::new(),
+            contact_positions: HashMap::new(),
+        };
+        cached_log.rebuild_indexes();
+        cached_log
+    }
+
+    fn rebuild_indexes(&mut self) {
+        self.callsign_index.clear();
+        self.contact_positions.clear();
+
+        for (index, contact) in self.contacts.iter().enumerate() {
+            let Some(contact_id) = contact_id(contact) else {
+                continue;
+            };
+            self.contact_positions.insert(contact_id, index);
+
+            if let Some(callsign) = contact_callsign(contact) {
+                self.callsign_index
+                    .entry(callsign)
+                    .or_default()
+                    .push(contact_id);
+            }
+        }
+    }
+
+    fn contact_by_id(&self, contact_id: i64) -> Option<Contact> {
+        let index = *self.contact_positions.get(&contact_id)?;
+        self.contacts.get(index).cloned()
+    }
+
+    fn matching_contact_ids_for_prefix(&self, callsign_prefix: &str) -> HashSet<i64> {
+        let mut matching_ids = HashSet::new();
+        for (callsign, contact_ids) in self.callsign_index.range(callsign_prefix.to_string()..) {
+            if !callsign.starts_with(callsign_prefix) {
+                break;
+            }
+            matching_ids.extend(contact_ids.iter().copied());
+        }
+        matching_ids
+    }
+}
+
 fn merge_contact(contacts: &mut Vec<Contact>, contact: &Contact) {
     if let Some(id) = contact_id(contact)
         && let Some(index) = contacts
@@ -347,6 +414,21 @@ fn dedupe_contacts(contacts: Vec<Contact>, excluded_ids: &HashSet<i64>) -> Vec<C
     }
 
     deduped
+}
+
+fn normalized_callsign_prefix(callsign_prefix: Option<&str>) -> Option<String> {
+    let callsign_prefix = callsign_prefix.unwrap_or_default().trim().to_uppercase();
+    (!callsign_prefix.is_empty()).then_some(callsign_prefix)
+}
+
+fn contact_callsign(contact: &Contact) -> Option<String> {
+    let callsign = contact
+        .get("CALL")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_uppercase();
+    (!callsign.is_empty()).then_some(callsign)
 }
 
 fn sort_contacts_desc(contacts: &mut [Contact]) {

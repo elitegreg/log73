@@ -259,6 +259,34 @@
   color: white;
   padding: 2px 5px;
   font-weight: bold;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-title-main {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-title-search {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.log-title-search input {
+  width: 14ch;
+  max-width: 180px;
+  border: 1px solid #808080;
+  padding: 1px 3px;
+  font: inherit;
+  text-transform: uppercase;
 }
 
 .log-table-scroll {
