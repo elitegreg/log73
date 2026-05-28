@@ -7,7 +7,6 @@ import React, {
   useState,
 } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { sanitizeCallsign } from '../domain/contactFields';
 import { apiJson, websocketUrl } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
@@ -42,7 +41,6 @@ const SOCKET_DEBUG_PANEL_QUERY_PARAM = 'socket_debug';
 const SOCKET_DEBUG_PANEL_STORAGE_KEY = 'log73.socket_debug_panel';
 const MAX_SOCKET_DEBUG_ENTRIES = 80;
 const MAX_SOCKET_DEBUG_DETAILS_LENGTH = 240;
-const CALLSIGN_SEARCH_DEBOUNCE_MS = 250;
 
 function promptForOperatorCallsign(defaultCallsign) {
   const enteredCallsign = window.prompt(
@@ -139,7 +137,6 @@ function LoggerScreen() {
   const [cwLabels, setCwLabels] = useState(null);
   const [cwSentEvent, setCwSentEvent] = useState(null);
   const [allContacts, setAllContacts] = useState(() => loadLocalContacts(logId));
-  const [callsignSearch, setCallsignSearch] = useState('');
   const [debouncedCallsignSearch, setDebouncedCallsignSearch] = useState('');
   const [searchResultIds, setSearchResultIds] = useState(null);
   const [operatorCallsign, setOperatorCallsign] = useState('');
@@ -176,6 +173,14 @@ function LoggerScreen() {
     [notifyError],
   );
 
+  const handleDebouncedCallsignChange = useCallback((value) => {
+    const normalizedValue = String(value ?? '').trim().toUpperCase();
+    setDebouncedCallsignSearch(normalizedValue);
+    if (!normalizedValue) {
+      setSearchResultIds(null);
+    }
+  }, []);
+
   useEffect(() => {
     saveLocalContacts(logId, allContacts);
   }, [allContacts, logId]);
@@ -185,22 +190,14 @@ function LoggerScreen() {
   }, [numericLogId]);
 
   useEffect(() => {
-    setCallsignSearch('');
     setDebouncedCallsignSearch('');
     setSearchResultIds(null);
     activeCallsignPrefixRef.current = '';
   }, [numericLogId]);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      setDebouncedCallsignSearch(callsignSearch.trim().toUpperCase());
-    }, CALLSIGN_SEARCH_DEBOUNCE_MS);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [callsignSearch]);
-
-  useEffect(() => {
-    activeCallsignPrefixRef.current = debouncedCallsignSearch.trim().toUpperCase();
+    activeCallsignPrefixRef.current =
+      debouncedCallsignSearch.trim().toUpperCase();
   }, [debouncedCallsignSearch]);
 
   const visibleContacts = useMemo(() => {
@@ -995,19 +992,18 @@ function LoggerScreen() {
     const searchPromise = loadSearchResults();
     searchPromise.catch((error) => {
       if (isCancelled) return;
-      notifyOperationalError(
-        'LoggerScreen.searchContacts',
-        'Unable to search contacts by callsign.',
+      console.error('LoggerScreen.searchContacts failed', {
+        logId: numericLogId,
+        callsignPrefix,
         error,
-        { logId: numericLogId, callsignPrefix },
-      );
+      });
       setSearchResultIds(null);
     });
 
     return () => {
       isCancelled = true;
     };
-  }, [numericLogId, debouncedCallsignSearch, notifyOperationalError]);
+  }, [numericLogId, debouncedCallsignSearch]);
 
   useEffect(() => {
     const pendingContact = allContacts.find((contact) => {
@@ -1262,8 +1258,8 @@ function LoggerScreen() {
         }
         onStopCw={() => sendRadioMessage({ type: 'stop_cw' })}
         onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}
+        onDebouncedCallsignChange={handleDebouncedCallsignChange}
         onLogContact={(contact) => {
-          setCallsignSearch('');
           setDebouncedCallsignSearch('');
           setSearchResultIds(null);
           setAllContacts((currentContacts) =>
@@ -1281,15 +1277,6 @@ function LoggerScreen() {
         log={log}
         contactsLoadState={contactsLoadState}
         radioMode={radioState?.mode ?? 'CW'}
-        searchQuery={callsignSearch}
-        onSearchQueryChange={(value) => {
-          const sanitizedValue = sanitizeCallsign(value);
-          setCallsignSearch(sanitizedValue);
-          if (!sanitizedValue.trim()) {
-            setDebouncedCallsignSearch('');
-            setSearchResultIds(null);
-          }
-        }}
         onDeleteContacts={deleteContacts}
         onUpdateContacts={updateContacts}
       />

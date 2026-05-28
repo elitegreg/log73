@@ -312,8 +312,6 @@ function LogWindow({
   log,
   contactsLoadState,
   radioMode = 'CW',
-  searchQuery = '',
-  onSearchQueryChange,
   onDeleteContacts,
   onUpdateContacts,
 }) {
@@ -485,22 +483,6 @@ function LogWindow({
             <span className="log-title-status"> ({contactsLoadMessage})</span>
           ) : null}
         </div>
-        <label className="log-title-search" htmlFor="log-callsign-search">
-          <span>Search:</span>
-          <input
-            id="log-callsign-search"
-            type="text"
-            inputMode="text"
-            placeholder="Callsign prefix"
-            value={searchQuery}
-            onChange={(event) => onSearchQueryChange?.(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key !== 'Escape') return;
-              event.preventDefault();
-              onSearchQueryChange?.('');
-            }}
-          />
-        </label>
       </div>
       <div className="log-table-scroll">
         <table className="log-table">

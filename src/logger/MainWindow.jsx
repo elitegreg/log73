@@ -66,6 +66,7 @@ function MainWindow({
   onStopCw,
   onSetCwWpm,
   onLogContact,
+  onDebouncedCallsignChange,
   onRescore,
   isRescoreLoading,
   scoreSummary,
@@ -175,6 +176,10 @@ function MainWindow({
       window.clearTimeout(timeoutId);
     };
   }, [callSign]);
+
+  useEffect(() => {
+    onDebouncedCallsignChange?.(debouncedCallSign.trim().toUpperCase());
+  }, [debouncedCallSign, onDebouncedCallsignChange]);
 
   useEffect(() => {
     let cancelled = false;
