@@ -1,5 +1,6 @@
 use crate::contest_rules::{ContestRules, MultiplierRule, QsoPoints, ScoringCondition};
 use crate::db::Contact;
+use crate::log_cache::LogCacheProcessor;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -35,11 +36,13 @@ fn scoring_module_key(contest_id: &str, contest_params: &Value) -> String {
     )
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Default)]
 pub struct ContestScoreTracker {
     logs: Arc<Mutex<HashMap<i64, TrackedLogScore>>>,
 }
 
+#[allow(dead_code)]
 #[derive(Clone)]
 struct TrackedLogScore {
     contacts: Vec<Contact>,
@@ -47,6 +50,7 @@ struct TrackedLogScore {
     totals: ScoreTotals,
 }
 
+#[allow(dead_code)]
 impl ContestScoreTracker {
     pub fn new() -> Self {
         Self::default()
@@ -266,6 +270,62 @@ impl ContestScoringModule {
             ..ContestScorer::default()
         }
     }
+
+    pub fn has_multipliers(&self) -> bool {
+        !self.rules.multipliers.is_empty()
+    }
+
+    pub fn dupe_key_for(&self, contact: &Contact) -> Option<String> {
+        if self.rules.dupe_key.is_empty() {
+            return None;
+        }
+        Some(scoring_key(contact, &self.rules, &self.rules.dupe_key))
+    }
+
+    pub fn qso_points_for(&self, contact: &Contact) -> i64 {
+        let Some(qso_points) = &self.rules.qso_points else {
+            return 0;
+        };
+
+        score_qso_points(qso_points, contact, &self.rules).unwrap_or(0)
+    }
+
+    pub fn multiplier_keys_for(&self, contact: &Contact) -> Vec<String> {
+        self.rules
+            .multipliers
+            .iter()
+            .filter(|multiplier| multiplier_matches(multiplier, contact, &self.rules))
+            .map(|multiplier| {
+                format!(
+                    "{}:{}",
+                    multiplier.name.to_uppercase(),
+                    scoring_key(contact, &self.rules, &multiplier.key)
+                )
+            })
+            .collect()
+    }
+
+    pub fn bonus_keys_for(&self, contact: &Contact) -> Vec<(String, i64)> {
+        let mut keys = Vec::new();
+        for bonus in &self.rules.bonus_points {
+            let Some(value) = field_value(contact, &self.rules, &bonus.field) else {
+                continue;
+            };
+            let Some(points) = bonus.values.get(&value) else {
+                continue;
+            };
+
+            keys.push((
+                format!(
+                    "{}:{}",
+                    bonus.name.to_uppercase(),
+                    scoring_key(contact, &self.rules, &bonus.key)
+                ),
+                *points,
+            ));
+        }
+        keys
+    }
 }
 
 impl Default for ContestScoringModule {
@@ -328,6 +388,7 @@ impl ContestScorer {
         self.totals.clone()
     }
 
+    #[allow(dead_code)]
     pub fn remove_scored_qso(&mut self, contact: &Contact) -> ScoreTotals {
         self.totals.qso_count = self.totals.qso_count.saturating_sub(1);
         self.totals.qso_points -= scored_i64(contact, "_pts");
@@ -344,19 +405,14 @@ impl ContestScorer {
     }
 
     pub fn dupe_key(&self, contact: &Contact) -> Option<String> {
-        let dupe_key = &self.module.rules.dupe_key;
-        if dupe_key.is_empty() {
-            return None;
-        }
-
-        Some(self.key(contact, dupe_key))
+        self.module.dupe_key_for(contact)
     }
 
     fn recalculate_score(&mut self) {
-        self.totals.score = if self.module.rules.multipliers.is_empty() {
-            self.totals.qso_points + self.totals.bonus_points
-        } else {
+        self.totals.score = if self.module.has_multipliers() {
             self.totals.qso_points * self.totals.multipliers + self.totals.bonus_points
+        } else {
+            self.totals.qso_points + self.totals.bonus_points
         };
     }
 
@@ -371,6 +427,7 @@ impl ContestScorer {
         is_dupe
     }
 
+    #[allow(dead_code)]
     fn remove_dupe_key(&mut self, contact: &Contact) {
         let Some(key) = self.dupe_key(contact) else {
             return;
@@ -387,58 +444,23 @@ impl ContestScorer {
     }
 
     fn qso_points(&self, contact: &Contact) -> i64 {
-        let Some(qso_points) = &self.module.rules.qso_points else {
-            return 0;
-        };
-
-        score_qso_points(qso_points, contact, &self.module.rules).unwrap_or(0)
+        self.module.qso_points_for(contact)
     }
 
     fn multipliers(&mut self, contact: &Contact) -> i64 {
-        let mut new_multipliers = 0;
-        let multipliers = self.module.rules.multipliers.clone();
-        for multiplier in &multipliers {
-            if !multiplier_matches(multiplier, contact, &self.module.rules) {
-                continue;
-            }
-            let key = self.key(contact, &multiplier.key);
-            if self
-                .multiplier_keys
-                .insert(format!("{}:{key}", multiplier.name.to_uppercase()))
-            {
-                new_multipliers += 1;
-            }
-        }
-        new_multipliers
+        self.module
+            .multiplier_keys_for(contact)
+            .into_iter()
+            .filter(|key| self.multiplier_keys.insert(key.clone()))
+            .count() as i64
     }
 
     fn bonus_points(&mut self, contact: &Contact) -> i64 {
-        let mut bonus_points = 0;
-        let bonuses = self.module.rules.bonus_points.clone();
-        for bonus in &bonuses {
-            let Some(value) = field_value(contact, &self.module.rules, &bonus.field) else {
-                continue;
-            };
-            let Some(points) = bonus.values.get(&value) else {
-                continue;
-            };
-            let key = self.key(contact, &bonus.key);
-            if self
-                .bonus_keys
-                .insert(format!("{}:{key}", bonus.name.to_uppercase()))
-            {
-                bonus_points += points;
-            }
-        }
-        bonus_points
-    }
-
-    fn key(&self, contact: &Contact, fields: &[String]) -> String {
-        fields
-            .iter()
-            .map(|field| field_value(contact, &self.module.rules, field).unwrap_or_default())
-            .collect::<Vec<_>>()
-            .join("|")
+        self.module
+            .bonus_keys_for(contact)
+            .into_iter()
+            .filter_map(|(key, points)| self.bonus_keys.insert(key).then_some(points))
+            .sum()
     }
 }
 
@@ -455,6 +477,14 @@ pub fn score_contacts(
         scorer.add_qso(contact);
     }
     scorer.totals()
+}
+
+fn scoring_key(contact: &Contact, rules: &ContestRules, fields: &[String]) -> String {
+    fields
+        .iter()
+        .map(|field| field_value(contact, rules, field).unwrap_or_default())
+        .collect::<Vec<_>>()
+        .join("|")
 }
 
 fn score_qso_points(
@@ -553,6 +583,7 @@ fn contact_id_for(contact: &Contact) -> Option<i64> {
         .and_then(Value::as_i64)
 }
 
+#[allow(dead_code)]
 fn contact_score_order(contact: &Contact) -> (i64, i64) {
     (
         contact
@@ -570,6 +601,463 @@ fn json_string(value: Option<&Value>) -> Option<String> {
         Value::Bool(value) => Some(value.to_string()),
         _ => None,
     }
+}
+
+#[derive(Clone, Default)]
+pub struct IncrementalScoreTracker {
+    logs: Arc<Mutex<HashMap<i64, IncrementalLogState>>>,
+}
+
+#[derive(Clone)]
+struct IncrementalLogState {
+    module: Arc<ContestScoringModule>,
+    totals: ScoreTotals,
+    dupe_counts: HashMap<String, usize>,
+    dupe_owners: HashMap<String, i64>,
+    multiplier_owners: HashMap<String, i64>,
+    bonus_owners: HashMap<String, i64>,
+}
+
+impl IncrementalScoreTracker {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn totals(&self, log_id: i64) -> Option<ScoreTotals> {
+        let logs = self
+            .logs
+            .lock()
+            .expect("incremental score tracker mutex poisoned");
+        logs.get(&log_id).map(|state| state.totals.clone())
+    }
+}
+
+impl LogCacheProcessor for IncrementalScoreTracker {
+    fn on_log_loaded(
+        &self,
+        log_id: i64,
+        module: Arc<ContestScoringModule>,
+        contacts: &mut [Contact],
+    ) {
+        let mut logs = self
+            .logs
+            .lock()
+            .expect("incremental score tracker mutex poisoned");
+        let state = logs
+            .entry(log_id)
+            .or_insert_with(|| IncrementalLogState::new(Arc::clone(&module)));
+        state.reset(module, contacts);
+    }
+
+    fn on_contacts_upserted(
+        &self,
+        log_id: i64,
+        module: Arc<ContestScoringModule>,
+        contacts: &mut [Contact],
+        committed_contacts: &[Contact],
+        previous_contacts: &[Option<Contact>],
+    ) -> Vec<Contact> {
+        let mut logs = self
+            .logs
+            .lock()
+            .expect("incremental score tracker mutex poisoned");
+        let state = logs
+            .entry(log_id)
+            .or_insert_with(|| IncrementalLogState::new(Arc::clone(&module)));
+        if !Arc::ptr_eq(&state.module, &module) {
+            state.reset(Arc::clone(&module), contacts);
+        }
+
+        let mut changed_contact_ids = HashSet::new();
+        for previous_contact in previous_contacts.iter().flatten() {
+            state.remove_contact(
+                previous_contact,
+                contacts,
+                &mut changed_contact_ids,
+                contact_id_for(previous_contact),
+            );
+        }
+
+        for committed_contact in committed_contacts {
+            let Some(committed_id) = contact_id_for(committed_contact) else {
+                continue;
+            };
+            if let Some(index) = contacts
+                .iter()
+                .position(|contact| contact_id_for(contact) == Some(committed_id))
+            {
+                state.add_contact(&mut contacts[index]);
+            }
+        }
+
+        let committed_ids = committed_contacts
+            .iter()
+            .filter_map(contact_id_for)
+            .collect::<HashSet<_>>();
+
+        collect_changed_contacts(contacts, &changed_contact_ids, &committed_ids)
+    }
+
+    fn on_contact_deleted(
+        &self,
+        log_id: i64,
+        module: Arc<ContestScoringModule>,
+        contacts: &mut [Contact],
+        deleted_contact: &Contact,
+    ) -> Vec<Contact> {
+        let mut logs = self
+            .logs
+            .lock()
+            .expect("incremental score tracker mutex poisoned");
+        let Some(state) = logs.get_mut(&log_id) else {
+            return Vec::new();
+        };
+        if !Arc::ptr_eq(&state.module, &module) {
+            state.reset(Arc::clone(&module), contacts);
+            return Vec::new();
+        }
+
+        let mut changed_contact_ids = HashSet::new();
+        state.remove_contact(deleted_contact, contacts, &mut changed_contact_ids, None);
+
+        collect_changed_contacts(contacts, &changed_contact_ids, &HashSet::new())
+    }
+
+    fn on_log_removed(&self, log_id: i64) {
+        let mut logs = self
+            .logs
+            .lock()
+            .expect("incremental score tracker mutex poisoned");
+        logs.remove(&log_id);
+    }
+}
+
+impl IncrementalLogState {
+    fn new(module: Arc<ContestScoringModule>) -> Self {
+        Self {
+            module,
+            totals: ScoreTotals::default(),
+            dupe_counts: HashMap::new(),
+            dupe_owners: HashMap::new(),
+            multiplier_owners: HashMap::new(),
+            bonus_owners: HashMap::new(),
+        }
+    }
+
+    fn reset(&mut self, module: Arc<ContestScoringModule>, contacts: &mut [Contact]) {
+        self.module = module;
+        self.totals = ScoreTotals::default();
+        self.dupe_counts.clear();
+        self.dupe_owners.clear();
+        self.multiplier_owners.clear();
+        self.bonus_owners.clear();
+
+        for contact in contacts {
+            self.add_contact(contact);
+        }
+    }
+
+    fn add_contact(&mut self, contact: &mut Contact) {
+        self.totals.qso_count += 1;
+
+        let contact_id = contact_id_for(contact);
+        let mut is_dupe = false;
+        if let Some(dupe_key) = self.module.dupe_key_for(contact) {
+            let count = self.dupe_counts.entry(dupe_key.clone()).or_insert(0);
+            is_dupe = *count > 0;
+            *count += 1;
+
+            if !is_dupe && let Some(contact_id) = contact_id {
+                self.dupe_owners.entry(dupe_key).or_insert(contact_id);
+            }
+        }
+
+        if is_dupe {
+            set_contact_score_fields(contact, 0, 0, 0, true);
+            self.recalculate_score();
+            return;
+        }
+
+        let (points, mults, bonus) = self.score_non_dupe_contact(contact, contact_id);
+        self.totals.qso_points += points;
+        self.totals.multipliers += mults;
+        self.totals.bonus_points += bonus;
+        set_contact_score_fields(contact, points, mults, bonus, false);
+
+        self.recalculate_score();
+    }
+
+    fn remove_contact(
+        &mut self,
+        deleted_contact: &Contact,
+        contacts: &mut [Contact],
+        changed_contact_ids: &mut HashSet<i64>,
+        skip_candidate_id: Option<i64>,
+    ) {
+        self.totals.qso_count = self.totals.qso_count.saturating_sub(1);
+        self.totals.qso_points -= scored_i64(deleted_contact, "_pts");
+        self.totals.multipliers -= scored_i64(deleted_contact, "_mult");
+        self.totals.bonus_points -= scored_i64(deleted_contact, "_bonus");
+
+        let deleted_contact_id = contact_id_for(deleted_contact);
+        let deleted_dupe_key = self.module.dupe_key_for(deleted_contact);
+
+        let mut dupe_replacement_index = None;
+        if let Some(dupe_key) = deleted_dupe_key.as_deref() {
+            if let Some(count) = self.dupe_counts.get_mut(dupe_key) {
+                if *count <= 1 {
+                    self.dupe_counts.remove(dupe_key);
+                } else {
+                    *count -= 1;
+                }
+            }
+
+            if let Some(deleted_contact_id) = deleted_contact_id
+                && self.dupe_owners.get(dupe_key) == Some(&deleted_contact_id)
+            {
+                self.dupe_owners.remove(dupe_key);
+                dupe_replacement_index =
+                    self.find_dupe_replacement_index(contacts, dupe_key, skip_candidate_id);
+                if let Some(index) = dupe_replacement_index
+                    && let Some(replacement_contact_id) = contact_id_for(&contacts[index])
+                {
+                    self.dupe_owners
+                        .insert(dupe_key.to_string(), replacement_contact_id);
+                }
+            }
+        }
+
+        let freed_multiplier_keys = deleted_contact_id
+            .map(|contact_id| {
+                IncrementalLogState::remove_owned_keys(&mut self.multiplier_owners, contact_id)
+            })
+            .unwrap_or_default();
+        let freed_bonus_keys = deleted_contact_id
+            .map(|contact_id| {
+                IncrementalLogState::remove_owned_keys(&mut self.bonus_owners, contact_id)
+            })
+            .unwrap_or_default();
+
+        if let Some(index) = dupe_replacement_index {
+            self.promote_contact(index, contacts, changed_contact_ids);
+        }
+
+        for multiplier_key in freed_multiplier_keys {
+            if self.multiplier_owners.contains_key(&multiplier_key) {
+                continue;
+            }
+            let Some(index) = self.find_multiplier_replacement_index(
+                contacts,
+                &multiplier_key,
+                skip_candidate_id,
+            ) else {
+                continue;
+            };
+            let Some(contact_id) = contact_id_for(&contacts[index]) else {
+                continue;
+            };
+
+            self.multiplier_owners.insert(multiplier_key, contact_id);
+            increment_contact_score_field(&mut contacts[index], "_mult", 1);
+            self.totals.multipliers += 1;
+            changed_contact_ids.insert(contact_id);
+        }
+
+        for bonus_key in freed_bonus_keys {
+            if self.bonus_owners.contains_key(&bonus_key) {
+                continue;
+            }
+            let Some((index, points)) =
+                self.find_bonus_replacement(contacts, &bonus_key, skip_candidate_id)
+            else {
+                continue;
+            };
+            let Some(contact_id) = contact_id_for(&contacts[index]) else {
+                continue;
+            };
+
+            self.bonus_owners.insert(bonus_key, contact_id);
+            increment_contact_score_field(&mut contacts[index], "_bonus", points);
+            self.totals.bonus_points += points;
+            changed_contact_ids.insert(contact_id);
+        }
+
+        self.recalculate_score();
+    }
+
+    fn promote_contact(
+        &mut self,
+        index: usize,
+        contacts: &mut [Contact],
+        changed_contact_ids: &mut HashSet<i64>,
+    ) {
+        let Some(contact) = contacts.get_mut(index) else {
+            return;
+        };
+        if !is_dupe_contact(contact) {
+            return;
+        }
+
+        let contact_id = contact_id_for(contact);
+        let (points, mults, bonus) = self.score_non_dupe_contact(contact, contact_id);
+        self.totals.qso_points += points;
+        self.totals.multipliers += mults;
+        self.totals.bonus_points += bonus;
+        set_contact_score_fields(contact, points, mults, bonus, false);
+
+        if let Some(contact_id) = contact_id {
+            changed_contact_ids.insert(contact_id);
+        }
+    }
+
+    fn score_non_dupe_contact(
+        &mut self,
+        contact: &Contact,
+        contact_id: Option<i64>,
+    ) -> (i64, i64, i64) {
+        let points = self.module.qso_points_for(contact);
+        let mut mults = 0;
+        let mut bonus = 0;
+
+        for multiplier_key in self.module.multiplier_keys_for(contact) {
+            if let Some(contact_id) = contact_id
+                && !self.multiplier_owners.contains_key(&multiplier_key)
+            {
+                self.multiplier_owners.insert(multiplier_key, contact_id);
+                mults += 1;
+            }
+        }
+
+        for (bonus_key, points) in self.module.bonus_keys_for(contact) {
+            if let Some(contact_id) = contact_id
+                && !self.bonus_owners.contains_key(&bonus_key)
+            {
+                self.bonus_owners.insert(bonus_key, contact_id);
+                bonus += points;
+            }
+        }
+
+        (points, mults, bonus)
+    }
+
+    fn remove_owned_keys(owners: &mut HashMap<String, i64>, contact_id: i64) -> Vec<String> {
+        let keys = owners
+            .iter()
+            .filter_map(|(key, owner_id)| (*owner_id == contact_id).then_some(key.clone()))
+            .collect::<Vec<_>>();
+        for key in &keys {
+            owners.remove(key);
+        }
+        keys
+    }
+
+    fn find_dupe_replacement_index(
+        &self,
+        contacts: &[Contact],
+        dupe_key: &str,
+        skip_candidate_id: Option<i64>,
+    ) -> Option<usize> {
+        contacts.iter().position(|contact| {
+            let Some(contact_id) = contact_id_for(contact) else {
+                return false;
+            };
+            if skip_candidate_id == Some(contact_id) {
+                return false;
+            }
+            self.module.dupe_key_for(contact).as_deref() == Some(dupe_key)
+        })
+    }
+
+    fn find_multiplier_replacement_index(
+        &self,
+        contacts: &[Contact],
+        multiplier_key: &str,
+        skip_candidate_id: Option<i64>,
+    ) -> Option<usize> {
+        contacts.iter().position(|contact| {
+            let Some(contact_id) = contact_id_for(contact) else {
+                return false;
+            };
+            if skip_candidate_id == Some(contact_id) || is_dupe_contact(contact) {
+                return false;
+            }
+            self.module
+                .multiplier_keys_for(contact)
+                .iter()
+                .any(|key| key == multiplier_key)
+        })
+    }
+
+    fn find_bonus_replacement(
+        &self,
+        contacts: &[Contact],
+        bonus_key: &str,
+        skip_candidate_id: Option<i64>,
+    ) -> Option<(usize, i64)> {
+        contacts.iter().enumerate().find_map(|(index, contact)| {
+            let contact_id = contact_id_for(contact)?;
+            if skip_candidate_id == Some(contact_id) || is_dupe_contact(contact) {
+                return None;
+            }
+
+            self.module
+                .bonus_keys_for(contact)
+                .into_iter()
+                .find_map(|(key, points)| (key == bonus_key).then_some((index, points)))
+        })
+    }
+
+    fn recalculate_score(&mut self) {
+        self.totals.score = if self.module.has_multipliers() {
+            self.totals.qso_points * self.totals.multipliers + self.totals.bonus_points
+        } else {
+            self.totals.qso_points + self.totals.bonus_points
+        };
+    }
+}
+
+fn set_contact_score_fields(
+    contact: &mut Contact,
+    points: i64,
+    mults: i64,
+    bonus: i64,
+    is_dupe: bool,
+) {
+    contact.insert("_pts".to_string(), Value::Number(points.into()));
+    contact.insert("_mult".to_string(), Value::Number(mults.into()));
+    contact.insert("_bonus".to_string(), Value::Number(bonus.into()));
+    contact.insert("_dupe".to_string(), Value::Bool(is_dupe));
+}
+
+fn increment_contact_score_field(contact: &mut Contact, field: &str, delta: i64) {
+    let value = scored_i64(contact, field) + delta;
+    contact.insert(field.to_string(), Value::Number(value.into()));
+}
+
+fn is_dupe_contact(contact: &Contact) -> bool {
+    contact
+        .get("_dupe")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn collect_changed_contacts(
+    contacts: &[Contact],
+    changed_contact_ids: &HashSet<i64>,
+    excluded_contact_ids: &HashSet<i64>,
+) -> Vec<Contact> {
+    contacts
+        .iter()
+        .filter_map(|contact| {
+            let contact_id = contact_id_for(contact)?;
+            if !changed_contact_ids.contains(&contact_id)
+                || excluded_contact_ids.contains(&contact_id)
+            {
+                return None;
+            }
+            Some(contact.clone())
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -774,5 +1262,109 @@ mod tests {
         assert_eq!(totals.score, 358);
         assert_eq!(contacts[0].get("_bonus"), Some(&json!(350)));
         assert_eq!(contacts[1].get("_bonus"), Some(&json!(0)));
+    }
+
+    #[test]
+    fn incremental_tracker_promotes_dupe_when_owner_is_deleted() {
+        let rules = test_rules(
+            fixed_points(2),
+            vec!["CALL", "BAND", "MODE"],
+            Vec::new(),
+            Vec::new(),
+        );
+        let module = Arc::new(ContestScoringModule::new(rules, Value::Null));
+        let tracker = IncrementalScoreTracker::new();
+        let mut contacts = vec![
+            contact(vec![
+                ("_id", json!(1)),
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+            ]),
+            contact(vec![
+                ("_id", json!(2)),
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+            ]),
+        ];
+
+        tracker.on_log_loaded(1, Arc::clone(&module), &mut contacts);
+        assert_eq!(contacts[0].get("_dupe"), Some(&json!(false)));
+        assert_eq!(contacts[1].get("_dupe"), Some(&json!(true)));
+
+        let deleted = contacts.remove(0);
+        let changed = tracker.on_contact_deleted(1, module, &mut contacts, &deleted);
+
+        assert_eq!(contacts[0].get("_dupe"), Some(&json!(false)));
+        assert_eq!(contacts[0].get("_pts"), Some(&json!(2)));
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].get("_id").and_then(Value::as_i64), Some(2));
+
+        let totals = tracker.totals(1).expect("totals should exist");
+        assert_eq!(totals.qso_count, 1);
+        assert_eq!(totals.qso_points, 2);
+        assert_eq!(totals.score, 2);
+    }
+
+    #[test]
+    fn incremental_tracker_reclaims_multipliers_after_owner_delete() {
+        let rules = test_rules(
+            fixed_points(1),
+            vec!["CALL", "BAND", "MODE"],
+            vec![state_multiplier()],
+            Vec::new(),
+        );
+        let module = Arc::new(ContestScoringModule::new(rules, Value::Null));
+        let tracker = IncrementalScoreTracker::new();
+        let mut contacts = vec![
+            contact(vec![
+                ("_id", json!(1)),
+                ("CALL", json!("K1AAA")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+                ("STATE", json!("SC")),
+            ]),
+            contact(vec![
+                ("_id", json!(2)),
+                ("CALL", json!("K1BBB")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+                ("STATE", json!("NC")),
+            ]),
+            contact(vec![
+                ("_id", json!(3)),
+                ("CALL", json!("K1CCC")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+                ("STATE", json!("SC")),
+            ]),
+        ];
+
+        tracker.on_log_loaded(7, Arc::clone(&module), &mut contacts);
+        assert_eq!(contact_by_id(&contacts, 1).get("_mult"), Some(&json!(1)));
+        assert_eq!(contact_by_id(&contacts, 2).get("_mult"), Some(&json!(1)));
+        assert_eq!(contact_by_id(&contacts, 3).get("_mult"), Some(&json!(0)));
+
+        let deleted = contacts.remove(0);
+        let changed = tracker.on_contact_deleted(7, module, &mut contacts, &deleted);
+
+        assert_eq!(contact_by_id(&contacts, 3).get("_mult"), Some(&json!(1)));
+        assert_eq!(changed.len(), 1);
+        assert_eq!(changed[0].get("_id").and_then(Value::as_i64), Some(3));
+
+        let totals = tracker.totals(7).expect("totals should exist");
+        assert_eq!(totals.qso_count, 2);
+        assert_eq!(totals.qso_points, 2);
+        assert_eq!(totals.multipliers, 2);
+        assert_eq!(totals.score, 4);
+    }
+
+    fn contact_by_id(contacts: &[Contact], id: i64) -> Contact {
+        contacts
+            .iter()
+            .find(|contact| contact.get("_id").and_then(Value::as_i64) == Some(id))
+            .cloned()
+            .expect("contact id should exist")
     }
 }

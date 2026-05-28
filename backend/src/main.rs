@@ -7,6 +7,7 @@ mod contest_rules;
 mod cw;
 mod db;
 mod dxcc;
+mod log_cache;
 mod radio;
 mod radio_manager;
 mod scoring;
@@ -29,16 +30,12 @@ use clap::Parser;
 use contest_rules::{ContestRules, ContestRulesStore};
 use db::{Contact, Database, NewLog, NewRadio, UpdateLog};
 use futures_util::{SinkExt, StreamExt};
+use log_cache::LogCache;
 use radio::{ClientMessage, RadioCommand, ServerMessage};
 use radio_cat_rs::supported_radio_kinds;
 use radio_manager::RadioManager;
-use scoring::{ContestScoreTracker, ScoreTotals, ScoringModules, score_contacts};
-use std::{
-    collections::{HashMap, HashSet},
-    fs::OpenOptions,
-    path::PathBuf,
-    time::Duration,
-};
+use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
+use std::{collections::HashMap, fs::OpenOptions, path::PathBuf, time::Duration};
 use supercheckpartial::SuperCheckPartial;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -51,8 +48,8 @@ struct AppState {
     log_events: broadcast::Sender<ServerMessage>,
     db: Database,
     contest_rules: ContestRulesStore,
-    scoring_modules: ScoringModules,
-    score_tracker: ContestScoreTracker,
+    log_cache: LogCache,
+    incremental_scoring: IncrementalScoreTracker,
     supercheckpartial: SuperCheckPartial,
     dxcc: std::sync::Arc<dxcc::DxccDatabase>,
 }
@@ -149,13 +146,18 @@ async fn main() {
     );
     let db = Database::open("log73.db").expect("failed to open log73.db");
     let radio_manager = RadioManager::new(db.clone());
+    let scoring_modules = ScoringModules::new();
+    let incremental_scoring = IncrementalScoreTracker::new();
+    let log_cache = LogCache::new(db.clone(), contest_rules.clone(), scoring_modules.clone());
+    log_cache.register_processor(std::sync::Arc::new(incremental_scoring.clone()));
+
     let app_state = AppState {
         radio_manager,
         log_events,
         db,
         contest_rules,
-        scoring_modules: ScoringModules::new(),
-        score_tracker: ContestScoreTracker::new(),
+        log_cache,
+        incremental_scoring,
         supercheckpartial,
         dxcc: std::sync::Arc::new(dxcc),
     };
@@ -300,7 +302,7 @@ async fn handle_socket(
     }
 
     if let Some(log_id) = log_id
-        && let Some(totals) = app_state.score_tracker.totals(log_id)
+        && let Some(totals) = app_state.incremental_scoring.totals(log_id)
     {
         let score_update = score_update_message(log_id, &totals);
         if sender
@@ -883,7 +885,7 @@ async fn delete_log(
     match app_state.db.delete_log(id).await {
         Ok(deleted) => {
             if deleted {
-                app_state.score_tracker.remove_log(id);
+                app_state.log_cache.remove_log(id);
             }
             Json(serde_json::json!({ "ok": true, "deleted": deleted }))
         }
@@ -1011,7 +1013,6 @@ async fn delete_radio(
 
 const DEFAULT_CONTACTS_PAGE_LIMIT: usize = 200;
 const MAX_CONTACTS_PAGE_LIMIT: usize = 1000;
-const TOKIO_YIELD_EVERY_ROWS: usize = 1000;
 
 #[derive(Debug, Default, serde::Deserialize)]
 struct ContactsQuery {
@@ -1038,20 +1039,24 @@ async fn contacts(
     Path(log_id): Path<i64>,
     Query(query): Query<ContactsQuery>,
 ) -> Json<Vec<Contact>> {
-    if let Err(error) = ensure_score_tracker_for_log(&app_state, log_id).await {
-        error!(log_id, %error, "failed to load contacts");
-        return Json(Vec::new());
-    }
+    let (limit, offset) = contacts_page(&query).unwrap_or((usize::MAX, 0));
 
-    let contacts = match contacts_page(&query) {
-        Some((limit, offset)) => app_state
-            .score_tracker
-            .contacts_display_page(log_id, offset, limit),
-        None => app_state
-            .score_tracker
-            .contacts_display_page(log_id, 0, usize::MAX),
+    let contacts = match app_state
+        .log_cache
+        .contacts_display_page(log_id, offset, limit)
+        .await
+    {
+        Ok(contacts) => contacts,
+        Err(error) => {
+            error!(log_id, %error, "failed to load contacts");
+            Vec::new()
+        }
     };
-    let totals = app_state.score_tracker.totals(log_id).unwrap_or_default();
+
+    let totals = app_state
+        .incremental_scoring
+        .totals(log_id)
+        .unwrap_or_default();
     send_score_update(&app_state, log_id, &totals);
     Json(contacts)
 }
@@ -1076,26 +1081,19 @@ async fn commit_contact(
     {
         return Json(serde_json::json!({ "ok": false, "error": error, "status": "failed" }));
     }
+
     let session_ids = input_contacts
         .iter()
         .map(contact_session_id)
         .collect::<Vec<_>>();
 
-    if let Err(error) = ensure_score_tracker_for_log(&app_state, log_id).await {
-        warn!(log_id, %error, "unable to initialize score tracker before committing contact");
-    }
-    let old_contacts = input_contacts
-        .iter()
-        .map(|contact| {
-            contact_id(contact).and_then(|id| app_state.score_tracker.contact(log_id, id))
-        })
-        .collect::<Vec<_>>();
-
-    match app_state.db.upsert_contacts(log_id, input_contacts).await {
-        Ok(mut contacts) => {
-            let score_result =
-                score_committed_contacts(&app_state, log_id, &mut contacts, &old_contacts).await;
-            for (contact, session_id) in contacts.iter_mut().zip(session_ids) {
+    match app_state
+        .log_cache
+        .upsert_contacts(log_id, input_contacts)
+        .await
+    {
+        Ok(mut result) => {
+            for (contact, session_id) in result.contacts.iter_mut().zip(session_ids) {
                 if let Some(session_id) = session_id {
                     contact.insert(
                         "_session_id".to_string(),
@@ -1106,18 +1104,29 @@ async fn commit_contact(
                     contact: contact.clone(),
                 });
             }
-            for contact in score_result.changed_contacts {
+
+            for contact in result.changed_contacts {
                 let _ = app_state
                     .log_events
                     .send(ServerMessage::LogEntry { contact });
             }
-            send_score_update(&app_state, log_id, &score_result.totals);
-            let contact = contacts.first().cloned();
-            Json(serde_json::json!({ "ok": true, "contact": contact, "contacts": contacts }))
+
+            let totals = app_state
+                .incremental_scoring
+                .totals(log_id)
+                .unwrap_or_default();
+            send_score_update(&app_state, log_id, &totals);
+
+            let contact = result.contacts.first().cloned();
+            Json(serde_json::json!({
+                "ok": true,
+                "contact": contact,
+                "contacts": result.contacts
+            }))
         }
         Err(error) => {
             error!(log_id, %error, "failed to commit contacts");
-            Json(serde_json::json!({ "ok": false, "error": error.to_string() }))
+            Json(serde_json::json!({ "ok": false, "error": error }))
         }
     }
 }
@@ -1126,43 +1135,27 @@ async fn delete_contact(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Json<serde_json::Value> {
-    match app_state.db.delete_contact(id).await {
-        Ok(Some(log_id)) => {
-            let old_contact = app_state.score_tracker.contact(log_id, id);
-            let needs_full_rescore = old_contact
-                .as_ref()
-                .map(|contact| {
-                    scored_contact_claimed_mult_or_bonus(contact)
-                        || app_state
-                            .score_tracker
-                            .removing_contact_affects_dupes(log_id, contact)
-                })
-                .unwrap_or(true);
-            let score_result = if needs_full_rescore {
-                rescore_log_after_change(&app_state, log_id, &HashSet::new()).await
-            } else {
-                match app_state.score_tracker.delete_incremental(log_id, id) {
-                    Some(totals) => ContactScoreResult {
-                        totals,
-                        changed_contacts: Vec::new(),
-                    },
-                    None => rescore_log_after_change(&app_state, log_id, &HashSet::new()).await,
-                }
-            };
-
-            let _ = app_state
-                .log_events
-                .send(ServerMessage::ContactDeleted { id, log_id });
-            for contact in score_result.changed_contacts {
+    match app_state.log_cache.delete_contact(id).await {
+        Ok(Some(result)) => {
+            let _ = app_state.log_events.send(ServerMessage::ContactDeleted {
+                id,
+                log_id: result.log_id,
+            });
+            for contact in result.changed_contacts {
                 let _ = app_state
                     .log_events
                     .send(ServerMessage::LogEntry { contact });
             }
-            send_score_update(&app_state, log_id, &score_result.totals);
+
+            let totals = app_state
+                .incremental_scoring
+                .totals(result.log_id)
+                .unwrap_or_default();
+            send_score_update(&app_state, result.log_id, &totals);
             Json(serde_json::json!({ "ok": true, "deleted": true }))
         }
         Ok(None) => Json(serde_json::json!({ "ok": true, "deleted": false })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
     }
 }
 
@@ -1171,156 +1164,6 @@ fn contact_session_id(contact: &Contact) -> Option<String> {
         .get("_session_id")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
-}
-
-#[derive(Default)]
-struct ScoredLogSnapshot {
-    contacts: Vec<Contact>,
-    totals: ScoreTotals,
-}
-
-#[derive(Default)]
-struct ContactScoreResult {
-    totals: ScoreTotals,
-    changed_contacts: Vec<Contact>,
-}
-
-async fn scored_contacts_for_log(
-    app_state: &AppState,
-    log_id: i64,
-) -> Result<ScoredLogSnapshot, String> {
-    let log = app_state
-        .db
-        .log(log_id)
-        .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("log {log_id} not found"))?;
-    let rules = app_state
-        .contest_rules
-        .get(&log.contest_id)
-        .ok_or_else(|| format!("unknown contest: {}", log.contest_id))?;
-    let mut contacts = app_state
-        .db
-        .contacts(log_id)
-        .await
-        .map_err(|error| error.to_string())?;
-
-    yield_now_for_row_count(contacts.len()).await;
-
-    contacts.sort_by_key(contact_score_order);
-    let module = app_state
-        .scoring_modules
-        .get(rules, log.contest_params.clone());
-    let totals = app_state
-        .score_tracker
-        .reset_log(log_id, module, &mut contacts);
-    tokio::task::yield_now().await;
-    contacts.sort_by_key(|contact| std::cmp::Reverse(contact_display_order(contact)));
-    Ok(ScoredLogSnapshot { contacts, totals })
-}
-
-async fn ensure_score_tracker_for_log(app_state: &AppState, log_id: i64) -> Result<(), String> {
-    if app_state.score_tracker.totals(log_id).is_some() {
-        return Ok(());
-    }
-
-    scored_contacts_for_log(app_state, log_id).await.map(|_| ())
-}
-
-async fn score_committed_contacts(
-    app_state: &AppState,
-    log_id: i64,
-    contacts: &mut [Contact],
-    old_contacts: &[Option<Contact>],
-) -> ContactScoreResult {
-    if contacts.len() == 1 && old_contacts.len() == 1 {
-        let contact = contacts[0].clone();
-        let score_result = if let Some(old_contact) = &old_contacts[0] {
-            let needs_full_rescore = scored_contact_claimed_mult_or_bonus(old_contact)
-                || contact_score_order(old_contact) != contact_score_order(&contact)
-                || !app_state.score_tracker.is_last_contact(log_id, old_contact)
-                || app_state
-                    .score_tracker
-                    .removing_contact_affects_dupes(log_id, old_contact);
-
-            if needs_full_rescore {
-                None
-            } else {
-                app_state.score_tracker.replace_incremental(log_id, contact)
-            }
-        } else if app_state.score_tracker.can_append(log_id, &contact) {
-            app_state.score_tracker.add_incremental(log_id, contact)
-        } else {
-            None
-        };
-
-        if let Some((scored_contact, totals)) = score_result {
-            contacts[0] = scored_contact;
-            return ContactScoreResult {
-                totals,
-                changed_contacts: Vec::new(),
-            };
-        }
-    }
-
-    let old_scored_contacts = app_state.score_tracker.contacts(log_id);
-    let committed_contact_ids = contacts
-        .iter()
-        .filter_map(contact_id)
-        .collect::<HashSet<_>>();
-    let scored_log = match scored_contacts_for_log(app_state, log_id).await {
-        Ok(scored_log) => scored_log,
-        Err(error) => {
-            error!(log_id, %error, "failed to rescore contacts after commit");
-            return ContactScoreResult {
-                totals: app_state.score_tracker.totals(log_id).unwrap_or_default(),
-                changed_contacts: Vec::new(),
-            };
-        }
-    };
-
-    for (index, contact) in contacts.iter_mut().enumerate() {
-        if let Some(scored_contact) = scored_contact_by_id(&scored_log.contacts, contact) {
-            *contact = scored_contact;
-        }
-        yield_now_every_rows(index + 1).await;
-    }
-
-    ContactScoreResult {
-        changed_contacts: scoring_changed_contacts(
-            &old_scored_contacts,
-            &scored_log.contacts,
-            &committed_contact_ids,
-        )
-        .await,
-        totals: scored_log.totals,
-    }
-}
-
-async fn rescore_log_after_change(
-    app_state: &AppState,
-    log_id: i64,
-    excluded_contact_ids: &HashSet<i64>,
-) -> ContactScoreResult {
-    let old_scored_contacts = app_state.score_tracker.contacts(log_id);
-    match scored_contacts_for_log(app_state, log_id).await {
-        Ok(scored_log) => ContactScoreResult {
-            changed_contacts: scoring_changed_contacts(
-                &old_scored_contacts,
-                &scored_log.contacts,
-                excluded_contact_ids,
-            )
-            .await,
-            totals: scored_log.totals,
-        },
-        Err(error) => {
-            error!(log_id, %error, "failed to rescore contacts after change");
-            ContactScoreResult {
-                totals: app_state.score_tracker.totals(log_id).unwrap_or_default(),
-                changed_contacts: Vec::new(),
-            }
-        }
-    }
 }
 
 fn send_score_update(app_state: &AppState, log_id: i64, totals: &ScoreTotals) {
@@ -1339,77 +1182,8 @@ fn score_update_message(log_id: i64, totals: &ScoreTotals) -> ServerMessage {
     }
 }
 
-fn scored_contact_by_id(scored_contacts: &[Contact], contact: &Contact) -> Option<Contact> {
-    let id = contact_id(contact)?;
-    scored_contacts
-        .iter()
-        .find(|scored_contact| contact_id(scored_contact) == Some(id))
-        .cloned()
-}
-
-async fn scoring_changed_contacts(
-    old_contacts: &[Contact],
-    new_contacts: &[Contact],
-    excluded_contact_ids: &HashSet<i64>,
-) -> Vec<Contact> {
-    let old_contacts_by_id = old_contacts
-        .iter()
-        .filter_map(|contact| contact_id(contact).map(|id| (id, contact)))
-        .collect::<HashMap<_, _>>();
-
-    let mut changed = Vec::new();
-    for (index, contact) in new_contacts.iter().enumerate() {
-        if let Some(id) = contact_id(contact)
-            && !excluded_contact_ids.contains(&id)
-            && old_contacts_by_id
-                .get(&id)
-                .map(|old_contact| scored_contact_values_changed(old_contact, contact))
-                .unwrap_or(false)
-        {
-            changed.push(contact.clone());
-        }
-        yield_now_every_rows(index + 1).await;
-    }
-    changed
-}
-
-async fn yield_now_for_row_count(row_count: usize) {
-    let mut processed = TOKIO_YIELD_EVERY_ROWS;
-    while processed <= row_count {
-        tokio::task::yield_now().await;
-        processed += TOKIO_YIELD_EVERY_ROWS;
-    }
-}
-
-async fn yield_now_every_rows(processed_rows: usize) {
-    if processed_rows % TOKIO_YIELD_EVERY_ROWS == 0 {
-        tokio::task::yield_now().await;
-    }
-}
-
-fn scored_contact_values_changed(old_contact: &Contact, new_contact: &Contact) -> bool {
-    ["_pts", "_mult", "_bonus", "_dupe"]
-        .iter()
-        .any(|field| old_contact.get(*field) != new_contact.get(*field))
-}
-
-fn scored_contact_claimed_mult_or_bonus(contact: &Contact) -> bool {
-    scored_contact_value(contact, "_mult") > 0 || scored_contact_value(contact, "_bonus") > 0
-}
-
-fn scored_contact_value(contact: &Contact, field: &str) -> i64 {
-    contact
-        .get(field)
-        .and_then(serde_json::Value::as_i64)
-        .unwrap_or(0)
-}
-
 fn contact_score_order(contact: &Contact) -> (i64, i64) {
     (contact_epoch(contact), contact_id(contact).unwrap_or(0))
-}
-
-fn contact_display_order(contact: &Contact) -> (i64, i64) {
-    contact_score_order(contact)
 }
 
 fn contact_epoch(contact: &Contact) -> i64 {
