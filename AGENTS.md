@@ -18,7 +18,7 @@ Only apply changes after I say one of:
 
 If the requested change is ambiguous, ask clarifying questions before planning.
 
-When a github issue is fixed or implemented, note that the issue is closed in both the git commit message and PR text (Closes #1)
+When a github issue is fixed or implemented, note that the issue is closed in both the git commit message and PR text (Closes #1), but only do this if you are told to work on "issue #1234".
 
 DB Migrations: Always assume I'm starting from a fresh database and don't need migrations, but if you think a migration is needed in a particular case, ask me, but make the initial plan with no migration.
 

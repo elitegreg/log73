@@ -16,6 +16,9 @@ contests:
         - 'BAND'
         - 'MODE'
     define:
+      - name: 'DX'
+        values:
+          - DX
       - name: 'Sections'
         values:
           - AL
@@ -128,7 +131,7 @@ contests:
         fixed: true
         source_param: 'Section'
         is_sent: true
-        in_sets: ['Sections']
+        in_sets: ['Sections', 'DX']
       - name: 'Class'
         type: 'String:3'
         adif: 'SRX_STRING'
@@ -138,7 +141,7 @@ contests:
         type: 'String:3'
         adif: 'ARRL_SECT'
         is_sent: false
-        in_sets: ['Sections']
+        in_sets: ['Sections', 'DX']
     qso_columns:
       - 'Class'
       - 'Section'
