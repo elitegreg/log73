@@ -9,6 +9,7 @@ function EntryFields({
   callSignRef,
   callSign,
   dxccLabel,
+  dupeAlertText,
   handleCallsignChange,
   handleCallsignKeyDown,
   setActiveCompletionField,
@@ -25,6 +26,9 @@ function EntryFields({
           flex: `${CALLSIGN_FIELD_WIDTH_CHARS} 1 ${CALLSIGN_FIELD_WIDTH_CHARS}em`,
         }}
       >
+        <span className="dupe-alert" aria-live="polite">
+          {dupeAlertText}
+        </span>
         <span>
           Callsign
           {dxccLabel ? (

@@ -10,6 +10,7 @@ import {
   sanitizeExchangeValue,
 } from '../domain/contactFields';
 import { dxccLabel, lookupDxcc } from '../domain/dxcc';
+import { dupeAlertText } from '../domain/dupes';
 import { validateExchangeField } from '../domain/validation';
 import { dxcc, supercheckpartial } from '../lib/api';
 import {
@@ -51,6 +52,7 @@ function MainWindow({
   radio,
   isContextLoading,
   contactsLoadState,
+  contacts = [],
   stationCallsign,
   operatorCallsign,
   radioState,
@@ -256,6 +258,11 @@ function MainWindow({
         );
   const currentDxccInfo = lookupDxcc(dxccData, debouncedCallSign);
   const currentDxccLabel = dxccLabel(currentDxccInfo);
+  const currentDupeAlertText =
+    callSign.trim() !== '' &&
+    debouncedCallSign.trim().toUpperCase() === callSign.trim().toUpperCase()
+      ? dupeAlertText(settings, currentContactFields(), contacts)
+      : '';
 
   function currentCwFields() {
     const fields = {
@@ -280,6 +287,21 @@ function MainWindow({
     );
 
     return fields;
+  }
+
+  function currentContactFields() {
+    const contact = {
+      CALL: callSign.trim().toUpperCase(),
+      BAND: currentBand?.name ?? '',
+      FREQ: radioFrequencyHz,
+      MODE: radioMode,
+    };
+
+    for (const field of settings?.exchange ?? []) {
+      contact[field.adif] = String(exchangeValue(field)).trim().toUpperCase();
+    }
+
+    return contact;
   }
 
   function stopRepeat() {
@@ -667,6 +689,7 @@ function MainWindow({
         callSignRef={callSignRef}
         callSign={callSign}
         dxccLabel={currentDxccLabel}
+        dupeAlertText={currentDupeAlertText}
         handleCallsignChange={handleCallsignChange}
         handleCallsignKeyDown={handleCallsignKeyDown}
         setActiveCompletionField={setActiveCompletionField}

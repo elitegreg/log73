@@ -122,6 +122,15 @@
   font-weight: normal;
 }
 
+.entry-field .dupe-alert {
+  display: block;
+  min-height: 1.2em;
+  color: var(--dupe-alert-text-color, var(--invalid-border-color));
+  font-size: 13px;
+  font-weight: bold;
+  line-height: 1.2;
+}
+
 :root {
   --invalid-border-color: #b00020;
   --invalid-background-color: #ffd6dd;

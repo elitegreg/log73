@@ -1242,6 +1242,7 @@ function LoggerScreen() {
         radio={radio}
         isContextLoading={isContextLoading}
         contactsLoadState={contactsLoadState}
+        contacts={visibleContacts}
         stationCallsign={log?.station_callsign ?? ''}
         operatorCallsign={operatorCallsign}
         radioState={radioState}
