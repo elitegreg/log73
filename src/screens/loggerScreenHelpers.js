@@ -1,4 +1,4 @@
-import { reportClientErrorLater } from '../lib/errorReporting';
+import { reportClientErrorLater } from '../lib/errorReporting.js';
 
 export const CONTACTS_STORAGE_KEY = 'log73.contacts';
 export const SESSION_STORAGE_KEY = 'log73.session_id';
@@ -39,6 +39,42 @@ export function sortContacts(contacts) {
   return [...contacts].sort(
     (a, b) => contactSortValue(b) - contactSortValue(a),
   );
+}
+
+function contactCallsign(contact) {
+  return String(contact?.CALL ?? contact?.Call ?? '')
+    .trim()
+    .toUpperCase();
+}
+
+function compareText(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+function compareContactIds(left, right) {
+  if (left?._id !== undefined && right?._id !== undefined) {
+    return Number(left._id) - Number(right._id);
+  }
+  if (left?._id !== undefined) return -1;
+  if (right?._id !== undefined) return 1;
+  return compareText(left?._client_id ?? '', right?._client_id ?? '');
+}
+
+export function sortContactsByCallsignThenTime(contacts) {
+  return [...contacts].sort((a, b) => {
+    const callsignComparison = compareText(
+      contactCallsign(a),
+      contactCallsign(b),
+    );
+    if (callsignComparison !== 0) return callsignComparison;
+
+    const timeComparison = contactSortValue(b) - contactSortValue(a);
+    if (timeComparison !== 0) return timeComparison;
+
+    return compareContactIds(a, b);
+  });
 }
 
 export function normalizeContact(contact) {

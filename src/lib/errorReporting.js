@@ -1,4 +1,4 @@
-import { apiJson } from './api';
+import { apiJson } from './api.js';
 
 const MAX_TEXT_LENGTH = 2048;
 const MAX_STACK_LENGTH = 8192;

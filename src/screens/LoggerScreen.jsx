@@ -29,6 +29,7 @@ import {
   committedBackendContact,
   mergeContact,
   sortContacts,
+  sortContactsByCallsignThenTime,
   markContactFailed,
   contactIdentifier,
 } from './loggerScreenHelpers';
@@ -204,7 +205,7 @@ function LoggerScreen() {
     const callsignPrefix = debouncedCallsignSearch.trim().toUpperCase();
     if (!callsignPrefix) return allContacts;
 
-    return allContacts.filter((contact) => {
+    const matchingContacts = allContacts.filter((contact) => {
       if (contact._status !== 'Committed') {
         return callsignPrefixMatches(contact, callsignPrefix);
       }
@@ -219,6 +220,7 @@ function LoggerScreen() {
       }
       return searchResultIds.has(String(contactId));
     });
+    return sortContactsByCallsignThenTime(matchingContacts);
   }, [allContacts, debouncedCallsignSearch, searchResultIds]);
 
   useEffect(() => {
