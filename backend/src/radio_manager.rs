@@ -6,6 +6,8 @@ use crate::radio::{
     normalize_mode,
 };
 use backon::{BackoffBuilder, ExponentialBuilder};
+use cw_serial_keyer::{Config as CwSerialConfig, ControlLine, SerialKeyer as CwSerialDevice};
+use futures_util::future::{BoxFuture, FutureExt};
 use radio_cat_rs::{ConnectionConfig, ControllableRadio, RadioKind, create_radio};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -138,6 +140,9 @@ impl RadioManager {
                         cat_timeout = config.cat_timeout,
                         cw_keyer_type = %config.cw_keyer_type,
                         winkeyer_serial_port = %config.winkeyer_serial_port,
+                        cw_serial_port = %config.cw_serial_port,
+                        cw_serial_baud_rate = config.cw_serial_baud_rate,
+                        cw_serial_line = %config.cw_serial_line,
                         "starting managed radio"
                     );
                     let current_status = Arc::new(RwLock::new(RadioStatus { online: false }));
@@ -284,6 +289,9 @@ impl RadioManager {
             cat_timeout = config.cat_timeout,
             cw_keyer_type = %config.cw_keyer_type,
             winkeyer_serial_port = %config.winkeyer_serial_port,
+            cw_serial_port = %config.cw_serial_port,
+            cw_serial_baud_rate = config.cw_serial_baud_rate,
+            cw_serial_line = %config.cw_serial_line,
             "requesting active radio config reload"
         );
         command_sender
@@ -526,6 +534,9 @@ async fn run_managed_radio(
                                 cat_timeout = new_config.cat_timeout,
                                 cw_keyer_type = %new_config.cw_keyer_type,
                                 winkeyer_serial_port = %new_config.winkeyer_serial_port,
+                                cw_serial_port = %new_config.cw_serial_port,
+                                cw_serial_baud_rate = new_config.cw_serial_baud_rate,
+                                cw_serial_line = %new_config.cw_serial_line,
                                 "reloading active radio config"
                             );
                             set_radio_status(&current_status, &status_updates, false).await;
@@ -780,40 +791,25 @@ async fn run_cw_task(
 struct CwController {
     radio_id: i64,
     messages: String,
-    backend: CwBackend,
+    keyer: Option<Box<dyn CwKeyer>>,
 }
 
 impl CwController {
     async fn new(config: &RadioConfig, radio: Arc<dyn ControllableRadio>) -> Self {
-        let backend = match config.cw_keyer_type.trim().to_ascii_lowercase().as_str() {
-            "winkeyer" => CwBackend::Winkeyer(WinkeyerKeyer {
-                serial_port: config.winkeyer_serial_port.clone(),
-                device: None,
-            }),
-            "cat" => CwBackend::Cat(CatKeyer::open(config.id, radio).await),
-            _ => CwBackend::None,
-        };
-
         let mut controller = Self {
             radio_id: config.id,
             messages: config.cw_messages.clone(),
-            backend,
+            keyer: cw_keyer_for_config(config, radio).await,
         };
         controller.connect().await;
         controller
     }
 
     async fn connect(&mut self) {
-        match &mut self.backend {
-            CwBackend::None => {
-                debug!(radio_id = self.radio_id, "CW keying disabled for radio");
-            }
-            CwBackend::Winkeyer(keyer) => {
-                connect_winkeyer(self.radio_id, keyer).await;
-            }
-            CwBackend::Cat(_) => {
-                debug!(radio_id = self.radio_id, "CAT CW keyer ready");
-            }
+        if let Some(keyer) = self.keyer.as_mut() {
+            keyer.connect(self.radio_id).await;
+        } else {
+            debug!(radio_id = self.radio_id, "CW keying disabled for radio");
         }
     }
 
@@ -839,47 +835,56 @@ impl CwController {
         }
         let text = cw_send_text(rendered_text, prepend_space);
         debug!(radio_id = self.radio_id, mode, key, text, "sending cw text");
-        match &mut self.backend {
-            CwBackend::None => {
+        let completion = {
+            let Some(keyer) = self.keyer.as_mut() else {
                 debug!(
                     radio_id = self.radio_id,
                     "ignoring CW send; no CW keyer configured"
                 );
-                Err("cw keyer unavailable".to_string())
-            }
-            CwBackend::Winkeyer(keyer) => {
-                let radio_id = self.radio_id;
-                let Some(winkeyer) = ensure_winkeyer_connected(self.radio_id, keyer).await else {
-                    return Err("winkeyer unavailable".to_string());
-                };
-                if let Err(error) = winkeyer.send_text(&text).await {
-                    warn!(radio_id, %error, "failed to send cw text");
-                    keyer.device = None;
-                    return Err(error.to_string());
+                return Err("cw keyer unavailable".to_string());
+            };
+            let keyer_name = keyer.name();
+            let completion = keyer.send_text(self.radio_id, &text).await?;
+            debug!(
+                radio_id = self.radio_id,
+                mode,
+                key,
+                keyer = keyer_name,
+                "cw text queued"
+            );
+            completion
+        };
+
+        match completion {
+            CwSendCompletion::PollStatus { wait_for_busy } => {
+                if wait_for_busy {
+                    debug!(
+                        radio_id = self.radio_id,
+                        mode, key, "waiting for cw keyer busy"
+                    );
+                    self.wait_until_busy_or_stopped(commands, pending).await?;
                 }
-                debug!(radio_id, mode, key, "cw text queued to winkeyer");
-                debug!(radio_id, mode, key, "waiting for winkeyer to become busy");
-                self.wait_until_busy_or_stopped(commands, pending).await?;
-                debug!(radio_id, mode, key, "waiting for winkeyer idle");
+                debug!(
+                    radio_id = self.radio_id,
+                    mode, key, "waiting for cw keyer idle"
+                );
                 let result = self.wait_until_idle_or_stopped(commands, pending).await;
                 debug!(
-                    radio_id,
+                    radio_id = self.radio_id,
                     mode,
                     key,
                     ?result,
-                    "finished waiting for winkeyer idle"
+                    "finished waiting for cw keyer idle"
                 );
                 result
             }
-            CwBackend::Cat(keyer) => {
-                keyer.send_text(&text).await?;
-                let estimated_duration = keyer.estimated_send_duration(&text);
+            CwSendCompletion::Estimated(estimated_duration) => {
                 debug!(
                     radio_id = self.radio_id,
                     mode,
                     key,
                     estimated_duration_ms = estimated_duration.as_millis(),
-                    "waiting for estimated CAT CW completion"
+                    "waiting for estimated CW completion"
                 );
                 self.wait_until_deadline_or_stopped(
                     tokio::time::Instant::now() + estimated_duration,
@@ -934,26 +939,19 @@ impl CwController {
                     }
                 }
                 _ = tokio::time::sleep_until(deadline) => {
-                    warn!(radio_id = self.radio_id, "timed out waiting for winkeyer to become busy");
-                    return Err("winkeyer did not become busy".to_string());
+                    warn!(radio_id = self.radio_id, "timed out waiting for cw keyer to become busy");
+                    return Err("cw keyer did not become busy".to_string());
                 }
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                    let radio_id = self.radio_id;
-                    let Some(winkeyer) = self.winkeyer().await else {
-                        return Err("winkeyer unavailable".to_string());
-                    };
-                    match winkeyer.status().await {
-                        Ok(status) if status.busy || status.wait || status.key_down => {
-                            debug!(radio_id = self.radio_id, "winkeyer is busy");
+                    match self.keyer_status().await {
+                        Ok(status) if status.busy => {
+                            debug!(radio_id = self.radio_id, "cw keyer is busy");
                             return Ok(());
                         }
                         Ok(_) => {}
                         Err(error) => {
-                            warn!(radio_id, %error, "failed waiting for winkeyer busy");
-                            if let CwBackend::Winkeyer(keyer) = &mut self.backend {
-                                keyer.device = None;
-                            }
-                            return Err(error.to_string());
+                            warn!(radio_id = self.radio_id, %error, "failed waiting for cw keyer busy");
+                            return Err(error);
                         }
                     }
                 }
@@ -1003,22 +1001,15 @@ impl CwController {
                     }
                 }
                 _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                    let radio_id = self.radio_id;
-                    let Some(winkeyer) = self.winkeyer().await else {
-                        return Err("winkeyer unavailable".to_string());
-                    };
-                    match winkeyer.status().await {
-                        Ok(status) if !status.busy && !status.wait && !status.key_down => {
-                            debug!(radio_id = self.radio_id, "winkeyer is idle");
+                    match self.keyer_status().await {
+                        Ok(status) if !status.busy => {
+                            debug!(radio_id = self.radio_id, "cw keyer is idle");
                             return Ok(());
                         }
                         Ok(_) => {}
                         Err(error) => {
-                            warn!(radio_id, %error, "failed waiting for winkeyer idle");
-                            if let CwBackend::Winkeyer(keyer) = &mut self.backend {
-                                keyer.device = None;
-                            }
-                            return Err(error.to_string());
+                            warn!(radio_id = self.radio_id, %error, "failed waiting for cw keyer idle");
+                            return Err(error);
                         }
                     }
                 }
@@ -1037,17 +1028,17 @@ impl CwController {
                 command = commands.recv() => {
                     match command {
                         Some(CwTaskCommand::Stop) => {
-                            debug!(radio_id = self.radio_id, "stop command interrupting CAT CW wait");
+                            debug!(radio_id = self.radio_id, "stop command interrupting estimated cw wait");
                             fail_pending_cw_sends(pending, "cw stopped");
                             self.stop().await;
                             return Err("cw stopped".to_string());
                         }
                         Some(CwTaskCommand::SetWpm(wpm)) => {
-                            debug!(radio_id = self.radio_id, wpm, "set_wpm command received during CAT CW wait");
+                            debug!(radio_id = self.radio_id, wpm, "set_wpm command received during estimated cw wait");
                             self.set_wpm(wpm).await;
                         }
                         Some(CwTaskCommand::Shutdown) | None => {
-                            debug!(radio_id = self.radio_id, "shutdown interrupting CAT CW wait");
+                            debug!(radio_id = self.radio_id, "shutdown interrupting estimated cw wait");
                             fail_pending_cw_sends(pending, "cw shutdown");
                             self.stop().await;
                             return Err("cw shutdown".to_string());
@@ -1069,7 +1060,7 @@ impl CwController {
                     }
                 }
                 _ = tokio::time::sleep_until(deadline) => {
-                    debug!(radio_id = self.radio_id, "estimated CAT CW send duration elapsed");
+                    debug!(radio_id = self.radio_id, "estimated CW send duration elapsed");
                     return Ok(());
                 }
             }
@@ -1077,86 +1068,387 @@ impl CwController {
     }
 
     async fn stop(&mut self) {
-        match &mut self.backend {
-            CwBackend::None => {}
-            CwBackend::Winkeyer(keyer) => {
-                let radio_id = self.radio_id;
-                let Some(winkeyer) = ensure_winkeyer_connected(self.radio_id, keyer).await else {
-                    return;
-                };
-                debug!(radio_id, "clearing winkeyer buffer");
-                if let Err(error) = winkeyer.clear_buffer().await {
-                    warn!(radio_id, %error, "failed to clear winkeyer buffer");
-                    keyer.device = None;
-                } else {
-                    debug!(radio_id, "winkeyer buffer cleared");
-                }
-            }
-            CwBackend::Cat(keyer) => {
-                if let Err(error) = keyer.clear_buffer().await {
-                    warn!(radio_id = self.radio_id, %error, "failed to stop CAT CW");
-                }
+        if let Some(keyer) = self.keyer.as_mut() {
+            let keyer_name = keyer.name();
+            debug!(
+                radio_id = self.radio_id,
+                keyer = keyer_name,
+                "clearing cw keyer buffer"
+            );
+            if let Err(error) = keyer.clear_buffer(self.radio_id).await {
+                warn!(radio_id = self.radio_id, keyer = keyer_name, %error, "failed to clear cw keyer buffer");
+            } else {
+                debug!(
+                    radio_id = self.radio_id,
+                    keyer = keyer_name,
+                    "cw keyer buffer cleared"
+                );
             }
         }
     }
 
     async fn set_wpm(&mut self, wpm: u8) {
-        match &mut self.backend {
-            CwBackend::None => {}
-            CwBackend::Winkeyer(keyer) => {
-                let radio_id = self.radio_id;
-                let Some(winkeyer) = ensure_winkeyer_connected(self.radio_id, keyer).await else {
-                    return;
-                };
-                debug!(radio_id, wpm, "setting winkeyer wpm");
-                if let Err(error) = winkeyer.set_wpm(wpm).await {
-                    warn!(radio_id, wpm, %error, "failed to set winkeyer wpm");
-                    keyer.device = None;
-                } else {
-                    debug!(radio_id, wpm, "winkeyer wpm set");
-                }
-            }
-            CwBackend::Cat(keyer) => {
-                if let Err(error) = keyer.set_wpm(wpm).await {
-                    warn!(radio_id = self.radio_id, wpm, %error, "failed to set CAT CW WPM");
-                }
+        if let Some(keyer) = self.keyer.as_mut() {
+            let keyer_name = keyer.name();
+            debug!(
+                radio_id = self.radio_id,
+                keyer = keyer_name,
+                wpm,
+                "setting cw keyer wpm"
+            );
+            if let Err(error) = keyer.set_wpm(self.radio_id, wpm).await {
+                warn!(radio_id = self.radio_id, keyer = keyer_name, wpm, %error, "failed to set cw keyer wpm");
+            } else {
+                debug!(
+                    radio_id = self.radio_id,
+                    keyer = keyer_name,
+                    wpm,
+                    "cw keyer wpm set"
+                );
             }
         }
     }
 
     async fn close(&mut self) {
-        match &mut self.backend {
-            CwBackend::None => {}
-            CwBackend::Winkeyer(keyer) => {
-                if let Some(mut winkeyer) = keyer.device.take()
-                    && let Err(error) = winkeyer.close().await
-                {
-                    warn!(radio_id = self.radio_id, %error, "failed to close winkeyer");
-                }
-            }
-            CwBackend::Cat(keyer) => {
-                keyer.close().await;
-            }
+        if let Some(keyer) = self.keyer.as_mut() {
+            keyer.close(self.radio_id).await;
         }
     }
 
-    async fn winkeyer(&mut self) -> Option<&mut winkeyer::WinKeyer> {
-        match &mut self.backend {
-            CwBackend::Winkeyer(keyer) => ensure_winkeyer_connected(self.radio_id, keyer).await,
-            CwBackend::None | CwBackend::Cat(_) => None,
-        }
+    async fn keyer_status(&mut self) -> Result<CwKeyerStatus, String> {
+        let Some(keyer) = self.keyer.as_mut() else {
+            return Err("cw keyer unavailable".to_string());
+        };
+        let keyer_name = keyer.name();
+        keyer
+            .status(self.radio_id)
+            .await?
+            .ok_or_else(|| format!("{keyer_name} keyer does not report status"))
     }
 }
 
-enum CwBackend {
-    None,
-    Winkeyer(WinkeyerKeyer),
-    Cat(CatKeyer),
+async fn cw_keyer_for_config(
+    config: &RadioConfig,
+    radio: Arc<dyn ControllableRadio>,
+) -> Option<Box<dyn CwKeyer>> {
+    match config.cw_keyer_type.trim().to_ascii_lowercase().as_str() {
+        "winkeyer" => Some(Box::new(WinkeyerKeyer {
+            serial_port: config.winkeyer_serial_port.clone(),
+            device: None,
+        })),
+        "cat" => Some(Box::new(CatKeyer::open(config.id, radio).await)),
+        "serial" => Some(Box::new(SerialLineKeyer {
+            serial_port: config.cw_serial_port.clone(),
+            baud_rate: config.cw_serial_baud_rate,
+            line: config.cw_serial_line.clone(),
+            device: None,
+        })),
+        _ => None,
+    }
+}
+
+struct CwKeyerStatus {
+    busy: bool,
+}
+
+enum CwSendCompletion {
+    PollStatus { wait_for_busy: bool },
+    Estimated(Duration),
+}
+
+trait CwKeyer: Send {
+    fn name(&self) -> &'static str;
+    fn connect<'a>(&'a mut self, radio_id: i64) -> BoxFuture<'a, ()>;
+    fn send_text<'a>(
+        &'a mut self,
+        radio_id: i64,
+        text: &'a str,
+    ) -> BoxFuture<'a, Result<CwSendCompletion, String>>;
+    fn status<'a>(
+        &'a mut self,
+        radio_id: i64,
+    ) -> BoxFuture<'a, Result<Option<CwKeyerStatus>, String>>;
+    fn clear_buffer<'a>(&'a mut self, radio_id: i64) -> BoxFuture<'a, Result<(), String>>;
+    fn set_wpm<'a>(&'a mut self, radio_id: i64, wpm: u8) -> BoxFuture<'a, Result<(), String>>;
+    fn close<'a>(&'a mut self, radio_id: i64) -> BoxFuture<'a, ()>;
+}
+
+impl CwKeyer for CatKeyer {
+    fn name(&self) -> &'static str {
+        "CAT"
+    }
+
+    fn connect<'a>(&'a mut self, radio_id: i64) -> BoxFuture<'a, ()> {
+        async move {
+            debug!(radio_id, "CAT CW keyer ready");
+        }
+        .boxed()
+    }
+
+    fn send_text<'a>(
+        &'a mut self,
+        _radio_id: i64,
+        text: &'a str,
+    ) -> BoxFuture<'a, Result<CwSendCompletion, String>> {
+        async move {
+            CatKeyer::send_text(self, text).await?;
+            Ok(CwSendCompletion::Estimated(
+                self.estimated_send_duration(text),
+            ))
+        }
+        .boxed()
+    }
+
+    fn status<'a>(
+        &'a mut self,
+        _radio_id: i64,
+    ) -> BoxFuture<'a, Result<Option<CwKeyerStatus>, String>> {
+        async move { Ok(None) }.boxed()
+    }
+
+    fn clear_buffer<'a>(&'a mut self, _radio_id: i64) -> BoxFuture<'a, Result<(), String>> {
+        async move { CatKeyer::clear_buffer(self).await }.boxed()
+    }
+
+    fn set_wpm<'a>(&'a mut self, _radio_id: i64, wpm: u8) -> BoxFuture<'a, Result<(), String>> {
+        async move { CatKeyer::set_wpm(self, wpm).await }.boxed()
+    }
+
+    fn close<'a>(&'a mut self, _radio_id: i64) -> BoxFuture<'a, ()> {
+        async move {
+            CatKeyer::close(self).await;
+        }
+        .boxed()
+    }
 }
 
 struct WinkeyerKeyer {
     serial_port: String,
     device: Option<winkeyer::WinKeyer>,
+}
+
+impl CwKeyer for WinkeyerKeyer {
+    fn name(&self) -> &'static str {
+        "Winkeyer"
+    }
+
+    fn connect<'a>(&'a mut self, radio_id: i64) -> BoxFuture<'a, ()> {
+        async move {
+            connect_winkeyer(radio_id, self).await;
+        }
+        .boxed()
+    }
+
+    fn send_text<'a>(
+        &'a mut self,
+        radio_id: i64,
+        text: &'a str,
+    ) -> BoxFuture<'a, Result<CwSendCompletion, String>> {
+        async move {
+            let result = {
+                let Some(winkeyer) = ensure_winkeyer_connected(radio_id, self).await else {
+                    return Err("winkeyer unavailable".to_string());
+                };
+                winkeyer.send_text(text).await
+            };
+            if let Err(error) = result {
+                warn!(radio_id, %error, "failed to send cw text through winkeyer");
+                self.device = None;
+                return Err(error.to_string());
+            }
+            Ok(CwSendCompletion::PollStatus {
+                wait_for_busy: true,
+            })
+        }
+        .boxed()
+    }
+
+    fn status<'a>(
+        &'a mut self,
+        radio_id: i64,
+    ) -> BoxFuture<'a, Result<Option<CwKeyerStatus>, String>> {
+        async move {
+            let result = {
+                let Some(winkeyer) = ensure_winkeyer_connected(radio_id, self).await else {
+                    return Err("winkeyer unavailable".to_string());
+                };
+                winkeyer.status().await
+            };
+            match result {
+                Ok(status) => Ok(Some(CwKeyerStatus {
+                    busy: status.busy || status.wait || status.key_down,
+                })),
+                Err(error) => {
+                    warn!(radio_id, %error, "failed to read winkeyer status");
+                    self.device = None;
+                    Err(error.to_string())
+                }
+            }
+        }
+        .boxed()
+    }
+
+    fn clear_buffer<'a>(&'a mut self, radio_id: i64) -> BoxFuture<'a, Result<(), String>> {
+        async move {
+            let result = {
+                let Some(winkeyer) = ensure_winkeyer_connected(radio_id, self).await else {
+                    return Err("winkeyer unavailable".to_string());
+                };
+                winkeyer.clear_buffer().await
+            };
+            if let Err(error) = result {
+                self.device = None;
+                return Err(error.to_string());
+            }
+            Ok(())
+        }
+        .boxed()
+    }
+
+    fn set_wpm<'a>(&'a mut self, radio_id: i64, wpm: u8) -> BoxFuture<'a, Result<(), String>> {
+        async move {
+            let result = {
+                let Some(winkeyer) = ensure_winkeyer_connected(radio_id, self).await else {
+                    return Err("winkeyer unavailable".to_string());
+                };
+                winkeyer.set_wpm(wpm).await
+            };
+            if let Err(error) = result {
+                self.device = None;
+                return Err(error.to_string());
+            }
+            Ok(())
+        }
+        .boxed()
+    }
+
+    fn close<'a>(&'a mut self, radio_id: i64) -> BoxFuture<'a, ()> {
+        async move {
+            if let Some(mut winkeyer) = self.device.take()
+                && let Err(error) = winkeyer.close().await
+            {
+                warn!(radio_id, %error, "failed to close winkeyer");
+            }
+        }
+        .boxed()
+    }
+}
+
+struct SerialLineKeyer {
+    serial_port: String,
+    baud_rate: u32,
+    line: String,
+    device: Option<CwSerialDevice>,
+}
+
+impl CwKeyer for SerialLineKeyer {
+    fn name(&self) -> &'static str {
+        "Serial"
+    }
+
+    fn connect<'a>(&'a mut self, radio_id: i64) -> BoxFuture<'a, ()> {
+        async move {
+            connect_serial_keyer(radio_id, self).await;
+        }
+        .boxed()
+    }
+
+    fn send_text<'a>(
+        &'a mut self,
+        radio_id: i64,
+        text: &'a str,
+    ) -> BoxFuture<'a, Result<CwSendCompletion, String>> {
+        async move {
+            let result = {
+                let Some(serial_keyer) = ensure_serial_keyer_connected(radio_id, self).await else {
+                    return Err("serial CW keyer unavailable".to_string());
+                };
+                serial_keyer.send_text(text).await
+            };
+            if let Err(error) = result {
+                warn!(radio_id, %error, "failed to send cw text through serial keyer");
+                self.device = None;
+                return Err(error.to_string());
+            }
+            Ok(CwSendCompletion::PollStatus {
+                wait_for_busy: false,
+            })
+        }
+        .boxed()
+    }
+
+    fn status<'a>(
+        &'a mut self,
+        radio_id: i64,
+    ) -> BoxFuture<'a, Result<Option<CwKeyerStatus>, String>> {
+        async move {
+            let result = {
+                let Some(serial_keyer) = ensure_serial_keyer_connected(radio_id, self).await else {
+                    return Err("serial CW keyer unavailable".to_string());
+                };
+                serial_keyer.status().await
+            };
+            match result {
+                Ok(status) => Ok(Some(CwKeyerStatus {
+                    busy: status.busy
+                        || status.key_down
+                        || status.ptt_on
+                        || status.queued_messages > 0,
+                })),
+                Err(error) => {
+                    warn!(radio_id, %error, "failed to read serial CW keyer status");
+                    self.device = None;
+                    Err(error.to_string())
+                }
+            }
+        }
+        .boxed()
+    }
+
+    fn clear_buffer<'a>(&'a mut self, radio_id: i64) -> BoxFuture<'a, Result<(), String>> {
+        async move {
+            let result = {
+                let Some(serial_keyer) = ensure_serial_keyer_connected(radio_id, self).await else {
+                    return Err("serial CW keyer unavailable".to_string());
+                };
+                serial_keyer.clear_buffer().await
+            };
+            if let Err(error) = result {
+                self.device = None;
+                return Err(error.to_string());
+            }
+            Ok(())
+        }
+        .boxed()
+    }
+
+    fn set_wpm<'a>(&'a mut self, radio_id: i64, wpm: u8) -> BoxFuture<'a, Result<(), String>> {
+        async move {
+            let result = {
+                let Some(serial_keyer) = ensure_serial_keyer_connected(radio_id, self).await else {
+                    return Err("serial CW keyer unavailable".to_string());
+                };
+                serial_keyer.set_wpm(wpm).await
+            };
+            if let Err(error) = result {
+                self.device = None;
+                return Err(error.to_string());
+            }
+            Ok(())
+        }
+        .boxed()
+    }
+
+    fn close<'a>(&'a mut self, radio_id: i64) -> BoxFuture<'a, ()> {
+        async move {
+            if let Some(mut serial_keyer) = self.device.take()
+                && let Err(error) = serial_keyer.close().await
+            {
+                warn!(radio_id, %error, "failed to close serial CW keyer");
+            }
+        }
+        .boxed()
+    }
 }
 
 fn cw_send_text(text: String, prepend_space: bool) -> String {
@@ -1165,6 +1457,64 @@ fn cw_send_text(text: String, prepend_space: bool) -> String {
     } else {
         text
     }
+}
+
+fn cw_serial_control_line(line: &str) -> ControlLine {
+    match line.trim().to_ascii_lowercase().as_str() {
+        "rts" => ControlLine::Rts,
+        _ => ControlLine::Dtr,
+    }
+}
+
+async fn connect_serial_keyer(radio_id: i64, keyer: &mut SerialLineKeyer) {
+    if keyer.serial_port.trim().is_empty() {
+        warn!(radio_id, "Serial CW keying selected without a serial port");
+        return;
+    }
+    if keyer.device.is_some() {
+        return;
+    }
+
+    let line = cw_serial_control_line(&keyer.line);
+    let config = CwSerialConfig::new(keyer.serial_port.as_str())
+        .baud_rate(keyer.baud_rate)
+        .key_line(line)
+        .ptt_line(None);
+
+    match CwSerialDevice::open_with_config(config).await {
+        Ok(mut serial_keyer) => {
+            serial_keyer.set_timeout(Duration::from_millis(500));
+            info!(
+                radio_id,
+                serial_port = %keyer.serial_port,
+                baud_rate = keyer.baud_rate,
+                line = %keyer.line,
+                "connected to serial CW keyer"
+            );
+            keyer.device = Some(serial_keyer);
+        }
+        Err(error) => {
+            warn!(
+                radio_id,
+                serial_port = %keyer.serial_port,
+                baud_rate = keyer.baud_rate,
+                line = %keyer.line,
+                %error,
+                "failed to connect to serial CW keyer"
+            );
+            keyer.device = None;
+        }
+    }
+}
+
+async fn ensure_serial_keyer_connected(
+    radio_id: i64,
+    keyer: &mut SerialLineKeyer,
+) -> Option<&mut CwSerialDevice> {
+    if keyer.device.is_none() {
+        connect_serial_keyer(radio_id, keyer).await;
+    }
+    keyer.device.as_mut()
 }
 
 async fn connect_winkeyer(radio_id: i64, keyer: &mut WinkeyerKeyer) {
@@ -1314,6 +1664,9 @@ mod tests {
             cat_timeout: 2.0,
             cw_keyer_type: "none".to_string(),
             winkeyer_serial_port: String::new(),
+            cw_serial_port: String::new(),
+            cw_serial_baud_rate: 9_600,
+            cw_serial_line: "dtr".to_string(),
             cw_messages: String::new(),
         }
     }

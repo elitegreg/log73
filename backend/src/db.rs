@@ -49,6 +49,9 @@ pub struct RadioConfig {
     pub cat_timeout: f64,
     pub cw_keyer_type: String,
     pub winkeyer_serial_port: String,
+    pub cw_serial_port: String,
+    pub cw_serial_baud_rate: u32,
+    pub cw_serial_line: String,
     pub cw_messages: String,
 }
 
@@ -83,6 +86,20 @@ pub struct NewRadio {
     pub cat_timeout: f64,
     pub cw_keyer_type: String,
     pub winkeyer_serial_port: String,
+    #[serde(default)]
+    pub cw_serial_port: String,
+    #[serde(default = "default_cw_serial_baud_rate")]
+    pub cw_serial_baud_rate: u32,
+    #[serde(default = "default_cw_serial_line")]
+    pub cw_serial_line: String,
+}
+
+fn default_cw_serial_baud_rate() -> u32 {
+    9_600
+}
+
+fn default_cw_serial_line() -> String {
+    "dtr".to_string()
 }
 
 const QSO_COLUMNS: &[&str] = &[
@@ -646,7 +663,7 @@ fn db_log_qso_count(connection: &Connection, id: i64) -> rusqlite::Result<usize>
 
 fn db_radios(connection: &Connection) -> rusqlite::Result<Vec<RadioConfig>> {
     let mut statement = connection.prepare(
-        "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, POLL_FREQUENCY, CAT_TIMEOUT, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_MESSAGES FROM radios ORDER BY ID",
+        "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, POLL_FREQUENCY, CAT_TIMEOUT, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES FROM radios ORDER BY ID",
     )?;
     let rows = statement.query_map([], row_to_radio)?;
     rows.collect()
@@ -698,7 +715,7 @@ fn db_update_auth_config(
 
 fn db_create_radio(connection: &Connection, radio: NewRadio) -> rusqlite::Result<RadioConfig> {
     connection.execute(
-        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, POLL_FREQUENCY, CAT_TIMEOUT, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, POLL_FREQUENCY, CAT_TIMEOUT, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             radio.name.trim(),
             radio.radio_kind.trim(),
@@ -711,6 +728,9 @@ fn db_create_radio(connection: &Connection, radio: NewRadio) -> rusqlite::Result
             radio.cat_timeout,
             radio.cw_keyer_type.trim(),
             radio.winkeyer_serial_port.trim(),
+            radio.cw_serial_port.trim(),
+            radio.cw_serial_baud_rate,
+            radio.cw_serial_line.trim(),
             DEFAULT_CW_MESSAGES
         ],
     )?;
@@ -724,7 +744,7 @@ fn db_update_radio(
     radio: NewRadio,
 ) -> rusqlite::Result<Option<RadioConfig>> {
     let updated = connection.execute(
-        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, POLL_FREQUENCY = ?8, CAT_TIMEOUT = ?9, CW_KEYER_TYPE = ?10, WINKEYER_SERIAL_PORT = ?11 WHERE ID = ?12",
+        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, POLL_FREQUENCY = ?8, CAT_TIMEOUT = ?9, CW_KEYER_TYPE = ?10, WINKEYER_SERIAL_PORT = ?11, CW_SERIAL_PORT = ?12, CW_SERIAL_BAUD_RATE = ?13, CW_SERIAL_LINE = ?14 WHERE ID = ?15",
         params![
             radio.name.trim(),
             radio.radio_kind.trim(),
@@ -737,6 +757,9 @@ fn db_update_radio(
             radio.cat_timeout,
             radio.cw_keyer_type.trim(),
             radio.winkeyer_serial_port.trim(),
+            radio.cw_serial_port.trim(),
+            radio.cw_serial_baud_rate,
+            radio.cw_serial_line.trim(),
             id
         ],
     )?;
@@ -816,6 +839,9 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
             CAT_TIMEOUT REAL NOT NULL DEFAULT 2.0 CHECK (CAT_TIMEOUT > 0),
             CW_KEYER_TYPE TEXT NOT NULL DEFAULT 'none',
             WINKEYER_SERIAL_PORT TEXT NOT NULL DEFAULT '',
+            CW_SERIAL_PORT TEXT NOT NULL DEFAULT '',
+            CW_SERIAL_BAUD_RATE INTEGER NOT NULL DEFAULT 9600 CHECK (CW_SERIAL_BAUD_RATE > 0),
+            CW_SERIAL_LINE TEXT NOT NULL DEFAULT 'dtr',
             CW_MESSAGES TEXT NOT NULL
         ) STRICT;
 
@@ -896,7 +922,7 @@ fn row_to_log(row: &rusqlite::Row<'_>) -> rusqlite::Result<Log> {
 fn select_radio(connection: &Connection, id: i64) -> rusqlite::Result<Option<RadioConfig>> {
     connection
         .query_row(
-            "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, POLL_FREQUENCY, CAT_TIMEOUT, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_MESSAGES FROM radios WHERE ID = ?1",
+            "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, POLL_FREQUENCY, CAT_TIMEOUT, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES FROM radios WHERE ID = ?1",
             params![id],
             row_to_radio,
         )
@@ -906,6 +932,7 @@ fn select_radio(connection: &Connection, id: i64) -> rusqlite::Result<Option<Rad
 fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioConfig> {
     let tcp_port: i64 = row.get("TCP_PORT")?;
     let serial_baud_rate: i64 = row.get("SERIAL_BAUD_RATE")?;
+    let cw_serial_baud_rate: i64 = row.get("CW_SERIAL_BAUD_RATE")?;
     Ok(RadioConfig {
         id: row.get("ID")?,
         name: row.get("NAME")?,
@@ -919,6 +946,9 @@ fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioConfig> {
         cat_timeout: row.get("CAT_TIMEOUT")?,
         cw_keyer_type: row.get("CW_KEYER_TYPE")?,
         winkeyer_serial_port: row.get("WINKEYER_SERIAL_PORT")?,
+        cw_serial_port: row.get("CW_SERIAL_PORT")?,
+        cw_serial_baud_rate: cw_serial_baud_rate as u32,
+        cw_serial_line: row.get("CW_SERIAL_LINE")?,
         cw_messages: row.get("CW_MESSAGES")?,
     })
 }
@@ -1174,6 +1204,9 @@ mod tests {
             cat_timeout: 2.0,
             cw_keyer_type: "none".to_string(),
             winkeyer_serial_port: String::new(),
+            cw_serial_port: String::new(),
+            cw_serial_baud_rate: 9_600,
+            cw_serial_line: "dtr".to_string(),
         }
     }
 
@@ -1434,5 +1467,8 @@ mod tests {
         assert_eq!(radio.serial_baud_rate, 115_200);
         assert_eq!(radio.cat_timeout, 2.0);
         assert_eq!(radio.cw_keyer_type, "none");
+        assert_eq!(radio.cw_serial_port, "");
+        assert_eq!(radio.cw_serial_baud_rate, 9_600);
+        assert_eq!(radio.cw_serial_line, "dtr");
     }
 }

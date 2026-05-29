@@ -6,6 +6,8 @@ import { useNotifications } from '../lib/notificationsContext';
 
 const DEFAULT_TRANSPORT_KIND = 'tcp';
 const DEFAULT_CW_KEYER_TYPE = 'none';
+const DEFAULT_CW_SERIAL_BAUD_RATE = 9600;
+const DEFAULT_CW_SERIAL_LINE = 'dtr';
 
 function CreateRadioScreen() {
   const navigate = useNavigate();
@@ -24,6 +26,11 @@ function CreateRadioScreen() {
   const [catTimeout, setCatTimeout] = useState(2);
   const [cwKeyerType, setCwKeyerType] = useState(DEFAULT_CW_KEYER_TYPE);
   const [winkeyerSerialPort, setWinkeyerSerialPort] = useState('');
+  const [cwSerialPort, setCwSerialPort] = useState('');
+  const [cwSerialBaudRate, setCwSerialBaudRate] = useState(
+    DEFAULT_CW_SERIAL_BAUD_RATE,
+  );
+  const [cwSerialLine, setCwSerialLine] = useState(DEFAULT_CW_SERIAL_LINE);
 
   const notifyOperationalError = useCallback(
     (source, fallback, error, details = {}) => {
@@ -80,6 +87,11 @@ function CreateRadioScreen() {
       setCatTimeout(result.radio.cat_timeout ?? 2);
       setCwKeyerType(result.radio.cw_keyer_type ?? DEFAULT_CW_KEYER_TYPE);
       setWinkeyerSerialPort(result.radio.winkeyer_serial_port ?? '');
+      setCwSerialPort(result.radio.cw_serial_port ?? '');
+      setCwSerialBaudRate(
+        result.radio.cw_serial_baud_rate ?? DEFAULT_CW_SERIAL_BAUD_RATE,
+      );
+      setCwSerialLine(result.radio.cw_serial_line ?? DEFAULT_CW_SERIAL_LINE);
     }
 
     loadContext().catch((error) =>
@@ -113,6 +125,13 @@ function CreateRadioScreen() {
         cw_keyer_type: cwKeyerType,
         winkeyer_serial_port:
           cwKeyerType === 'winkeyer' ? winkeyerSerialPort : '',
+        cw_serial_port: cwKeyerType === 'serial' ? cwSerialPort : '',
+        cw_serial_baud_rate:
+          cwKeyerType === 'serial'
+            ? Number(cwSerialBaudRate)
+            : DEFAULT_CW_SERIAL_BAUD_RATE,
+        cw_serial_line:
+          cwKeyerType === 'serial' ? cwSerialLine : DEFAULT_CW_SERIAL_LINE,
       }),
     });
     if (!result.ok) {
@@ -247,6 +266,7 @@ function CreateRadioScreen() {
           <option value="none">None</option>
           <option value="winkeyer">Winkeyer</option>
           <option value="cat">CAT</option>
+          <option value="serial">Serial (DTR/RTS)</option>
         </select>
       </label>
       {cwKeyerType === 'winkeyer' ? (
@@ -259,6 +279,40 @@ function CreateRadioScreen() {
             placeholder="/dev/ttyUSB0"
           />
         </label>
+      ) : null}
+      {cwKeyerType === 'serial' ? (
+        <>
+          <label>
+            CW Serial Port
+            <input
+              value={cwSerialPort}
+              onChange={(event) => setCwSerialPort(event.target.value)}
+              required
+              placeholder="/dev/ttyUSB0"
+            />
+          </label>
+          <label>
+            CW Serial Baud Rate
+            <input
+              type="number"
+              min="1"
+              value={cwSerialBaudRate}
+              onChange={(event) => setCwSerialBaudRate(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            DTR/RTS Selection
+            <select
+              value={cwSerialLine}
+              onChange={(event) => setCwSerialLine(event.target.value)}
+              required
+            >
+              <option value="dtr">DTR</option>
+              <option value="rts">RTS</option>
+            </select>
+          </label>
+        </>
       ) : null}
       <div className="selection-actions">
         <button className="cmd-btn primary" type="submit">

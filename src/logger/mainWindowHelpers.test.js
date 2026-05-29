@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   availableModeOptions,
+  cwActiveTimeoutMs,
   modeIsCw,
   nextCwWpm,
   typedModeFromCallsignInput,
@@ -48,4 +49,11 @@ test('nextCwWpm clamps page-up and page-down changes to valid range', () => {
   assert.equal(nextCwWpm(60, 1), 60);
   assert.equal(nextCwWpm(5, -1), 5);
   assert.equal(nextCwWpm(Number.NaN, 1), 21);
+});
+
+test('cwActiveTimeoutMs waits for completion-capable keyers', () => {
+  assert.equal(cwActiveTimeoutMs('winkeyer'), 30000);
+  assert.equal(cwActiveTimeoutMs('cat'), 30000);
+  assert.equal(cwActiveTimeoutMs('serial'), 30000);
+  assert.equal(cwActiveTimeoutMs('none'), 500);
 });

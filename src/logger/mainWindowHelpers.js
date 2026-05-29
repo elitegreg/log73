@@ -63,6 +63,18 @@ export function exchangeDefaults(settings, radioMode, contestParams = {}) {
   );
 }
 
+export function cwActiveTimeoutMs(cwKeyerType) {
+  switch (cwKeyerType) {
+    case 'winkeyer':
+      return CW_ACTIVE_TIMEOUT_WIKEYER_MS;
+    case 'cat':
+    case 'serial':
+      return CW_ACTIVE_TIMEOUT_CAT_MS;
+    default:
+      return CW_ACTIVE_TIMEOUT_NONE_MS;
+  }
+}
+
 export function formatFrequency(frequencyHz) {
   return Math.round(frequencyHz / HZ_PER_KHZ);
 }

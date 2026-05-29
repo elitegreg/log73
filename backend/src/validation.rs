@@ -30,7 +30,7 @@ const MIN_CW_WPM: u8 = 5;
 const MAX_CW_WPM: u8 = 60;
 const MAX_CW_REQUEST_ID_LEN: usize = 64;
 const MAX_WS_FIELDS: usize = 100;
-const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat"];
+const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat", "serial"];
 const LOGGER_MODE_OPTIONS: &[&str] = &[
     "CW", "CW-R", "SSB", "FM", "FT8", "JT65", "JT9", "MFSK", "PSK", "RTTY",
 ];
@@ -84,7 +84,7 @@ pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
     validate_seconds("CAT timeout", payload.cat_timeout)?;
     let cw_keyer_type = payload.cw_keyer_type.trim().to_ascii_lowercase();
     if !ALLOWED_CW_KEYER_TYPES.contains(&cw_keyer_type.as_str()) {
-        return Err("CW keyer type must be one of: none, winkeyer, cat".to_string());
+        return Err("CW keyer type must be one of: none, winkeyer, cat, serial".to_string());
     }
 
     match transport_kind.as_str() {
@@ -126,7 +126,31 @@ pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
             "Winkeyer serial port must be at most {MAX_SERIAL_PORT_LEN} characters"
         ));
     }
-    validate_serial_port("Winkeyer serial port", &payload.winkeyer_serial_port)
+    validate_serial_port("Winkeyer serial port", &payload.winkeyer_serial_port)?;
+
+    if cw_keyer_type == "serial" {
+        validate_required_text(
+            "CW serial port",
+            &payload.cw_serial_port,
+            MAX_SERIAL_PORT_LEN,
+        )?;
+    } else if payload.cw_serial_port.chars().count() > MAX_SERIAL_PORT_LEN {
+        return Err(format!(
+            "CW serial port must be at most {MAX_SERIAL_PORT_LEN} characters"
+        ));
+    }
+    validate_serial_port("CW serial port", &payload.cw_serial_port)?;
+
+    if payload.cw_serial_baud_rate == 0 {
+        return Err("CW serial baud rate must be greater than 0".to_string());
+    }
+
+    let cw_serial_line = payload.cw_serial_line.trim().to_ascii_lowercase();
+    if !matches!(cw_serial_line.as_str(), "dtr" | "rts") {
+        return Err("CW serial line must be dtr or rts".to_string());
+    }
+
+    Ok(())
 }
 
 pub fn validate_auth_config(
@@ -926,6 +950,9 @@ mod tests {
             cat_timeout: 2.0,
             cw_keyer_type: "none".to_string(),
             winkeyer_serial_port: String::new(),
+            cw_serial_port: String::new(),
+            cw_serial_baud_rate: 9_600,
+            cw_serial_line: "dtr".to_string(),
         }
     }
 
@@ -1025,6 +1052,37 @@ mod tests {
 
         let error = validate_radio(&radio).expect_err("winkeyer port should be required");
         assert!(error.contains("Winkeyer serial port"));
+    }
+
+    #[test]
+    fn validates_serial_cw_keyer_type() {
+        let mut radio = test_radio();
+        radio.cw_keyer_type = "serial".to_string();
+        radio.cw_serial_port = "/dev/ttyUSB1".to_string();
+        radio.cw_serial_baud_rate = 9_600;
+        radio.cw_serial_line = "rts".to_string();
+
+        assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn serial_cw_keyer_requires_serial_port() {
+        let mut radio = test_radio();
+        radio.cw_keyer_type = "serial".to_string();
+
+        let error = validate_radio(&radio).expect_err("CW serial port should be required");
+        assert!(error.contains("CW serial port"));
+    }
+
+    #[test]
+    fn serial_cw_keyer_rejects_unknown_line() {
+        let mut radio = test_radio();
+        radio.cw_keyer_type = "serial".to_string();
+        radio.cw_serial_port = "/dev/ttyUSB1".to_string();
+        radio.cw_serial_line = "both".to_string();
+
+        let error = validate_radio(&radio).expect_err("CW serial line should be rejected");
+        assert!(error.contains("CW serial line"));
     }
 
     #[test]

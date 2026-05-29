@@ -22,14 +22,12 @@ import {
   DEFAULT_RADIO_FREQUENCY_HZ,
   SUPERCHECKPARTIAL_MIN_QUERY_LENGTH,
   CALLSIGN_LOOKUP_DEBOUNCE_MS,
-  CW_ACTIVE_TIMEOUT_WIKEYER_MS,
-  CW_ACTIVE_TIMEOUT_CAT_MS,
-  CW_ACTIVE_TIMEOUT_NONE_MS,
   CW_REPEAT_DELAY_MS,
   FUNCTION_KEY_PATTERN,
   HZ_PER_KHZ,
   EPOCH_MS_PER_SECOND,
   nextCwWpm,
+  cwActiveTimeoutMs,
   typedModeFromCallsignInput,
   exchangeDefaults,
   formatFrequency,
@@ -318,12 +316,7 @@ function MainWindow({
   function markCwKeyActive(requestId, key) {
     activeCwRequestsRef.current.set(requestId, key);
     setActiveCwKeys((current) => new Set(current).add(key));
-    const timeoutMs =
-      radio?.cw_keyer_type === 'winkeyer'
-        ? CW_ACTIVE_TIMEOUT_WIKEYER_MS
-        : radio?.cw_keyer_type === 'cat'
-          ? CW_ACTIVE_TIMEOUT_CAT_MS
-          : CW_ACTIVE_TIMEOUT_NONE_MS;
+    const timeoutMs = cwActiveTimeoutMs(radio?.cw_keyer_type);
     const timeoutId = window.setTimeout(
       () => clearCwRequest(requestId),
       timeoutMs,
