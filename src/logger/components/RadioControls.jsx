@@ -1,5 +1,9 @@
 import React from 'react';
-import { MODE_OPTIONS } from '../mainWindowHelpers';
+import {
+  MODE_OPTIONS,
+  isSelectableMode,
+  modeIsCw,
+} from '../mainWindowHelpers';
 
 function RadioControls({
   operatingMode,
@@ -18,6 +22,11 @@ function RadioControls({
   backendSocketStatus,
   catStatus,
 }) {
+  const modeSelectable = isSelectableMode(radioMode);
+  const modeOptions = modeSelectable
+    ? MODE_OPTIONS
+    : [...MODE_OPTIONS, radioMode].filter(Boolean);
+
   return (
     <div className="radio-controls">
       <label className="radio-control">
@@ -45,20 +54,22 @@ function RadioControls({
           {!currentBand && <option value="unknown">Unknown</option>}
         </select>
       </label>
-      <label className="radio-control">
+      <label
+        className={modeSelectable ? 'radio-control' : 'radio-control unsupported'}
+      >
         Mode:
         <select
           value={radioMode}
           onChange={(event) => onSetRadioMode?.(event.target.value)}
         >
-          {MODE_OPTIONS.map((mode) => (
+          {modeOptions.map((mode) => (
             <option key={mode} value={mode}>
               {mode}
             </option>
           ))}
         </select>
       </label>
-      {radioMode === 'CW' && (
+      {modeIsCw(radioMode) && (
         <label className="radio-control cw-wpm-control">
           CW WPM:
           <input

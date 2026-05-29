@@ -1,9 +1,11 @@
+import { modeIsCw } from './modes.js';
+
 export function parseFieldType(type = '', radioMode = 'CW') {
   const [rawKind = 'STRING', length = '8'] = type.split(':');
   const kind = rawKind.toUpperCase();
   const maxLength =
     kind === 'RST'
-      ? radioMode === 'CW'
+      ? modeIsCw(radioMode)
         ? 3
         : 2
       : Number.parseInt(length, 10) || 8;
@@ -11,7 +13,7 @@ export function parseFieldType(type = '', radioMode = 'CW') {
 }
 
 export function sanitizeRST(value, radioMode = 'CW') {
-  const maxLength = radioMode === 'CW' ? 3 : 2;
+  const maxLength = modeIsCw(radioMode) ? 3 : 2;
   let nextValue = value.replace(/[^1-9]/g, '').slice(0, maxLength);
 
   while (nextValue.length > 0 && !/^[1-5]$/.test(nextValue[0])) {

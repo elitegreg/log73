@@ -34,6 +34,8 @@ import {
   exchangeDefaults,
   formatFrequency,
   isFrequencyInput,
+  adifModeForLoggerMode,
+  isSelectableMode,
   bandForFrequency,
   bandByMeters,
   createContactId,
@@ -294,7 +296,7 @@ function MainWindow({
       CALL: callSign.trim().toUpperCase(),
       BAND: currentBand?.name ?? '',
       FREQ: radioFrequencyHz,
-      MODE: radioMode,
+      MODE: adifModeForLoggerMode(radioMode),
     };
 
     for (const field of settings?.exchange ?? []) {
@@ -532,7 +534,7 @@ function MainWindow({
       CALL: normalizedCallSign,
       BAND: currentBand?.name ?? '',
       FREQ: radioFrequencyHz,
-      MODE: radioMode,
+      MODE: adifModeForLoggerMode(radioMode),
       _status: 'Pending',
       _session_id: sessionId,
       _log_id: logId,
@@ -618,7 +620,9 @@ function MainWindow({
 
     if (selectedBand) {
       onSetRadioFrequency?.(selectedBand.lowerHz);
-      onSetRadioMode?.(radioMode);
+      if (isSelectableMode(radioMode)) {
+        onSetRadioMode?.(radioMode);
+      }
     }
   }
 

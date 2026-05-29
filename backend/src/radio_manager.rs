@@ -2,7 +2,8 @@ use crate::cat_keyer::CatKeyer;
 use crate::cw;
 use crate::db::{Database, RadioConfig};
 use crate::radio::{
-    RadioCommand, RadioState, RadioStatus, ServerMessage, mode_for_request, normalize_mode,
+    RadioCommand, RadioState, RadioStatus, ServerMessage, mode_candidates_for_request,
+    normalize_mode,
 };
 use backon::{BackoffBuilder, ExponentialBuilder};
 use radio_cat_rs::{ConnectionConfig, ControllableRadio, RadioKind, create_radio};
@@ -1250,20 +1251,41 @@ async fn apply_command(
                 "translating CAT mode request"
             );
 
-            match mode_for_request(&mode, frequency_hz) {
-                Some(radio_mode) => {
-                    debug!(
-                        requested_mode = %mode,
-                        applied_mode = %radio_mode,
-                        resolved_frequency_hz = frequency_hz,
-                        "setting CAT radio mode"
-                    );
-                    radio.set_mode(radio_mode).await
+            let radio_modes = mode_candidates_for_request(&mode, frequency_hz);
+            if radio_modes.is_empty() {
+                debug!(mode, frequency_hz, "ignoring unsupported CAT radio mode");
+                return Ok(());
+            }
+
+            let mut last_error = None;
+            for radio_mode in radio_modes {
+                match radio.set_mode(radio_mode).await {
+                    Ok(()) => {
+                        debug!(
+                            requested_mode = %mode,
+                            applied_mode = %radio_mode,
+                            resolved_frequency_hz = frequency_hz,
+                            "setting CAT radio mode"
+                        );
+                        return Ok(());
+                    }
+                    Err(error) => {
+                        warn!(
+                            requested_mode = %mode,
+                            attempted_mode = %radio_mode,
+                            resolved_frequency_hz = frequency_hz,
+                            %error,
+                            "failed to set CAT radio mode candidate"
+                        );
+                        last_error = Some(error);
+                    }
                 }
-                None => {
-                    debug!(mode, frequency_hz, "ignoring unsupported CAT radio mode");
-                    Ok(())
-                }
+            }
+
+            if let Some(error) = last_error {
+                Err(error)
+            } else {
+                Ok(())
             }
         }
         RadioCommand::SendCw { .. }

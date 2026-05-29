@@ -1,6 +1,16 @@
 import { fieldDefault } from '../domain/contactFields.js';
+import {
+  LOGGER_MODE_OPTIONS,
+  normalizeLoggerMode,
+} from '../domain/modes.js';
 
-export const MODE_OPTIONS = ['CW', 'SSB', 'FM'];
+export {
+  adifModeForLoggerMode,
+  isSelectableMode,
+  modeIsCw,
+} from '../domain/modes.js';
+
+export const MODE_OPTIONS = LOGGER_MODE_OPTIONS;
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
 export const DEFAULT_CW_LABELS = {
   run: Array.from({ length: 12 }, (_, index) => ({
@@ -89,27 +99,12 @@ export function isEmptyCwButton(button) {
   return String(button?.label ?? '').trim() === '-';
 }
 
-export function availableModeOptions(settings) {
-  const allowedModes = Array.isArray(settings?.allowed_modes)
-    ? settings.allowed_modes
-    : [];
-  const normalizedAllowedModes = allowedModes
-    .map((mode) =>
-      String(mode ?? '')
-        .trim()
-        .toUpperCase(),
-    )
-    .filter(Boolean);
-
-  return normalizedAllowedModes.length > 0
-    ? [...new Set(normalizedAllowedModes)]
-    : MODE_OPTIONS;
+export function availableModeOptions() {
+  return MODE_OPTIONS;
 }
 
 export function typedModeFromCallsignInput(value, settings) {
-  const normalizedValue = String(value ?? '')
-    .trim()
-    .toUpperCase();
+  const normalizedValue = normalizeLoggerMode(value);
   if (!normalizedValue) return null;
 
   return (

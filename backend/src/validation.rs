@@ -31,6 +31,9 @@ const MAX_CW_WPM: u8 = 60;
 const MAX_CW_REQUEST_ID_LEN: usize = 64;
 const MAX_WS_FIELDS: usize = 100;
 const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat"];
+const LOGGER_MODE_OPTIONS: &[&str] = &[
+    "CW", "CW-R", "SSB", "FM", "FT8", "JT65", "JT9", "MFSK", "PSK", "RTTY",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ParsedFieldType {
@@ -222,10 +225,13 @@ pub fn validate_radio_frequency_hz(frequency_hz: u64) -> Result<(), String> {
 
 pub fn validate_radio_mode(mode: &str) -> Result<(), String> {
     let mode = mode.trim().to_uppercase();
-    if matches!(mode.as_str(), "CW" | "SSB" | "USB" | "LSB" | "FM") {
+    if LOGGER_MODE_OPTIONS.contains(&mode.as_str()) {
         Ok(())
     } else {
-        Err("mode must be one of: CW, SSB, USB, LSB, FM".to_string())
+        Err(format!(
+            "mode must be one of: {}",
+            LOGGER_MODE_OPTIONS.join(", ")
+        ))
     }
 }
 
@@ -602,11 +608,7 @@ fn validate_typed_field(
     }
 
     if parsed.kind == "RST" {
-        let expected_length = if radio_mode.eq_ignore_ascii_case("CW") {
-            3
-        } else {
-            2
-        };
+        let expected_length = if mode_is_cw(radio_mode) { 3 } else { 2 };
         if !is_valid_rst(&normalized_value, expected_length) {
             return Err(format!(
                 "{label} must be a valid {expected_length}-digit RST"
@@ -647,11 +649,7 @@ fn parse_field_type(field_type: &str, radio_mode: &str) -> ParsedFieldType {
     let kind = parts.next().unwrap_or("STRING").trim().to_uppercase();
     let raw_length = parts.next().unwrap_or("8");
     let max_length = if kind == "RST" {
-        if radio_mode.eq_ignore_ascii_case("CW") {
-            3
-        } else {
-            2
-        }
+        if mode_is_cw(radio_mode) { 3 } else { 2 }
     } else {
         raw_length
             .parse::<usize>()
@@ -661,6 +659,10 @@ fn parse_field_type(field_type: &str, radio_mode: &str) -> ParsedFieldType {
     };
 
     ParsedFieldType { kind, max_length }
+}
+
+fn mode_is_cw(mode: &str) -> bool {
+    matches!(mode.trim().to_uppercase().as_str(), "CW" | "CW-R")
 }
 
 fn is_valid_rst(value: &str, expected_length: usize) -> bool {
@@ -930,6 +932,7 @@ mod tests {
     #[test]
     fn validates_typed_fields_like_frontend() {
         assert!(validate_typed_field("RST", "RST", "599", &[], None, "CW").is_ok());
+        assert!(validate_typed_field("RST", "RST", "599", &[], None, "CW-R").is_ok());
         assert!(validate_typed_field("RST", "RST", "59", &[], None, "CW").is_err());
         assert!(validate_typed_field("Serial", "Numeric:3", "123", &[], None, "CW").is_ok());
         assert!(validate_typed_field("Serial", "Numeric:3", "12A", &[], None, "CW").is_err());
@@ -941,6 +944,14 @@ mod tests {
             validate_typed_field("Section", "String:3", "GA", &["SC".to_string()], None, "CW")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn validates_logger_mode_requests() {
+        for mode in LOGGER_MODE_OPTIONS {
+            assert!(validate_radio_mode(mode).is_ok());
+        }
+        assert!(validate_radio_mode("AM").is_err());
     }
 
     #[test]

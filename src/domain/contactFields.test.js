@@ -21,11 +21,16 @@ test('parseFieldType uses contest lengths and RST mode lengths', () => {
     maxLength: 3,
   });
   assert.deepEqual(parseFieldType('RST', 'CW'), { kind: 'RST', maxLength: 3 });
+  assert.deepEqual(parseFieldType('RST', 'CW-R'), {
+    kind: 'RST',
+    maxLength: 3,
+  });
   assert.deepEqual(parseFieldType('RST', 'SSB'), { kind: 'RST', maxLength: 2 });
 });
 
 test('sanitizeRST keeps valid RST digits for the active mode', () => {
   assert.equal(sanitizeRST('599', 'CW'), '599');
+  assert.equal(sanitizeRST('599', 'CW-R'), '599');
   assert.equal(sanitizeRST('599', 'SSB'), '59');
   assert.equal(sanitizeRST('abc5799', 'CW'), '579');
   assert.equal(sanitizeRST('999', 'CW'), '');

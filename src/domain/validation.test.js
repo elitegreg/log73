@@ -27,6 +27,10 @@ test('validateExchangeField validates RST by mode', () => {
     true,
   );
   assert.equal(
+    validateExchangeField({ name: 'RST', type: 'RST' }, '599', 'CW-R').ok,
+    true,
+  );
+  assert.equal(
     validateExchangeField({ name: 'RST', type: 'RST' }, '59', 'CW').ok,
     false,
   );

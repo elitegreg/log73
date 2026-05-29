@@ -725,6 +725,11 @@ function LoggerScreen() {
           if (message.type === 'radio_status') {
             setCatStatus(message.online ? 'online' : 'offline');
           } else if (message.type === 'radio_state') {
+            debugSocket('radio_state_received', {
+              frequencyHz: message.frequency_hz,
+              mode: message.mode,
+              socketState: socketStateLabel(socket),
+            });
             setRadioState({
               frequency_hz: message.frequency_hz,
               mode: message.mode,

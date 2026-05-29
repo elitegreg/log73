@@ -1,4 +1,5 @@
 import { parseFieldType } from './contactFields.js';
+import { modeIsCw } from './modes.js';
 
 export function fieldValueLabel(field) {
   return field?.label ?? field?.name ?? 'Field';
@@ -11,7 +12,7 @@ function validateSingleValue(field, value, radioMode) {
 
   const { kind } = parseFieldType(field?.type, radioMode);
   if (kind === 'RST') {
-    const expectedLength = radioMode === 'CW' ? 3 : 2;
+    const expectedLength = modeIsCw(radioMode) ? 3 : 2;
     if (
       !/^([1-5][1-9]{1,2})$/.test(normalizedValue) ||
       normalizedValue.length !== expectedLength

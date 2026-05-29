@@ -4,6 +4,7 @@ import {
   sanitizeCallsign,
   sanitizeExchangeValue,
 } from '../domain/contactFields';
+import { adifModeForLoggerMode } from '../domain/modes';
 import { validateExchangeField } from '../domain/validation';
 import { useNotifications } from '../lib/notificationsContext';
 
@@ -272,10 +273,13 @@ function parseUpdateValue(settings, column, value, radioMode, entry = null) {
   }
 
   if (column === 'Mode') {
-    const mode = value.trim().toUpperCase();
+    const mode = adifModeForLoggerMode(value);
     if (
       (settings?.allowed_modes ?? []).length > 0 &&
-      !settings.allowed_modes.includes(mode)
+      !settings.allowed_modes.some(
+        (allowedMode) =>
+          String(allowedMode).trim().toUpperCase() === mode,
+      )
     ) {
       return {
         ok: false,

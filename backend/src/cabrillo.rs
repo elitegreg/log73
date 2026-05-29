@@ -233,13 +233,15 @@ fn qso_frequency_token(contact: &Contact) -> Option<String> {
 
 fn qso_mode_token(contact: &Contact) -> Option<String> {
     let mode = token_string(contact.get("MODE"))?;
-    Some(match mode.as_str() {
-        "CW" => "CW".to_string(),
-        "FM" => "FM".to_string(),
-        "RTTY" => "RY".to_string(),
-        "SSB" | "USB" | "LSB" | "PH" => "PH".to_string(),
-        _ => "DG".to_string(),
-    })
+    Some(cabrillo_mode_token(&mode).to_string())
+}
+
+fn cabrillo_mode_token(mode: &str) -> &'static str {
+    match mode.trim().to_uppercase().as_str() {
+        "CW" | "CW-R" => "CW",
+        "SSB" | "USB" | "LSB" | "FM" | "FMN" | "WFM" | "AM" | "PH" => "PH",
+        _ => "DG",
+    }
 }
 
 fn qso_datetime(epoch: i64) -> Result<(String, String), String> {
@@ -498,6 +500,23 @@ mod tests {
         assert!(lines.contains(&"OPERATORS: K1ABC"));
         assert!(lines.iter().any(|line| line.starts_with("QSO: 14250 PH ")));
         assert!(text.ends_with("\r\n"));
+    }
+
+    #[test]
+    fn qso_mode_token_maps_logger_modes_to_cabrillo_groups() {
+        for (mode, token) in [
+            ("CW", "CW"),
+            ("CW-R", "CW"),
+            ("SSB", "PH"),
+            ("FM", "PH"),
+            ("AM", "PH"),
+            ("RTTY", "DG"),
+            ("FT8", "DG"),
+            ("PSK", "DG"),
+        ] {
+            let contact = Map::from_iter([("MODE".to_string(), json!(mode))]);
+            assert_eq!(qso_mode_token(&contact).as_deref(), Some(token));
+        }
     }
 
     #[test]

@@ -86,6 +86,7 @@ fn contact_fields(
 
         let serialized = match normalized.as_str() {
             "FREQ" => frequency_value_string(value),
+            "MODE" => mode_value_string(value),
             _ => value_string(value),
         };
 
@@ -156,6 +157,13 @@ fn value_string(value: &Value) -> Option<String> {
 fn frequency_value_string(value: &Value) -> Option<String> {
     let hz = contact_i64(Some(value))?;
     Some(format_frequency_mhz(hz))
+}
+
+fn mode_value_string(value: &Value) -> Option<String> {
+    value_string(value).map(|mode| match mode.trim().to_uppercase().as_str() {
+        "CW-R" => "CW".to_string(),
+        mode => mode.to_string(),
+    })
 }
 
 fn format_frequency_mhz(hz: i64) -> String {
@@ -268,6 +276,16 @@ mod tests {
         assert!(text.contains("<EOR>\n"));
         assert!(!text.contains("_id"));
         assert!(!text.contains("LOG_ID"));
+    }
+
+    #[test]
+    fn render_log_maps_cw_reverse_to_adif_cw() {
+        let mut contact = test_contact();
+        contact.insert("MODE".to_string(), json!("CW-R"));
+        let text = render_log(&test_log(), &[contact]).expect("ADIF export should render");
+
+        assert!(text.contains("<MODE:2>CW"));
+        assert!(!text.contains("CW-R"));
     }
 
     #[test]
