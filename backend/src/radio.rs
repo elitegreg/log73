@@ -25,7 +25,7 @@ pub enum ServerMessage {
         bonus_points: i64,
         total_score: i64,
     },
-    CwSent {
+    MessageSent {
         request_id: String,
     },
 }
@@ -53,7 +53,7 @@ pub enum ClientMessage {
     SetMode {
         mode: String,
     },
-    SendCw {
+    SendMessage {
         request_id: String,
         mode: String,
         key: String,
@@ -73,7 +73,7 @@ pub enum ClientMessage {
 pub enum RadioCommand {
     SetFrequency(u64),
     SetMode(String),
-    SendCw {
+    SendMessage {
         mode: String,
         key: String,
         fields: serde_json::Map<String, serde_json::Value>,
@@ -179,6 +179,35 @@ mod tests {
 
         match message {
             ClientMessage::Ping { request_id } => assert_eq!(request_id, "ping-123"),
+            other => panic!("unexpected client message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deserializes_send_message_client_message() {
+        let message: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "send_message",
+            "request_id": "msg-123",
+            "mode": "run",
+            "key": "F1",
+            "fields": {
+                "CALL": "K1ABC"
+            }
+        }))
+        .expect("send_message should deserialize");
+
+        match message {
+            ClientMessage::SendMessage {
+                request_id,
+                mode,
+                key,
+                fields,
+            } => {
+                assert_eq!(request_id, "msg-123");
+                assert_eq!(mode, "run");
+                assert_eq!(key, "F1");
+                assert_eq!(fields.get("CALL"), Some(&serde_json::json!("K1ABC")));
+            }
             other => panic!("unexpected client message: {other:?}"),
         }
     }

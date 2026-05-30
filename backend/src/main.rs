@@ -408,7 +408,7 @@ async fn handle_socket(
                 }
                 let _ = radio_handle.send_command(RadioCommand::SetMode(mode)).await;
             }
-            Ok(ClientMessage::SendCw {
+            Ok(ClientMessage::SendMessage {
                 request_id,
                 mode,
                 key,
@@ -416,17 +416,17 @@ async fn handle_socket(
             }) => {
                 debug!(
                     session_id,
-                    radio_id, request_id, mode, key, "websocket send_cw command received"
+                    radio_id, request_id, mode, key, "websocket send_message command received"
                 );
                 if let Err(error) =
-                    validation::validate_cw_request(&request_id, &mode, &key, &fields)
+                    validation::validate_message_request(&request_id, &mode, &key, &fields)
                 {
-                    warn!(session_id, radio_id, request_id, mode, key, %error, "invalid websocket send_cw command");
+                    warn!(session_id, radio_id, request_id, mode, key, %error, "invalid websocket send_message command");
                     continue;
                 }
                 let (completed_tx, completed_rx) = oneshot::channel();
                 let command_result = radio_handle
-                    .send_command(RadioCommand::SendCw {
+                    .send_command(RadioCommand::SendMessage {
                         mode,
                         key,
                         fields,
@@ -440,23 +440,23 @@ async fn handle_socket(
                         debug!(
                             session_id = %completion_session_id,
                             request_id,
-                            "waiting for cw send completion"
+                            "waiting for message send completion"
                         );
                         match completed_rx.await {
                             Ok(Ok(())) => {
                                 debug!(
                                     session_id = %completion_session_id,
                                     request_id,
-                                    "cw send complete; sending cw_sent websocket message"
+                                    "message send complete; sending message_sent websocket message"
                                 );
                                 if direct_tx
-                                    .send(ServerMessage::CwSent { request_id })
+                                    .send(ServerMessage::MessageSent { request_id })
                                     .await
                                     .is_err()
                                 {
                                     debug!(
                                         session_id = %completion_session_id,
-                                        "unable to send cw_sent websocket message; session closed"
+                                        "unable to send message_sent websocket message; session closed"
                                     );
                                 }
                             }
@@ -465,7 +465,7 @@ async fn handle_socket(
                                     session_id = %completion_session_id,
                                     request_id,
                                     %error,
-                                    "cw send did not complete; not sending cw_sent websocket message"
+                                    "message send did not complete; not sending message_sent websocket message"
                                 );
                             }
                             Err(error) => {
@@ -473,7 +473,7 @@ async fn handle_socket(
                                     session_id = %completion_session_id,
                                     request_id,
                                     %error,
-                                    "cw completion channel closed; not sending cw_sent websocket message"
+                                    "message completion channel closed; not sending message_sent websocket message"
                                 );
                             }
                         }
@@ -481,7 +481,7 @@ async fn handle_socket(
                 } else {
                     debug!(
                         session_id,
-                        radio_id, request_id, "failed to queue cw command"
+                        radio_id, request_id, "failed to queue message command"
                     );
                 }
             }
@@ -515,16 +515,16 @@ async fn handle_socket(
                                 debug!(
                                     session_id = %completion_session_id,
                                     request_id,
-                                    "cw text send complete; sending cw_sent websocket message"
+                                    "cw text send complete; sending message_sent websocket message"
                                 );
                                 if direct_tx
-                                    .send(ServerMessage::CwSent { request_id })
+                                    .send(ServerMessage::MessageSent { request_id })
                                     .await
                                     .is_err()
                                 {
                                     debug!(
                                         session_id = %completion_session_id,
-                                        "unable to send cw_sent websocket message; session closed"
+                                        "unable to send message_sent websocket message; session closed"
                                     );
                                 }
                             }
@@ -533,7 +533,7 @@ async fn handle_socket(
                                     session_id = %completion_session_id,
                                     request_id,
                                     %error,
-                                    "cw text send did not complete; not sending cw_sent websocket message"
+                                    "cw text send did not complete; not sending message_sent websocket message"
                                 );
                             }
                             Err(error) => {
@@ -541,7 +541,7 @@ async fn handle_socket(
                                     session_id = %completion_session_id,
                                     request_id,
                                     %error,
-                                    "cw text completion channel closed; not sending cw_sent websocket message"
+                                    "cw text completion channel closed; not sending message_sent websocket message"
                                 );
                             }
                         }

@@ -271,17 +271,17 @@ pub fn validate_radio_mode(mode: &str) -> Result<(), String> {
     }
 }
 
-pub fn validate_cw_request(
+pub fn validate_message_request(
     request_id: &str,
     mode: &str,
     key: &str,
     fields: &serde_json::Map<String, Value>,
 ) -> Result<(), String> {
-    validate_required_text("CW request id", request_id, MAX_CW_REQUEST_ID_LEN)?;
+    validate_required_text("Message request id", request_id, MAX_CW_REQUEST_ID_LEN)?;
 
     let normalized_mode = mode.trim().to_lowercase();
     if normalized_mode != "run" && normalized_mode != "s&p" && normalized_mode != "sp" {
-        return Err("CW mode must be run or s&p".to_string());
+        return Err("Message mode must be run or s&p".to_string());
     }
 
     let normalized_key = key.trim().to_uppercase();
@@ -289,12 +289,12 @@ pub fn validate_cw_request(
         normalized_key.as_str(),
         "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12"
     ) {
-        return Err("CW key must be F1 through F12".to_string());
+        return Err("Message key must be F1 through F12".to_string());
     }
 
     if fields.len() > MAX_WS_FIELDS {
         return Err(format!(
-            "CW fields cannot contain more than {MAX_WS_FIELDS} entries"
+            "Message fields cannot contain more than {MAX_WS_FIELDS} entries"
         ));
     }
     for (key, value) in fields {

@@ -135,8 +135,8 @@ function LoggerScreen() {
   const [settings, setSettings] = useState(null);
   const [log, setLog] = useState(null);
   const [radio, setRadio] = useState(null);
-  const [cwLabels, setCwLabels] = useState(null);
-  const [cwSentEvent, setCwSentEvent] = useState(null);
+  const [messageLabels, setMessageLabels] = useState(null);
+  const [messageSentEvent, setMessageSentEvent] = useState(null);
   const [allContacts, setAllContacts] = useState(() => loadLocalContacts(logId));
   const [debouncedCallsignSearch, setDebouncedCallsignSearch] = useState('');
   const [searchResultIds, setSearchResultIds] = useState(null);
@@ -228,7 +228,7 @@ function LoggerScreen() {
 
     async function loadContext() {
       setIsContextLoading(true);
-      const [logResult, radioResult, cwLabelsResult] = await Promise.all([
+      const [logResult, radioResult, messageLabelsResult] = await Promise.all([
         apiJson(`/logs/${numericLogId}`),
         apiJson(`/radios/${numericRadioId}`),
         apiJson(`/radios/${numericRadioId}/cw-labels`),
@@ -243,7 +243,7 @@ function LoggerScreen() {
       setSettings(contestSettings);
       setLog(logResult.log);
       setRadio(radioResult.radio);
-      if (cwLabelsResult.ok) setCwLabels(cwLabelsResult.labels);
+      if (messageLabelsResult.ok) setMessageLabels(messageLabelsResult.labels);
       setOperatorCallsign(
         (current) =>
           current || promptForOperatorCallsign(logResult.log.station_callsign),
@@ -734,8 +734,8 @@ function LoggerScreen() {
               frequency_hz: message.frequency_hz,
               mode: message.mode,
             });
-          } else if (message.type === 'cw_sent') {
-            setCwSentEvent({
+          } else if (message.type === 'message_sent') {
+            setMessageSentEvent({
               requestId: message.request_id,
               sequence: Date.now(),
             });
@@ -1253,16 +1253,16 @@ function LoggerScreen() {
         radioState={radioState}
         backendSocketStatus={backendSocketStatus}
         catStatus={catStatus}
-        cwLabels={cwLabels}
-        cwSentEvent={cwSentEvent}
+        messageLabels={messageLabels}
+        messageSentEvent={messageSentEvent}
         sessionId={sessionId}
         logId={numericLogId}
         onSetRadioFrequency={(frequencyHz) =>
           sendRadioMessage({ type: 'set_frequency', frequency_hz: frequencyHz })
         }
         onSetRadioMode={(mode) => sendRadioMessage({ type: 'set_mode', mode })}
-        onSendCw={(payload) =>
-          sendRadioMessage({ type: 'send_cw', ...payload })
+        onSendMessage={(payload) =>
+          sendRadioMessage({ type: 'send_message', ...payload })
         }
         onSendCwText={(payload) =>
           sendRadioMessage({ type: 'send_cw_text', ...payload })

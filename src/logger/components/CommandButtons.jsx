@@ -1,7 +1,7 @@
 import React from 'react';
 
 function CommandButtons({
-  stopCwSending,
+  stopMessageSending,
   resetEntryFields,
   logContact,
   onRescore,
@@ -16,7 +16,7 @@ function CommandButtons({
         className="cmd-btn"
         type="button"
         title="Keyboard shortcut: Esc"
-        onClick={stopCwSending}
+        onClick={stopMessageSending}
       >
         Stop Sending
       </button>

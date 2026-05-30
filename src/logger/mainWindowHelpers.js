@@ -13,7 +13,7 @@ export {
 export const MODE_OPTIONS = LOGGER_MODE_OPTIONS;
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
 export const ESM_ENABLED_STORAGE_KEY = 'log73.esm_enabled';
-export const DEFAULT_CW_LABELS = {
+export const DEFAULT_MESSAGE_LABELS = {
   run: Array.from({ length: 12 }, (_, index) => ({
     key: `F${index + 1}`,
     label: '-',
@@ -99,16 +99,16 @@ export function createContactId(date, callSign) {
   return `${date.getTime()}-${callSign}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function cwButtonLabel(label, stationCallsign) {
+export function messageButtonLabel(label, stationCallsign) {
   return String(label ?? '').replaceAll('{STATION_CALLSIGN}', stationCallsign);
 }
 
-export function createCwRequestId() {
+export function createMessageRequestId() {
   if (window.crypto?.randomUUID) return window.crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export function isEmptyCwButton(button) {
+export function isEmptyMessageButton(button) {
   return String(button?.label ?? '').trim() === '-';
 }
 

@@ -1,12 +1,12 @@
 import React from 'react';
-import { cwButtonLabel } from '../mainWindowHelpers';
+import { messageButtonLabel } from '../mainWindowHelpers';
 
 function FunctionKeys({
-  activeCwLabels,
-  activeCwKeys,
-  sendCwKey,
+  activeMessageLabels,
+  activeMessageKeys,
+  sendMessageKey,
   stationCallsign,
-  cwModeKey,
+  messageModeKey,
   repeatRunF1,
   setRepeatRunF1,
   esmNextKeys = [],
@@ -16,16 +16,16 @@ function FunctionKeys({
   return (
     <div className="function-keys">
       <div className="f-row">
-        {activeCwLabels.slice(0, 6).map((button) => (
+        {activeMessageLabels.slice(0, 6).map((button) => (
           <button
             key={button.key}
-            className={`f-key ${activeCwKeys.has(button.key) ? 'active' : ''} ${esmNextKeySet.has(button.key) ? 'esm-next' : ''}`.trim()}
+            className={`f-key ${activeMessageKeys.has(button.key) ? 'active' : ''} ${esmNextKeySet.has(button.key) ? 'esm-next' : ''}`.trim()}
             type="button"
             title={`Keyboard shortcut: ${button.key}`}
-            onClick={() => sendCwKey(button.key)}
+            onClick={() => sendMessageKey(button.key)}
           >
-            {button.key} {cwButtonLabel(button.label, stationCallsign)}
-            {cwModeKey === 'run' && button.key === 'F1' && (
+            {button.key} {messageButtonLabel(button.label, stationCallsign)}
+            {messageModeKey === 'run' && button.key === 'F1' && (
               <label
                 className="f-key-repeat"
                 style={{ float: 'right' }}
@@ -43,15 +43,15 @@ function FunctionKeys({
         ))}
       </div>
       <div className="f-row">
-        {activeCwLabels.slice(6, 12).map((button) => (
+        {activeMessageLabels.slice(6, 12).map((button) => (
           <button
             key={button.key}
-            className={`f-key ${activeCwKeys.has(button.key) ? 'active' : ''} ${esmNextKeySet.has(button.key) ? 'esm-next' : ''}`.trim()}
+            className={`f-key ${activeMessageKeys.has(button.key) ? 'active' : ''} ${esmNextKeySet.has(button.key) ? 'esm-next' : ''}`.trim()}
             type="button"
             title={`Keyboard shortcut: ${button.key}`}
-            onClick={() => sendCwKey(button.key)}
+            onClick={() => sendMessageKey(button.key)}
           >
-            {button.key} {cwButtonLabel(button.label, stationCallsign)}
+            {button.key} {messageButtonLabel(button.label, stationCallsign)}
           </button>
         ))}
       </div>

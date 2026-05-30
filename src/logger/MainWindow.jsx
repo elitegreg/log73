@@ -16,7 +16,7 @@ import { dxcc, supercheckpartial } from '../lib/api';
 import {
   CW_WPM_STORAGE_KEY,
   ESM_ENABLED_STORAGE_KEY,
-  DEFAULT_CW_LABELS,
+  DEFAULT_MESSAGE_LABELS,
   DEFAULT_CW_WPM,
   CW_WPM_MIN,
   CW_WPM_MAX,
@@ -35,12 +35,13 @@ import {
   isFrequencyInput,
   adifModeForLoggerMode,
   isSelectableMode,
+  modeIsCw,
   esmEnterAction,
   bandForFrequency,
   bandByMeters,
   createContactId,
-  createCwRequestId,
-  isEmptyCwButton,
+  createMessageRequestId,
+  isEmptyMessageButton,
 } from './mainWindowHelpers';
 import RadioControls from './components/RadioControls';
 import EntryFields from './components/EntryFields';
@@ -60,13 +61,13 @@ function MainWindow({
   radioState,
   backendSocketStatus,
   catStatus,
-  cwLabels,
-  cwSentEvent,
+  messageLabels,
+  messageSentEvent,
   sessionId,
   logId,
   onSetRadioFrequency,
   onSetRadioMode,
-  onSendCw,
+  onSendMessage,
   onSendCwText,
   onStopCw,
   onSetCwWpm,
@@ -87,7 +88,7 @@ function MainWindow({
   });
   const [esmRunCallsignAttempt, setEsmRunCallsignAttempt] = useState('');
   const [esmExchangeSentCallsign, setEsmExchangeSentCallsign] = useState('');
-  const [activeCwKeys, setActiveCwKeys] = useState(() => new Set());
+  const [activeMessageKeys, setActiveMessageKeys] = useState(() => new Set());
   const [activeCompletionField, setActiveCompletionField] = useState(null);
   const [supercheckpartialCallsigns, setSupercheckpartialCallsigns] = useState(
     [],
@@ -112,8 +113,8 @@ function MainWindow({
   const callSignValueRef = useRef('');
   const repeatSendRunF1Ref = useRef(() => {});
   const callsignSelectionRef = useRef(null);
-  const activeCwRequestsRef = useRef(new Map());
-  const activeCwTimeoutsRef = useRef(new Map());
+  const activeMessageRequestsRef = useRef(new Map());
+  const activeMessageTimeoutsRef = useRef(new Map());
   const exchangeInputRefs = useRef({});
   const cwTextInputRef = useRef(null);
   const callSignEditedAtRef = useRef(new Date());
@@ -266,8 +267,9 @@ function MainWindow({
     supercheckpartialCallsigns,
   ]);
 
-  const cwModeKey = operatingMode === 'Run' ? 'run' : 's&p';
-  const activeCwLabels = cwLabels?.[cwModeKey] ?? DEFAULT_CW_LABELS[cwModeKey];
+  const messageModeKey = operatingMode === 'Run' ? 'run' : 's&p';
+  const activeMessageLabels =
+    messageLabels?.[messageModeKey] ?? DEFAULT_MESSAGE_LABELS[messageModeKey];
   const activeExchangeCompletionField = (settings?.exchange ?? []).find(
     (field) => field.name === activeCompletionField && field.fixed !== true,
   );
@@ -286,7 +288,7 @@ function MainWindow({
       ? dupeAlertText(settings, currentContactFields(), contacts)
       : '';
 
-  function currentCwFields() {
+  function currentMessageFields() {
     const fields = {
       STATION_CALLSIGN: stationCallsign,
       CALL: callSign.trim().toUpperCase(),
@@ -350,28 +352,28 @@ function MainWindow({
     }
   }
 
-  function markCwKeyActive(requestId, key) {
-    activeCwRequestsRef.current.set(requestId, key);
-    setActiveCwKeys((current) => new Set(current).add(key));
+  function markMessageKeyActive(requestId, key) {
+    activeMessageRequestsRef.current.set(requestId, key);
+    setActiveMessageKeys((current) => new Set(current).add(key));
     const timeoutMs = cwActiveTimeoutMs(radio?.cw_keyer_type);
     const timeoutId = window.setTimeout(
-      () => clearCwRequest(requestId),
+      () => clearMessageRequest(requestId),
       timeoutMs,
     );
-    activeCwTimeoutsRef.current.set(requestId, timeoutId);
+    activeMessageTimeoutsRef.current.set(requestId, timeoutId);
   }
 
-  function clearCwRequest(requestId) {
-    const key = activeCwRequestsRef.current.get(requestId);
+  function clearMessageRequest(requestId) {
+    const key = activeMessageRequestsRef.current.get(requestId);
     if (!key) return;
-    activeCwRequestsRef.current.delete(requestId);
-    const timeoutId = activeCwTimeoutsRef.current.get(requestId);
+    activeMessageRequestsRef.current.delete(requestId);
+    const timeoutId = activeMessageTimeoutsRef.current.get(requestId);
     if (timeoutId !== undefined) {
       window.clearTimeout(timeoutId);
-      activeCwTimeoutsRef.current.delete(requestId);
+      activeMessageTimeoutsRef.current.delete(requestId);
     }
-    setActiveCwKeys((current) => {
-      const stillActive = [...activeCwRequestsRef.current.values()].includes(
+    setActiveMessageKeys((current) => {
+      const stillActive = [...activeMessageRequestsRef.current.values()].includes(
         key,
       );
       if (stillActive) return current;
@@ -381,40 +383,40 @@ function MainWindow({
     });
   }
 
-  function clearAllCwRequests() {
-    for (const timeoutId of activeCwTimeoutsRef.current.values()) {
+  function clearAllMessageRequests() {
+    for (const timeoutId of activeMessageTimeoutsRef.current.values()) {
       window.clearTimeout(timeoutId);
     }
-    activeCwTimeoutsRef.current.clear();
-    activeCwRequestsRef.current.clear();
-    setActiveCwKeys(new Set());
+    activeMessageTimeoutsRef.current.clear();
+    activeMessageRequestsRef.current.clear();
+    setActiveMessageKeys(new Set());
   }
 
-  function sendSingleCwKey(key, mode = cwModeKey) {
-    const button = (cwLabels?.[mode] ?? DEFAULT_CW_LABELS[mode]).find(
+  function sendSingleMessageKey(key, mode = messageModeKey) {
+    const button = (messageLabels?.[mode] ?? DEFAULT_MESSAGE_LABELS[mode]).find(
       (label) => label.key === key,
     );
-    if (isEmptyCwButton(button)) return null;
-    const requestId = createCwRequestId();
-    markCwKeyActive(requestId, key);
-    onSendCw?.({
+    if (isEmptyMessageButton(button)) return null;
+    const requestId = createMessageRequestId();
+    markMessageKeyActive(requestId, key);
+    onSendMessage?.({
       request_id: requestId,
       mode,
       key,
-      fields: currentCwFields(),
+      fields: currentMessageFields(),
     });
     return requestId;
   }
 
   repeatSendRunF1Ref.current = () => {
-    repeatRequestIdRef.current = sendSingleCwKey('F1', 'run');
+    repeatRequestIdRef.current = sendSingleMessageKey('F1', 'run');
   };
   callSignValueRef.current = callSign;
 
-  function sendCwKey(key) {
-    const shouldRepeat = cwModeKey === 'run' && key === 'F1' && repeatRunF1;
+  function sendMessageKey(key) {
+    const shouldRepeat = messageModeKey === 'run' && key === 'F1' && repeatRunF1;
     stopRepeat();
-    const requestId = sendSingleCwKey(key);
+    const requestId = sendSingleMessageKey(key);
     if (!requestId) return;
 
     if (key === 'F2') {
@@ -426,31 +428,31 @@ function MainWindow({
       repeatRequestIdRef.current = requestId;
     }
 
-    if (cwModeKey === 's&p' && key === 'F1') {
+    if (messageModeKey === 's&p' && key === 'F1') {
       setOperatingMode('Run');
     }
   }
 
-  function stopCwSending() {
+  function stopMessageSending() {
     stopRepeat();
-    clearAllCwRequests();
+    clearAllMessageRequests();
     onStopCw?.();
   }
 
   useEffect(
     () => () => {
       stopRepeat();
-      clearAllCwRequests();
+      clearAllMessageRequests();
     },
     [],
   );
 
   useEffect(() => {
-    if (cwSentEvent?.requestId) clearCwRequest(cwSentEvent.requestId);
+    if (messageSentEvent?.requestId) clearMessageRequest(messageSentEvent.requestId);
     if (
       !repeatActiveRef.current ||
-      !cwSentEvent?.requestId ||
-      cwSentEvent.requestId !== repeatRequestIdRef.current
+      !messageSentEvent?.requestId ||
+      messageSentEvent.requestId !== repeatRequestIdRef.current
     )
       return;
     repeatTimeoutRef.current = window.setTimeout(() => {
@@ -461,9 +463,10 @@ function MainWindow({
       }
       repeatSendRunF1Ref.current();
     }, CW_REPEAT_DELAY_MS);
-  }, [cwSentEvent]);
+  }, [messageSentEvent]);
 
   function openCwTextDialog() {
+    if (!modeIsCw(radioMode)) return;
     setCwTextCommittedWords([]);
     setCwTextCurrentWord('');
     setIsCwTextDialogOpen(true);
@@ -481,7 +484,7 @@ function MainWindow({
     if (!word) return;
 
     onSendCwText?.({
-      request_id: createCwRequestId(),
+      request_id: createMessageRequestId(),
       text: sendTrailingSpace ? `${word} ` : word,
     });
     setCwTextCommittedWords((current) => [...current, word]);
@@ -520,7 +523,7 @@ function MainWindow({
   function sendEsmKeys(keys) {
     stopRepeat();
     for (const key of keys) {
-      const requestId = sendSingleCwKey(key);
+      const requestId = sendSingleMessageKey(key);
       if (!requestId) continue;
       if (key === 'F2') {
         markEsmExchangeSentForCurrentCallsign();
@@ -529,13 +532,23 @@ function MainWindow({
   }
 
   useEffect(() => {
+    if (!modeIsCw(radioMode) && isCwTextDialogOpen) {
+      setIsCwTextDialogOpen(false);
+      setCwTextCommittedWords([]);
+      setCwTextCurrentWord('');
+      callSignRef.current?.focus();
+    }
+  }, [radioMode, isCwTextDialogOpen]);
+
+  useEffect(() => {
     function handleFunctionKey(event) {
       if (event.target?.closest?.('.log-window')) return;
       if (
         event.ctrlKey &&
         !event.altKey &&
         !event.metaKey &&
-        event.key.toLowerCase() === 'k'
+        event.key.toLowerCase() === 'k' &&
+        modeIsCw(radioMode)
       ) {
         event.preventDefault();
         openCwTextDialog();
@@ -550,7 +563,7 @@ function MainWindow({
       }
       if (event.key === 'Escape') {
         event.preventDefault();
-        stopCwSending();
+        stopMessageSending();
         return;
       }
       if (event.key === 'PageUp') {
@@ -565,7 +578,7 @@ function MainWindow({
       }
       if (FUNCTION_KEY_PATTERN.test(event.key)) {
         event.preventDefault();
-        sendCwKey(event.key);
+        sendMessageKey(event.key);
       }
     }
 
@@ -978,7 +991,7 @@ function MainWindow({
         aria-label="Completion matches"
         value={completionMatches.join(' ')}
       />
-      {isCwTextDialogOpen ? (
+      {modeIsCw(radioMode) && isCwTextDialogOpen ? (
         <div className="cw-text-dialog-overlay" onClick={closeCwTextDialog}>
           <div
             className="cw-text-dialog"
@@ -1016,17 +1029,17 @@ function MainWindow({
         </div>
       ) : null}
       <FunctionKeys
-        activeCwLabels={activeCwLabels}
-        activeCwKeys={activeCwKeys}
-        sendCwKey={sendCwKey}
+        activeMessageLabels={activeMessageLabels}
+        activeMessageKeys={activeMessageKeys}
+        sendMessageKey={sendMessageKey}
         stationCallsign={stationCallsign}
-        cwModeKey={cwModeKey}
+        messageModeKey={messageModeKey}
         repeatRunF1={repeatRunF1}
         setRepeatRunF1={setRepeatRunF1}
         esmNextKeys={esmHighlightedKeys}
       />
       <CommandButtons
-        stopCwSending={stopCwSending}
+        stopMessageSending={stopMessageSending}
         resetEntryFields={resetEntryFields}
         logContact={logContact}
         onRescore={onRescore}
