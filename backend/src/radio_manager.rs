@@ -1630,17 +1630,6 @@ fn cw_serial_config(serial_port: &str, baud_rate: u32, line: &str) -> CwSerialCo
         .ptt_line(None)
 }
 
-async fn open_serial_keyer_for_config(
-    config: &RadioConfig,
-) -> cw_serial_keyer::Result<CwSerialDevice> {
-    open_serial_keyer(
-        &config.cw_serial_port,
-        config.cw_serial_baud_rate,
-        &config.cw_serial_line,
-    )
-    .await
-}
-
 async fn open_serial_keyer(
     serial_port: &str,
     baud_rate: u32,

@@ -111,6 +111,7 @@ impl DxccDatabase {
         Ok(database)
     }
 
+    #[allow(dead_code)]
     pub fn lookup(&self, callsign: &str) -> Option<DxccInfo> {
         let normalized_callsign = normalize_callsign(callsign);
         callsign_prefix(&normalized_callsign)?;
@@ -140,6 +141,7 @@ impl DxccDatabase {
         self.rules.len()
     }
 
+    #[allow(dead_code)]
     fn info_for_rule(&self, rule: &DxccRule) -> DxccInfo {
         let entity = &self.entities[rule.entity_index];
         DxccInfo {
