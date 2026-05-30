@@ -36,8 +36,8 @@ import {
 
 let promptedOperatorCallsign;
 const SOCKET_READY_STATE_LABELS = ['connecting', 'open', 'closing', 'closed'];
-const FOREGROUND_CONNECTING_GRACE_MS = 1000;
-const BACKEND_WS_CONNECT_TIMEOUT_MS = 2000;
+const FOREGROUND_CONNECTING_GRACE_MS = 3000;
+const BACKEND_WS_CONNECT_TIMEOUT_MS = 5000;
 const SOCKET_DEBUG_PANEL_QUERY_PARAM = 'socket_debug';
 const SOCKET_DEBUG_PANEL_STORAGE_KEY = 'log73.socket_debug_panel';
 const MAX_SOCKET_DEBUG_ENTRIES = 80;
