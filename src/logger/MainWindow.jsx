@@ -15,6 +15,7 @@ import { validateExchangeField } from '../domain/validation';
 import { dxcc, supercheckpartial } from '../lib/api';
 import {
   CW_WPM_STORAGE_KEY,
+  ESM_ENABLED_STORAGE_KEY,
   DEFAULT_CW_LABELS,
   DEFAULT_CW_WPM,
   CW_WPM_MIN,
@@ -34,6 +35,7 @@ import {
   isFrequencyInput,
   adifModeForLoggerMode,
   isSelectableMode,
+  esmEnterAction,
   bandForFrequency,
   bandByMeters,
   createContactId,
@@ -80,6 +82,11 @@ function MainWindow({
   const [exchangeValues, setExchangeValues] = useState({});
   const [operatingMode, setOperatingMode] = useState('S&P');
   const [repeatRunF1, setRepeatRunF1] = useState(false);
+  const [esmEnabled, setEsmEnabled] = useState(() => {
+    return localStorage.getItem(ESM_ENABLED_STORAGE_KEY) === '1';
+  });
+  const [esmRunCallsignAttempt, setEsmRunCallsignAttempt] = useState('');
+  const [esmExchangeSentCallsign, setEsmExchangeSentCallsign] = useState('');
   const [activeCwKeys, setActiveCwKeys] = useState(() => new Set());
   const [activeCompletionField, setActiveCompletionField] = useState(null);
   const [supercheckpartialCallsigns, setSupercheckpartialCallsigns] = useState(
@@ -151,6 +158,10 @@ function MainWindow({
     localStorage.setItem(CW_WPM_STORAGE_KEY, String(cwWpm));
     setCwWpmRef.current?.(cwWpm);
   }, [cwWpm]);
+
+  useEffect(() => {
+    localStorage.setItem(ESM_ENABLED_STORAGE_KEY, esmEnabled ? '1' : '0');
+  }, [esmEnabled]);
 
   useEffect(() => {
     if (backendSocketStatus === 'connected') {
@@ -315,6 +326,21 @@ function MainWindow({
     return contact;
   }
 
+  function currentCallsign() {
+    return callSign.trim().toUpperCase();
+  }
+
+  function clearEsmState() {
+    setEsmRunCallsignAttempt('');
+    setEsmExchangeSentCallsign('');
+  }
+
+  function markEsmExchangeSentForCurrentCallsign() {
+    const normalizedCallsign = currentCallsign();
+    if (!normalizedCallsign) return;
+    setEsmExchangeSentCallsign(normalizedCallsign);
+  }
+
   function stopRepeat() {
     repeatActiveRef.current = false;
     repeatRequestIdRef.current = null;
@@ -390,6 +416,10 @@ function MainWindow({
     stopRepeat();
     const requestId = sendSingleCwKey(key);
     if (!requestId) return;
+
+    if (key === 'F2') {
+      markEsmExchangeSentForCurrentCallsign();
+    }
 
     if (shouldRepeat) {
       repeatActiveRef.current = true;
@@ -487,6 +517,17 @@ function MainWindow({
     }
   }
 
+  function sendEsmKeys(keys) {
+    stopRepeat();
+    for (const key of keys) {
+      const requestId = sendSingleCwKey(key);
+      if (!requestId) continue;
+      if (key === 'F2') {
+        markEsmExchangeSentForCurrentCallsign();
+      }
+    }
+  }
+
   useEffect(() => {
     function handleFunctionKey(event) {
       if (event.target?.closest?.('.log-window')) return;
@@ -546,7 +587,15 @@ function MainWindow({
       start: selectionStart ?? event.target.value.length,
       end: selectionEnd ?? event.target.value.length,
     };
-    setCallSign(sanitizeCallsign(event.target.value));
+    const sanitizedCallsign = sanitizeCallsign(event.target.value);
+    const normalizedCallsign = sanitizedCallsign.trim().toUpperCase();
+    if (normalizedCallsign !== esmRunCallsignAttempt) {
+      setEsmRunCallsignAttempt('');
+    }
+    if (normalizedCallsign !== esmExchangeSentCallsign) {
+      setEsmExchangeSentCallsign('');
+    }
+    setCallSign(sanitizedCallsign);
     callSignEditedAtRef.current = new Date();
   }
 
@@ -586,6 +635,7 @@ function MainWindow({
     setExchangeValues(
       exchangeDefaults(settings, radioMode, log?.contest_params ?? {}),
     );
+    clearEsmState();
     callSignEditedAtRef.current = new Date();
     callSignRef.current?.focus();
   }
@@ -650,6 +700,30 @@ function MainWindow({
     return true;
   }
 
+  function focusNextEditableField(currentFieldName) {
+    const fields = [
+      { name: 'CALL', ref: callSignRef, editable: true },
+      ...(settings?.exchange ?? []).map((field) => ({
+        name: field.name,
+        ref: { current: exchangeInputRefs.current[field.name] },
+        editable: field.fixed !== true,
+      })),
+    ];
+    const currentIndex = fields.findIndex(
+      (field) => field.name === currentFieldName,
+    );
+    const nextEditableField = fields
+      .slice(currentIndex + 1)
+      .find((field) => field.editable);
+
+    if (!nextEditableField) {
+      return false;
+    }
+
+    nextEditableField.ref.current?.focus();
+    return true;
+  }
+
   function handleFieldTab(event, currentFieldName) {
     if (event.key !== 'Tab' || event.shiftKey) {
       return;
@@ -660,9 +734,83 @@ function MainWindow({
     }
   }
 
+  function exchangeFieldsValid() {
+    return allRequiredFieldsFilled() && !firstInvalidExchangeField();
+  }
+
+  function fieldFilledAndValid(fieldName) {
+    if (fieldName === 'CALL') {
+      return callSign.trim() !== '';
+    }
+    const field = (settings?.exchange ?? []).find(
+      (item) => item.name === fieldName,
+    );
+    if (!field || field.fixed === true) return false;
+    const value = String(exchangeValue(field)).trim();
+    return value !== '' && exchangeValidation(field).ok;
+  }
+
+  function nextInvalidExchangeFieldName(currentIndex) {
+    const exchangeFields = settings?.exchange ?? [];
+    const totalFields = exchangeFields.length;
+    if (totalFields === 0) return null;
+
+    for (let step = 1; step <= totalFields; step += 1) {
+      const nextIndex = (currentIndex + step) % totalFields;
+      const field = exchangeFields[nextIndex];
+      if (!field || field.fixed === true) continue;
+
+      const value = String(exchangeValue(field)).trim();
+      if (value === '' || !exchangeValidation(field).ok) {
+        return field.name;
+      }
+    }
+
+    return null;
+  }
+
+  function currentEsmAction() {
+    return esmEnterAction({
+      esmEnabled,
+      operatingMode,
+      callsign: callSign,
+      exchangeValid: exchangeFieldsValid(),
+      exchangeSentCallsign: esmExchangeSentCallsign,
+      runCallsignAttempt: esmRunCallsignAttempt,
+    });
+  }
+
+  function handleEsmEnter(event, currentFieldName) {
+    if (event.key !== 'Enter' || !esmEnabled) {
+      return false;
+    }
+
+    event.preventDefault();
+
+    if (event.altKey) {
+      logContact(false);
+      return true;
+    }
+
+    const esmAction = currentEsmAction();
+    sendEsmKeys(esmAction.keys);
+    setEsmRunCallsignAttempt(esmAction.nextRunCallsignAttempt);
+    setEsmExchangeSentCallsign(esmAction.nextExchangeSentCallsign);
+
+    if (esmAction.shouldLog) {
+      logContact(false);
+      return true;
+    }
+
+    if (fieldFilledAndValid(currentFieldName)) {
+      focusNextEditableField(currentFieldName);
+    }
+
+    return true;
+  }
+
   function handleCallsignKeyDown(event) {
     const value = callSign.trim();
-    const forceLog = event.ctrlKey && event.altKey;
 
     if (event.key === 'Tab') {
       handleFieldTab(event, 'CALL');
@@ -673,6 +821,7 @@ function MainWindow({
       event.preventDefault();
       onSetRadioFrequency?.(Math.round(Number.parseFloat(value) * HZ_PER_KHZ));
       setCallSign('');
+      clearEsmState();
       return;
     }
 
@@ -681,12 +830,17 @@ function MainWindow({
       event.preventDefault();
       onSetRadioMode?.(typedMode);
       setCallSign('');
+      clearEsmState();
       return;
     }
 
-    if (event.key === 'Enter' && allRequiredFieldsFilled()) {
+    if (handleEsmEnter(event, 'CALL')) {
+      return;
+    }
+
+    if (event.key === 'Enter' && exchangeFieldsValid()) {
       event.preventDefault();
-      logContact(forceLog);
+      logContact(false);
     }
   }
 
@@ -702,13 +856,42 @@ function MainWindow({
   }
 
   function handleExchangeKeyDown(event, index) {
-    if (event.key === 'Enter' && allRequiredFieldsFilled()) {
-      event.preventDefault();
-      logContact(event.ctrlKey && event.altKey);
+    const currentField = settings.exchange[index];
+    const currentFieldName = currentField?.name;
+
+    if (
+      event.key === 'Enter' &&
+      esmEnabled &&
+      currentField &&
+      currentField.fixed !== true
+    ) {
+      if (event.altKey) {
+        event.preventDefault();
+        logContact(false);
+        return;
+      }
+
+      if (fieldFilledAndValid(currentFieldName)) {
+        const nextInvalidFieldName = nextInvalidExchangeFieldName(index);
+        if (nextInvalidFieldName) {
+          event.preventDefault();
+          exchangeInputRefs.current[nextInvalidFieldName]?.focus();
+          return;
+        }
+      }
+    }
+
+    if (handleEsmEnter(event, currentFieldName)) {
       return;
     }
 
-    handleFieldTab(event, settings.exchange[index]?.name);
+    if (event.key === 'Enter' && exchangeFieldsValid()) {
+      event.preventDefault();
+      logContact(false);
+      return;
+    }
+
+    handleFieldTab(event, currentFieldName);
   }
 
   function handleCwWpmChange(event) {
@@ -728,6 +911,14 @@ function MainWindow({
 
     window.open(qrzUrl, '_blank', 'noopener,noreferrer');
   }
+
+  const esmNextAction = currentEsmAction();
+  const esmHighlightedKeys = esmEnabled
+    ? esmNextAction.shouldLog && operatingMode === 'Run'
+      ? [...new Set([...esmNextAction.keys, 'F3'])]
+      : esmNextAction.keys
+    : [];
+  const highlightLogIt = esmEnabled && esmNextAction.shouldLog;
 
   return (
     <div className="window">
@@ -755,6 +946,8 @@ function MainWindow({
         handleBandChange={handleBandChange}
         radioMode={radioMode}
         onSetRadioMode={onSetRadioMode}
+        esmEnabled={esmEnabled}
+        onSetEsmEnabled={setEsmEnabled}
         cwWpm={cwWpm}
         cwWpmMin={CW_WPM_MIN}
         cwWpmMax={CW_WPM_MAX}
@@ -830,6 +1023,7 @@ function MainWindow({
         cwModeKey={cwModeKey}
         repeatRunF1={repeatRunF1}
         setRepeatRunF1={setRepeatRunF1}
+        esmNextKeys={esmHighlightedKeys}
       />
       <CommandButtons
         stopCwSending={stopCwSending}
@@ -839,6 +1033,7 @@ function MainWindow({
         isRescoreLoading={isRescoreLoading}
         disableRescore={isContextLoading || contactsLoadState !== 'idle'}
         handleQrzClick={handleQrzClick}
+        highlightLogIt={highlightLogIt}
       />
       <StatusBar
         stationCallsign={stationCallsign}

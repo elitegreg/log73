@@ -8,6 +8,7 @@ function CommandButtons({
   isRescoreLoading,
   disableRescore,
   handleQrzClick,
+  highlightLogIt = false,
 }) {
   return (
     <div className="command-buttons">
@@ -22,7 +23,10 @@ function CommandButtons({
       <button className="cmd-btn" onClick={resetEntryFields}>
         Wipe
       </button>
-      <button className="cmd-btn" onClick={() => logContact(false)}>
+      <button
+        className={`cmd-btn${highlightLogIt ? ' esm-next' : ''}`}
+        onClick={() => logContact(false)}
+      >
         Log it
       </button>
       <button

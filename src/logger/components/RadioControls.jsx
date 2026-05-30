@@ -15,6 +15,8 @@ function RadioControls({
   handleBandChange,
   radioMode,
   onSetRadioMode,
+  esmEnabled,
+  onSetEsmEnabled,
   cwWpm,
   cwWpmMin,
   cwWpmMax,
@@ -68,6 +70,14 @@ function RadioControls({
             </option>
           ))}
         </select>
+      </label>
+      <label className="radio-control esm-toggle">
+        ESM:
+        <input
+          type="checkbox"
+          checked={esmEnabled}
+          onChange={(event) => onSetEsmEnabled?.(event.target.checked)}
+        />
       </label>
       {modeIsCw(radioMode) && (
         <label className="radio-control cw-wpm-control">

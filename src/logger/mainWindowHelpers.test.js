@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   availableModeOptions,
   cwActiveTimeoutMs,
+  esmEnterAction,
   modeIsCw,
   nextCwWpm,
   typedModeFromCallsignInput,
@@ -56,4 +57,180 @@ test('cwActiveTimeoutMs waits for completion-capable keyers', () => {
   assert.equal(cwActiveTimeoutMs('cat'), 30000);
   assert.equal(cwActiveTimeoutMs('serial'), 30000);
   assert.equal(cwActiveTimeoutMs('none'), 500);
+});
+
+test('esmEnterAction follows run mode matrix states', () => {
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: true,
+      operatingMode: 'Run',
+      callsign: '',
+      exchangeValid: false,
+      exchangeSentCallsign: '',
+      runCallsignAttempt: '',
+    }),
+    {
+      keys: ['F1'],
+      shouldLog: false,
+      nextRunCallsignAttempt: '',
+      nextExchangeSentCallsign: '',
+    },
+  );
+
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: true,
+      operatingMode: 'Run',
+      callsign: 'K1ABC',
+      exchangeValid: false,
+      exchangeSentCallsign: '',
+      runCallsignAttempt: '',
+    }),
+    {
+      keys: ['F5', 'F2'],
+      shouldLog: false,
+      nextRunCallsignAttempt: 'K1ABC',
+      nextExchangeSentCallsign: 'K1ABC',
+    },
+  );
+
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: true,
+      operatingMode: 'Run',
+      callsign: 'K1ABC',
+      exchangeValid: false,
+      exchangeSentCallsign: '',
+      runCallsignAttempt: 'K1ABC',
+    }),
+    {
+      keys: ['F8'],
+      shouldLog: false,
+      nextRunCallsignAttempt: 'K1ABC',
+      nextExchangeSentCallsign: '',
+    },
+  );
+
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: true,
+      operatingMode: 'Run',
+      callsign: 'K1ABC',
+      exchangeValid: true,
+      exchangeSentCallsign: '',
+      runCallsignAttempt: '',
+    }),
+    {
+      keys: ['F5', 'F2'],
+      shouldLog: false,
+      nextRunCallsignAttempt: 'K1ABC',
+      nextExchangeSentCallsign: 'K1ABC',
+    },
+  );
+
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: true,
+      operatingMode: 'Run',
+      callsign: 'K1ABC',
+      exchangeValid: true,
+      exchangeSentCallsign: 'K1ABC',
+      runCallsignAttempt: 'K1ABC',
+    }),
+    {
+      keys: ['F3'],
+      shouldLog: true,
+      nextRunCallsignAttempt: 'K1ABC',
+      nextExchangeSentCallsign: 'K1ABC',
+    },
+  );
+});
+
+test('esmEnterAction follows s&p mode matrix states', () => {
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: true,
+      operatingMode: 'S&P',
+      callsign: '',
+      exchangeValid: false,
+      exchangeSentCallsign: '',
+      runCallsignAttempt: '',
+    }),
+    {
+      keys: ['F4'],
+      shouldLog: false,
+      nextRunCallsignAttempt: '',
+      nextExchangeSentCallsign: '',
+    },
+  );
+
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: true,
+      operatingMode: 'S&P',
+      callsign: 'K1ABC',
+      exchangeValid: false,
+      exchangeSentCallsign: '',
+      runCallsignAttempt: '',
+    }),
+    {
+      keys: ['F4'],
+      shouldLog: false,
+      nextRunCallsignAttempt: '',
+      nextExchangeSentCallsign: '',
+    },
+  );
+
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: true,
+      operatingMode: 'S&P',
+      callsign: 'K1ABC',
+      exchangeValid: true,
+      exchangeSentCallsign: '',
+      runCallsignAttempt: '',
+    }),
+    {
+      keys: ['F2'],
+      shouldLog: true,
+      nextRunCallsignAttempt: '',
+      nextExchangeSentCallsign: 'K1ABC',
+    },
+  );
+
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: true,
+      operatingMode: 'S&P',
+      callsign: 'K1ABC',
+      exchangeValid: true,
+      exchangeSentCallsign: 'K1ABC',
+      runCallsignAttempt: '',
+    }),
+    {
+      keys: [],
+      shouldLog: true,
+      nextRunCallsignAttempt: '',
+      nextExchangeSentCallsign: 'K1ABC',
+    },
+  );
+});
+
+test('esmEnterAction returns no action when disabled', () => {
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: false,
+      operatingMode: 'Run',
+      callsign: 'K1ABC',
+      exchangeValid: true,
+      exchangeSentCallsign: 'K1ABC',
+      runCallsignAttempt: 'K1ABC',
+    }),
+    {
+      keys: [],
+      shouldLog: false,
+      nextRunCallsignAttempt: '',
+      nextExchangeSentCallsign: 'K1ABC',
+    },
+  );
 });

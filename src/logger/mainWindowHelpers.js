@@ -12,6 +12,7 @@ export {
 
 export const MODE_OPTIONS = LOGGER_MODE_OPTIONS;
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
+export const ESM_ENABLED_STORAGE_KEY = 'log73.esm_enabled';
 export const DEFAULT_CW_LABELS = {
   run: Array.from({ length: 12 }, (_, index) => ({
     key: `F${index + 1}`,
@@ -133,4 +134,106 @@ export function nextCwWpm(currentWpm, delta) {
     CW_WPM_MAX,
     Math.max(CW_WPM_MIN, normalizedCurrentWpm + delta),
   );
+}
+
+export function esmEnterAction({
+  esmEnabled,
+  operatingMode,
+  callsign,
+  exchangeValid,
+  exchangeSentCallsign,
+  runCallsignAttempt,
+}) {
+  if (!esmEnabled) {
+    return {
+      keys: [],
+      shouldLog: false,
+      nextRunCallsignAttempt: '',
+      nextExchangeSentCallsign: exchangeSentCallsign ?? '',
+    };
+  }
+
+  const normalizedCallsign = String(callsign ?? '').trim().toUpperCase();
+  const normalizedRunCallsignAttempt = String(runCallsignAttempt ?? '')
+    .trim()
+    .toUpperCase();
+  const normalizedExchangeSentCallsign = String(exchangeSentCallsign ?? '')
+    .trim()
+    .toUpperCase();
+  const isRunMode = operatingMode === 'Run';
+
+  if (!normalizedCallsign) {
+    return {
+      keys: [isRunMode ? 'F1' : 'F4'],
+      shouldLog: false,
+      nextRunCallsignAttempt: '',
+      nextExchangeSentCallsign: '',
+    };
+  }
+
+  if (!exchangeValid) {
+    if (!isRunMode) {
+      return {
+        keys: ['F4'],
+        shouldLog: false,
+        nextRunCallsignAttempt: '',
+        nextExchangeSentCallsign: normalizedExchangeSentCallsign,
+      };
+    }
+
+    const isRepeatCall = normalizedRunCallsignAttempt === normalizedCallsign;
+    if (isRepeatCall) {
+      return {
+        keys: ['F8'],
+        shouldLog: false,
+        nextRunCallsignAttempt: normalizedRunCallsignAttempt,
+        nextExchangeSentCallsign: normalizedExchangeSentCallsign,
+      };
+    }
+
+    return {
+      keys: ['F5', 'F2'],
+      shouldLog: false,
+      nextRunCallsignAttempt: normalizedCallsign,
+      nextExchangeSentCallsign: normalizedCallsign,
+    };
+  }
+
+  if (isRunMode) {
+    const exchangeAlreadySentForCallsign =
+      normalizedExchangeSentCallsign === normalizedCallsign;
+    if (exchangeAlreadySentForCallsign) {
+      return {
+        keys: ['F3'],
+        shouldLog: true,
+        nextRunCallsignAttempt: normalizedCallsign,
+        nextExchangeSentCallsign: normalizedCallsign,
+      };
+    }
+
+    return {
+      keys: ['F5', 'F2'],
+      shouldLog: false,
+      nextRunCallsignAttempt: normalizedCallsign,
+      nextExchangeSentCallsign: normalizedCallsign,
+    };
+  }
+
+  const exchangeAlreadySentForCallsign =
+    normalizedExchangeSentCallsign === normalizedCallsign;
+  if (exchangeAlreadySentForCallsign) {
+    return {
+      keys: [],
+      shouldLog: true,
+      nextRunCallsignAttempt: '',
+      nextExchangeSentCallsign: normalizedCallsign,
+    };
+  }
+
+  return {
+    keys: ['F2'],
+    shouldLog: true,
+    nextRunCallsignAttempt: '',
+    nextExchangeSentCallsign: normalizedCallsign,
+  };
 }

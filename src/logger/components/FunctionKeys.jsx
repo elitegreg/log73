@@ -9,14 +9,17 @@ function FunctionKeys({
   cwModeKey,
   repeatRunF1,
   setRepeatRunF1,
+  esmNextKeys = [],
 }) {
+  const esmNextKeySet = new Set(esmNextKeys);
+
   return (
     <div className="function-keys">
       <div className="f-row">
         {activeCwLabels.slice(0, 6).map((button) => (
           <button
             key={button.key}
-            className={`f-key ${activeCwKeys.has(button.key) ? 'active' : ''}`.trim()}
+            className={`f-key ${activeCwKeys.has(button.key) ? 'active' : ''} ${esmNextKeySet.has(button.key) ? 'esm-next' : ''}`.trim()}
             type="button"
             title={`Keyboard shortcut: ${button.key}`}
             onClick={() => sendCwKey(button.key)}
@@ -43,7 +46,7 @@ function FunctionKeys({
         {activeCwLabels.slice(6, 12).map((button) => (
           <button
             key={button.key}
-            className={`f-key ${activeCwKeys.has(button.key) ? 'active' : ''}`.trim()}
+            className={`f-key ${activeCwKeys.has(button.key) ? 'active' : ''} ${esmNextKeySet.has(button.key) ? 'esm-next' : ''}`.trim()}
             type="button"
             title={`Keyboard shortcut: ${button.key}`}
             onClick={() => sendCwKey(button.key)}
