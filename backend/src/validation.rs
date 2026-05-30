@@ -29,6 +29,7 @@ const MAX_RADIO_FREQUENCY_HZ: u64 = 500_000_000;
 const MIN_CW_WPM: u8 = 5;
 const MAX_CW_WPM: u8 = 60;
 const MAX_CW_REQUEST_ID_LEN: usize = 64;
+const MAX_CW_TEXT_LEN: usize = 256;
 const MAX_WS_FIELDS: usize = 100;
 const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat", "serial"];
 const LOGGER_MODE_OPTIONS: &[&str] = &[
@@ -148,6 +149,17 @@ pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
     let cw_serial_line = payload.cw_serial_line.trim().to_ascii_lowercase();
     if !matches!(cw_serial_line.as_str(), "dtr" | "rts") {
         return Err("CW serial line must be dtr or rts".to_string());
+    }
+
+    if transport_kind == "serial"
+        && cw_keyer_type == "serial"
+        && payload.serial_port.trim() == payload.cw_serial_port.trim()
+        && payload.serial_baud_rate != payload.cw_serial_baud_rate
+    {
+        return Err(
+            "CAT serial baud rate and CW serial baud rate must match when sharing a serial port"
+                .to_string(),
+        );
     }
 
     Ok(())
@@ -290,6 +302,12 @@ pub fn validate_cw_request(
         validate_json_value_size(value, 0).map_err(|error| format!("{key}: {error}"))?;
     }
 
+    Ok(())
+}
+
+pub fn validate_cw_text_request(request_id: &str, text: &str) -> Result<(), String> {
+    validate_required_text("CW request id", request_id, MAX_CW_REQUEST_ID_LEN)?;
+    validate_required_text("CW text", text, MAX_CW_TEXT_LEN)?;
     Ok(())
 }
 
@@ -1083,6 +1101,52 @@ mod tests {
 
         let error = validate_radio(&radio).expect_err("CW serial line should be rejected");
         assert!(error.contains("CW serial line"));
+    }
+
+    #[test]
+    fn serial_cw_keyer_allows_shared_cat_port_with_matching_baud_rate() {
+        let mut radio = test_radio();
+        radio.transport_kind = "serial".to_string();
+        radio.tcp_host = String::new();
+        radio.tcp_port = 0;
+        radio.serial_port = "/dev/ttyUSB0".to_string();
+        radio.serial_baud_rate = 9_600;
+        radio.cw_keyer_type = "serial".to_string();
+        radio.cw_serial_port = "/dev/ttyUSB0".to_string();
+        radio.cw_serial_baud_rate = 9_600;
+
+        assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn serial_cw_keyer_rejects_shared_cat_port_with_different_baud_rate() {
+        let mut radio = test_radio();
+        radio.transport_kind = "serial".to_string();
+        radio.tcp_host = String::new();
+        radio.tcp_port = 0;
+        radio.serial_port = "/dev/ttyUSB0".to_string();
+        radio.serial_baud_rate = 115_200;
+        radio.cw_keyer_type = "serial".to_string();
+        radio.cw_serial_port = "/dev/ttyUSB0".to_string();
+        radio.cw_serial_baud_rate = 9_600;
+
+        let error = validate_radio(&radio).expect_err("shared baud rate mismatch should fail");
+        assert!(error.contains("baud rate"));
+    }
+
+    #[test]
+    fn serial_cw_keyer_allows_different_cat_port_with_different_baud_rate() {
+        let mut radio = test_radio();
+        radio.transport_kind = "serial".to_string();
+        radio.tcp_host = String::new();
+        radio.tcp_port = 0;
+        radio.serial_port = "/dev/ttyUSB0".to_string();
+        radio.serial_baud_rate = 115_200;
+        radio.cw_keyer_type = "serial".to_string();
+        radio.cw_serial_port = "/dev/ttyUSB1".to_string();
+        radio.cw_serial_baud_rate = 9_600;
+
+        assert!(validate_radio(&radio).is_ok());
     }
 
     #[test]

@@ -59,6 +59,10 @@ pub enum ClientMessage {
         key: String,
         fields: serde_json::Map<String, serde_json::Value>,
     },
+    SendCwText {
+        request_id: String,
+        text: String,
+    },
     StopCw,
     SetWpm {
         wpm: u8,
@@ -73,6 +77,10 @@ pub enum RadioCommand {
         mode: String,
         key: String,
         fields: serde_json::Map<String, serde_json::Value>,
+        completed: tokio::sync::oneshot::Sender<Result<(), String>>,
+    },
+    SendCwText {
+        text: String,
         completed: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
     StopCw,
@@ -171,6 +179,24 @@ mod tests {
 
         match message {
             ClientMessage::Ping { request_id } => assert_eq!(request_id, "ping-123"),
+            other => panic!("unexpected client message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deserializes_send_cw_text_client_message() {
+        let message: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "send_cw_text",
+            "request_id": "cw-123",
+            "text": "CQ "
+        }))
+        .expect("send_cw_text should deserialize");
+
+        match message {
+            ClientMessage::SendCwText { request_id, text } => {
+                assert_eq!(request_id, "cw-123");
+                assert_eq!(text, "CQ ");
+            }
             other => panic!("unexpected client message: {other:?}"),
         }
     }

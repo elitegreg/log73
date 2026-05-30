@@ -386,16 +386,6 @@ async fn run_managed_radio(
                 continue;
             }
         };
-        let connection = match connection_config_for(&config) {
-            Ok(connection) => connection,
-            Err(error) => {
-                set_radio_status(&current_status, &status_updates, false).await;
-                reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
-                warn!(radio_id = config.id, %error, "radio config has invalid transport settings");
-                continue;
-            }
-        };
-
         debug!(
             radio_id = config.id,
             radio_kind = %config.radio_kind,
@@ -406,10 +396,12 @@ async fn run_managed_radio(
             serial_baud_rate = config.serial_baud_rate,
             poll_frequency = config.poll_frequency,
             cat_timeout = config.cat_timeout,
+            shared_cw_serial_port = uses_shared_cw_serial_port(&config),
             "attempting CAT radio connection"
         );
 
-        let radio = tokio::select! {
+        let connect_config = config.clone();
+        let connected = tokio::select! {
             _ = &mut shutdown => return,
             command = commands.recv() => {
                 match command {
@@ -426,9 +418,9 @@ async fn run_managed_radio(
                     None => return,
                 }
             }
-            result = create_radio(radio_kind, connection) => {
+            result = connect_cat_radio(connect_config, radio_kind) => {
                 match result {
-                    Ok(radio) => radio,
+                    Ok(connected) => connected,
                     Err(error) => {
                     set_radio_status(&current_status, &status_updates, false).await;
                     reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
@@ -445,7 +437,8 @@ async fn run_managed_radio(
             }
         };
 
-        let radio: Arc<dyn ControllableRadio> = radio.into();
+        let radio: Arc<dyn ControllableRadio> = connected.radio.into();
+        let shared_cw_serial_keyer = connected.shared_cw_serial_keyer;
 
         reconnect_backoff = cat_reconnect_backoff().build();
         info!(
@@ -458,7 +451,9 @@ async fn run_managed_radio(
         let (cw_tx, cw_rx) = mpsc::channel(32);
         let cw_config = config.clone();
         let cw_radio = radio.clone();
-        let cw_task = tokio::spawn(async move { run_cw_task(cw_config, cw_radio, cw_rx).await });
+        let cw_task = tokio::spawn(async move {
+            run_cw_task(cw_config, cw_radio, shared_cw_serial_keyer, cw_rx).await
+        });
         let mut interval = tokio::time::interval(poll_interval);
         let mut last_frequency_hz = current
             .read()
@@ -510,6 +505,13 @@ async fn run_managed_radio(
                             debug!(radio_id = config.id, mode, key, "forwarding cw send command");
                             if let Err(error) = cw_tx.send(CwTaskCommand::Send { mode, key, fields, completed }).await {
                                 let CwTaskCommand::Send { completed, .. } = error.0 else { unreachable!() };
+                                let _ = completed.send(Err("cw task unavailable".to_string()));
+                            }
+                        }
+                        RadioCommand::SendCwText { text, completed } => {
+                            debug!(radio_id = config.id, text, "forwarding cw text send command");
+                            if let Err(error) = cw_tx.send(CwTaskCommand::SendText { text, completed }).await {
+                                let CwTaskCommand::SendText { completed, .. } = error.0 else { unreachable!() };
                                 let _ = completed.send(Err("cw task unavailable".to_string()));
                             }
                         }
@@ -592,7 +594,7 @@ fn fail_pending_cw_sends(pending: &mut VecDeque<PendingCwSend>, reason: &str) {
 
 fn fail_unavailable_radio_command(command: RadioCommand, reason: &str) {
     match command {
-        RadioCommand::SendCw { completed, .. } => {
+        RadioCommand::SendCw { completed, .. } | RadioCommand::SendCwText { completed, .. } => {
             let _ = completed.send(Err(reason.to_string()));
         }
         RadioCommand::StopCw
@@ -601,6 +603,40 @@ fn fail_unavailable_radio_command(command: RadioCommand, reason: &str) {
         | RadioCommand::SetMode(_)
         | RadioCommand::ReloadConfig(_) => {}
     }
+}
+
+struct ConnectedCatRadio {
+    radio: Box<dyn ControllableRadio>,
+    shared_cw_serial_keyer: Option<CwSerialDevice>,
+}
+
+async fn connect_cat_radio(
+    config: RadioConfig,
+    radio_kind: RadioKind,
+) -> Result<ConnectedCatRadio, String> {
+    if uses_shared_cw_serial_port(&config) {
+        warn!(
+            radio_id = config.id,
+            "shared CAT/CW serial port is not supported by this build; falling back to independent connections"
+        );
+    }
+
+    let connection = connection_config_for(&config)?;
+    let radio = create_radio(radio_kind, connection)
+        .await
+        .map_err(|error| error.to_string())?;
+
+    Ok(ConnectedCatRadio {
+        radio,
+        shared_cw_serial_keyer: None,
+    })
+}
+
+fn uses_shared_cw_serial_port(config: &RadioConfig) -> bool {
+    config.transport_kind.trim().eq_ignore_ascii_case("serial")
+        && config.cw_keyer_type.trim().eq_ignore_ascii_case("serial")
+        && !config.serial_port.trim().is_empty()
+        && config.serial_port.trim() == config.cw_serial_port.trim()
 }
 
 fn radio_kind_for_config(config: &RadioConfig) -> Result<RadioKind, String> {
@@ -696,24 +732,38 @@ enum CwTaskCommand {
         fields: serde_json::Map<String, serde_json::Value>,
         completed: oneshot::Sender<Result<(), String>>,
     },
+    SendText {
+        text: String,
+        completed: oneshot::Sender<Result<(), String>>,
+    },
     Stop,
     SetWpm(u8),
     Shutdown,
 }
 
+enum PendingCwPayload {
+    Template {
+        mode: String,
+        key: String,
+        fields: serde_json::Map<String, serde_json::Value>,
+    },
+    Text {
+        text: String,
+    },
+}
+
 struct PendingCwSend {
-    mode: String,
-    key: String,
-    fields: serde_json::Map<String, serde_json::Value>,
+    payload: PendingCwPayload,
     completed: oneshot::Sender<Result<(), String>>,
 }
 
 async fn run_cw_task(
     config: RadioConfig,
     radio: Arc<dyn ControllableRadio>,
+    shared_cw_serial_keyer: Option<CwSerialDevice>,
     mut commands: mpsc::Receiver<CwTaskCommand>,
 ) {
-    let mut controller = CwController::new(&config, radio).await;
+    let mut controller = CwController::new(&config, radio, shared_cw_serial_keyer).await;
     let mut pending = VecDeque::new();
 
     loop {
@@ -728,9 +778,14 @@ async fn run_cw_task(
                     completed,
                 }) => (
                     Some(PendingCwSend {
-                        mode,
-                        key,
-                        fields,
+                        payload: PendingCwPayload::Template { mode, key, fields },
+                        completed,
+                    }),
+                    false,
+                ),
+                Some(CwTaskCommand::SendText { text, completed }) => (
+                    Some(PendingCwSend {
+                        payload: PendingCwPayload::Text { text },
                         completed,
                     }),
                     false,
@@ -761,21 +816,28 @@ async fn run_cw_task(
         };
         debug!(
             radio_id = config.id,
-            mode = send.mode,
-            key = send.key,
             pending_count = pending.len(),
             "cw task starting queued send"
         );
-        let result = controller
-            .send(
-                &send.mode,
-                &send.key,
-                &send.fields,
-                prepend_space,
-                &mut commands,
-                &mut pending,
-            )
-            .await;
+        let result = match &send.payload {
+            PendingCwPayload::Template { mode, key, fields } => {
+                controller
+                    .send(
+                        mode,
+                        key,
+                        fields,
+                        prepend_space,
+                        &mut commands,
+                        &mut pending,
+                    )
+                    .await
+            }
+            PendingCwPayload::Text { text } => {
+                controller
+                    .send_text(text, &mut commands, &mut pending)
+                    .await
+            }
+        };
         debug!(
             radio_id = config.id,
             ?result,
@@ -795,11 +857,15 @@ struct CwController {
 }
 
 impl CwController {
-    async fn new(config: &RadioConfig, radio: Arc<dyn ControllableRadio>) -> Self {
+    async fn new(
+        config: &RadioConfig,
+        radio: Arc<dyn ControllableRadio>,
+        shared_cw_serial_keyer: Option<CwSerialDevice>,
+    ) -> Self {
         let mut controller = Self {
             radio_id: config.id,
             messages: config.cw_messages.clone(),
-            keyer: cw_keyer_for_config(config, radio).await,
+            keyer: cw_keyer_for_config(config, radio, shared_cw_serial_keyer).await,
         };
         controller.connect().await;
         controller
@@ -896,6 +962,53 @@ impl CwController {
         }
     }
 
+    async fn send_text(
+        &mut self,
+        text: &str,
+        commands: &mut mpsc::Receiver<CwTaskCommand>,
+        pending: &mut VecDeque<PendingCwSend>,
+    ) -> Result<(), String> {
+        if text.trim().is_empty() {
+            return Ok(());
+        }
+
+        debug!(radio_id = self.radio_id, text, "sending cw text");
+        let completion = {
+            let Some(keyer) = self.keyer.as_mut() else {
+                debug!(
+                    radio_id = self.radio_id,
+                    "ignoring CW send; no CW keyer configured"
+                );
+                return Err("cw keyer unavailable".to_string());
+            };
+            let keyer_name = keyer.name();
+            let completion = keyer.send_text(self.radio_id, text).await?;
+            debug!(
+                radio_id = self.radio_id,
+                keyer = keyer_name,
+                "cw text queued"
+            );
+            completion
+        };
+
+        match completion {
+            CwSendCompletion::PollStatus { wait_for_busy } => {
+                if wait_for_busy {
+                    self.wait_until_busy_or_stopped(commands, pending).await?;
+                }
+                self.wait_until_idle_or_stopped(commands, pending).await
+            }
+            CwSendCompletion::Estimated(estimated_duration) => {
+                self.wait_until_deadline_or_stopped(
+                    tokio::time::Instant::now() + estimated_duration,
+                    commands,
+                    pending,
+                )
+                .await
+            }
+        }
+    }
+
     async fn wait_until_busy_or_stopped(
         &mut self,
         commands: &mut mpsc::Receiver<CwTaskCommand>,
@@ -930,9 +1043,14 @@ impl CwController {
                         }) => {
                             debug!(radio_id = self.radio_id, mode, key, pending_count = pending.len(), "queueing cw send command while busy");
                             pending.push_back(PendingCwSend {
-                                mode,
-                                key,
-                                fields,
+                                payload: PendingCwPayload::Template { mode, key, fields },
+                                completed,
+                            });
+                        }
+                        Some(CwTaskCommand::SendText { text, completed }) => {
+                            debug!(radio_id = self.radio_id, text, pending_count = pending.len(), "queueing cw text send command while busy");
+                            pending.push_back(PendingCwSend {
+                                payload: PendingCwPayload::Text { text },
                                 completed,
                             });
                         }
@@ -992,9 +1110,14 @@ impl CwController {
                         }) => {
                             debug!(radio_id = self.radio_id, mode, key, pending_count = pending.len(), "queueing cw send command while busy");
                             pending.push_back(PendingCwSend {
-                                mode,
-                                key,
-                                fields,
+                                payload: PendingCwPayload::Template { mode, key, fields },
+                                completed,
+                            });
+                        }
+                        Some(CwTaskCommand::SendText { text, completed }) => {
+                            debug!(radio_id = self.radio_id, text, pending_count = pending.len(), "queueing cw text send command while busy");
+                            pending.push_back(PendingCwSend {
+                                payload: PendingCwPayload::Text { text },
                                 completed,
                             });
                         }
@@ -1051,9 +1174,14 @@ impl CwController {
                         }) => {
                             debug!(radio_id = self.radio_id, mode, key, pending_count = pending.len(), "queueing cw send command while busy");
                             pending.push_back(PendingCwSend {
-                                mode,
-                                key,
-                                fields,
+                                payload: PendingCwPayload::Template { mode, key, fields },
+                                completed,
+                            });
+                        }
+                        Some(CwTaskCommand::SendText { text, completed }) => {
+                            debug!(radio_id = self.radio_id, text, pending_count = pending.len(), "queueing cw text send command while busy");
+                            pending.push_back(PendingCwSend {
+                                payload: PendingCwPayload::Text { text },
                                 completed,
                             });
                         }
@@ -1130,6 +1258,7 @@ impl CwController {
 async fn cw_keyer_for_config(
     config: &RadioConfig,
     radio: Arc<dyn ControllableRadio>,
+    shared_cw_serial_keyer: Option<CwSerialDevice>,
 ) -> Option<Box<dyn CwKeyer>> {
     match config.cw_keyer_type.trim().to_ascii_lowercase().as_str() {
         "winkeyer" => Some(Box::new(WinkeyerKeyer {
@@ -1141,7 +1270,7 @@ async fn cw_keyer_for_config(
             serial_port: config.cw_serial_port.clone(),
             baud_rate: config.cw_serial_baud_rate,
             line: config.cw_serial_line.clone(),
-            device: None,
+            device: shared_cw_serial_keyer,
         })),
         _ => None,
     }
@@ -1466,6 +1595,35 @@ fn cw_serial_control_line(line: &str) -> ControlLine {
     }
 }
 
+fn cw_serial_config(serial_port: &str, baud_rate: u32, line: &str) -> CwSerialConfig {
+    CwSerialConfig::new(serial_port)
+        .baud_rate(baud_rate)
+        .key_line(cw_serial_control_line(line))
+        .ptt_line(None)
+}
+
+async fn open_serial_keyer_for_config(
+    config: &RadioConfig,
+) -> cw_serial_keyer::Result<CwSerialDevice> {
+    open_serial_keyer(
+        &config.cw_serial_port,
+        config.cw_serial_baud_rate,
+        &config.cw_serial_line,
+    )
+    .await
+}
+
+async fn open_serial_keyer(
+    serial_port: &str,
+    baud_rate: u32,
+    line: &str,
+) -> cw_serial_keyer::Result<CwSerialDevice> {
+    let config = cw_serial_config(serial_port, baud_rate, line);
+    let mut serial_keyer = CwSerialDevice::open_with_config(config).await?;
+    serial_keyer.set_timeout(Duration::from_millis(500));
+    Ok(serial_keyer)
+}
+
 async fn connect_serial_keyer(radio_id: i64, keyer: &mut SerialLineKeyer) {
     if keyer.serial_port.trim().is_empty() {
         warn!(radio_id, "Serial CW keying selected without a serial port");
@@ -1475,15 +1633,8 @@ async fn connect_serial_keyer(radio_id: i64, keyer: &mut SerialLineKeyer) {
         return;
     }
 
-    let line = cw_serial_control_line(&keyer.line);
-    let config = CwSerialConfig::new(keyer.serial_port.as_str())
-        .baud_rate(keyer.baud_rate)
-        .key_line(line)
-        .ptt_line(None);
-
-    match CwSerialDevice::open_with_config(config).await {
-        Ok(mut serial_keyer) => {
-            serial_keyer.set_timeout(Duration::from_millis(500));
+    match open_serial_keyer(&keyer.serial_port, keyer.baud_rate, &keyer.line).await {
+        Ok(serial_keyer) => {
             info!(
                 radio_id,
                 serial_port = %keyer.serial_port,
@@ -1639,6 +1790,7 @@ async fn apply_command(
             }
         }
         RadioCommand::SendCw { .. }
+        | RadioCommand::SendCwText { .. }
         | RadioCommand::StopCw
         | RadioCommand::SetWpm(_)
         | RadioCommand::ReloadConfig(_) => Ok(()),
@@ -1742,21 +1894,47 @@ mod tests {
         }
     }
 
+    #[test]
+    fn detects_shared_cw_serial_cat_port() {
+        let mut config = test_config();
+        config.transport_kind = "serial".to_string();
+        config.serial_port = "/dev/ttyUSB0".to_string();
+        config.cw_keyer_type = "serial".to_string();
+        config.cw_serial_port = "/dev/ttyUSB0".to_string();
+
+        assert!(uses_shared_cw_serial_port(&config));
+    }
+
+    #[test]
+    fn does_not_share_different_cw_serial_cat_ports() {
+        let mut config = test_config();
+        config.transport_kind = "serial".to_string();
+        config.serial_port = "/dev/ttyUSB0".to_string();
+        config.cw_keyer_type = "serial".to_string();
+        config.cw_serial_port = "/dev/ttyUSB1".to_string();
+
+        assert!(!uses_shared_cw_serial_port(&config));
+    }
+
     #[tokio::test]
     async fn fail_pending_cw_sends_rejects_all_queued_requests() {
         let (first_tx, first_rx) = oneshot::channel();
         let (second_tx, second_rx) = oneshot::channel();
         let mut pending = VecDeque::from([
             PendingCwSend {
-                mode: "run".to_string(),
-                key: "F1".to_string(),
-                fields: Map::new(),
+                payload: PendingCwPayload::Template {
+                    mode: "run".to_string(),
+                    key: "F1".to_string(),
+                    fields: Map::new(),
+                },
                 completed: first_tx,
             },
             PendingCwSend {
-                mode: "run".to_string(),
-                key: "F2".to_string(),
-                fields: Map::new(),
+                payload: PendingCwPayload::Template {
+                    mode: "run".to_string(),
+                    key: "F2".to_string(),
+                    fields: Map::new(),
+                },
                 completed: second_tx,
             },
         ]);

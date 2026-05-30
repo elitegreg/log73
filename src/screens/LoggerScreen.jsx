@@ -1264,6 +1264,9 @@ function LoggerScreen() {
         onSendCw={(payload) =>
           sendRadioMessage({ type: 'send_cw', ...payload })
         }
+        onSendCwText={(payload) =>
+          sendRadioMessage({ type: 'send_cw_text', ...payload })
+        }
         onStopCw={() => sendRadioMessage({ type: 'stop_cw' })}
         onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}
         onDebouncedCallsignChange={handleDebouncedCallsignChange}

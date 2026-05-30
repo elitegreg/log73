@@ -65,6 +65,7 @@ function MainWindow({
   onSetRadioFrequency,
   onSetRadioMode,
   onSendCw,
+  onSendCwText,
   onStopCw,
   onSetCwWpm,
   onLogContact,
@@ -93,6 +94,9 @@ function MainWindow({
     );
     return Number.isFinite(storedWpm) ? storedWpm : DEFAULT_CW_WPM;
   });
+  const [isCwTextDialogOpen, setIsCwTextDialogOpen] = useState(false);
+  const [cwTextCommittedWords, setCwTextCommittedWords] = useState([]);
+  const [cwTextCurrentWord, setCwTextCurrentWord] = useState('');
   const callSignRef = useRef(null);
   const setCwWpmRef = useRef(onSetCwWpm);
   const repeatActiveRef = useRef(false);
@@ -104,6 +108,7 @@ function MainWindow({
   const activeCwRequestsRef = useRef(new Map());
   const activeCwTimeoutsRef = useRef(new Map());
   const exchangeInputRefs = useRef({});
+  const cwTextInputRef = useRef(null);
   const callSignEditedAtRef = useRef(new Date());
   const radioMode = radioState?.mode ?? 'CW';
   const radioFrequencyHz =
@@ -163,6 +168,12 @@ function MainWindow({
     input.setSelectionRange(start, end);
     callsignSelectionRef.current = null;
   }, [callSign]);
+
+  useEffect(() => {
+    if (isCwTextDialogOpen) {
+      cwTextInputRef.current?.focus();
+    }
+  }, [isCwTextDialogOpen]);
 
   useEffect(() => {
     if (callSign.trim() === '') {
@@ -422,9 +433,80 @@ function MainWindow({
     }, CW_REPEAT_DELAY_MS);
   }, [cwSentEvent]);
 
+  function openCwTextDialog() {
+    setCwTextCommittedWords([]);
+    setCwTextCurrentWord('');
+    setIsCwTextDialogOpen(true);
+  }
+
+  function closeCwTextDialog() {
+    setIsCwTextDialogOpen(false);
+    setCwTextCommittedWords([]);
+    setCwTextCurrentWord('');
+    callSignRef.current?.focus();
+  }
+
+  function sendCwTextWord(sendTrailingSpace) {
+    const word = cwTextCurrentWord.trim();
+    if (!word) return;
+
+    onSendCwText?.({
+      request_id: createCwRequestId(),
+      text: sendTrailingSpace ? `${word} ` : word,
+    });
+    setCwTextCommittedWords((current) => [...current, word]);
+    setCwTextCurrentWord('');
+  }
+
+  function handleCwTextInputChange(event) {
+    setCwTextCurrentWord(String(event.target.value ?? '').replace(/\s+/g, ''));
+  }
+
+  function handleCwTextInputKeyDown(event) {
+    if (event.key === ' ') {
+      event.preventDefault();
+      sendCwTextWord(true);
+      return;
+    }
+
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      sendCwTextWord(false);
+      closeCwTextDialog();
+      return;
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeCwTextDialog();
+      return;
+    }
+
+    if (event.key === 'Backspace' && cwTextCurrentWord.length === 0) {
+      event.preventDefault();
+    }
+  }
+
   useEffect(() => {
     function handleFunctionKey(event) {
       if (event.target?.closest?.('.log-window')) return;
+      if (
+        event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        event.key.toLowerCase() === 'k'
+      ) {
+        event.preventDefault();
+        openCwTextDialog();
+        return;
+      }
+      if (isCwTextDialogOpen) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeCwTextDialog();
+        }
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         stopCwSending();
@@ -703,6 +785,43 @@ function MainWindow({
         aria-label="Completion matches"
         value={completionMatches.join(' ')}
       />
+      {isCwTextDialogOpen ? (
+        <div className="cw-text-dialog-overlay" onClick={closeCwTextDialog}>
+          <div
+            className="cw-text-dialog"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="cw-text-dialog-header">
+              <strong>CW Text</strong>
+              <button
+                className="title-button"
+                type="button"
+                aria-label="Close CW text dialog"
+                onClick={closeCwTextDialog}
+              >
+                ×
+              </button>
+            </div>
+            <div className="cw-text-dialog-body">
+              <div className="cw-text-dialog-sent" aria-live="polite">
+                {cwTextCommittedWords.join(' ')}
+              </div>
+              <input
+                ref={cwTextInputRef}
+                className="cw-text-dialog-input"
+                type="text"
+                value={cwTextCurrentWord}
+                onChange={handleCwTextInputChange}
+                onKeyDown={handleCwTextInputKeyDown}
+                spellCheck={false}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
       <FunctionKeys
         activeCwLabels={activeCwLabels}
         activeCwKeys={activeCwKeys}

@@ -485,6 +485,74 @@ async fn handle_socket(
                     );
                 }
             }
+            Ok(ClientMessage::SendCwText { request_id, text }) => {
+                debug!(
+                    session_id,
+                    radio_id, request_id, "websocket send_cw_text command received"
+                );
+                if let Err(error) = validation::validate_cw_text_request(&request_id, &text) {
+                    warn!(session_id, radio_id, request_id, %error, "invalid websocket send_cw_text command");
+                    continue;
+                }
+                let (completed_tx, completed_rx) = oneshot::channel();
+                let command_result = radio_handle
+                    .send_command(RadioCommand::SendCwText {
+                        text,
+                        completed: completed_tx,
+                    })
+                    .await;
+                if command_result.is_ok() {
+                    let direct_tx = direct_tx.clone();
+                    let completion_session_id = session_id.clone();
+                    tokio::spawn(async move {
+                        debug!(
+                            session_id = %completion_session_id,
+                            request_id,
+                            "waiting for cw text send completion"
+                        );
+                        match completed_rx.await {
+                            Ok(Ok(())) => {
+                                debug!(
+                                    session_id = %completion_session_id,
+                                    request_id,
+                                    "cw text send complete; sending cw_sent websocket message"
+                                );
+                                if direct_tx
+                                    .send(ServerMessage::CwSent { request_id })
+                                    .await
+                                    .is_err()
+                                {
+                                    debug!(
+                                        session_id = %completion_session_id,
+                                        "unable to send cw_sent websocket message; session closed"
+                                    );
+                                }
+                            }
+                            Ok(Err(error)) => {
+                                debug!(
+                                    session_id = %completion_session_id,
+                                    request_id,
+                                    %error,
+                                    "cw text send did not complete; not sending cw_sent websocket message"
+                                );
+                            }
+                            Err(error) => {
+                                debug!(
+                                    session_id = %completion_session_id,
+                                    request_id,
+                                    %error,
+                                    "cw text completion channel closed; not sending cw_sent websocket message"
+                                );
+                            }
+                        }
+                    });
+                } else {
+                    debug!(
+                        session_id,
+                        radio_id, request_id, "failed to queue cw text command"
+                    );
+                }
+            }
             Ok(ClientMessage::StopCw) => {
                 debug!(session_id, radio_id, "websocket stop_cw command received");
                 let _ = radio_handle.send_command(RadioCommand::StopCw).await;
