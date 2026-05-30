@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
-import { THEME_OPTIONS } from '../themes/themes';
+import { THEME_OPTIONS, ZOOM_OPTIONS } from '../themes/themes';
 
-function ConfigScreen({ theme, onSetTheme }) {
+function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
   const navigate = useNavigate();
   const { notifyError } = useNotifications();
   const [loginUser, setLoginUser] = useState('');
@@ -90,6 +90,19 @@ function ConfigScreen({ theme, onSetTheme }) {
             {THEME_OPTIONS.map((themeOption) => (
               <option key={themeOption.id} value={themeOption.id}>
                 {themeOption.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="theme-selector">
+          Zoom:
+          <select
+            value={String(zoom)}
+            onChange={(event) => onSetZoom?.(Number(event.target.value))}
+          >
+            {ZOOM_OPTIONS.map((zoomOption) => (
+              <option key={zoomOption.value} value={String(zoomOption.value)}>
+                {zoomOption.label}
               </option>
             ))}
           </select>

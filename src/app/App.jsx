@@ -8,9 +8,11 @@ import LoggerScreen from '../screens/LoggerScreen';
 import OpenLogScreen from '../screens/OpenLogScreen';
 import {
   loadTheme,
+  loadZoom,
   themeClassName,
   THEME_CLASS_NAMES,
   THEME_STORAGE_KEY,
+  ZOOM_STORAGE_KEY,
 } from '../themes/themes';
 import { NotificationsProvider } from '../lib/notifications';
 import '../styles/App.css';
@@ -22,6 +24,7 @@ import '../styles/theme-high-contrast.css';
 
 function App() {
   const [theme, setTheme] = useState(loadTheme);
+  const [zoom, setZoom] = useState(loadZoom);
 
   useEffect(() => {
     localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -30,9 +33,13 @@ function App() {
     if (nextThemeClassName) document.body.classList.add(nextThemeClassName);
   }, [theme]);
 
+  useEffect(() => {
+    localStorage.setItem(ZOOM_STORAGE_KEY, String(zoom));
+  }, [zoom]);
+
   return (
     <NotificationsProvider>
-      <div className="app-container">
+      <div className="app-container" style={{ zoom }}>
         <Routes>
           <Route path="/" element={<Navigate to="/ui/open_log" replace />} />
           <Route
@@ -41,7 +48,14 @@ function App() {
           />
           <Route
             path="/ui/config"
-            element={<ConfigScreen theme={theme} onSetTheme={setTheme} />}
+            element={
+              <ConfigScreen
+                theme={theme}
+                onSetTheme={setTheme}
+                zoom={zoom}
+                onSetZoom={setZoom}
+              />
+            }
           />
           <Route path="/ui/create_log" element={<CreateLogScreen />} />
           <Route path="/ui/edit_log/:logId" element={<CreateLogScreen />} />
