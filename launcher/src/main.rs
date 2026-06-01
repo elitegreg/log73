@@ -1,5 +1,6 @@
-use iced::widget::{button, column, container, pick_list, row, text, text_input};
-use iced::{Element, Length, Subscription, Task, Theme, application, window};
+use iced::widget::image::Handle as ImageHandle;
+use iced::widget::{Image, button, column, container, pick_list, row, text, text_input};
+use iced::{Element, Font, Length, Subscription, Task, Theme, application, font, window};
 use serde::{Deserialize, Serialize};
 use shared_child::SharedChild;
 use std::fmt;
@@ -12,6 +13,14 @@ use std::time::{Duration, Instant};
 const DEFAULT_PORT: &str = "7300";
 const APP_WINDOW_SIZE: &str = "1200,800";
 const STOP_TIMEOUT: Duration = Duration::from_secs(3);
+const LAUNCHER_ICON_PNG: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../static/log73-icon-512.png"
+));
+const LAUNCHER_MAIN_ICON_SIZE: f32 = 256.0;
+const LAUNCHER_TITLE_TEXT_SIZE: f32 = 40.0;
+const LAUNCHER_WINDOW_WIDTH: f32 = 720.0;
+const LAUNCHER_WINDOW_HEIGHT: f32 = 420.0;
 
 #[cfg(all(unix, not(target_os = "macos")))]
 const LINUX_CHROME_COMMANDS: &[&str] = &["google-chrome", "google-chrome-stable", "chrome"];
@@ -26,15 +35,39 @@ const LINUX_EDGE_COMMANDS: &[&str] = &[
 
 fn main() -> iced::Result {
     application("log73 Launcher", update, view)
-        .theme(|_| Theme::Dark)
+        .theme(|_| Theme::Light)
+        .style(|_, _| iced::application::Appearance {
+            background_color: iced::Color::WHITE,
+            text_color: iced::Color::BLACK,
+        })
+        .window(window::Settings {
+            size: iced::Size::new(LAUNCHER_WINDOW_WIDTH, LAUNCHER_WINDOW_HEIGHT),
+            icon: launcher_window_icon(),
+            ..window::Settings::default()
+        })
         .subscription(subscription)
         .exit_on_close_request(false)
         .run_with(|| (Launcher::default(), Task::none()))
 }
 
+fn launcher_window_icon() -> Option<window::Icon> {
+    match window::icon::from_file_data(LAUNCHER_ICON_PNG, None) {
+        Ok(icon) => Some(icon),
+        Err(error) => {
+            eprintln!("log73-launcher: failed to decode launcher window icon: {error}");
+            None
+        }
+    }
+}
+
+fn launcher_image_handle() -> ImageHandle {
+    ImageHandle::from_bytes(LAUNCHER_ICON_PNG)
+}
+
 #[derive(Debug)]
 struct Launcher {
     screen: Screen,
+    main_icon: ImageHandle,
     settings: LauncherSettings,
     status: String,
     child: Option<Arc<SharedChild>>,
@@ -48,6 +81,7 @@ impl Default for Launcher {
     fn default() -> Self {
         Self {
             screen: Screen::Main,
+            main_icon: launcher_image_handle(),
             settings: load_settings_or_default(),
             status: "Backend is stopped.".to_string(),
             child: None,
@@ -579,12 +613,8 @@ fn open_browser_app_mode(settings: &LauncherSettings) -> Result<String, String> 
         settings.app_browser, url
     );
 
-    let profile_dir = launch_app_mode(settings.app_browser, &url)?;
-    Ok(format!(
-        "Opened app mode in {} (profile: {}).",
-        settings.app_browser,
-        profile_dir.display()
-    ))
+    let _ = launch_app_mode(settings.app_browser, &url)?;
+    Ok(format!("Opened app mode in {}.", settings.app_browser))
 }
 
 fn launch_app_mode(browser: AppBrowser, url: &str) -> Result<PathBuf, String> {
@@ -649,12 +679,7 @@ fn launch_app_mode(browser: AppBrowser, url: &str) -> Result<PathBuf, String> {
         for command_name in commands {
             let profile_dir = linux_user_data_dir_for_command(browser, command_name);
             if let Err(error) = fs::create_dir_all(&profile_dir) {
-                let detail = format!(
-                    "{} profile dir create failed ({}): {}",
-                    command_name,
-                    profile_dir.display(),
-                    error
-                );
+                let detail = format!("{} profile dir create failed: {}", command_name, error);
                 eprintln!("log73-launcher: {detail}");
                 errors.push(detail);
                 continue;
@@ -662,8 +687,8 @@ fn launch_app_mode(browser: AppBrowser, url: &str) -> Result<PathBuf, String> {
 
             let user_data_arg = format!("--user-data-dir={}", profile_dir.to_string_lossy());
             eprintln!(
-                "log73-launcher: trying linux app-mode command={} {} {} {} {}",
-                command_name, new_window_arg, app_arg, size_arg, user_data_arg
+                "log73-launcher: trying linux app-mode command={} {} {} {}",
+                command_name, new_window_arg, app_arg, size_arg
             );
 
             let spawn_result = Command::new(command_name)
@@ -697,10 +722,9 @@ fn launch_app_mode(browser: AppBrowser, url: &str) -> Result<PathBuf, String> {
                         }
                         Ok(None) => {
                             eprintln!(
-                                "log73-launcher: launched app mode with {} (pid={}) using user-data-dir={}",
+                                "log73-launcher: launched app mode with {} (pid={})",
                                 command_name,
-                                child.id(),
-                                profile_dir.display()
+                                child.id()
                             );
                             return Ok(profile_dir);
                         }
@@ -874,16 +898,41 @@ fn view_main(state: &Launcher) -> Element<'_, Message> {
         "stopped"
     };
 
-    let content = column![
-        row![text("log73 launcher"), settings_button].spacing(12),
-        text(format!("Backend status: {backend_state}")),
-        row![start_button, stop_button].spacing(12),
-        row![open_log_button, open_browser_button, open_app_mode_button].spacing(12),
-        text(&state.status),
+    let header_icon = Image::new(state.main_icon.clone())
+        .width(Length::Fixed(LAUNCHER_MAIN_ICON_SIZE))
+        .height(Length::Fixed(LAUNCHER_MAIN_ICON_SIZE));
+
+    let controls = column![
+        text("log73 Launcher")
+            .size(LAUNCHER_TITLE_TEXT_SIZE)
+            .font(Font {
+                weight: font::Weight::Bold,
+                ..Font::DEFAULT
+            }),
+        settings_button,
+        row![
+            start_button,
+            stop_button,
+            text(format!("Backend status: {backend_state}"))
+        ]
+        .spacing(12)
+        .align_y(iced::alignment::Vertical::Center),
+        column![
+            row![open_log_button, open_browser_button, open_app_mode_button].spacing(12),
+            text(&state.status)
+                .width(Length::Fill)
+                .wrapping(iced::widget::text::Wrapping::Word),
+        ]
+        .spacing(8)
+        .width(Length::Shrink),
     ]
     .spacing(12)
-    .padding(16)
     .max_width(900);
+
+    let content = row![header_icon, controls]
+        .spacing(16)
+        .align_y(iced::alignment::Vertical::Top)
+        .padding(16);
 
     container(content)
         .width(Length::Fill)
