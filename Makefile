@@ -1,30 +1,48 @@
 .PHONY: all release \
-	backend frontend \
+	backend launcher frontend \
 	backend-build backend-release backend-test backend-fmt backend-lint \
+	launcher-build launcher-test launcher-fmt launcher-lint launcher-run \
 	frontend-build frontend-release frontend-test frontend-fmt frontend-lint
 
-all: backend-build frontend-build
+all: backend-build launcher-build frontend-build
 
-release: backend-release frontend-release
+release: backend-release launcher-build frontend-release
 
 backend: backend-fmt backend-lint backend-test backend-build
+
+launcher: launcher-fmt launcher-lint launcher-test launcher-build
 
 frontend: frontend-fmt frontend-lint frontend-test frontend-build
 
 backend-build:
-	cd backend && cargo build
+	cargo build -p log73-backend
 
 backend-release: frontend-release
-	cd backend && cargo build --release
+	cargo build --release -p log73-backend
 
 backend-test:
-	cd backend && cargo test
+	cargo test -p log73-backend
 
 backend-fmt:
-	cd backend && cargo fmt
+	cargo fmt -p log73-backend
 
 backend-lint:
-	cd backend && cargo clippy --all-targets --all-features
+	cargo clippy -p log73-backend --all-targets --all-features
+
+launcher-build:
+	cargo build -p launcher
+
+launcher-test:
+	cargo test -p launcher
+
+launcher-fmt:
+	cargo fmt -p launcher
+
+launcher-lint:
+	cargo clippy -p launcher --all-targets --all-features
+
+launcher-run:
+	cargo run -p launcher
 
 frontend-build:
 	pnpm run build

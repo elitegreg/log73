@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@10.28.2",
   "scripts": {
-    "build": "rsbuild build",
+    "build": "rsbuild build && cp static/favicon.ico dist/favicon.ico",
     "dev": "rsbuild dev --open",
     "format": "prettier --write .",
     "lint": "eslint .",

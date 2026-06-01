@@ -1,6 +1,6 @@
 # Log73
 
-Log73 is an amateur radio contest logger prototype. It uses a React/Rsbuild browser frontend and a Rust/Axum backend in a single deployable application.
+Log73 is an amateur radio contest logger prototype. It uses a React/Rsbuild browser frontend, a Rust/Axum backend, and a Rust desktop launcher.
 
 The current architecture supports multiple logs, multiple radios, browser clients, SQLite storage, and lazy CAT connections created through `radio-cat-rs`.
 
@@ -10,6 +10,9 @@ Browser UI
   -> SQLite database
   -> radio-cat-rs transports
   -> radios
+
+Desktop launcher UI
+  -> starts/stops Rust backend process
 ```
 
 ## Current status
@@ -75,8 +78,7 @@ npm install
 Start the backend:
 
 ```bash
-cd backend
-cargo run
+cargo run -p log73-backend
 ```
 
 By default, the backend binds to:
@@ -88,16 +90,16 @@ By default, the backend binds to:
 Use `--bind` to choose a different listen address:
 
 ```bash
-cargo run -- --bind 0.0.0.0:7300
-cargo run -- --bind 127.0.0.1:8080
+cargo run -p log73-backend -- --bind 0.0.0.0:7300
+cargo run -p log73-backend -- --bind 127.0.0.1:8080
 ```
 
 Backend logging defaults to `info` on stdout. You can change the level or write to a file. At `debug` level, incoming request details and pretty-printed POST JSON bodies are logged, with sensitive HTTP headers redacted:
 
 ```bash
-cargo run -- --log-level debug
-cargo run -- --bind 0.0.0.0:7300 --log-level info --log-file log73.log
-cargo run -- --contest-rules-dir ../contest-rules
+cargo run -p log73-backend -- --log-level debug
+cargo run -p log73-backend -- --bind 0.0.0.0:7300 --log-level info --log-file log73.log
+cargo run -p log73-backend -- --contest-rules-dir ../contest-rules
 ```
 
 Start the frontend dev server in another terminal:
@@ -127,8 +129,7 @@ npm run build
 Build the backend:
 
 ```bash
-cd backend
-cargo build --release
+cargo build --release -p log73-backend
 ```
 
 The backend embeds and serves the built frontend assets from `dist/`.
@@ -136,7 +137,6 @@ The backend embeds and serves the built frontend assets from `dist/`.
 Run the production backend:
 
 ```bash
-cd backend
 ./target/release/log73-backend
 ```
 
@@ -146,6 +146,31 @@ Production logging options are the same:
 ./target/release/log73-backend --bind 127.0.0.1:7300 --log-level debug
 ./target/release/log73-backend --bind 0.0.0.0:7300 --log-level info --log-file log73.log
 ```
+
+Run the launcher:
+
+```bash
+cargo run -p launcher
+```
+
+Launcher main screen controls:
+
+- Start/Stop backend process controls with status
+- Open log file in the OS default editor/viewer
+- Open app in the default browser
+- Open app in browser app mode (`--app`) with `1200x800` initial size
+- Menu button to open launcher settings
+
+Launcher settings screen controls:
+
+- Backend binary path (editable)
+- Bind mode: `localhost only` (`127.0.0.1`) or `open` (`0.0.0.0`)
+- Port (default `7300`)
+- Log level and log file path
+- App-mode browser choice: `chrome` / `chromium` / `edge`
+- Set defaults button
+
+Launcher settings are persisted in the platform config directory. Browser app mode uses a per-browser `--user-data-dir`; by default this is under the launcher config directory (for example `~/.config/log73-launcher/chrome/`). On Linux, snap-managed browsers use a snap-compatible profile directory under `~/snap/<package>/common/` (for example `~/snap/chromium/common/log73-profile-chromium`). Stop uses graceful termination first (where supported) and falls back to force-stop after a timeout. Backend stdout/stderr are forwarded to the launcher console for debugging startup/runtime errors.
 
 ## Development checks
 
@@ -159,11 +184,11 @@ npm run build
 Backend:
 
 ```bash
-cd backend
-cargo fmt
-cargo check
-cargo run -- --bind 127.0.0.1:7300 --log-level debug
-cargo run -- --bind 127.0.0.1:7300 --log-level info --log-file /tmp/log73.log
+cargo fmt --all
+cargo check --workspace
+cargo run -p log73-backend -- --bind 127.0.0.1:7300 --log-level debug
+cargo run -p log73-backend -- --bind 127.0.0.1:7300 --log-level info --log-file /tmp/log73.log
+cargo run -p launcher
 ```
 
 ## Project layout
@@ -185,6 +210,8 @@ src/styles/*.css                      base styles and theme overrides
 
 backend/                              Rust backend
 backend/src/main.rs                   Axum routes, websocket handling, API handlers
+launcher/                             Rust iced desktop launcher
+launcher/src/main.rs                  launcher UI and backend process start/stop controls
 backend/src/auth.rs                   HTTP Basic Auth middleware
 backend/src/db.rs                     SQLite schema and data mapping
 backend/src/radio.rs                  radio/CW websocket messages, mode conversion helpers

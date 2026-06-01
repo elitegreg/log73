@@ -63,7 +63,11 @@ fn init_tracing(cli: &Cli) -> std::io::Result<Option<tracing_appender::non_block
     if let Some(path) = &cli.log_file {
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         let (writer, guard) = tracing_appender::non_blocking(file);
-        fmt().with_env_filter(filter).with_writer(writer).init();
+        fmt()
+            .with_env_filter(filter)
+            .with_writer(writer)
+            .with_ansi(false)
+            .init();
         return Ok(Some(guard));
     }
 
@@ -232,7 +236,38 @@ async fn main() {
         address = %cli.bind,
         "log73 backend listening; radio connections are lazy"
     );
-    axum::serve(listener, app).await.expect("server failed");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("server failed");
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => {
+                result.expect("failed to listen for SIGINT");
+                info!("received SIGINT; starting graceful shutdown");
+            }
+            _ = sigterm.recv() => {
+                info!("received SIGTERM; starting graceful shutdown");
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to listen for shutdown signal");
+        info!("received shutdown signal; starting graceful shutdown");
+    }
 }
 
 async fn ws_handler(
