@@ -40,7 +40,7 @@ use supercheckpartial::SuperCheckPartial;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{Span, debug, error, info, warn};
-use tracing_subscriber::{EnvFilter, fmt};
+use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 
 #[derive(Clone)]
 struct AppState {
@@ -59,19 +59,27 @@ const MAX_CLIENT_ERROR_JSON_LENGTH: usize = 8192;
 
 fn init_tracing(cli: &Cli) -> std::io::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
     let filter = EnvFilter::try_new(&cli.log_level).unwrap_or_else(|_| EnvFilter::new("info"));
+    let stdout_layer = fmt::layer();
 
     if let Some(path) = &cli.log_file {
         let file = OpenOptions::new().create(true).append(true).open(path)?;
         let (writer, guard) = tracing_appender::non_blocking(file);
-        fmt()
-            .with_env_filter(filter)
-            .with_writer(writer)
-            .with_ansi(false)
+        let file_layer = fmt::layer().with_writer(writer).with_ansi(false);
+
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(stdout_layer)
+            .with(file_layer)
             .init();
+
         return Ok(Some(guard));
     }
 
-    fmt().with_env_filter(filter).init();
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(stdout_layer)
+        .init();
+
     Ok(None)
 }
 
