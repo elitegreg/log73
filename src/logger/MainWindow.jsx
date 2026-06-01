@@ -43,6 +43,7 @@ import {
   createMessageRequestId,
   isEmptyMessageButton,
   cwActionForMessage,
+  callsignHasQuery,
 } from './mainWindowHelpers';
 import RadioControls from './components/RadioControls';
 import EntryFields from './components/EntryFields';
@@ -818,6 +819,18 @@ function MainWindow({
 
     if (event.altKey) {
       logContact(false);
+      return true;
+    }
+
+    if (
+      currentFieldName === 'CALL' &&
+      modeIsCw(radioMode) &&
+      callsignHasQuery(callSign)
+    ) {
+      onSendCwText?.({
+        request_id: createMessageRequestId(),
+        text: callSign,
+      });
       return true;
     }
 

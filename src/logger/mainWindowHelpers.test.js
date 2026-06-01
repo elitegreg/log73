@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   availableModeOptions,
+  callsignHasQuery,
   cwActionForMessage,
   cwActionFromTemplate,
   cwActiveTimeoutMs,
@@ -44,6 +45,13 @@ test('modeIsCw treats CW-R as CW', () => {
   assert.equal(modeIsCw('CW'), true);
   assert.equal(modeIsCw('CW-R'), true);
   assert.equal(modeIsCw('RTTY'), false);
+});
+
+test('callsignHasQuery detects incomplete queried callsigns', () => {
+  assert.equal(callsignHasQuery('WB4?'), true);
+  assert.equal(callsignHasQuery(' WB4? '), true);
+  assert.equal(callsignHasQuery('K1ABC'), false);
+  assert.equal(callsignHasQuery(''), false);
 });
 
 test('nextCwWpm clamps page-up and page-down changes to valid range', () => {

@@ -169,6 +169,10 @@ export function typedModeFromCallsignInput(value, settings) {
   );
 }
 
+export function callsignHasQuery(value) {
+  return String(value ?? '').trim().includes('?');
+}
+
 export function nextCwWpm(currentWpm, delta) {
   const normalizedCurrentWpm = Number.isFinite(currentWpm)
     ? currentWpm
