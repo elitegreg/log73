@@ -24,7 +24,10 @@ export function sanitizeRST(value, radioMode = 'CW') {
 }
 
 export function sanitizeCallsign(value) {
-  return value.toUpperCase().slice(0, 12);
+  return String(value ?? '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9/?]/g, '')
+    .slice(0, 12);
 }
 
 function sanitizeSingleLine(

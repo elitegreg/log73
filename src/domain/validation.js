@@ -55,6 +55,53 @@ function validateSingleValue(field, value, radioMode) {
   return { ok: true, error: '' };
 }
 
+export function validateCallsign(value) {
+  const normalizedValue = String(value ?? '').trim().toUpperCase();
+
+  if (normalizedValue === '') {
+    return { ok: false, error: 'Callsign is required.' };
+  }
+
+  if (!/^[A-Z0-9/?]+$/.test(normalizedValue)) {
+    return {
+      ok: false,
+      error: "Callsign can only contain A-Z, 0-9, '/', and '?'.",
+    };
+  }
+
+  if (normalizedValue.includes('?')) {
+    return {
+      ok: false,
+      error: "Callsign cannot contain '?' when logging.",
+    };
+  }
+
+  const slashCount = [...normalizedValue].filter(
+    (character) => character === '/',
+  ).length;
+  if (slashCount > 1) {
+    return { ok: false, error: 'Callsign can contain at most one slash.' };
+  }
+
+  if (normalizedValue.startsWith('/') || normalizedValue.endsWith('/')) {
+    return {
+      ok: false,
+      error: 'Callsign slash must be in the middle, not at the ends.',
+    };
+  }
+
+  const secondCharacter = normalizedValue[1] ?? '';
+  const thirdCharacter = normalizedValue[2] ?? '';
+  if (!/\d/.test(secondCharacter) && !/\d/.test(thirdCharacter)) {
+    return {
+      ok: false,
+      error: 'Callsign must have a digit in the 2nd or 3rd character.',
+    };
+  }
+
+  return { ok: true, error: '' };
+}
+
 export function validateConfiguredField(field, value, radioMode = 'CW') {
   const label = fieldValueLabel(field);
   const normalizedValue = String(value ?? '').trim();

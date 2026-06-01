@@ -11,7 +11,10 @@ import {
 } from '../domain/contactFields';
 import { dxccLabel, lookupDxcc } from '../domain/dxcc';
 import { dupeAlertText } from '../domain/dupes';
-import { validateExchangeField } from '../domain/validation';
+import {
+  validateCallsign,
+  validateExchangeField,
+} from '../domain/validation';
 import { dxcc, supercheckpartial } from '../lib/api';
 import {
   CW_WPM_STORAGE_KEY,
@@ -656,8 +659,15 @@ function MainWindow({
     );
   }
 
+  function callsignValidation() {
+    return validateCallsign(callSign);
+  }
+
   function canLogContact(force = false) {
-    return allRequiredFieldsFilled() && (force || !firstInvalidExchangeField());
+    return (
+      allRequiredFieldsFilled() &&
+      (force || (callsignValidation().ok && !firstInvalidExchangeField()))
+    );
   }
 
   function clearEntryFields() {
@@ -672,6 +682,11 @@ function MainWindow({
 
   function logContact(force = false) {
     if (!canLogContact(force)) {
+      if (!force && !callsignValidation().ok) {
+        callSignRef.current?.focus();
+        return false;
+      }
+
       const invalidField = firstInvalidExchangeField();
       if (invalidField) {
         exchangeInputRefs.current[invalidField.name]?.focus();
@@ -694,6 +709,7 @@ function MainWindow({
       _session_id: sessionId,
       _log_id: logId,
       _client_id: createContactId(timeOn, normalizedCallSign),
+      ...(force ? { _force: true } : {}),
     };
 
     for (const field of settings.exchange) {
@@ -765,12 +781,16 @@ function MainWindow({
   }
 
   function exchangeFieldsValid() {
-    return allRequiredFieldsFilled() && !firstInvalidExchangeField();
+    return (
+      allRequiredFieldsFilled() &&
+      callsignValidation().ok &&
+      !firstInvalidExchangeField()
+    );
   }
 
   function fieldFilledAndValid(fieldName) {
     if (fieldName === 'CALL') {
-      return callSign.trim() !== '';
+      return callsignValidation().ok;
     }
     const field = (settings?.exchange ?? []).find(
       (item) => item.name === fieldName,
@@ -818,7 +838,7 @@ function MainWindow({
     event.preventDefault();
 
     if (event.altKey) {
-      logContact(false);
+      logContact(true);
       return true;
     }
 
@@ -831,6 +851,10 @@ function MainWindow({
         request_id: createMessageRequestId(),
         text: callSign,
       });
+      return true;
+    }
+
+    if (currentFieldName === 'CALL' && !callsignValidation().ok) {
       return true;
     }
 
@@ -909,7 +933,7 @@ function MainWindow({
     ) {
       if (event.altKey) {
         event.preventDefault();
-        logContact(false);
+        logContact(true);
         return;
       }
 

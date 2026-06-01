@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   fieldValueLabel,
+  validateCallsign,
   validateConfiguredField,
   validateExchangeField,
 } from './validation.js';
@@ -10,6 +11,22 @@ test('fieldValueLabel uses label, name, then Field fallback', () => {
   assert.equal(fieldValueLabel({ label: 'Section', name: 'Sect' }), 'Section');
   assert.equal(fieldValueLabel({ name: 'Sect' }), 'Sect');
   assert.equal(fieldValueLabel({}), 'Field');
+});
+
+test('validateCallsign enforces logging rules', () => {
+  assert.equal(validateCallsign('K1ABC').ok, true);
+  assert.equal(validateCallsign('4O9A').ok, true);
+  assert.equal(validateCallsign('KA1BC').ok, true);
+  assert.equal(validateCallsign('K1ABC/4').ok, true);
+
+  assert.equal(validateCallsign('').ok, false);
+  assert.equal(validateCallsign('WB4?').ok, false);
+  assert.equal(validateCallsign('K 1ABC').ok, false);
+  assert.equal(validateCallsign('K1A*').ok, false);
+  assert.equal(validateCallsign('/K1ABC').ok, false);
+  assert.equal(validateCallsign('K1ABC/').ok, false);
+  assert.equal(validateCallsign('K1/A/BC').ok, false);
+  assert.equal(validateCallsign('KABC').ok, false);
 });
 
 test('validateExchangeField requires non-empty values', () => {

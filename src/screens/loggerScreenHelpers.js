@@ -179,6 +179,9 @@ export function mergeContact(contacts, contact) {
     ...committedContact,
     _error: undefined,
   };
+  if (nextContacts[index]._status === 'Committed') {
+    delete nextContacts[index]._force;
+  }
   return sortContacts(nextContacts);
 }
 

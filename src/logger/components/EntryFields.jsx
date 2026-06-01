@@ -1,6 +1,9 @@
 import React from 'react';
 import { parseFieldType } from '../../domain/contactFields';
-import { validateExchangeField } from '../../domain/validation';
+import {
+  validateCallsign,
+  validateExchangeField,
+} from '../../domain/validation';
 import { CALLSIGN_FIELD_WIDTH_CHARS } from '../mainWindowHelpers';
 
 function EntryFields({
@@ -18,6 +21,8 @@ function EntryFields({
   updateExchangeField,
   handleExchangeKeyDown,
 }) {
+  const callsignValidation = validateCallsign(callSign);
+
   return (
     <div className="entry-fields">
       <label
@@ -43,7 +48,9 @@ function EntryFields({
           onKeyDown={handleCallsignKeyDown}
           onFocus={() => setActiveCompletionField('CALL')}
           onBlur={() => setActiveCompletionField(null)}
-          className="callsign"
+          className={`callsign${callsignValidation.ok ? '' : ' invalid-field'}`}
+          title={callsignValidation.ok ? undefined : callsignValidation.error}
+          aria-invalid={callsignValidation.ok ? undefined : true}
           maxLength={12}
         />
       </label>

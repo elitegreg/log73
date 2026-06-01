@@ -36,11 +36,13 @@ test('sanitizeRST keeps valid RST digits for the active mode', () => {
   assert.equal(sanitizeRST('999', 'CW'), '');
 });
 
-test('sanitizeCallsign uppercases and truncates callsigns', () => {
+test('sanitizeCallsign uppercases, filters chars, and truncates callsigns', () => {
   assert.equal(
     sanitizeCallsign('k1abcdefghijklmnopqrstuvwxyz'),
     'K1ABCDEFGHIJ',
   );
+  assert.equal(sanitizeCallsign(' wb4? /x*'), 'WB4?/X');
+  assert.equal(sanitizeCallsign('k 1 a b c'), 'K1ABC');
 });
 
 test('sanitizeExchangeValue applies type-specific normalization', () => {

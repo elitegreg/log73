@@ -44,7 +44,7 @@ struct ParsedFieldType {
 
 pub fn validate_new_log(contest_rules: &ContestRulesStore, payload: &NewLog) -> Result<(), String> {
     validate_required_text("log name", &payload.name, MAX_LOG_NAME_LEN)?;
-    validate_callsign("station callsign", &payload.station_callsign)?;
+    validate_required_text("station callsign", &payload.station_callsign, MAX_CALLSIGN_LEN)?;
 
     let contest_id = payload.contest_id.trim();
     validate_required_text("contest", contest_id, MAX_CONTEST_ID_LEN)?;
@@ -56,7 +56,7 @@ pub fn validate_new_log(contest_rules: &ContestRulesStore, payload: &NewLog) -> 
 
 pub fn validate_update_log(rules: &ContestRules, payload: &UpdateLog) -> Result<(), String> {
     validate_required_text("log name", &payload.name, MAX_LOG_NAME_LEN)?;
-    validate_callsign("station callsign", &payload.station_callsign)?;
+    validate_required_text("station callsign", &payload.station_callsign, MAX_CALLSIGN_LEN)?;
     validate_persisted_log_params(rules, &payload.contest_params)
 }
 
@@ -230,8 +230,13 @@ pub async fn validate_contacts(
         .ok_or_else(|| format!("unknown contest: {}", log.contest_id))?;
 
     for (index, contact) in contacts.iter().enumerate() {
-        validate_contact(rules, log_id, contact)
-            .map_err(|error| format!("contact {}: {error}", index + 1))?;
+        if force_commit_requested(contact) {
+            validate_contact_shape(contact)
+                .map_err(|error| format!("contact {}: {error}", index + 1))?;
+        } else {
+            validate_contact(rules, log_id, contact)
+                .map_err(|error| format!("contact {}: {error}", index + 1))?;
+        }
 
         if let Some(contact_id) = contact_id(contact)
             && let Some(existing_log_id) = database
@@ -248,6 +253,13 @@ pub async fn validate_contacts(
     }
 
     Ok(())
+}
+
+pub fn force_commit_requested(contact: &Contact) -> bool {
+    contact
+        .get("_force")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 pub fn validate_radio_frequency_hz(frequency_hz: u64) -> Result<(), String> {
@@ -451,13 +463,15 @@ fn validate_contact(rules: &ContestRules, log_id: i64, contact: &Contact) -> Res
     }
 
     validate_qso_epoch(contact)?;
-    validate_callsign_value("station callsign", contact.get("STATION_CALLSIGN"))?;
+    let station_callsign = json_trimmed_string(contact.get("STATION_CALLSIGN")).unwrap_or_default();
+    validate_required_text("station callsign", &station_callsign, MAX_CALLSIGN_LEN)?;
     if let Some(operator) = json_trimmed_string(contact.get("OPERATOR"))
         && !operator.is_empty()
     {
-        validate_callsign("operator callsign", &operator)?;
+        validate_required_text("operator callsign", &operator, MAX_CALLSIGN_LEN)?;
     }
-    validate_callsign_value("callsign", contact.get("CALL"))?;
+    let callsign = json_trimmed_string(contact.get("CALL")).unwrap_or_default();
+    validate_required_text("callsign", &callsign, MAX_CALLSIGN_LEN)?;
     validate_contact_band_and_frequency(rules, contact)?;
     let mode = validate_contact_mode(rules, contact)?;
 
@@ -728,32 +742,6 @@ fn validate_required_text(label: &str, value: &str, max_length: usize) -> Result
     }
     if value.chars().any(char::is_control) {
         return Err(format!("{label} cannot contain control characters"));
-    }
-    Ok(())
-}
-
-fn validate_callsign_value(label: &str, value: Option<&Value>) -> Result<(), String> {
-    let value = json_trimmed_string(value).unwrap_or_default();
-    validate_callsign(label, &value)
-}
-
-fn validate_callsign(label: &str, value: &str) -> Result<(), String> {
-    let value = value.trim();
-    validate_required_text(label, value, MAX_CALLSIGN_LEN)?;
-    if !value
-        .chars()
-        .all(|character| character.is_ascii_alphanumeric() || character == '/')
-    {
-        return Err(format!(
-            "{label} can only contain letters, numbers, and '/'"
-        ));
-    }
-    if !value
-        .chars()
-        .any(|character| character.is_ascii_alphabetic())
-        || !value.chars().any(|character| character.is_ascii_digit())
-    {
-        return Err(format!("{label} must include letters and numbers"));
     }
     Ok(())
 }
