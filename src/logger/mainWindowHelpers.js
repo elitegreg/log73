@@ -112,6 +112,49 @@ export function isEmptyMessageButton(button) {
   return String(button?.label ?? '').trim() === '-';
 }
 
+export function cwActionFromTemplate(template) {
+  const match = String(template ?? '')
+    .trim()
+    .match(/^\{\s*action\s*:\s*([^}]+?)\s*\}$/i);
+  return match ? match[1].trim() : null;
+}
+
+export function cwActionForMessage(config, mode, key) {
+  const normalizedMode =
+    String(mode ?? '').trim().toLowerCase() === 'run' ? 'run' : 's&p';
+  const normalizedKey = String(key ?? '').trim().toUpperCase();
+  if (!normalizedKey) return null;
+
+  let currentMode = null;
+  for (const rawLine of String(config ?? '').split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    const upper = line.toUpperCase();
+    if (upper.includes('RUN MESSAGES')) {
+      currentMode = 'run';
+      continue;
+    }
+    if (upper.includes('S&P MESSAGES') || upper.includes('SP MESSAGES')) {
+      currentMode = 's&p';
+      continue;
+    }
+    if (line.startsWith('#') || currentMode !== normalizedMode) continue;
+
+    const commaIndex = line.indexOf(',');
+    if (commaIndex <= 0) continue;
+
+    const keyAndLabel = line.slice(0, commaIndex).trim();
+    const message = line.slice(commaIndex + 1).trim();
+    const parsedKey = keyAndLabel.split(/\s+/, 1)[0]?.trim().toUpperCase();
+    if (parsedKey !== normalizedKey) continue;
+
+    return cwActionFromTemplate(message);
+  }
+
+  return null;
+}
+
 export function availableModeOptions() {
   return MODE_OPTIONS;
 }

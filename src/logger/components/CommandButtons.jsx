@@ -2,7 +2,7 @@ import React from 'react';
 
 function CommandButtons({
   stopMessageSending,
-  resetEntryFields,
+  clearEntryFields,
   logContact,
   onRescore,
   isRescoreLoading,
@@ -20,8 +20,8 @@ function CommandButtons({
       >
         Stop Sending
       </button>
-      <button className="cmd-btn" onClick={resetEntryFields}>
-        Wipe
+      <button className="cmd-btn" onClick={clearEntryFields}>
+        Clear
       </button>
       <button
         className={`cmd-btn${highlightLogIt ? ' esm-next' : ''}`}

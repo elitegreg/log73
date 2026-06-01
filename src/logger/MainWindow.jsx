@@ -42,6 +42,7 @@ import {
   createContactId,
   createMessageRequestId,
   isEmptyMessageButton,
+  cwActionForMessage,
 } from './mainWindowHelpers';
 import RadioControls from './components/RadioControls';
 import EntryFields from './components/EntryFields';
@@ -392,7 +393,22 @@ function MainWindow({
     setActiveMessageKeys(new Set());
   }
 
+  function performMessageAction(action) {
+    switch (String(action ?? '').trim().toLowerCase()) {
+      case 'clear':
+        clearEntryFields();
+        return true;
+      default:
+        return false;
+    }
+  }
+
   function sendSingleMessageKey(key, mode = messageModeKey) {
+    const action = cwActionForMessage(radio?.cw_messages, mode, key);
+    if (action && performMessageAction(action)) {
+      return null;
+    }
+
     const button = (messageLabels?.[mode] ?? DEFAULT_MESSAGE_LABELS[mode]).find(
       (label) => label.key === key,
     );
@@ -643,7 +659,7 @@ function MainWindow({
     return allRequiredFieldsFilled() && (force || !firstInvalidExchangeField());
   }
 
-  function resetEntryFields() {
+  function clearEntryFields() {
     setCallSign('');
     setExchangeValues(
       exchangeDefaults(settings, radioMode, log?.contest_params ?? {}),
@@ -684,7 +700,7 @@ function MainWindow({
     }
 
     onLogContact?.(contact);
-    resetEntryFields();
+    clearEntryFields();
     return true;
   }
 
@@ -1040,7 +1056,7 @@ function MainWindow({
       />
       <CommandButtons
         stopMessageSending={stopMessageSending}
-        resetEntryFields={resetEntryFields}
+        clearEntryFields={clearEntryFields}
         logContact={logContact}
         onRescore={onRescore}
         isRescoreLoading={isRescoreLoading}

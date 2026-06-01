@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   availableModeOptions,
+  cwActionForMessage,
+  cwActionFromTemplate,
   cwActiveTimeoutMs,
   esmEnterAction,
   modeIsCw,
@@ -57,6 +59,29 @@ test('cwActiveTimeoutMs waits for completion-capable keyers', () => {
   assert.equal(cwActiveTimeoutMs('cat'), 30000);
   assert.equal(cwActiveTimeoutMs('serial'), 30000);
   assert.equal(cwActiveTimeoutMs('none'), 500);
+});
+
+test('cwActionFromTemplate parses {Action:...} tokens only', () => {
+  assert.equal(cwActionFromTemplate('{Action:Clear}'), 'Clear');
+  assert.equal(cwActionFromTemplate(' { action : Clear } '), 'Clear');
+  assert.equal(cwActionFromTemplate('CQ TEST'), null);
+  assert.equal(cwActionFromTemplate('{CALL}'), null);
+  assert.equal(cwActionFromTemplate('{Action:Clear} TU'), null);
+});
+
+test('cwActionForMessage returns action by mode and key', () => {
+  const config = `
+# RUN Messages
+F1 Cq,CQ TEST
+F12 Clear,{Action:Clear}
+# S&P Messages
+F12 Clear,CQ
+`;
+
+  assert.equal(cwActionForMessage(config, 'run', 'F12'), 'Clear');
+  assert.equal(cwActionForMessage(config, 's&p', 'F12'), null);
+  assert.equal(cwActionForMessage(config, 'run', 'F1'), null);
+  assert.equal(cwActionForMessage(config, 'run', 'F9'), null);
 });
 
 test('esmEnterAction follows run mode matrix states', () => {

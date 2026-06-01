@@ -15,7 +15,7 @@ F8 Agn?,Agn?
 F9 Nr?,Nr?
 F10 Call?,Cl?
 F11 -,
-F12 -,
+F12 Clear,{Action:Clear}
 #
 ###################
 #   S&P Messages
@@ -31,7 +31,7 @@ F8 Agn?,Agn?
 F9 Nr?,Nr?
 F10 Call?,Cl?
 F11 -,
-F12 -,
+F12 Clear,{Action:Clear}
 "#;
 
 #[derive(Debug, Clone, Serialize)]
