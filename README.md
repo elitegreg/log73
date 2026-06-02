@@ -487,7 +487,6 @@ Default
 Modern Dark Radio
 Classic Terminal
 Clean Light Desktop
-N1MM-ish Contest
 High Contrast
 ```
 

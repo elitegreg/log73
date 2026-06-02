@@ -268,7 +268,7 @@
 .log-window {
   width: 800px;
   border: 1px solid #000;
-  background-color: #add8e6; /* Light blue to match N1MM+ style */
+  background-color: #add8e6;
   margin: 10px auto;
   font-family: 'Arial', sans-serif;
   font-size: 12px;

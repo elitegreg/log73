@@ -1,0 +1,123 @@
+/* Default contest logger theme overrides. */
+body.theme-default {
+  --invalid-border-color: #cc0000;
+  --invalid-background-color: #ffd6d6;
+  --invalid-text-color: #660000;
+}
+body.theme-default .app-container {
+  background-color: #808080;
+  color: #000000;
+}
+body.theme-default .window,
+body.theme-default .log-window,
+body.theme-default .selection-window,
+body.theme-default .form-window {
+  border-color: #202020;
+  background-color: #bfc7d5;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.55);
+}
+body.theme-default .title-bar,
+body.theme-default .log-title-bar {
+  background-color: #003399;
+  color: #ffffff;
+}
+body.theme-default .radio-controls,
+body.theme-default .status-bar,
+body.theme-default .log-table th {
+  background-color: #c0c0c0;
+  color: #000000;
+}
+body.theme-default .radio-control.unsupported {
+  color: #cc0000;
+}
+body.theme-default .entry-fields input {
+  border-color: #000000;
+  background-color: #fff6bf;
+  color: #000000;
+}
+body.theme-default .form-window input,
+body.theme-default .form-window select,
+body.theme-default .log-cell-editor,
+body.theme-default .selection-list,
+body.theme-default .supercheckpartial-box {
+  border-color: #404040;
+  background-color: #ffffff;
+  color: #000000;
+}
+body.theme-default .entry-fields input:read-only {
+  background-color: #e6e6e6;
+  color: #202020;
+}
+body.theme-default .f-key,
+body.theme-default .cmd-btn,
+body.theme-default .title-button,
+body.theme-default .window-controls button {
+  border-color: #606060;
+  background-color: #d0d0d0;
+  color: #000000;
+}
+body.theme-default .f-key.active,
+body.theme-default .cmd-btn.primary {
+  background-color: #ff2020;
+  color: #ffffff;
+}
+body.theme-default .log-table {
+  background-color: #ffffff;
+}
+body.theme-default .log-table th,
+body.theme-default .log-table td {
+  border-color: #808080;
+}
+body.theme-default .log-table tbody tr:nth-child(odd) {
+  background-color: #d8d8d8;
+}
+body.theme-default .log-table tbody tr:nth-child(even) {
+  background-color: #ffffff;
+}
+body.theme-default .log-table tbody tr.uncommitted-contact {
+  background-color: #fff0a0;
+}
+body.theme-default .log-table tbody tr.selected-contact,
+body.theme-default .log-table tbody tr.selected-contact:nth-child(odd),
+body.theme-default .log-table tbody tr.selected-contact:nth-child(even),
+body.theme-default
+  .log-table
+  tbody
+  tr.selected-contact.uncommitted-contact {
+  background-color: #004fe0;
+}
+body.theme-default .log-table td {
+  color: #000000;
+}
+body.theme-default .log-table tbody tr.selected-contact td {
+  color: #ffffff;
+}
+body.theme-default .log-table tbody tr.selected-contact td.invalid-cell {
+  background-color: #ffd6d6;
+  color: #660000;
+}
+body.theme-default .empty-log {
+  color: #505050;
+}
+body.theme-default .log-context-menu,
+body.theme-default .error-message {
+  border-color: #404040;
+  background-color: #ffffff;
+  color: #000000;
+}
+body.theme-default .log-context-menu button {
+  color: #000000;
+}
+body.theme-default .log-context-menu button:hover:not(:disabled) {
+  background-color: #004fe0;
+  color: #ffffff;
+}
+body.theme-default .log-context-menu button:disabled {
+  color: #808080;
+}
+body.theme-default .backend-socket-light.connected {
+  background-color: #00a000;
+}
+body.theme-default .backend-socket-light.disconnected {
+  background-color: #d00000;
+}

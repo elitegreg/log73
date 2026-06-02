@@ -6,13 +6,12 @@ export const THEME_OPTIONS = [
   { id: 'modern-dark-radio', label: 'Modern Dark Radio' },
   { id: 'classic-terminal', label: 'Classic Terminal' },
   { id: 'clean-light-desktop', label: 'Clean Light Desktop' },
-  { id: 'n1mm-contest', label: 'N1MM-ish Contest' },
   { id: 'high-contrast', label: 'High Contrast' },
 ];
 
-export const THEME_CLASS_NAMES = THEME_OPTIONS.filter(
-  (theme) => theme.id !== 'default',
-).map((theme) => `theme-${theme.id}`);
+export const THEME_CLASS_NAMES = THEME_OPTIONS.map(
+  (theme) => `theme-${theme.id}`,
+);
 
 export const ZOOM_OPTIONS = [
   { value: 1, label: '100%' },
@@ -32,8 +31,7 @@ export function loadTheme() {
 }
 
 export function themeClassName(theme) {
-  const normalizedTheme = normalizeTheme(theme);
-  return normalizedTheme === 'default' ? null : `theme-${normalizedTheme}`;
+  return `theme-${normalizeTheme(theme)}`;
 }
 
 export function normalizeZoom(zoom) {

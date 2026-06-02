@@ -19,7 +19,7 @@ import '../styles/App.css';
 import '../styles/theme-modern-dark-radio.css';
 import '../styles/theme-classic-terminal.css';
 import '../styles/theme-clean-light-desktop.css';
-import '../styles/theme-n1mm-contest.css';
+import '../styles/theme-default.css';
 import '../styles/theme-high-contrast.css';
 
 function App() {
