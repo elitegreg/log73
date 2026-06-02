@@ -19,6 +19,9 @@ const FIXED_COLUMN_WIDTHS = {
   Pts: 2,
   Op: 12,
 };
+const VIRTUAL_ROW_HEIGHT_PX = 22;
+const VIRTUAL_OVERSCAN_ROWS = 8;
+const LOAD_MORE_THRESHOLD_PX = 120;
 
 function epochFromLegacyQsoDateTime(entry) {
   const date = String(entry.QSO_DATE ?? '');
@@ -175,11 +178,10 @@ function formatCell(column, entry, columnFieldMap) {
 }
 
 function contactKey(entry, index) {
-  return String(
-    entry._id ??
-      entry._client_id ??
-      `${entry.QSO_DATE_TIME_ON ?? entry.TIME_ON ?? entry.Time ?? 'row'}-${entry.CALL ?? entry.Call ?? index}`,
-  );
+  if (entry?._client_id) return `client:${entry._client_id}`;
+  if (entry?._id !== undefined && entry?._id !== null) return `id:${entry._id}`;
+
+  return `row:${entry.QSO_DATE_TIME_ON ?? entry.TIME_ON ?? entry.Time ?? 'row'}-${entry.CALL ?? entry.Call ?? index}`;
 }
 
 function contactRowClassName(entry, isSelected) {
@@ -318,6 +320,9 @@ function LogWindow({
   radioMode = 'CW',
   onDeleteContacts,
   onUpdateContacts,
+  hasMoreContacts = false,
+  isLoadingMoreContacts = false,
+  onLoadMoreContacts,
 }) {
   const { notifyError } = useNotifications();
   const columns = settings?.qso_columns ?? [];
@@ -328,8 +333,11 @@ function LogWindow({
   const [selectedKeys, setSelectedKeys] = useState(() => new Set());
   const [contextMenu, setContextMenu] = useState(null);
   const [editingCell, setEditingCell] = useState(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(230);
   const lastSelectedIndexRef = useRef(null);
   const inputRef = useRef(null);
+  const scrollContainerRef = useRef(null);
   const editingCellKey = editingCell?.key;
   const editingCellColumn = editingCell?.column;
   const contactsLoadMessage =
@@ -340,6 +348,24 @@ function LogWindow({
         : contactsLoadState === 'retrying'
           ? 'Retrying contact load...'
           : '';
+  const visibleRowCount = Math.max(
+    1,
+    Math.ceil(viewportHeight / VIRTUAL_ROW_HEIGHT_PX),
+  );
+  const startIndex = Math.max(
+    0,
+    Math.floor(scrollTop / VIRTUAL_ROW_HEIGHT_PX) - VIRTUAL_OVERSCAN_ROWS,
+  );
+  const endIndex = Math.min(
+    contacts.length,
+    startIndex + visibleRowCount + VIRTUAL_OVERSCAN_ROWS * 2,
+  );
+  const visibleContacts = contacts.slice(startIndex, endIndex);
+  const topSpacerHeight = startIndex * VIRTUAL_ROW_HEIGHT_PX;
+  const bottomSpacerHeight = Math.max(
+    0,
+    (contacts.length - endIndex) * VIRTUAL_ROW_HEIGHT_PX,
+  );
 
   useEffect(() => {
     const validKeys = new Set(contacts.map(contactKey));
@@ -368,6 +394,62 @@ function LogWindow({
     inputRef.current?.focus();
     inputRef.current?.select();
   }, [editingCellKey, editingCellColumn]);
+
+  useEffect(() => {
+    function updateViewportHeight() {
+      setViewportHeight(scrollContainerRef.current?.clientHeight ?? 230);
+    }
+
+    updateViewportHeight();
+    window.addEventListener('resize', updateViewportHeight);
+    return () => window.removeEventListener('resize', updateViewportHeight);
+  }, []);
+
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    if (
+      !hasMoreContacts ||
+      isLoadingMoreContacts ||
+      typeof onLoadMoreContacts !== 'function'
+    ) {
+      return;
+    }
+
+    const remainingPx =
+      container.scrollHeight - (container.scrollTop + container.clientHeight);
+    if (remainingPx <= LOAD_MORE_THRESHOLD_PX) {
+      onLoadMoreContacts();
+    }
+  }, [
+    contacts.length,
+    hasMoreContacts,
+    isLoadingMoreContacts,
+    onLoadMoreContacts,
+  ]);
+
+  function maybeLoadMoreContacts(container) {
+    if (
+      !container ||
+      !hasMoreContacts ||
+      isLoadingMoreContacts ||
+      typeof onLoadMoreContacts !== 'function'
+    ) {
+      return;
+    }
+
+    const remainingPx =
+      container.scrollHeight - (container.scrollTop + container.clientHeight);
+    if (remainingPx <= LOAD_MORE_THRESHOLD_PX) {
+      onLoadMoreContacts();
+    }
+  }
+
+  function handleTableScroll(event) {
+    const container = event.currentTarget;
+    setScrollTop(container.scrollTop);
+    maybeLoadMoreContacts(container);
+  }
 
   function selectedContacts() {
     return contacts.filter((entry, index) =>
@@ -488,7 +570,11 @@ function LogWindow({
           ) : null}
         </div>
       </div>
-      <div className="log-table-scroll">
+      <div
+        className="log-table-scroll"
+        ref={scrollContainerRef}
+        onScroll={handleTableScroll}
+      >
         <table className="log-table">
           <colgroup>
             {columns.map((column) => (
@@ -506,77 +592,104 @@ function LogWindow({
             </tr>
           </thead>
           <tbody>
-            {contacts.map((entry, index) => {
-              const key = contactKey(entry, index);
-              const isSelected = selectedKeys.has(key);
-              return (
-                <tr
-                  key={key}
-                  className={contactRowClassName(entry, isSelected)}
-                  title={contactRowTitle(entry)}
-                  onClick={(event) => selectRow(event, index, key)}
-                >
-                  {columns.map((column) => {
-                    const isEditing =
-                      editingCell?.key === key && editingCell.column === column;
-                    const validation = cellValidation(
-                      settings,
-                      column,
-                      entry,
-                      columnFieldMap,
-                      radioMode,
-                    );
-                    return (
-                      <td
-                        key={column}
-                        className={validation.ok ? undefined : 'invalid-cell'}
-                        title={validation.ok ? undefined : validation.error}
-                        onContextMenu={(event) =>
-                          openContextMenu(event, entry, index, column)
-                        }
-                      >
-                        {isEditing ? (
-                          <input
-                            ref={inputRef}
-                            className={`log-cell-editor ${parseUpdateValue(settings, editingCell.column, editingCell.value, radioMode, entry).ok ? '' : 'invalid-field'}`.trim()}
-                            value={editingCell.value}
-                            onChange={(event) =>
-                              setEditingCell({
-                                ...editingCell,
-                                value: sanitizeUpdateInput(
-                                  settings,
-                                  editingCell.column,
-                                  event.target.value,
-                                  radioMode,
-                                ),
-                              })
-                            }
-                            onClick={(event) => event.stopPropagation()}
-                            onKeyDown={(event) => {
-                              if (event.key === 'Enter') {
-                                event.preventDefault();
-                                finishUpdate();
-                              } else if (event.key === 'Escape') {
-                                event.preventDefault();
-                                setEditingCell(null);
-                              }
-                            }}
-                          />
-                        ) : (
-                          formatCell(column, entry, columnFieldMap)
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-            {contacts.length === 0 && (
+            {contacts.length === 0 ? (
               <tr>
                 <td colSpan={Math.max(columns.length, 1)} className="empty-log">
                   {contactsLoadMessage || 'No contacts loaded.'}
                 </td>
               </tr>
+            ) : (
+              <>
+                {topSpacerHeight > 0 ? (
+                  <tr className="virtual-spacer" aria-hidden>
+                    <td
+                      colSpan={Math.max(columns.length, 1)}
+                      style={{ height: `${topSpacerHeight}px` }}
+                    />
+                  </tr>
+                ) : null}
+                {visibleContacts.map((entry, rowOffset) => {
+                  const index = startIndex + rowOffset;
+                  const key = contactKey(entry, index);
+                  const isSelected = selectedKeys.has(key);
+                  return (
+                    <tr
+                      key={key}
+                      className={contactRowClassName(entry, isSelected)}
+                      title={contactRowTitle(entry)}
+                      onClick={(event) => selectRow(event, index, key)}
+                    >
+                      {columns.map((column) => {
+                        const isEditing =
+                          editingCell?.key === key && editingCell.column === column;
+                        const validation = cellValidation(
+                          settings,
+                          column,
+                          entry,
+                          columnFieldMap,
+                          radioMode,
+                        );
+                        return (
+                          <td
+                            key={column}
+                            className={validation.ok ? undefined : 'invalid-cell'}
+                            title={validation.ok ? undefined : validation.error}
+                            onContextMenu={(event) =>
+                              openContextMenu(event, entry, index, column)
+                            }
+                          >
+                            {isEditing ? (
+                              <input
+                                ref={inputRef}
+                                className={`log-cell-editor ${parseUpdateValue(settings, editingCell.column, editingCell.value, radioMode, entry).ok ? '' : 'invalid-field'}`.trim()}
+                                value={editingCell.value}
+                                onChange={(event) =>
+                                  setEditingCell({
+                                    ...editingCell,
+                                    value: sanitizeUpdateInput(
+                                      settings,
+                                      editingCell.column,
+                                      event.target.value,
+                                      radioMode,
+                                    ),
+                                  })
+                                }
+                                onClick={(event) => event.stopPropagation()}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    finishUpdate();
+                                  } else if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    setEditingCell(null);
+                                  }
+                                }}
+                              />
+                            ) : (
+                              formatCell(column, entry, columnFieldMap)
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+                {bottomSpacerHeight > 0 ? (
+                  <tr className="virtual-spacer" aria-hidden>
+                    <td
+                      colSpan={Math.max(columns.length, 1)}
+                      style={{ height: `${bottomSpacerHeight}px` }}
+                    />
+                  </tr>
+                ) : null}
+                {isLoadingMoreContacts ? (
+                  <tr className="loading-more-row" aria-live="polite">
+                    <td colSpan={Math.max(columns.length, 1)}>
+                      Loading more contacts...
+                    </td>
+                  </tr>
+                ) : null}
+              </>
             )}
           </tbody>
         </table>

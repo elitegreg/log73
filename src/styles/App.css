@@ -325,6 +325,23 @@
 
 .log-table tbody tr {
   user-select: none;
+  height: 22px;
+}
+
+.log-table tbody tr.virtual-spacer {
+  height: auto;
+  background-color: transparent !important;
+}
+
+.log-table tbody tr.virtual-spacer td {
+  border: 0;
+  padding: 0;
+}
+
+.log-table tbody tr.loading-more-row td {
+  text-align: center;
+  font-style: italic;
+  color: #555;
 }
 
 .log-table td {

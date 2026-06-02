@@ -79,7 +79,13 @@ export function sortContactsByCallsignThenTime(contacts) {
 
 export function normalizeContact(contact) {
   const nextContact = { ...contact };
-  if (nextContact._status === 'Committed') delete nextContact._client_id;
+  if (
+    nextContact._status === 'Committed' &&
+    nextContact._id !== undefined &&
+    nextContact._id !== null
+  ) {
+    nextContact._client_id = String(nextContact._id);
+  }
   if (typeof nextContact.QSO_DATE_TIME_ON !== 'number') {
     const epoch = contactSortValue(nextContact);
     if (epoch > 0) nextContact.QSO_DATE_TIME_ON = epoch;

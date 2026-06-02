@@ -29,7 +29,6 @@ import {
   committedBackendContact,
   mergeContact,
   sortContacts,
-  sortContactsByCallsignThenTime,
   markContactFailed,
   contactIdentifier,
 } from './loggerScreenHelpers';
@@ -82,29 +81,6 @@ function callsignPrefixMatches(contact, callsignPrefix) {
   return callsign.startsWith(callsignPrefix);
 }
 
-function updateSearchResultIdsForContact(currentIds, contact, callsignPrefix) {
-  if (!(currentIds instanceof Set)) return currentIds;
-  const contactId = contact?._id;
-  if (contactId === undefined || contactId === null) {
-    return currentIds;
-  }
-
-  const nextIds = new Set(currentIds);
-  if (callsignPrefixMatches(contact, callsignPrefix)) {
-    nextIds.add(String(contactId));
-  } else {
-    nextIds.delete(String(contactId));
-  }
-  return nextIds;
-}
-
-function removeContactIdFromSearchResults(currentIds, contactId) {
-  if (!(currentIds instanceof Set)) return currentIds;
-  const nextIds = new Set(currentIds);
-  nextIds.delete(String(contactId));
-  return nextIds;
-}
-
 // Runtime toggle for the on-screen socket log panel used during iPad debugging.
 function readSocketDebugPanelEnabled() {
   if (typeof window === 'undefined') return false;
@@ -139,7 +115,6 @@ function LoggerScreen() {
   const [messageSentEvent, setMessageSentEvent] = useState(null);
   const [allContacts, setAllContacts] = useState(() => loadLocalContacts(logId));
   const [debouncedCallsignSearch, setDebouncedCallsignSearch] = useState('');
-  const [searchResultIds, setSearchResultIds] = useState(null);
   const [operatorCallsign, setOperatorCallsign] = useState('');
   const [sessionId] = useState(getSessionId);
   const [radioState, setRadioState] = useState(DEFAULT_RADIO_STATE);
@@ -149,12 +124,14 @@ function LoggerScreen() {
   const [scoreSummary, setScoreSummary] = useState(EMPTY_SCORE_SUMMARY);
   const [isContextLoading, setIsContextLoading] = useState(true);
   const [contactsLoadState, setContactsLoadState] = useState('initial-loading');
+  const [hasMoreContacts, setHasMoreContacts] = useState(false);
+  const [isLoadingMoreContacts, setIsLoadingMoreContacts] = useState(false);
   const [isRescoreLoading, setIsRescoreLoading] = useState(false);
   const [isSocketDebugPanelEnabled] = useState(readSocketDebugPanelEnabled);
   const [socketDebugEntries, setSocketDebugEntries] = useState([]);
   const backendSocketRef = useRef(null);
   const committingContactIdsRef = useRef(new Set());
-  const refreshContactsRef = useRef(() => {});
+  const refreshContactsRef = useRef(() => Promise.resolve(false));
   const contactsLoadErrorNotifiedRef = useRef(false);
   const commitContactErrorNotifiedRef = useRef(false);
   const socketDebugSequenceRef = useRef(0);
@@ -177,9 +154,6 @@ function LoggerScreen() {
   const handleDebouncedCallsignChange = useCallback((value) => {
     const normalizedValue = String(value ?? '').trim().toUpperCase();
     setDebouncedCallsignSearch(normalizedValue);
-    if (!normalizedValue) {
-      setSearchResultIds(null);
-    }
   }, []);
 
   useEffect(() => {
@@ -192,7 +166,6 @@ function LoggerScreen() {
 
   useEffect(() => {
     setDebouncedCallsignSearch('');
-    setSearchResultIds(null);
     activeCallsignPrefixRef.current = '';
   }, [numericLogId]);
 
@@ -205,23 +178,13 @@ function LoggerScreen() {
     const callsignPrefix = debouncedCallsignSearch.trim().toUpperCase();
     if (!callsignPrefix) return allContacts;
 
-    const matchingContacts = allContacts.filter((contact) => {
+    return allContacts.filter((contact) => {
       if (contact._status !== 'Committed') {
         return callsignPrefixMatches(contact, callsignPrefix);
       }
-
-      if (!(searchResultIds instanceof Set)) {
-        return callsignPrefixMatches(contact, callsignPrefix);
-      }
-
-      const contactId = contact?._id;
-      if (contactId === undefined || contactId === null) {
-        return false;
-      }
-      return searchResultIds.has(String(contactId));
+      return true;
     });
-    return sortContactsByCallsignThenTime(matchingContacts);
-  }, [allContacts, debouncedCallsignSearch, searchResultIds]);
+  }, [allContacts, debouncedCallsignSearch]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -744,17 +707,13 @@ function LoggerScreen() {
             message.contact?._session_id !== sessionId &&
             Number(message.contact?._log_id) === numericLogId
           ) {
-            setAllContacts((currentContacts) =>
-              mergeContact(currentContacts, message.contact),
-            );
             const callsignPrefix = activeCallsignPrefixRef.current;
-            if (callsignPrefix) {
-              setSearchResultIds((currentIds) =>
-                updateSearchResultIdsForContact(
-                  currentIds,
-                  message.contact,
-                  callsignPrefix,
-                ),
+            if (
+              !callsignPrefix ||
+              callsignPrefixMatches(message.contact, callsignPrefix)
+            ) {
+              setAllContacts((currentContacts) =>
+                mergeContact(currentContacts, message.contact),
               );
             }
           } else if (
@@ -766,12 +725,6 @@ function LoggerScreen() {
                 (contact) => String(contact._id) !== String(message.id),
               ),
             );
-            const callsignPrefix = activeCallsignPrefixRef.current;
-            if (callsignPrefix) {
-              setSearchResultIds((currentIds) =>
-                removeContactIdFromSearchResults(currentIds, message.id),
-              );
-            }
           } else if (
             message.type === 'score_update' &&
             Number(message.log_id) === numericLogId
@@ -859,13 +812,50 @@ function LoggerScreen() {
     let contactsLoadRetryDelayMs = CONTACTS_LOAD_INITIAL_RETRY_DELAY_MS;
     let contactsLoadRetryTimerId;
     let contactsLoadInFlightPromise = null;
+    let offset = 0;
+    let hasMore = true;
+    const callsignPrefix = debouncedCallsignSearch.trim().toUpperCase();
+    activeCallsignPrefixRef.current = callsignPrefix;
+    setHasMoreContacts(true);
+    setIsLoadingMoreContacts(false);
 
-    function contactsPagePath(offset) {
+    function contactsPagePath(pageOffset) {
       const params = new URLSearchParams({
         limit: String(CONTACTS_PAGE_SIZE),
-        offset: String(offset),
+        offset: String(pageOffset),
       });
+      if (callsignPrefix) params.set('callsign_prefix', callsignPrefix);
       return `/logs/${numericLogId}/contacts?${params.toString()}`;
+    }
+
+    function mergeCommittedPage(currentContacts, committedPage) {
+      const committedById = new Map();
+      const localUncommitted = [];
+
+      for (const contact of currentContacts) {
+        if (
+          contact._status === 'Committed' &&
+          contact._id !== undefined &&
+          contact._id !== null
+        ) {
+          committedById.set(String(contact._id), contact);
+        } else {
+          localUncommitted.push(contact);
+        }
+      }
+
+      for (const contact of committedPage) {
+        if (contact._id === undefined || contact._id === null) continue;
+        const key = String(contact._id);
+        const existing = committedById.get(key) ?? {};
+        committedById.set(key, {
+          ...existing,
+          ...contact,
+          _status: 'Committed',
+        });
+      }
+
+      return sortContacts([...committedById.values(), ...localUncommitted]);
     }
 
     function scheduleContactsLoadRetry() {
@@ -873,7 +863,7 @@ function LoggerScreen() {
       if (contactsLoadRetryTimerId !== undefined) return true;
       contactsLoadRetryTimerId = window.setTimeout(() => {
         contactsLoadRetryTimerId = undefined;
-        loadContacts({ mode: 'retry' });
+        loadContacts({ mode: 'retry', reset: true });
       }, contactsLoadRetryDelayMs);
       contactsLoadRetryDelayMs = Math.min(
         contactsLoadRetryDelayMs * 2,
@@ -882,57 +872,91 @@ function LoggerScreen() {
       return true;
     }
 
-    function loadContacts({ mode = 'refresh' } = {}) {
+    function loadContacts({ mode = 'refresh', reset = true } = {}) {
       if (contactsLoadInFlightPromise) return contactsLoadInFlightPromise;
-      setContactsLoadState((currentState) => {
-        if (mode === 'retry') return 'retrying';
-        if (mode === 'initial') return 'initial-loading';
-        if (currentState === 'initial-loading') return 'initial-loading';
-        return 'refreshing';
-      });
+      if (!reset && !hasMore) return Promise.resolve(false);
+
+      if (mode === 'load-more') {
+        setIsLoadingMoreContacts(true);
+      } else {
+        setContactsLoadState((currentState) => {
+          if (mode === 'retry') return 'retrying';
+          if (mode === 'initial') return 'initial-loading';
+          if (currentState === 'initial-loading') return 'initial-loading';
+          return 'refreshing';
+        });
+      }
 
       contactsLoadInFlightPromise = (async () => {
         try {
-          const backendContacts = [];
-          let offset = 0;
-
-          while (true) {
-            if (isCancelled) return false;
-            const page = await apiJson(contactsPagePath(offset));
-            const committedPage = page.map(committedBackendContact);
-            backendContacts.push(...committedPage);
-            if (committedPage.length < CONTACTS_PAGE_SIZE) {
-              break;
-            }
-            offset += CONTACTS_PAGE_SIZE;
+          if (reset) {
+            offset = 0;
+            hasMore = true;
+            setHasMoreContacts(true);
           }
 
           if (isCancelled) return false;
-          const localUncommittedContacts = loadLocalContacts(logId).filter(
-            (contact) => contact._status !== 'Committed',
-          );
-          setAllContacts(
-            sortContacts([...backendContacts, ...localUncommittedContacts]),
-          );
-          shouldRetryContactsLoad = false;
-          contactsLoadErrorNotifiedRef.current = false;
-          setContactsLoadState('idle');
-          return true;
+          const page = await apiJson(contactsPagePath(offset));
+          const committedPage = page.map(committedBackendContact);
+          if (isCancelled) return false;
+
+          if (reset) {
+            setAllContacts((currentContacts) => {
+              const localUncommitted = currentContacts.filter(
+                (contact) => contact._status !== 'Committed',
+              );
+              return sortContacts([...committedPage, ...localUncommitted]);
+            });
+          } else if (committedPage.length > 0) {
+            setAllContacts((currentContacts) =>
+              mergeCommittedPage(currentContacts, committedPage),
+            );
+          }
+
+          offset += committedPage.length;
+          hasMore = committedPage.length === CONTACTS_PAGE_SIZE;
+          setHasMoreContacts(hasMore);
+
+          if (mode !== 'load-more') {
+            shouldRetryContactsLoad = false;
+            contactsLoadErrorNotifiedRef.current = false;
+            setContactsLoadState('idle');
+          }
+          return committedPage.length > 0;
         } catch (error) {
           if (isCancelled) return false;
+          if (mode === 'load-more') {
+            notifyOperationalError(
+              'LoggerScreen.loadMoreContacts',
+              'Unable to load more contacts.',
+              error,
+              {
+                logId: numericLogId,
+                callsignPrefix,
+                offset,
+              },
+            );
+            return false;
+          }
           if (!contactsLoadErrorNotifiedRef.current) {
             contactsLoadErrorNotifiedRef.current = true;
             notifyOperationalError(
               'LoggerScreen.loadContacts',
               'Unable to load backend contacts. Using local contacts and retrying.',
               error,
-              { logId: numericLogId },
+              {
+                logId: numericLogId,
+                callsignPrefix,
+              },
             );
           }
           const retryScheduled = scheduleContactsLoadRetry();
           setContactsLoadState(retryScheduled ? 'retrying' : 'idle');
           return false;
         } finally {
+          if (mode === 'load-more') {
+            setIsLoadingMoreContacts(false);
+          }
           contactsLoadInFlightPromise = null;
         }
       })();
@@ -940,77 +964,18 @@ function LoggerScreen() {
       return contactsLoadInFlightPromise;
     }
 
-    refreshContactsRef.current = loadContacts;
+    refreshContactsRef.current = ({ mode = 'refresh', reset = true } = {}) =>
+      loadContacts({ mode, reset });
     setContactsLoadState('initial-loading');
-    loadContacts({ mode: 'initial' });
+    loadContacts({ mode: 'initial', reset: true });
     return () => {
       isCancelled = true;
-      refreshContactsRef.current = () => {};
+      refreshContactsRef.current = () => Promise.resolve(false);
       shouldRetryContactsLoad = false;
       if (contactsLoadRetryTimerId !== undefined)
         window.clearTimeout(contactsLoadRetryTimerId);
     };
-  }, [numericLogId, logId, notifyOperationalError]);
-
-  useEffect(() => {
-    let isCancelled = false;
-    const callsignPrefix = debouncedCallsignSearch.trim().toUpperCase();
-
-    if (!callsignPrefix) {
-      setSearchResultIds(null);
-      return () => {
-        isCancelled = true;
-      };
-    }
-
-    setSearchResultIds(null);
-
-    async function loadSearchResults() {
-      const matchingIds = new Set();
-      let offset = 0;
-
-      while (true) {
-        if (isCancelled) return;
-        const params = new URLSearchParams({
-          limit: String(CONTACTS_PAGE_SIZE),
-          offset: String(offset),
-          callsign_prefix: callsignPrefix,
-        });
-        const page = await apiJson(
-          `/logs/${numericLogId}/contacts?${params.toString()}`,
-        );
-        const committedPage = page.map(committedBackendContact);
-        for (const contact of committedPage) {
-          if (contact._id !== undefined) {
-            matchingIds.add(String(contact._id));
-          }
-        }
-        if (committedPage.length < CONTACTS_PAGE_SIZE) {
-          break;
-        }
-        offset += CONTACTS_PAGE_SIZE;
-      }
-
-      if (!isCancelled) {
-        setSearchResultIds(matchingIds);
-      }
-    }
-
-    const searchPromise = loadSearchResults();
-    searchPromise.catch((error) => {
-      if (isCancelled) return;
-      console.error('LoggerScreen.searchContacts failed', {
-        logId: numericLogId,
-        callsignPrefix,
-        error,
-      });
-      setSearchResultIds(null);
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [numericLogId, debouncedCallsignSearch]);
+  }, [numericLogId, logId, debouncedCallsignSearch, notifyOperationalError]);
 
   useEffect(() => {
     const pendingContact = allContacts.find((contact) => {
@@ -1060,19 +1025,22 @@ function LoggerScreen() {
         }
         if (responseBody.contact) {
           commitContactErrorNotifiedRef.current = false;
-          setAllContacts((currentContacts) =>
-            mergeContact(currentContacts, {
-              ...responseBody.contact,
-              _client_id: contact._client_id,
-            }),
-          );
           const callsignPrefix = activeCallsignPrefixRef.current;
-          if (callsignPrefix) {
-            setSearchResultIds((currentIds) =>
-              updateSearchResultIdsForContact(
-                currentIds,
-                responseBody.contact,
-                callsignPrefix,
+          if (
+            !callsignPrefix ||
+            callsignPrefixMatches(responseBody.contact, callsignPrefix)
+          ) {
+            setAllContacts((currentContacts) =>
+              mergeContact(currentContacts, {
+                ...responseBody.contact,
+                _client_id: contact._client_id,
+              }),
+            );
+          } else {
+            setAllContacts((currentContacts) =>
+              currentContacts.filter(
+                (currentContact) =>
+                  currentContact._client_id !== contact._client_id,
               ),
             );
           }
@@ -1130,10 +1098,15 @@ function LoggerScreen() {
     if (isRescoreLoading || contactsLoadState !== 'idle') return;
     setIsRescoreLoading(true);
     try {
-      await refreshContactsRef.current({ mode: 'refresh' });
+      await refreshContactsRef.current({ mode: 'refresh', reset: true });
     } finally {
       setIsRescoreLoading(false);
     }
+  }
+
+  function loadMoreContacts() {
+    if (contactsLoadState === 'initial-loading') return Promise.resolve(false);
+    return refreshContactsRef.current({ mode: 'load-more', reset: false });
   }
 
   async function deleteContacts(contactsToDelete) {
@@ -1186,17 +1159,6 @@ function LoggerScreen() {
         return !identifier || !deletedIdentifiers.has(identifier);
       }),
     );
-    if (successfullyDeletedIds.length > 0) {
-      setSearchResultIds((currentIds) => {
-        if (!(currentIds instanceof Set)) return currentIds;
-        const nextIds = new Set(currentIds);
-        for (const deletedId of successfullyDeletedIds) {
-          nextIds.delete(deletedId);
-        }
-        return nextIds;
-      });
-    }
-
     if (failureCount > 0) {
       const message = `Unable to delete ${failureCount === 1 ? '1 QSO' : `${failureCount} QSOs`}.`;
       notifyError(message, {
@@ -1272,7 +1234,6 @@ function LoggerScreen() {
         onDebouncedCallsignChange={handleDebouncedCallsignChange}
         onLogContact={(contact) => {
           setDebouncedCallsignSearch('');
-          setSearchResultIds(null);
           setAllContacts((currentContacts) =>
             sortContacts([...currentContacts, contact]),
           );
@@ -1290,6 +1251,9 @@ function LoggerScreen() {
         radioMode={radioState?.mode ?? 'CW'}
         onDeleteContacts={deleteContacts}
         onUpdateContacts={updateContacts}
+        hasMoreContacts={hasMoreContacts}
+        isLoadingMoreContacts={isLoadingMoreContacts}
+        onLoadMoreContacts={loadMoreContacts}
       />
       {isSocketDebugPanelEnabled && (
         <div
