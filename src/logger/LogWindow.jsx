@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   parseFieldType,
   sanitizeCallsign,
@@ -310,6 +311,20 @@ function parseUpdateValue(settings, column, value, radioMode, entry = null) {
   }
 
   return { ok: true, value: sanitizedValue };
+}
+
+function contextMenuPositionStyle(contextMenu) {
+  const menuWidth = 190;
+  const menuHeight = 72;
+  const viewportWidth =
+    typeof window === 'undefined' ? menuWidth : window.innerWidth;
+  const viewportHeight =
+    typeof window === 'undefined' ? menuHeight : window.innerHeight;
+
+  return {
+    left: Math.max(0, Math.min(contextMenu.x, viewportWidth - menuWidth)),
+    top: Math.max(0, Math.min(contextMenu.y, viewportHeight - menuHeight)),
+  };
 }
 
 function LogWindow({
@@ -694,32 +709,35 @@ function LogWindow({
           </tbody>
         </table>
       </div>
-      {contextMenu && (
-        <div
-          className="log-context-menu"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button
-            type="button"
-            disabled={
-              !editableFieldForColumn(contextMenu.column, columnFieldMap)
-            }
-            onClick={beginUpdate}
-          >
-            Update selected{' '}
-            {contextMenu.selectedCount === 1
-              ? 'QSO'
-              : `${contextMenu.selectedCount} QSOs`}
-          </button>
-          <button type="button" onClick={deleteSelected}>
-            Delete selected{' '}
-            {contextMenu.selectedCount === 1
-              ? 'QSO'
-              : `${contextMenu.selectedCount} QSOs`}
-          </button>
-        </div>
-      )}
+      {contextMenu
+        ? createPortal(
+            <div
+              className="log-context-menu"
+              style={contextMenuPositionStyle(contextMenu)}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                disabled={
+                  !editableFieldForColumn(contextMenu.column, columnFieldMap)
+                }
+                onClick={beginUpdate}
+              >
+                Update selected{' '}
+                {contextMenu.selectedCount === 1
+                  ? 'QSO'
+                  : `${contextMenu.selectedCount} QSOs`}
+              </button>
+              <button type="button" onClick={deleteSelected}>
+                Delete selected{' '}
+                {contextMenu.selectedCount === 1
+                  ? 'QSO'
+                  : `${contextMenu.selectedCount} QSOs`}
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
