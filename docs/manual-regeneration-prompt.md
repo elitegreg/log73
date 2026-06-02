@@ -24,10 +24,11 @@ You are writing a **standalone operator manual** for Log73.
 ### Hard requirements
 
 1. Production-only operation.
-2. Assume distributable backend layout:
+2. Assume distributable backend layout and default Linux paths:
    - `/opt/log73/bin/log73-backend`
-   - `/opt/log73/data`
-   - `/opt/log73/contest-rules`
+   - config: `~/.config/log73/`
+   - data/db/SCP/DXCC: `~/.local/share/log73/`
+   - contest rules: `~/.local/share/log73/contest-rules`
 3. Explain Basic Auth in plain language and include trust warning:
    - Any trusted operator with access can change credentials.
 4. Include **full hotkey and keyboard behavior coverage**.
@@ -75,7 +76,7 @@ Inspect current project files before writing. At minimum:
 - `backend/src/db.rs` (field constraints and defaults)
 - `backend/src/radio_manager.rs` (CW keyer behavior, reconnect behavior, shared serial constraints)
 - `backend/src/radio.rs` (mode mapping and websocket message types)
-- `contest-rules/*.yaml` (contest names/params)
+- `data/contest-rules/*.yaml` (contest names/params)
 - `src/screens/ConfigScreen.jsx`
 - `src/screens/OpenLogScreen.jsx`
 - `src/screens/CreateLogScreen.jsx`

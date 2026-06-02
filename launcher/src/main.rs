@@ -114,6 +114,8 @@ enum Message {
     BackToMainPressed,
     SetDefaultsPressed,
     BackendPathChanged(String),
+    ConfigDirPathChanged(String),
+    DataDirPathChanged(String),
     LogLevelSelected(LogLevel),
     LogFilePathChanged(String),
     BindModeSelected(BindMode),
@@ -165,6 +167,8 @@ struct StopOutcome {
 #[serde(default)]
 struct LauncherSettings {
     backend_path: String,
+    config_dir: String,
+    data_dir: String,
     log_level: LogLevel,
     log_file_path: String,
     bind_mode: BindMode,
@@ -176,6 +180,8 @@ impl Default for LauncherSettings {
     fn default() -> Self {
         Self {
             backend_path: default_backend_path(),
+            config_dir: default_config_dir_path(),
+            data_dir: default_data_dir_path(),
             log_level: LogLevel::Info,
             log_file_path: default_log_file_path(),
             bind_mode: BindMode::LocalhostOnly,
@@ -354,6 +360,16 @@ fn update(state: &mut Launcher, message: Message) -> Task<Message> {
             persist_settings_quietly(&state.settings);
             Task::none()
         }
+        Message::ConfigDirPathChanged(path) => {
+            state.settings.config_dir = path;
+            persist_settings_quietly(&state.settings);
+            Task::none()
+        }
+        Message::DataDirPathChanged(path) => {
+            state.settings.data_dir = path;
+            persist_settings_quietly(&state.settings);
+            Task::none()
+        }
         Message::LogLevelSelected(level) => {
             state.settings.log_level = level;
             persist_settings_quietly(&state.settings);
@@ -441,6 +457,28 @@ fn start_backend(state: &mut Launcher) -> Task<Message> {
         }
     };
 
+    let config_dir = PathBuf::from(state.settings.config_dir.trim());
+    if config_dir.as_os_str().is_empty() {
+        state.status = "Config directory is required.".to_string();
+        return Task::none();
+    }
+
+    let data_dir = PathBuf::from(state.settings.data_dir.trim());
+    if data_dir.as_os_str().is_empty() {
+        state.status = "Data directory is required.".to_string();
+        return Task::none();
+    }
+
+    if let Err(error) = fs::create_dir_all(&config_dir) {
+        state.status = format!("Failed to create config directory: {error}");
+        return Task::none();
+    }
+
+    if let Err(error) = fs::create_dir_all(&data_dir) {
+        state.status = format!("Failed to create data directory: {error}");
+        return Task::none();
+    }
+
     persist_settings_quietly(&state.settings);
 
     let bind_address = format!("{}:{port}", state.settings.bind_mode.bind_ip());
@@ -450,36 +488,15 @@ fn start_backend(state: &mut Launcher) -> Task<Message> {
     command
         .arg("--bind")
         .arg(&bind_address)
+        .arg("--config-dir")
+        .arg(&config_dir)
+        .arg("--data-dir")
+        .arg(&data_dir)
         .arg("--log-level")
         .arg(state.settings.log_level.as_arg())
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
-
-    if let Some(work_dir) = discover_backend_working_dir(&backend_binary_path) {
-        eprintln!(
-            "log73-launcher: using backend working directory: {}",
-            work_dir.display()
-        );
-        command.current_dir(work_dir);
-    }
-
-    if let Some((contest_rules_dir, data_dir)) =
-        discover_backend_resource_dirs(&backend_binary_path)
-    {
-        eprintln!(
-            "log73-launcher: using contest-rules-dir={} data-dir={}",
-            contest_rules_dir.display(),
-            data_dir.display()
-        );
-        command
-            .arg("--contest-rules-dir")
-            .arg(contest_rules_dir)
-            .arg("--data-dir")
-            .arg(data_dir);
-    } else {
-        eprintln!("log73-launcher: could not auto-detect contest-rules/data directories");
-    }
 
     let log_file_path = state.settings.log_file_path.trim();
     if !log_file_path.is_empty() {
@@ -487,9 +504,11 @@ fn start_backend(state: &mut Launcher) -> Task<Message> {
     }
 
     eprintln!(
-        "log73-launcher: starting backend path={} bind={} log_level={} log_file={}",
+        "log73-launcher: starting backend path={} bind={} config_dir={} data_dir={} log_level={} log_file={}",
         backend_binary_path.display(),
         bind_address,
+        config_dir.display(),
+        data_dir.display(),
         state.settings.log_level,
         if log_file_path.is_empty() {
             "<stdout only>"
@@ -947,6 +966,14 @@ fn view_settings(state: &Launcher) -> Element<'_, Message> {
         .on_input(Message::BackendPathChanged)
         .width(Length::Fill);
 
+    let config_dir_input = text_input("Config directory", &state.settings.config_dir)
+        .on_input(Message::ConfigDirPathChanged)
+        .width(Length::Fill);
+
+    let data_dir_input = text_input("Data directory", &state.settings.data_dir)
+        .on_input(Message::DataDirPathChanged)
+        .width(Length::Fill);
+
     let log_level_pick_list = pick_list(
         &LogLevel::ALL[..],
         Some(state.settings.log_level),
@@ -985,6 +1012,10 @@ fn view_settings(state: &Launcher) -> Element<'_, Message> {
         text("Settings"),
         text("Backend binary path"),
         backend_path_input,
+        text("Config directory"),
+        config_dir_input,
+        text("Data directory"),
+        data_dir_input,
         row![text("Bind"), bind_mode_pick_list, text("Port"), port_input].spacing(12),
         row![text("Log level"), log_level_pick_list].spacing(12),
         text("Log file path"),
@@ -1016,31 +1047,16 @@ fn default_backend_path() -> String {
         "log73-backend"
     };
 
-    let mut candidates = Vec::new();
+    let mut candidates = vec![log73_paths::backend_path(log73_paths::app_root())];
 
     if let Ok(current_executable) = std::env::current_exe()
         && let Some(executable_dir) = current_executable.parent()
     {
         candidates.push(executable_dir.join(executable_name));
         candidates.push(executable_dir.join("..").join(executable_name));
-        candidates.push(
-            executable_dir
-                .join("..")
-                .join("backend")
-                .join("target")
-                .join("debug")
-                .join(executable_name),
-        );
     }
 
     if let Ok(current_dir) = std::env::current_dir() {
-        candidates.push(
-            current_dir
-                .join("backend")
-                .join("target")
-                .join("debug")
-                .join(executable_name),
-        );
         candidates.push(
             current_dir
                 .join("target")
@@ -1053,15 +1069,18 @@ fn default_backend_path() -> String {
     choose_existing_or_first(candidates)
 }
 
-fn default_log_file_path() -> String {
-    if let Ok(current_dir) = std::env::current_dir() {
-        return current_dir
-            .join("log73-backend.log")
-            .to_string_lossy()
-            .into_owned();
-    }
+fn default_config_dir_path() -> String {
+    log73_paths::config_dir().to_string_lossy().into_owned()
+}
 
-    "log73-backend.log".to_string()
+fn default_data_dir_path() -> String {
+    log73_paths::data_dir().to_string_lossy().into_owned()
+}
+
+fn default_log_file_path() -> String {
+    log73_paths::log_file_path(log73_paths::data_dir())
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn choose_existing_or_first(candidates: Vec<PathBuf>) -> String {
@@ -1080,67 +1099,16 @@ fn choose_existing_or_first(candidates: Vec<PathBuf>) -> String {
     }
 }
 
-fn discover_backend_working_dir(backend_binary_path: &Path) -> Option<PathBuf> {
-    backend_binary_path
-        .parent()
-        .into_iter()
-        .flat_map(Path::ancestors)
-        .find(|ancestor| {
-            ancestor
-                .file_name()
-                .and_then(|name| name.to_str())
-                .is_some_and(|name| name == "backend")
-                && ancestor.join("Cargo.toml").is_file()
-        })
-        .map(Path::to_path_buf)
+fn launcher_config_dir() -> PathBuf {
+    log73_paths::config_dir()
 }
 
-fn discover_backend_resource_dirs(backend_binary_path: &Path) -> Option<(PathBuf, PathBuf)> {
-    let mut search_roots = Vec::new();
-
-    if let Some(parent) = backend_binary_path.parent() {
-        search_roots.push(parent.to_path_buf());
-    }
-
-    if let Ok(current_dir) = std::env::current_dir() {
-        search_roots.push(current_dir);
-    }
-
-    search_roots
-        .iter()
-        .flat_map(|root| root.ancestors())
-        .find_map(|ancestor| {
-            let contest_rules_dir = ancestor.join("contest-rules");
-            let data_dir = ancestor.join("data");
-            if contest_rules_dir.is_dir() && data_dir.is_dir() {
-                Some((contest_rules_dir, data_dir))
-            } else {
-                None
-            }
-        })
-}
-
-fn launcher_config_dir() -> Option<PathBuf> {
-    directories::ProjectDirs::from("com", "log73", "log73-launcher")
-        .map(|dirs| dirs.config_dir().to_path_buf())
-}
-
-fn settings_file_path() -> Option<PathBuf> {
-    launcher_config_dir().map(|config_dir| config_dir.join("settings.toml"))
+fn settings_file_path() -> PathBuf {
+    launcher_config_dir().join("launcher-settings.toml")
 }
 
 fn browser_user_data_dir(browser: AppBrowser) -> PathBuf {
-    if let Some(config_dir) = launcher_config_dir() {
-        return config_dir.join(browser.profile_dir_name());
-    }
-
-    if let Ok(current_dir) = std::env::current_dir() {
-        return current_dir
-            .join(".log73-launcher")
-            .join(browser.profile_dir_name());
-    }
-
-    PathBuf::from(".log73-launcher").join(browser.profile_dir_name())
+    launcher_config_dir().join(browser.profile_dir_name())
 }
 
 fn effective_browser_user_data_dir(browser: AppBrowser) -> PathBuf {
@@ -1222,10 +1190,7 @@ fn resolve_command_in_path(command_name: &str) -> Option<PathBuf> {
 
 fn load_settings_or_default() -> LauncherSettings {
     let settings = LauncherSettings::default();
-
-    let Some(path) = settings_file_path() else {
-        return settings;
-    };
+    let path = settings_file_path();
 
     let Ok(contents) = fs::read_to_string(path) else {
         return settings;
@@ -1235,6 +1200,12 @@ fn load_settings_or_default() -> LauncherSettings {
         Ok(mut loaded) => {
             if loaded.backend_path.trim().is_empty() {
                 loaded.backend_path = default_backend_path();
+            }
+            if loaded.config_dir.trim().is_empty() {
+                loaded.config_dir = default_config_dir_path();
+            }
+            if loaded.data_dir.trim().is_empty() {
+                loaded.data_dir = default_data_dir_path();
             }
             if loaded.log_file_path.trim().is_empty() {
                 loaded.log_file_path = default_log_file_path();
@@ -1258,10 +1229,7 @@ fn persist_settings_quietly(settings: &LauncherSettings) {
 }
 
 fn save_settings(settings: &LauncherSettings) -> Result<(), String> {
-    let Some(path) = settings_file_path() else {
-        return Ok(());
-    };
-
+    let path = settings_file_path();
     let Some(parent) = path.parent() else {
         return Err("settings path has no parent directory".to_string());
     };

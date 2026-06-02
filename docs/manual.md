@@ -37,29 +37,27 @@ This manual assumes your files are installed like this:
 
 ```text
 /opt/log73/bin/log73-backend
-/opt/log73/contest-rules/*.yaml
-/opt/log73/data/MASTER.SCP
-/opt/log73/data/cty.dat
+~/.config/log73/
+~/.local/share/log73/contest-rules/*.yaml
+~/.local/share/log73/MASTER.SCP
+~/.local/share/log73/cty.dat
 ```
 
 Recommended run pattern:
 
 ```bash
-cd /opt/log73
-./bin/log73-backend \
-  --bind 0.0.0.0:7300 \
-  --contest-rules-dir /opt/log73/contest-rules \
-  --data-dir /opt/log73/data
+/opt/log73/bin/log73-backend \
+  --bind 0.0.0.0:7300
 ```
 
 ### Important: where the database is created
 
-`log73-backend` creates/uses `log73.db` in its **current working directory**.
+`log73-backend` creates/uses `log73.db` in the active data directory.
 
-So if you run from `/opt/log73`, your database is:
+On Linux, the default database path is:
 
 ```text
-/opt/log73/log73.db
+~/.local/share/log73/log73.db
 ```
 
 ---
@@ -79,8 +77,8 @@ Current options:
 | `--bind <ADDR:PORT>` | Listen address for browser/API/WebSocket clients | `127.0.0.1:7300` |
 | `--log-level <LEVEL>` | Backend log verbosity | `info` |
 | `--log-file <PATH>` | Append logs to file instead of stdout | (none) |
-| `--contest-rules-dir <PATH>` | Contest rule YAML directory | `../contest-rules` |
-| `--data-dir <PATH>` | Data directory for `MASTER.SCP` and `cty.dat` | `../data` |
+| `--config-dir <PATH>` | Config directory | platform-specific Log73 config dir |
+| `--data-dir <PATH>` | Data directory for `log73.db`, `MASTER.SCP`, `cty.dat`, and `contest-rules/` | platform-specific Log73 data dir |
 | `-h`, `--help` | Show help | n/a |
 | `-V`, `--version` | Show version | n/a |
 
@@ -90,9 +88,7 @@ Bind to all interfaces on port 7300:
 
 ```bash
 /opt/log73/bin/log73-backend \
-  --bind 0.0.0.0:7300 \
-  --contest-rules-dir /opt/log73/contest-rules \
-  --data-dir /opt/log73/data
+  --bind 0.0.0.0:7300
 ```
 
 Write logs to a file:
@@ -100,8 +96,6 @@ Write logs to a file:
 ```bash
 /opt/log73/bin/log73-backend \
   --bind 0.0.0.0:7300 \
-  --contest-rules-dir /opt/log73/contest-rules \
-  --data-dir /opt/log73/data \
   --log-level info \
   --log-file /var/log/log73.log
 ```
@@ -710,8 +704,8 @@ Advanced protocol options are backend-level and are not currently user-configura
 
 ## 20) Practical operating tips
 
-- Run backend with explicit absolute paths for `--contest-rules-dir` and `--data-dir`.
-- Choose a stable working directory so your `log73.db` is where you expect.
+- Run backend with the expected `--config-dir` and `--data-dir`, or use the platform defaults.
+- Check the active data directory so your `log73.db` is where you expect.
 - Before contest start:
   - verify radio CAT connection
   - verify CW keying path

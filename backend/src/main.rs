@@ -35,7 +35,7 @@ use radio::{ClientMessage, RadioCommand, ServerMessage};
 use radio_cat_rs::supported_radio_kinds;
 use radio_manager::RadioManager;
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
-use std::{collections::HashMap, fs::OpenOptions, path::PathBuf, time::Duration};
+use std::{collections::HashMap, fs, fs::OpenOptions, path::PathBuf, time::Duration};
 use supercheckpartial::SuperCheckPartial;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -114,24 +114,74 @@ struct Cli {
     #[arg(long)]
     log_file: Option<PathBuf>,
 
-    #[arg(long, default_value = "../contest-rules")]
-    contest_rules_dir: PathBuf,
+    #[arg(long)]
+    config_dir: Option<PathBuf>,
 
-    #[arg(long, default_value = "../data")]
+    #[arg(long)]
+    data_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone)]
+struct AppPaths {
+    config_dir: PathBuf,
     data_dir: PathBuf,
+    contest_rules_dir: PathBuf,
+    database_path: PathBuf,
+}
+
+fn resolve_paths(cli: &Cli) -> AppPaths {
+    let config_dir = cli
+        .config_dir
+        .clone()
+        .unwrap_or_else(log73_paths::config_dir);
+    let data_dir = cli.data_dir.clone().unwrap_or_else(log73_paths::data_dir);
+    let contest_rules_dir = log73_paths::contest_rules_dir(&data_dir);
+    let database_path = log73_paths::database_path(&data_dir);
+
+    AppPaths {
+        config_dir,
+        data_dir,
+        contest_rules_dir,
+        database_path,
+    }
+}
+
+fn ensure_startup_dirs(paths: &AppPaths, log_file: Option<&PathBuf>) -> std::io::Result<()> {
+    fs::create_dir_all(&paths.config_dir)?;
+    fs::create_dir_all(&paths.data_dir)?;
+
+    if let Some(parent) = log_file
+        .and_then(|path| path.parent())
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+
+    Ok(())
 }
 
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    let paths = resolve_paths(&cli);
+    ensure_startup_dirs(&paths, cli.log_file.as_ref())
+        .expect("failed to initialize path directories");
     let _log_guard = init_tracing(&cli).expect("failed to initialize logging");
 
+    info!(
+        config_dir = %paths.config_dir.display(),
+        data_dir = %paths.data_dir.display(),
+        contest_rules_dir = %paths.contest_rules_dir.display(),
+        database_path = %paths.database_path.display(),
+        "using log73 paths"
+    );
+
     let (log_events, _) = broadcast::channel(128);
-    let contest_rules = ContestRulesStore::load_dir(&cli.contest_rules_dir)
+    let contest_rules = ContestRulesStore::load_dir(&paths.contest_rules_dir)
         .unwrap_or_else(|error| panic!("failed to load contest rules: {error}"));
-    let supercheckpartial = SuperCheckPartial::load_dir(&cli.data_dir).unwrap_or_else(|error| {
+    let supercheckpartial = SuperCheckPartial::load_dir(&paths.data_dir).unwrap_or_else(|error| {
         warn!(
-            data_dir = %cli.data_dir.display(),
+            data_dir = %paths.data_dir.display(),
             %error,
             "failed to load MASTER.SCP; supercheckpartial matches will be unavailable"
         );
@@ -139,12 +189,12 @@ async fn main() {
     });
     info!(
         callsigns = supercheckpartial.len(),
-        data_dir = %cli.data_dir.display(),
+        data_dir = %paths.data_dir.display(),
         "loaded supercheckpartial callsigns"
     );
-    let dxcc = dxcc::DxccDatabase::load_dir(&cli.data_dir).unwrap_or_else(|error| {
+    let dxcc = dxcc::DxccDatabase::load_dir(&paths.data_dir).unwrap_or_else(|error| {
         warn!(
-            data_dir = %cli.data_dir.display(),
+            data_dir = %paths.data_dir.display(),
             %error,
             "failed to load cty.dat; DXCC lookup will be unavailable"
         );
@@ -153,10 +203,10 @@ async fn main() {
     info!(
         entities = dxcc.entity_count(),
         rules = dxcc.rule_count(),
-        data_dir = %cli.data_dir.display(),
+        data_dir = %paths.data_dir.display(),
         "loaded DXCC country data"
     );
-    let db = Database::open("log73.db").expect("failed to open log73.db");
+    let db = Database::open(&paths.database_path).expect("failed to open log73 database");
     let radio_manager = RadioManager::new(db.clone());
     let scoring_modules = ScoringModules::new();
     let incremental_scoring = IncrementalScoreTracker::new();

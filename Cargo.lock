@@ -2269,8 +2269,8 @@ dependencies = [
 name = "launcher"
 version = "0.1.0"
 dependencies = [
- "directories",
  "iced",
+ "log73-paths",
  "nix 0.29.0",
  "open",
  "serde",
@@ -2416,6 +2416,7 @@ dependencies = [
  "clap",
  "cw-serial-keyer",
  "futures-util",
+ "log73-paths",
  "mime_guess",
  "radif",
  "radio-cat-rs",
@@ -2432,6 +2433,13 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "winkeyer-rs",
+]
+
+[[package]]
+name = "log73-paths"
+version = "0.1.0"
+dependencies = [
+ "directories",
 ]
 
 [[package]]

@@ -75,10 +75,10 @@ Install frontend dependencies:
 npm install
 ```
 
-Start the backend:
+Start the backend from a source checkout, using the repository data directory:
 
 ```bash
-cargo run -p log73-backend
+cargo run -p log73-backend -- --data-dir ./data
 ```
 
 By default, the backend binds to:
@@ -97,9 +97,9 @@ cargo run -p log73-backend -- --bind 127.0.0.1:8080
 Backend logging defaults to `info` on stdout. You can change the level or write to a file. At `debug` level, incoming request details and pretty-printed POST JSON bodies are logged, with sensitive HTTP headers redacted:
 
 ```bash
-cargo run -p log73-backend -- --log-level debug
-cargo run -p log73-backend -- --bind 0.0.0.0:7300 --log-level info --log-file log73.log
-cargo run -p log73-backend -- --contest-rules-dir ../contest-rules
+cargo run -p log73-backend -- --data-dir ./data --log-level debug
+cargo run -p log73-backend -- --data-dir ./data --bind 0.0.0.0:7300 --log-level info --log-file log73.log
+cargo run -p log73-backend -- --config-dir /tmp/log73-config --data-dir ./data
 ```
 
 Start the frontend dev server in another terminal:
@@ -134,17 +134,25 @@ cargo build --release -p log73-backend
 
 The backend embeds and serves the built frontend assets from `dist/`.
 
-Run the production backend:
+Runtime path defaults:
+
+- Linux config: `~/.config/log73/`
+- Linux data: `~/.local/share/log73/`
+- Linux contest rules: `~/.local/share/log73/contest-rules/`
+- Linux application root: `/opt/log73/` (`bin/log73-backend` under that root)
+- macOS and Windows use their platform-specific Log73 config/data directories.
+
+Run the production backend from a source checkout:
 
 ```bash
-./target/release/log73-backend
+./target/release/log73-backend --data-dir ./data
 ```
 
 Production logging options are the same:
 
 ```bash
-./target/release/log73-backend --bind 127.0.0.1:7300 --log-level debug
-./target/release/log73-backend --bind 0.0.0.0:7300 --log-level info --log-file log73.log
+./target/release/log73-backend --data-dir ./data --bind 127.0.0.1:7300 --log-level debug
+./target/release/log73-backend --data-dir ./data --bind 0.0.0.0:7300 --log-level info --log-file log73.log
 ```
 
 Run the launcher:
@@ -164,13 +172,14 @@ Launcher main screen controls:
 Launcher settings screen controls:
 
 - Backend binary path (editable)
+- Config directory and data directory
 - Bind mode: `localhost only` (`127.0.0.1`) or `open` (`0.0.0.0`)
 - Port (default `7300`)
 - Log level and log file path
 - App-mode browser choice: `chrome` / `chromium` / `edge`
 - Set defaults button
 
-Launcher settings are persisted in the platform config directory. Browser app mode uses a per-browser `--user-data-dir`; by default this is under the launcher config directory (for example `~/.config/log73-launcher/chrome/`). On Linux, snap-managed browsers use a snap-compatible profile directory under `~/snap/<package>/common/` (for example `~/snap/chromium/common/log73-profile-chromium`). Stop uses graceful termination first (where supported) and falls back to force-stop after a timeout. Backend stdout/stderr are forwarded to the launcher console for debugging startup/runtime errors.
+Launcher settings are persisted in the Log73 platform config directory. Browser app mode uses a per-browser `--user-data-dir`; by default this is under the Log73 config directory (for example `~/.config/log73/chrome/` on Linux). On Linux, snap-managed browsers use a snap-compatible profile directory under `~/snap/<package>/common/` (for example `~/snap/chromium/common/log73-profile-chromium`). Stop uses graceful termination first (where supported) and falls back to force-stop after a timeout. Backend stdout/stderr are forwarded to the launcher console for debugging startup/runtime errors.
 
 ## Development checks
 
@@ -186,8 +195,8 @@ Backend:
 ```bash
 cargo fmt --all
 cargo check --workspace
-cargo run -p log73-backend -- --bind 127.0.0.1:7300 --log-level debug
-cargo run -p log73-backend -- --bind 127.0.0.1:7300 --log-level info --log-file /tmp/log73.log
+cargo run -p log73-backend -- --data-dir ./data --bind 127.0.0.1:7300 --log-level debug
+cargo run -p log73-backend -- --data-dir ./data --bind 127.0.0.1:7300 --log-level info --log-file /tmp/log73.log
 cargo run -p launcher
 ```
 
@@ -334,10 +343,10 @@ Client CW commands:
 SQLite database file:
 
 ```text
-backend/log73.db
+<data-dir>/log73.db
 ```
 
-The database is created automatically in the backend working directory.
+On Linux, the default data directory is `~/.local/share/log73/`, so the default database path is `~/.local/share/log73/log73.db`. The database is created automatically.
 
 Tables:
 
@@ -357,7 +366,7 @@ Important schema notes:
 - Foreign keys are enabled.
 - Tables are SQLite `STRICT` tables.
 
-There are no migrations yet. If schema changes during development, remove `backend/log73.db` manually and restart the backend.
+There are no migrations yet. If schema changes during development, remove `log73.db` from the active data directory manually and restart the backend.
 
 ## Radio configuration
 
@@ -454,7 +463,7 @@ Committed contacts are loaded from the backend. Pending/updating contacts are ca
 
 ## Contest rules
 
-Contest rules are loaded from YAML files in `contest-rules/` by default. The backend option `--contest-rules-dir` can point at another directory.
+Contest rules are loaded from YAML files in `<data-dir>/contest-rules/` by default. In a source checkout, run the backend with `--data-dir ./data` to use `data/contest-rules/`.
 Scoring-related YAML settings live under a `scoring` block (`qso_points`, `dupe_key`, `multipliers`, `bonus_points`).
 Contest-specific Cabrillo metadata lives under a `cabrillo` block (`fixed_fields`, `log_fields`, `export_fields`).
 ADIF export uses committed QSO data from the database and derives `QSO_DATE` and `TIME_ON` from the stored `QSO_DATE_TIME_ON` epoch.

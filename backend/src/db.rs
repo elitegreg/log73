@@ -4,6 +4,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
+use std::path::Path;
 use std::thread;
 use tokio::sync::{mpsc, oneshot};
 
@@ -384,10 +385,10 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn open(path: &str) -> rusqlite::Result<Self> {
+    pub fn open(path: impl AsRef<Path>) -> rusqlite::Result<Self> {
         let (commands, command_rx) = mpsc::channel(DB_COMMAND_BUFFER);
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
-        let path = path.to_string();
+        let path = path.as_ref().to_path_buf();
 
         thread::Builder::new()
             .name("log73-db-worker".to_string())

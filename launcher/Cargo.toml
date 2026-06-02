@@ -8,8 +8,8 @@ name = "log73-launcher"
 path = "src/main.rs"
 
 [dependencies]
-directories = "6"
 iced = { version = "0.13", features = ["tokio", "image"] }
+log73-paths = { path = "../paths" }
 open = "5"
 serde = { version = "1", features = ["derive"] }
 shared_child = "1"
