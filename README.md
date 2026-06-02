@@ -139,8 +139,8 @@ Runtime path defaults:
 - Linux config: `~/.config/log73/`
 - Linux data: `~/.local/share/log73/`
 - Linux contest rules: `~/.local/share/log73/contest-rules/`
-- Linux application root: `/opt/log73/` (`bin/log73-backend` under that root)
-- macOS and Windows use their platform-specific Log73 config/data directories.
+- Linux application root/app dir: `/opt/log73/` (`bin/log73-backend` under that root)
+- macOS and Windows use their platform-specific Log73 config/data/app directories.
 
 Run the production backend from a source checkout:
 
@@ -172,7 +172,7 @@ Launcher main screen controls:
 Launcher settings screen controls:
 
 - Backend binary path (editable)
-- Config directory and data directory
+- Config directory, data directory, and app directory
 - Bind mode: `localhost only` (`127.0.0.1`) or `open` (`0.0.0.0`)
 - Port (default `7300`)
 - Log level and log file path

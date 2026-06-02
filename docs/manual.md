@@ -79,6 +79,7 @@ Current options:
 | `--log-file <PATH>` | Append logs to file instead of stdout | (none) |
 | `--config-dir <PATH>` | Config directory | platform-specific Log73 config dir |
 | `--data-dir <PATH>` | Data directory for `log73.db`, `MASTER.SCP`, `cty.dat`, and `contest-rules/` | platform-specific Log73 data dir |
+| `--app-dir <PATH>` | Application install/root directory | platform-specific Log73 app dir (`/opt/log73` on Linux) |
 | `-h`, `--help` | Show help | n/a |
 | `-V`, `--version` | Show version | n/a |
 

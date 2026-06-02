@@ -119,12 +119,16 @@ struct Cli {
 
     #[arg(long)]
     data_dir: Option<PathBuf>,
+
+    #[arg(long)]
+    app_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
 struct AppPaths {
     config_dir: PathBuf,
     data_dir: PathBuf,
+    app_dir: PathBuf,
     contest_rules_dir: PathBuf,
     database_path: PathBuf,
 }
@@ -135,12 +139,14 @@ fn resolve_paths(cli: &Cli) -> AppPaths {
         .clone()
         .unwrap_or_else(log73_paths::config_dir);
     let data_dir = cli.data_dir.clone().unwrap_or_else(log73_paths::data_dir);
+    let app_dir = cli.app_dir.clone().unwrap_or_else(log73_paths::app_root);
     let contest_rules_dir = log73_paths::contest_rules_dir(&data_dir);
     let database_path = log73_paths::database_path(&data_dir);
 
     AppPaths {
         config_dir,
         data_dir,
+        app_dir,
         contest_rules_dir,
         database_path,
     }
@@ -171,6 +177,7 @@ async fn main() {
     info!(
         config_dir = %paths.config_dir.display(),
         data_dir = %paths.data_dir.display(),
+        app_dir = %paths.app_dir.display(),
         contest_rules_dir = %paths.contest_rules_dir.display(),
         database_path = %paths.database_path.display(),
         "using log73 paths"

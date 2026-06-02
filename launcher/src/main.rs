@@ -116,6 +116,7 @@ enum Message {
     BackendPathChanged(String),
     ConfigDirPathChanged(String),
     DataDirPathChanged(String),
+    AppDirPathChanged(String),
     LogLevelSelected(LogLevel),
     LogFilePathChanged(String),
     BindModeSelected(BindMode),
@@ -169,6 +170,7 @@ struct LauncherSettings {
     backend_path: String,
     config_dir: String,
     data_dir: String,
+    app_dir: String,
     log_level: LogLevel,
     log_file_path: String,
     bind_mode: BindMode,
@@ -182,6 +184,7 @@ impl Default for LauncherSettings {
             backend_path: default_backend_path(),
             config_dir: default_config_dir_path(),
             data_dir: default_data_dir_path(),
+            app_dir: default_app_dir_path(),
             log_level: LogLevel::Info,
             log_file_path: default_log_file_path(),
             bind_mode: BindMode::LocalhostOnly,
@@ -370,6 +373,11 @@ fn update(state: &mut Launcher, message: Message) -> Task<Message> {
             persist_settings_quietly(&state.settings);
             Task::none()
         }
+        Message::AppDirPathChanged(path) => {
+            state.settings.app_dir = path;
+            persist_settings_quietly(&state.settings);
+            Task::none()
+        }
         Message::LogLevelSelected(level) => {
             state.settings.log_level = level;
             persist_settings_quietly(&state.settings);
@@ -469,6 +477,12 @@ fn start_backend(state: &mut Launcher) -> Task<Message> {
         return Task::none();
     }
 
+    let app_dir = PathBuf::from(state.settings.app_dir.trim());
+    if app_dir.as_os_str().is_empty() {
+        state.status = "App directory is required.".to_string();
+        return Task::none();
+    }
+
     if let Err(error) = fs::create_dir_all(&config_dir) {
         state.status = format!("Failed to create config directory: {error}");
         return Task::none();
@@ -492,6 +506,8 @@ fn start_backend(state: &mut Launcher) -> Task<Message> {
         .arg(&config_dir)
         .arg("--data-dir")
         .arg(&data_dir)
+        .arg("--app-dir")
+        .arg(&app_dir)
         .arg("--log-level")
         .arg(state.settings.log_level.as_arg())
         .stdin(Stdio::null())
@@ -504,11 +520,12 @@ fn start_backend(state: &mut Launcher) -> Task<Message> {
     }
 
     eprintln!(
-        "log73-launcher: starting backend path={} bind={} config_dir={} data_dir={} log_level={} log_file={}",
+        "log73-launcher: starting backend path={} bind={} config_dir={} data_dir={} app_dir={} log_level={} log_file={}",
         backend_binary_path.display(),
         bind_address,
         config_dir.display(),
         data_dir.display(),
+        app_dir.display(),
         state.settings.log_level,
         if log_file_path.is_empty() {
             "<stdout only>"
@@ -974,6 +991,10 @@ fn view_settings(state: &Launcher) -> Element<'_, Message> {
         .on_input(Message::DataDirPathChanged)
         .width(Length::Fill);
 
+    let app_dir_input = text_input("App directory", &state.settings.app_dir)
+        .on_input(Message::AppDirPathChanged)
+        .width(Length::Fill);
+
     let log_level_pick_list = pick_list(
         &LogLevel::ALL[..],
         Some(state.settings.log_level),
@@ -1016,6 +1037,8 @@ fn view_settings(state: &Launcher) -> Element<'_, Message> {
         config_dir_input,
         text("Data directory"),
         data_dir_input,
+        text("App directory"),
+        app_dir_input,
         row![text("Bind"), bind_mode_pick_list, text("Port"), port_input].spacing(12),
         row![text("Log level"), log_level_pick_list].spacing(12),
         text("Log file path"),
@@ -1075,6 +1098,10 @@ fn default_config_dir_path() -> String {
 
 fn default_data_dir_path() -> String {
     log73_paths::data_dir().to_string_lossy().into_owned()
+}
+
+fn default_app_dir_path() -> String {
+    log73_paths::app_root().to_string_lossy().into_owned()
 }
 
 fn default_log_file_path() -> String {
@@ -1206,6 +1233,9 @@ fn load_settings_or_default() -> LauncherSettings {
             }
             if loaded.data_dir.trim().is_empty() {
                 loaded.data_dir = default_data_dir_path();
+            }
+            if loaded.app_dir.trim().is_empty() {
+                loaded.app_dir = default_app_dir_path();
             }
             if loaded.log_file_path.trim().is_empty() {
                 loaded.log_file_path = default_log_file_path();
