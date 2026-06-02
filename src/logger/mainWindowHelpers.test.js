@@ -4,6 +4,7 @@ import {
   availableModeOptions,
   callsignHasQuery,
   cwActionForMessage,
+  shouldBlockEsmCallEnter,
   cwActionFromTemplate,
   cwActiveTimeoutMs,
   esmEnterAction,
@@ -52,6 +53,14 @@ test('callsignHasQuery detects incomplete queried callsigns', () => {
   assert.equal(callsignHasQuery(' WB4? '), true);
   assert.equal(callsignHasQuery('K1ABC'), false);
   assert.equal(callsignHasQuery(''), false);
+});
+
+test('shouldBlockEsmCallEnter blocks only non-empty invalid callsigns', () => {
+  assert.equal(shouldBlockEsmCallEnter('', false), false);
+  assert.equal(shouldBlockEsmCallEnter('   ', false), false);
+  assert.equal(shouldBlockEsmCallEnter('K1ABC', true), false);
+  assert.equal(shouldBlockEsmCallEnter('WB4?', false), true);
+  assert.equal(shouldBlockEsmCallEnter('KABC', false), true);
 });
 
 test('nextCwWpm clamps page-up and page-down changes to valid range', () => {

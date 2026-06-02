@@ -173,6 +173,12 @@ export function callsignHasQuery(value) {
   return String(value ?? '').trim().includes('?');
 }
 
+export function shouldBlockEsmCallEnter(callsign, callsignIsValid) {
+  const normalizedCallsign = String(callsign ?? '').trim();
+  if (normalizedCallsign === '') return false;
+  return !callsignIsValid;
+}
+
 export function nextCwWpm(currentWpm, delta) {
   const normalizedCurrentWpm = Number.isFinite(currentWpm)
     ? currentWpm

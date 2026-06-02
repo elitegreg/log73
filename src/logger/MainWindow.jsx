@@ -47,6 +47,7 @@ import {
   isEmptyMessageButton,
   cwActionForMessage,
   callsignHasQuery,
+  shouldBlockEsmCallEnter,
 } from './mainWindowHelpers';
 import RadioControls from './components/RadioControls';
 import EntryFields from './components/EntryFields';
@@ -854,7 +855,10 @@ function MainWindow({
       return true;
     }
 
-    if (currentFieldName === 'CALL' && !callsignValidation().ok) {
+    if (
+      currentFieldName === 'CALL' &&
+      shouldBlockEsmCallEnter(callSign, callsignValidation().ok)
+    ) {
       return true;
     }
 
