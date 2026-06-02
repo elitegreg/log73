@@ -92,6 +92,8 @@ pub struct NewRadio {
     pub cw_serial_baud_rate: u32,
     #[serde(default = "default_cw_serial_line")]
     pub cw_serial_line: String,
+    #[serde(default = "default_cw_messages")]
+    pub cw_messages: String,
 }
 
 fn default_cw_serial_baud_rate() -> u32 {
@@ -100,6 +102,10 @@ fn default_cw_serial_baud_rate() -> u32 {
 
 fn default_cw_serial_line() -> String {
     "dtr".to_string()
+}
+
+fn default_cw_messages() -> String {
+    DEFAULT_CW_MESSAGES.to_string()
 }
 
 const QSO_COLUMNS: &[&str] = &[
@@ -731,7 +737,7 @@ fn db_create_radio(connection: &Connection, radio: NewRadio) -> rusqlite::Result
             radio.cw_serial_port.trim(),
             radio.cw_serial_baud_rate,
             radio.cw_serial_line.trim(),
-            DEFAULT_CW_MESSAGES
+            radio.cw_messages
         ],
     )?;
     select_radio(connection, connection.last_insert_rowid())?
@@ -744,7 +750,7 @@ fn db_update_radio(
     radio: NewRadio,
 ) -> rusqlite::Result<Option<RadioConfig>> {
     let updated = connection.execute(
-        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, POLL_FREQUENCY = ?8, CAT_TIMEOUT = ?9, CW_KEYER_TYPE = ?10, WINKEYER_SERIAL_PORT = ?11, CW_SERIAL_PORT = ?12, CW_SERIAL_BAUD_RATE = ?13, CW_SERIAL_LINE = ?14 WHERE ID = ?15",
+        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, POLL_FREQUENCY = ?8, CAT_TIMEOUT = ?9, CW_KEYER_TYPE = ?10, WINKEYER_SERIAL_PORT = ?11, CW_SERIAL_PORT = ?12, CW_SERIAL_BAUD_RATE = ?13, CW_SERIAL_LINE = ?14, CW_MESSAGES = ?15 WHERE ID = ?16",
         params![
             radio.name.trim(),
             radio.radio_kind.trim(),
@@ -760,6 +766,7 @@ fn db_update_radio(
             radio.cw_serial_port.trim(),
             radio.cw_serial_baud_rate,
             radio.cw_serial_line.trim(),
+            radio.cw_messages,
             id
         ],
     )?;
@@ -1207,6 +1214,7 @@ mod tests {
             cw_serial_port: String::new(),
             cw_serial_baud_rate: 9_600,
             cw_serial_line: "dtr".to_string(),
+            cw_messages: DEFAULT_CW_MESSAGES.to_string(),
         }
     }
 

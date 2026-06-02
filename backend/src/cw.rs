@@ -1,5 +1,6 @@
 use serde::Serialize;
 use serde_json::{Map, Value};
+use std::collections::HashSet;
 
 pub const DEFAULT_CW_MESSAGES: &str = r#"###################
 #   RUN Messages
@@ -68,6 +69,64 @@ pub fn labels(config: &str) -> CwLabels {
     }
 }
 
+pub fn validate(config: &str) -> Result<CwLabels, String> {
+    let mut current_mode = None::<&str>;
+    let mut run_keys = HashSet::new();
+    let mut search_and_pounce_keys = HashSet::new();
+
+    for (index, raw_line) in config.lines().enumerate() {
+        let line_number = index + 1;
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+
+        let upper = line.to_uppercase();
+        if upper.contains("RUN MESSAGES") {
+            current_mode = Some("run");
+            continue;
+        }
+        if upper.contains("S&P MESSAGES") || upper.contains("SP MESSAGES") {
+            current_mode = Some("s&p");
+            continue;
+        }
+        if line.starts_with('#') {
+            continue;
+        }
+
+        let mode = current_mode
+            .ok_or_else(|| format!("line {line_number}: message is outside a mode section"))?;
+        let message = parse_message_line(line)
+            .ok_or_else(|| format!("line {line_number}: expected 'F# Label,Message'"))?;
+        if !is_valid_function_key(&message.key) {
+            return Err(format!(
+                "line {line_number}: message key must be F1 through F12"
+            ));
+        }
+
+        let keys = if mode == "run" {
+            &mut run_keys
+        } else {
+            &mut search_and_pounce_keys
+        };
+        if !keys.insert(message.key.clone()) {
+            return Err(format!(
+                "line {line_number}: duplicate {} message in {mode} section",
+                message.key
+            ));
+        }
+    }
+
+    if run_keys.is_empty() {
+        return Err("CW messages must include at least one Run message".to_string());
+    }
+    if search_and_pounce_keys.is_empty() {
+        return Err("CW messages must include at least one S&P message".to_string());
+    }
+
+    Ok(labels(config))
+}
+
 pub fn render(config: &str, mode: &str, key: &str, fields: &Map<String, Value>) -> Option<String> {
     let messages = parse_messages(config);
     let mode_messages = if normalize_mode(mode) == "run" {
@@ -132,15 +191,23 @@ fn parse_message_line(line: &str) -> Option<CwMessage> {
     let mut parts = key_and_label.splitn(2, char::is_whitespace);
     let key = parts.next()?.trim();
     let label = parts.next().unwrap_or("").trim();
-    if !key.to_uppercase().starts_with('F') {
+    let normalized_key = key.to_uppercase();
+    if !normalized_key.starts_with('F') {
         return None;
     }
 
     Some(CwMessage {
-        key: key.to_uppercase(),
+        key: normalized_key,
         label: label.to_string(),
         message: message.trim().to_string(),
     })
+}
+
+fn is_valid_function_key(key: &str) -> bool {
+    matches!(
+        key.trim().to_uppercase().as_str(),
+        "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12"
+    )
 }
 
 fn render_template(template: &str, fields: &Map<String, Value>) -> String {
@@ -202,6 +269,23 @@ F1 His Call,{CALL}
         assert_eq!(labels.search_and_pounce.len(), 1);
         assert_eq!(labels.search_and_pounce[0].key, "F1");
         assert_eq!(labels.search_and_pounce[0].label, "His Call");
+    }
+
+    #[test]
+    fn validates_sensible_cw_messages() {
+        let labels = validate(TEST_MESSAGES).expect("messages should validate");
+        assert_eq!(labels.run.len(), 2);
+        assert_eq!(labels.search_and_pounce.len(), 1);
+    }
+
+    #[test]
+    fn rejects_invalid_cw_messages() {
+        assert!(validate("F1 Cq,CQ").is_err());
+        assert!(validate("# RUN Messages\nF13 Bad,BAD\n# S&P Messages\nF1 Ok,OK").is_err());
+        assert!(validate("# RUN Messages\nF1 Cq,CQ\n# S&P Messages").is_err());
+        assert!(
+            validate("# RUN Messages\nF1 Cq,CQ\nF1 Again,CQ\n# S&P Messages\nF1 Ok,OK").is_err()
+        );
     }
 
     #[test]

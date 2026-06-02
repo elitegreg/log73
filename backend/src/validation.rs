@@ -1,5 +1,6 @@
 use crate::bands::{USA_AMATEUR_BANDS, band_for_frequency};
 use crate::contest_rules::{ContestParam, ContestRules, ContestRulesStore, ExchangeField};
+use crate::cw;
 use crate::db::{Contact, Database, NewLog, NewRadio, UpdateLog};
 use radio_cat_rs::{Frequency, RadioKind};
 use regex::Regex;
@@ -30,6 +31,7 @@ const MIN_CW_WPM: u8 = 5;
 const MAX_CW_WPM: u8 = 60;
 const MAX_CW_REQUEST_ID_LEN: usize = 64;
 const MAX_CW_TEXT_LEN: usize = 256;
+const MAX_CW_MESSAGES_LEN: usize = 16_384;
 const MAX_WS_FIELDS: usize = 100;
 const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat", "serial"];
 const LOGGER_MODE_OPTIONS: &[&str] = &[
@@ -44,7 +46,11 @@ struct ParsedFieldType {
 
 pub fn validate_new_log(contest_rules: &ContestRulesStore, payload: &NewLog) -> Result<(), String> {
     validate_required_text("log name", &payload.name, MAX_LOG_NAME_LEN)?;
-    validate_required_text("station callsign", &payload.station_callsign, MAX_CALLSIGN_LEN)?;
+    validate_required_text(
+        "station callsign",
+        &payload.station_callsign,
+        MAX_CALLSIGN_LEN,
+    )?;
 
     let contest_id = payload.contest_id.trim();
     validate_required_text("contest", contest_id, MAX_CONTEST_ID_LEN)?;
@@ -56,7 +62,11 @@ pub fn validate_new_log(contest_rules: &ContestRulesStore, payload: &NewLog) -> 
 
 pub fn validate_update_log(rules: &ContestRules, payload: &UpdateLog) -> Result<(), String> {
     validate_required_text("log name", &payload.name, MAX_LOG_NAME_LEN)?;
-    validate_required_text("station callsign", &payload.station_callsign, MAX_CALLSIGN_LEN)?;
+    validate_required_text(
+        "station callsign",
+        &payload.station_callsign,
+        MAX_CALLSIGN_LEN,
+    )?;
     validate_persisted_log_params(rules, &payload.contest_params)
 }
 
@@ -162,7 +172,28 @@ pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
         );
     }
 
+    validate_cw_messages(&payload.cw_messages)?;
+
     Ok(())
+}
+
+pub fn validate_cw_messages(value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err("CW messages are required".to_string());
+    }
+    if value.chars().count() > MAX_CW_MESSAGES_LEN {
+        return Err(format!(
+            "CW messages must be at most {MAX_CW_MESSAGES_LEN} characters"
+        ));
+    }
+    if value
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err("CW messages cannot contain control characters".to_string());
+    }
+
+    cw::validate(value).map(|_| ())
 }
 
 pub fn validate_auth_config(
@@ -959,6 +990,7 @@ mod tests {
             cw_serial_port: String::new(),
             cw_serial_baud_rate: 9_600,
             cw_serial_line: "dtr".to_string(),
+            cw_messages: cw::DEFAULT_CW_MESSAGES.to_string(),
         }
     }
 

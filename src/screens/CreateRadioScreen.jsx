@@ -31,6 +31,11 @@ function CreateRadioScreen() {
     DEFAULT_CW_SERIAL_BAUD_RATE,
   );
   const [cwSerialLine, setCwSerialLine] = useState(DEFAULT_CW_SERIAL_LINE);
+  const [defaultCwMessages, setDefaultCwMessages] = useState('');
+  const [cwMessages, setCwMessages] = useState('');
+  const [isCwMessagesOpen, setIsCwMessagesOpen] = useState(false);
+  const [cwMessagesValidationMessage, setCwMessagesValidationMessage] =
+    useState('');
 
   const notifyOperationalError = useCallback(
     (source, fallback, error, details = {}) => {
@@ -65,10 +70,26 @@ function CreateRadioScreen() {
         );
       }
 
+      let loadedDefaultCwMessages = '';
+      try {
+        const defaultMessagesResult = await apiJson('/radios/cw-messages/default');
+        if (defaultMessagesResult.ok) {
+          loadedDefaultCwMessages = defaultMessagesResult.cw_messages ?? '';
+        }
+      } catch (error) {
+        notifyOperationalError(
+          'CreateRadioScreen.loadDefaultCwMessages',
+          'Unable to load default CW messages.',
+          error,
+        );
+      }
+
       if (isCancelled) return;
       setRadioKinds(kinds);
+      setDefaultCwMessages(loadedDefaultCwMessages);
 
       if (!isEditing) {
+        setCwMessages(loadedDefaultCwMessages);
         return;
       }
 
@@ -92,6 +113,7 @@ function CreateRadioScreen() {
         result.radio.cw_serial_baud_rate ?? DEFAULT_CW_SERIAL_BAUD_RATE,
       );
       setCwSerialLine(result.radio.cw_serial_line ?? DEFAULT_CW_SERIAL_LINE);
+      setCwMessages(result.radio.cw_messages ?? loadedDefaultCwMessages);
     }
 
     loadContext().catch((error) =>
@@ -108,8 +130,31 @@ function CreateRadioScreen() {
     };
   }, [isEditing, notifyOperationalError, radioId]);
 
+  async function validateCwMessages() {
+    setCwMessagesValidationMessage('');
+    const result = await apiJson('/radios/cw-messages/validate', {
+      method: 'POST',
+      body: JSON.stringify({ cw_messages: cwMessages }),
+    });
+
+    if (!result.ok) {
+      setCwMessagesValidationMessage(result.error ?? 'CW messages are invalid.');
+      notifyOperationalError(
+        'CreateRadioScreen.validateCwMessages',
+        'CW messages are invalid.',
+        result.error,
+      );
+      return false;
+    }
+
+    setCwMessagesValidationMessage('CW messages are valid.');
+    return true;
+  }
+
   async function saveRadio(event) {
     event.preventDefault();
+    if (!(await validateCwMessages())) return;
+
     const result = await apiJson(isEditing ? `/radios/${radioId}` : '/radios', {
       method: isEditing ? 'PUT' : 'POST',
       body: JSON.stringify({
@@ -132,6 +177,7 @@ function CreateRadioScreen() {
             : DEFAULT_CW_SERIAL_BAUD_RATE,
         cw_serial_line:
           cwKeyerType === 'serial' ? cwSerialLine : DEFAULT_CW_SERIAL_LINE,
+        cw_messages: cwMessages,
       }),
     });
     if (!result.ok) {
@@ -313,6 +359,53 @@ function CreateRadioScreen() {
             </select>
           </label>
         </>
+      ) : null}
+      <div className="selection-actions">
+        <button
+          className="cmd-btn"
+          type="button"
+          onClick={() => setIsCwMessagesOpen((current) => !current)}
+        >
+          {isCwMessagesOpen ? 'Hide CW Messages' : 'Edit CW Messages'}
+        </button>
+      </div>
+      {isCwMessagesOpen ? (
+        <div className="cw-messages-editor">
+          <label>
+            CW Messages
+            <textarea
+              value={cwMessages}
+              onChange={(event) => {
+                setCwMessages(event.target.value);
+                setCwMessagesValidationMessage('');
+              }}
+              rows={18}
+              spellCheck={false}
+            />
+          </label>
+          {cwMessagesValidationMessage ? (
+            <div className="cw-messages-validation-status">
+              {cwMessagesValidationMessage}
+            </div>
+          ) : null}
+          <div className="selection-actions">
+            <button
+              className="cmd-btn"
+              type="button"
+              onClick={() => setCwMessages(defaultCwMessages)}
+              disabled={!defaultCwMessages}
+            >
+              Reset to Defaults
+            </button>
+            <button
+              className="cmd-btn"
+              type="button"
+              onClick={() => validateCwMessages()}
+            >
+              Validate CW Messages
+            </button>
+          </div>
+        </div>
       ) : null}
       <div className="selection-actions">
         <button className="cmd-btn primary" type="submit">

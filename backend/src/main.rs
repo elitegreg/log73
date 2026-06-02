@@ -221,6 +221,8 @@ async fn main() {
         .route("/contacts/{id}", delete(delete_contact))
         .route("/radio-kinds", get(radio_kinds))
         .route("/radios", get(radios).post(create_radio))
+        .route("/radios/cw-messages/default", get(default_cw_messages))
+        .route("/radios/cw-messages/validate", post(validate_cw_messages))
         .route(
             "/radios/{id}",
             get(radio).put(update_radio).delete(delete_radio),
@@ -1057,6 +1059,25 @@ async fn cw_labels(
         }
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct CwMessagesPayload {
+    cw_messages: String,
+}
+
+async fn default_cw_messages() -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "ok": true, "cw_messages": cw::DEFAULT_CW_MESSAGES }))
+}
+
+async fn validate_cw_messages(Json(payload): Json<CwMessagesPayload>) -> Json<serde_json::Value> {
+    match validation::validate_cw_messages(&payload.cw_messages) {
+        Ok(()) => Json(serde_json::json!({
+            "ok": true,
+            "labels": cw::labels(&payload.cw_messages)
+        })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
     }
 }
 

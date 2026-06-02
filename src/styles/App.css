@@ -489,6 +489,19 @@
   font: inherit;
 }
 
+.cw-messages-editor textarea {
+  min-height: 360px;
+  font-family: monospace;
+  font-size: 12px;
+  white-space: pre;
+}
+
+.cw-messages-validation-status {
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
 .form-window label.checkbox-label {
   flex-direction: row;
   align-items: center;
