@@ -8,7 +8,9 @@ use crate::radio::{
 use backon::{BackoffBuilder, ExponentialBuilder};
 use cw_serial_keyer::{Config as CwSerialConfig, ControlLine, SerialKeyer as CwSerialDevice};
 use futures_util::future::{BoxFuture, FutureExt};
-use radio_cat_rs::{ConnectionConfig, ControllableRadio, RadioKind, create_radio};
+use radio_cat_rs::{
+    ConnectionConfig, ControllableRadio, RadioKind, create_radio, create_radio_with_io,
+};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
@@ -616,10 +618,39 @@ async fn connect_cat_radio(
     radio_kind: RadioKind,
 ) -> Result<ConnectedCatRadio, String> {
     if uses_shared_cw_serial_port(&config) {
-        warn!(
-            radio_id = config.id,
-            "shared CAT/CW serial port is not supported by this build; falling back to independent connections"
+        let mut shared_cw_serial_keyer = open_serial_keyer(
+            &config.cw_serial_port,
+            config.cw_serial_baud_rate,
+            &config.cw_serial_line,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+        let radio_id = config.id;
+        let serial_port = config.serial_port.clone();
+        let timeout = Duration::from_secs_f64(config.cat_timeout);
+        let io = shared_cw_serial_keyer.serial_stream();
+        info!(
+            radio_id,
+            serial_port = %serial_port,
+            baud_rate = config.serial_baud_rate,
+            line = %config.cw_serial_line,
+            "sharing serial port for CAT and CW keying"
         );
+
+        let radio = match create_radio_with_io(radio_kind, io, timeout, &config.options).await {
+            Ok(radio) => radio,
+            Err(error) => {
+                if let Err(close_error) = shared_cw_serial_keyer.close().await {
+                    warn!(radio_id, %close_error, "failed to close shared serial CW keyer");
+                }
+                return Err(error.to_string());
+            }
+        };
+
+        return Ok(ConnectedCatRadio {
+            radio,
+            shared_cw_serial_keyer: Some(shared_cw_serial_keyer),
+        });
     }
 
     let connection = connection_config_for(&config)?;
