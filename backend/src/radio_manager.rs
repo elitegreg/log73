@@ -623,7 +623,7 @@ async fn connect_cat_radio(
     }
 
     let connection = connection_config_for(&config)?;
-    let radio = create_radio(radio_kind, connection)
+    let radio = create_radio(radio_kind, connection, &config.options)
         .await
         .map_err(|error| error.to_string())?;
 
@@ -1829,6 +1829,7 @@ mod tests {
             tcp_port: 5002,
             serial_port: String::new(),
             serial_baud_rate: 115_200,
+            options: String::new(),
             poll_frequency: 0.25,
             cat_timeout: 2.0,
             cw_keyer_type: "none".to_string(),

@@ -22,6 +22,7 @@ function CreateRadioScreen() {
   const [tcpPort, setTcpPort] = useState('');
   const [serialPort, setSerialPort] = useState('');
   const [serialBaudRate, setSerialBaudRate] = useState(115200);
+  const [options, setOptions] = useState('');
   const [pollFrequency, setPollFrequency] = useState(0.25);
   const [catTimeout, setCatTimeout] = useState(2);
   const [cwKeyerType, setCwKeyerType] = useState(DEFAULT_CW_KEYER_TYPE);
@@ -104,6 +105,7 @@ function CreateRadioScreen() {
       setTcpPort(result.radio.tcp_port);
       setSerialPort(result.radio.serial_port ?? '');
       setSerialBaudRate(result.radio.serial_baud_rate ?? 115200);
+      setOptions(result.radio.options ?? '');
       setPollFrequency(result.radio.poll_frequency ?? 0.25);
       setCatTimeout(result.radio.cat_timeout ?? 2);
       setCwKeyerType(result.radio.cw_keyer_type ?? DEFAULT_CW_KEYER_TYPE);
@@ -165,6 +167,7 @@ function CreateRadioScreen() {
         tcp_port: Number(tcpPort),
         serial_port: serialPort,
         serial_baud_rate: Number(serialBaudRate),
+        options: options,
         poll_frequency: Number(pollFrequency),
         cat_timeout: Number(catTimeout),
         cw_keyer_type: cwKeyerType,
@@ -280,6 +283,13 @@ function CreateRadioScreen() {
           </label>
         </>
       )}
+      <label>
+        Options
+        <input
+          value={options}
+          onChange={(event) => setOptions(event.target.value)}
+        />
+      </label>
       <label>
         Poll Frequency (seconds)
         <input

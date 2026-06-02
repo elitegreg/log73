@@ -983,6 +983,7 @@ mod tests {
             tcp_port: 5002,
             serial_port: String::new(),
             serial_baud_rate: 115_200,
+            options: String::new(),
             poll_frequency: 0.25,
             cat_timeout: 2.0,
             cw_keyer_type: "none".to_string(),
