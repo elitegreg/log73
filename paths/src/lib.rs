@@ -14,6 +14,10 @@ pub fn data_dir() -> PathBuf {
         .unwrap_or_else(|| fallback_data_dir().join(APP_NAME))
 }
 
+pub fn installed_data_dir(app_root: impl AsRef<Path>) -> PathBuf {
+    app_root.as_ref().join("data")
+}
+
 pub fn contest_rules_dir(data_dir: impl AsRef<Path>) -> PathBuf {
     data_dir.as_ref().join("contest-rules")
 }
@@ -172,6 +176,10 @@ mod tests {
         assert_eq!(
             database_path(data_dir),
             Path::new("log73-data").join("log73.db")
+        );
+        assert_eq!(
+            installed_data_dir(Path::new("app-root")),
+            Path::new("app-root").join("data")
         );
     }
 }

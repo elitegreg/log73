@@ -35,7 +35,13 @@ use radio::{ClientMessage, RadioCommand, ServerMessage};
 use radio_cat_rs::supported_radio_kinds;
 use radio_manager::RadioManager;
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
-use std::{collections::HashMap, fs, fs::OpenOptions, path::PathBuf, time::Duration};
+use std::{
+    collections::HashMap,
+    fs,
+    fs::OpenOptions,
+    path::{Path as FsPath, PathBuf},
+    time::Duration,
+};
 use supercheckpartial::SuperCheckPartial;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
@@ -129,7 +135,11 @@ struct AppPaths {
     config_dir: PathBuf,
     data_dir: PathBuf,
     app_dir: PathBuf,
-    contest_rules_dir: PathBuf,
+    installed_data_dir: PathBuf,
+    installed_contest_rules_dir: PathBuf,
+    user_contest_rules_dir: PathBuf,
+    master_scp_path: PathBuf,
+    cty_dat_path: PathBuf,
     database_path: PathBuf,
 }
 
@@ -140,15 +150,32 @@ fn resolve_paths(cli: &Cli) -> AppPaths {
         .unwrap_or_else(log73_paths::config_dir);
     let data_dir = cli.data_dir.clone().unwrap_or_else(log73_paths::data_dir);
     let app_dir = cli.app_dir.clone().unwrap_or_else(log73_paths::app_root);
-    let contest_rules_dir = log73_paths::contest_rules_dir(&data_dir);
+    let installed_data_dir = log73_paths::installed_data_dir(&app_dir);
+    let installed_contest_rules_dir = log73_paths::contest_rules_dir(&installed_data_dir);
+    let user_contest_rules_dir = log73_paths::contest_rules_dir(&data_dir);
+    let master_scp_path = data_file_path(&data_dir, &installed_data_dir, "MASTER.SCP");
+    let cty_dat_path = data_file_path(&data_dir, &installed_data_dir, "cty.dat");
     let database_path = log73_paths::database_path(&data_dir);
 
     AppPaths {
         config_dir,
         data_dir,
         app_dir,
-        contest_rules_dir,
+        installed_data_dir,
+        installed_contest_rules_dir,
+        user_contest_rules_dir,
+        master_scp_path,
+        cty_dat_path,
         database_path,
+    }
+}
+
+fn data_file_path(user_data_dir: &FsPath, installed_data_dir: &FsPath, file_name: &str) -> PathBuf {
+    let user_path = user_data_dir.join(file_name);
+    match user_path.try_exists() {
+        Ok(true) => user_path,
+        Ok(false) => installed_data_dir.join(file_name),
+        Err(_) => user_path,
     }
 }
 
@@ -178,30 +205,38 @@ async fn main() {
         config_dir = %paths.config_dir.display(),
         data_dir = %paths.data_dir.display(),
         app_dir = %paths.app_dir.display(),
-        contest_rules_dir = %paths.contest_rules_dir.display(),
+        installed_data_dir = %paths.installed_data_dir.display(),
+        installed_contest_rules_dir = %paths.installed_contest_rules_dir.display(),
+        user_contest_rules_dir = %paths.user_contest_rules_dir.display(),
+        master_scp_path = %paths.master_scp_path.display(),
+        cty_dat_path = %paths.cty_dat_path.display(),
         database_path = %paths.database_path.display(),
         "using log73 paths"
     );
 
     let (log_events, _) = broadcast::channel(128);
-    let contest_rules = ContestRulesStore::load_dir(&paths.contest_rules_dir)
-        .unwrap_or_else(|error| panic!("failed to load contest rules: {error}"));
-    let supercheckpartial = SuperCheckPartial::load_dir(&paths.data_dir).unwrap_or_else(|error| {
-        warn!(
-            data_dir = %paths.data_dir.display(),
-            %error,
-            "failed to load MASTER.SCP; supercheckpartial matches will be unavailable"
-        );
-        SuperCheckPartial::default()
-    });
+    let contest_rules = ContestRulesStore::load_dirs([
+        paths.installed_contest_rules_dir.as_path(),
+        paths.user_contest_rules_dir.as_path(),
+    ])
+    .unwrap_or_else(|error| panic!("failed to load contest rules: {error}"));
+    let supercheckpartial =
+        SuperCheckPartial::load_file(&paths.master_scp_path).unwrap_or_else(|error| {
+            warn!(
+                path = %paths.master_scp_path.display(),
+                %error,
+                "failed to load MASTER.SCP; supercheckpartial matches will be unavailable"
+            );
+            SuperCheckPartial::default()
+        });
     info!(
         callsigns = supercheckpartial.len(),
-        data_dir = %paths.data_dir.display(),
+        path = %paths.master_scp_path.display(),
         "loaded supercheckpartial callsigns"
     );
-    let dxcc = dxcc::DxccDatabase::load_dir(&paths.data_dir).unwrap_or_else(|error| {
+    let dxcc = dxcc::DxccDatabase::load_file(&paths.cty_dat_path).unwrap_or_else(|error| {
         warn!(
-            data_dir = %paths.data_dir.display(),
+            path = %paths.cty_dat_path.display(),
             %error,
             "failed to load cty.dat; DXCC lookup will be unavailable"
         );
@@ -210,7 +245,7 @@ async fn main() {
     info!(
         entities = dxcc.entity_count(),
         rules = dxcc.rule_count(),
-        data_dir = %paths.data_dir.display(),
+        path = %paths.cty_dat_path.display(),
         "loaded DXCC country data"
     );
     let db = Database::open(&paths.database_path).expect("failed to open log73 database");

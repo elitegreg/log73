@@ -237,32 +237,15 @@ struct RawScoringRules {
 }
 
 impl ContestRulesStore {
-    pub fn load_dir(path: impl AsRef<Path>) -> Result<Self, String> {
+    pub fn load_dirs<I, P>(paths: I) -> Result<Self, String>
+    where
+        I: IntoIterator<Item = P>,
+        P: AsRef<Path>,
+    {
         let mut raw_contests = BTreeMap::new();
-        let entries = fs::read_dir(path.as_ref()).map_err(|error| {
-            format!(
-                "unable to read contest rules dir {}: {error}",
-                path.as_ref().display()
-            )
-        })?;
 
-        for entry in entries {
-            let entry =
-                entry.map_err(|error| format!("unable to read contest rules entry: {error}"))?;
-            let path = entry.path();
-            let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
-                continue;
-            };
-            if extension != "yaml" && extension != "yml" {
-                continue;
-            }
-            let text = fs::read_to_string(&path)
-                .map_err(|error| format!("unable to read {}: {error}", path.display()))?;
-            let rules_file: RulesFile = serde_yaml::from_str(&text)
-                .map_err(|error| format!("unable to parse {}: {error}", path.display()))?;
-            for contest in rules_file.contests {
-                raw_contests.insert(contest.id.clone(), contest);
-            }
+        for path in paths {
+            load_raw_contests_dir(path.as_ref(), &mut raw_contests)?;
         }
 
         let mut contests = BTreeMap::new();
@@ -297,6 +280,43 @@ impl ContestRulesStore {
             })
             .collect()
     }
+}
+
+fn load_raw_contests_dir(
+    path: &Path,
+    raw_contests: &mut BTreeMap<String, RawContestRules>,
+) -> Result<(), String> {
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "unable to read contest rules dir {}: {error}",
+                path.display()
+            ));
+        }
+    };
+
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| format!("unable to read contest rules entry: {error}"))?;
+        let path = entry.path();
+        let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
+            continue;
+        };
+        if extension != "yaml" && extension != "yml" {
+            continue;
+        }
+        let text = fs::read_to_string(&path)
+            .map_err(|error| format!("unable to read {}: {error}", path.display()))?;
+        let rules_file: RulesFile = serde_yaml::from_str(&text)
+            .map_err(|error| format!("unable to parse {}: {error}", path.display()))?;
+        for contest in rules_file.contests {
+            raw_contests.insert(contest.id.clone(), contest);
+        }
+    }
+
+    Ok(())
 }
 
 fn apply_defines(current: &mut Vec<ValueSet>, updates: &[ValueSet]) {
@@ -529,6 +549,44 @@ fn resolve_contest(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new() -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time should be after unix epoch")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "log73-contest-rules-test-{}-{unique}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&path).expect("test dir should be created");
+            Self { path }
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn write_rules_file(dir: &Path, file_name: &str, yaml: &str) {
+        fs::write(dir.join(file_name), yaml).expect("rules file should be written");
+    }
 
     fn resolve_yaml_contest(yaml: &str, id: &str) -> ContestRules {
         let rules_file: RulesFile = serde_yaml::from_str(yaml).expect("yaml should parse");
@@ -540,6 +598,93 @@ mod tests {
 
         resolve_contest(id, &raw_contests, &mut BTreeMap::new(), &mut Vec::new())
             .expect("contest should resolve")
+    }
+
+    #[test]
+    fn user_rules_override_installed_rules_and_union_is_loaded() {
+        let installed = TestDir::new();
+        let user = TestDir::new();
+
+        write_rules_file(
+            installed.path(),
+            "installed.yaml",
+            r#"
+contests:
+  - id: SHARED
+    display_name: Installed Shared
+    allowed_bands: [20]
+    allowed_modes: ['CW']
+    exchange: []
+    qso_columns: []
+    qso_column_fields: {}
+  - id: INSTALLED_ONLY
+    display_name: Installed Only
+    allowed_bands: [40]
+    allowed_modes: ['SSB']
+    exchange: []
+    qso_columns: []
+    qso_column_fields: {}
+"#,
+        );
+        write_rules_file(
+            user.path(),
+            "user.yaml",
+            r#"
+contests:
+  - id: SHARED
+    display_name: User Shared
+    allowed_bands: [15]
+    allowed_modes: ['RTTY']
+    exchange: []
+    qso_columns: []
+    qso_column_fields: {}
+  - id: USER_ONLY
+    display_name: User Only
+    allowed_bands: [10]
+    allowed_modes: ['CW']
+    exchange: []
+    qso_columns: []
+    qso_column_fields: {}
+"#,
+        );
+
+        let store = ContestRulesStore::load_dirs([installed.path(), user.path()])
+            .expect("rules should load");
+
+        assert_eq!(
+            store.get("SHARED").map(|contest| &contest.display_name),
+            Some(&"User Shared".to_string())
+        );
+        assert!(store.get("INSTALLED_ONLY").is_some());
+        assert!(store.get("USER_ONLY").is_some());
+    }
+
+    #[test]
+    fn missing_rules_dirs_are_ignored_when_other_rules_exist() {
+        let installed = TestDir::new();
+        let missing_user = TestDir::new();
+        let missing_user_path = missing_user.path().to_path_buf();
+        drop(missing_user);
+
+        write_rules_file(
+            installed.path(),
+            "installed.yaml",
+            r#"
+contests:
+  - id: INSTALLED_ONLY
+    display_name: Installed Only
+    allowed_bands: [40]
+    allowed_modes: ['SSB']
+    exchange: []
+    qso_columns: []
+    qso_column_fields: {}
+"#,
+        );
+
+        let store = ContestRulesStore::load_dirs([installed.path(), missing_user_path.as_path()])
+            .expect("rules should load");
+
+        assert!(store.get("INSTALLED_ONLY").is_some());
     }
 
     #[test]

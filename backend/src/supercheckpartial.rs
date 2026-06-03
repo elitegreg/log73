@@ -10,9 +10,8 @@ pub struct SuperCheckPartial {
 }
 
 impl SuperCheckPartial {
-    pub fn load_dir(data_dir: &Path) -> std::io::Result<Self> {
-        let path = data_dir.join("MASTER.SCP");
-        let file = File::open(path)?;
+    pub fn load_file(path: impl AsRef<Path>) -> std::io::Result<Self> {
+        let file = File::open(path.as_ref())?;
         let reader = BufReader::new(file);
         let mut callsigns = Vec::new();
 
