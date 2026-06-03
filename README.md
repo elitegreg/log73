@@ -161,6 +161,37 @@ Run the launcher:
 cargo run -p launcher
 ```
 
+## Release packages
+
+Release packaging is configured with `cargo-dist` in `dist-workspace.toml`.
+Tag pushes such as `v0.1.0` run `.github/workflows/release.yml`, building:
+
+- Windows `.msi` installers from cargo-dist
+- macOS `.pkg` installers from cargo-dist
+- Linux `.deb` and `.rpm` packages with nFPM, using cargo-dist-built binaries
+- cargo-dist archive artifacts for all configured targets
+
+The release workflow builds frontend assets first so `log73-backend` embeds the current `dist/` output.
+
+Local package planning:
+
+```bash
+cargo install cargo-dist --version 0.32.0 --locked
+~/.cargo/bin/dist plan --allow-dirty
+```
+
+Linux native packages can be built with:
+
+```bash
+make deb
+```
+
+This uses `DEB_TARGET=x86_64-unknown-linux-gnu` and the backend crate version by default. Override them when needed:
+
+```bash
+make deb DEB_TARGET=aarch64-unknown-linux-gnu VERSION=0.1.0
+```
+
 Launcher main screen controls:
 
 - Start/Stop backend process controls with status

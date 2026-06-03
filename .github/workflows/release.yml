@@ -1,0 +1,135 @@
+name: Release Packages
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-packages:
+    name: Build ${{ matrix.target }} packages
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            native_linux: true
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            native_linux: true
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            native_linux: false
+          - os: macos-14
+            target: aarch64-apple-darwin
+            native_linux: false
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+            native_linux: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.28.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend assets
+        run: pnpm run build:production
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-dist
+        if: runner.os != 'Windows'
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.sh | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install cargo-dist
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm https://github.com/axodotdev/cargo-dist/releases/download/v0.32.0/cargo-dist-installer.ps1 | iex
+          "$env:USERPROFILE\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Build cargo-dist artifacts
+        run: dist build --artifacts=local --target=${{ matrix.target }}
+
+      - name: Setup Go for nFPM
+        if: matrix.native_linux
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Install nFPM
+        if: matrix.native_linux
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.1
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
+
+      - name: Build native Linux packages
+        if: matrix.native_linux
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if [[ -z "$version" || "$version" == "$GITHUB_REF_NAME" ]]; then
+            version="$(cargo metadata --no-deps --format-version=1 | jq -r '.packages[] | select(.name == "log73-backend") | .version')"
+          fi
+          scripts/build_native_linux_packages.sh "${{ matrix.target }}" "$version"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            target/distrib/*
+            target/native-packages/*.deb
+            target/native-packages/*.rpm
+
+  publish-github-release:
+    name: Publish GitHub Release
+    needs: build-packages
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -t files < <(find release-artifacts -type f | sort)
+          gh release create "${GITHUB_REF_NAME}" "${files[@]}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes

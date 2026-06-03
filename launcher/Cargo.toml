@@ -2,6 +2,7 @@
 name = "launcher"
 version = "0.1.0"
 edition = "2024"
+repository = "https://github.com/elitegreg/log73"
 
 [[bin]]
 name = "log73-launcher"

@@ -1,4 +1,9 @@
-.PHONY: all release \
+DEB_TARGET ?= x86_64-unknown-linux-gnu
+VERSION ?= $(shell awk -F '"' '/^version =/ { print $$2; exit }' backend/Cargo.toml)
+DIST ?= $(shell command -v dist 2>/dev/null || printf '%s' "$$HOME/.cargo/bin/dist")
+NFPM ?= $(shell command -v nfpm 2>/dev/null || { command -v go >/dev/null 2>&1 && printf '%s' "$$(go env GOPATH)/bin/nfpm"; } || printf '%s' nfpm)
+
+.PHONY: all release deb \
 	backend launcher frontend \
 	backend-build backend-release backend-test backend-fmt backend-lint \
 	launcher-build launcher-test launcher-fmt launcher-lint launcher-run \
@@ -7,6 +12,15 @@
 all: backend-build launcher-build frontend-build
 
 release: backend-release launcher-build frontend-release
+
+deb:
+	@if ! command -v "$(DIST)" >/dev/null 2>&1 && [ ! -x "$(DIST)" ]; then \
+		echo "dist not found; install with: cargo install cargo-dist --version 0.32.0 --locked"; \
+		exit 1; \
+	fi
+	pnpm run build:production
+	"$(DIST)" build --artifacts=local --target="$(DEB_TARGET)" --allow-dirty
+	NFPM="$(NFPM)" scripts/build_native_linux_packages.sh "$(DEB_TARGET)" "$(VERSION)"
 
 backend: backend-fmt backend-lint backend-test backend-build
 

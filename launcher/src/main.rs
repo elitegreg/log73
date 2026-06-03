@@ -1,5 +1,7 @@
 use iced::widget::image::Handle as ImageHandle;
-use iced::widget::{Image, button, column, container, pick_list, row, text, text_input};
+use iced::widget::{
+    Image, button, column, container, pick_list, row, scrollable, text, text_input,
+};
 use iced::{Element, Font, Length, Subscription, Task, Theme, application, font, window};
 use serde::{Deserialize, Serialize};
 use shared_child::SharedChild;
@@ -1055,11 +1057,10 @@ fn view_settings(state: &Launcher) -> Element<'_, Message> {
     .padding(16)
     .max_width(900);
 
-    container(content)
+    container(scrollable(content).height(Length::Fill))
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
-        .center_y(Length::Fill)
         .into()
 }
 
