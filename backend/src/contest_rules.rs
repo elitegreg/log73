@@ -1,6 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{collections::BTreeMap, fs, path::Path};
+use std::{
+    collections::BTreeMap,
+    fs,
+    path::{Path, PathBuf},
+};
+use tracing::info;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValueSet {
@@ -242,10 +247,24 @@ impl ContestRulesStore {
         I: IntoIterator<Item = P>,
         P: AsRef<Path>,
     {
+        let search_paths = paths
+            .into_iter()
+            .map(|path| path.as_ref().to_path_buf())
+            .collect::<Vec<_>>();
         let mut raw_contests = BTreeMap::new();
 
-        for path in paths {
-            load_raw_contests_dir(path.as_ref(), &mut raw_contests)?;
+        info!(
+            paths = %format_paths(&search_paths),
+            "searching contest rules directories"
+        );
+        for path in &search_paths {
+            let stats = load_raw_contests_dir(path, &mut raw_contests)?;
+            info!(
+                path = %path.display(),
+                yaml_files = stats.yaml_files,
+                contests = stats.contests,
+                "finished contest rules directory"
+            );
         }
 
         let mut contests = BTreeMap::new();
@@ -256,9 +275,13 @@ impl ContestRulesStore {
         }
 
         if contests.is_empty() {
-            return Err("no contest rules found".to_string());
+            return Err(format!(
+                "no contest rules found in searched directories: {}",
+                format_paths(&search_paths)
+            ));
         }
 
+        info!(contests = contests.len(), "loaded contest rules");
         Ok(Self { contests })
     }
 
@@ -282,13 +305,23 @@ impl ContestRulesStore {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct ContestRulesDirStats {
+    yaml_files: usize,
+    contests: usize,
+}
+
 fn load_raw_contests_dir(
     path: &Path,
     raw_contests: &mut BTreeMap<String, RawContestRules>,
-) -> Result<(), String> {
+) -> Result<ContestRulesDirStats, String> {
+    info!(path = %path.display(), "looking for contest rules directory");
     let entries = match fs::read_dir(path) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            info!(path = %path.display(), "contest rules directory not found; skipping");
+            return Ok(ContestRulesDirStats::default());
+        }
         Err(error) => {
             return Err(format!(
                 "unable to read contest rules dir {}: {error}",
@@ -297,6 +330,7 @@ fn load_raw_contests_dir(
         }
     };
 
+    let mut stats = ContestRulesDirStats::default();
     for entry in entries {
         let entry =
             entry.map_err(|error| format!("unable to read contest rules entry: {error}"))?;
@@ -311,12 +345,31 @@ fn load_raw_contests_dir(
             .map_err(|error| format!("unable to read {}: {error}", path.display()))?;
         let rules_file: RulesFile = serde_yaml::from_str(&text)
             .map_err(|error| format!("unable to parse {}: {error}", path.display()))?;
+        let contest_count = rules_file.contests.len();
+        info!(
+            path = %path.display(),
+            contests = contest_count,
+            "loaded contest rules file"
+        );
+        stats.yaml_files += 1;
+        stats.contests += contest_count;
         for contest in rules_file.contests {
             raw_contests.insert(contest.id.clone(), contest);
         }
     }
 
-    Ok(())
+    Ok(stats)
+}
+
+fn format_paths(paths: &[PathBuf]) -> String {
+    if paths.is_empty() {
+        return "<none>".to_string();
+    }
+    paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn apply_defines(current: &mut Vec<ValueSet>, updates: &[ValueSet]) {
@@ -685,6 +738,23 @@ contests:
             .expect("rules should load");
 
         assert!(store.get("INSTALLED_ONLY").is_some());
+    }
+
+    #[test]
+    fn empty_rules_error_lists_searched_dirs() {
+        let first = TestDir::new();
+        let second = TestDir::new();
+        let first_path = first.path().to_path_buf();
+        let second_path = second.path().to_path_buf();
+        drop(first);
+        drop(second);
+
+        let error = ContestRulesStore::load_dirs([first_path.as_path(), second_path.as_path()])
+            .expect_err("missing rules should fail when no other rules exist");
+
+        assert!(error.contains("no contest rules found"));
+        assert!(error.contains(&first_path.display().to_string()));
+        assert!(error.contains(&second_path.display().to_string()));
     }
 
     #[test]
