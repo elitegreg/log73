@@ -58,9 +58,15 @@ pub struct RadioConfig {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct AuthConfigView {
+pub struct ConfigView {
     pub login_user: String,
     pub login_enabled: bool,
+    pub dxcluster_enabled: bool,
+    pub dxcluster_host: String,
+    pub dxcluster_port: u16,
+    pub dxcluster_callsign: String,
+    pub dxcluster_max_age_min: u16,
+    pub dxcluster_commands: String,
 }
 
 #[derive(Debug, Clone)]
@@ -69,10 +75,39 @@ pub struct AuthConfig {
     pub login_password: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct DxClusterConfig {
+    pub enabled: bool,
+    pub host: String,
+    pub port: u16,
+    pub callsign: String,
+    pub max_age_min: u16,
+    pub commands: String,
+}
+
+impl Default for DxClusterConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            host: String::new(),
+            port: DEFAULT_DXCLUSTER_PORT,
+            callsign: String::new(),
+            max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+            commands: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize)]
-pub struct UpdateAuthConfig {
+pub struct UpdateConfig {
     pub login_user: String,
     pub login_password: String,
+    pub dxcluster_enabled: bool,
+    pub dxcluster_host: String,
+    pub dxcluster_port: u16,
+    pub dxcluster_callsign: String,
+    pub dxcluster_max_age_min: u16,
+    pub dxcluster_commands: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -306,6 +341,11 @@ ON CONFLICT(ID) DO UPDATE SET
     JSON = excluded.JSON
 "#;
 
+pub const DEFAULT_DXCLUSTER_PORT: u16 = 23;
+pub const DEFAULT_DXCLUSTER_MAX_AGE_MIN: u16 = 60;
+pub const MIN_DXCLUSTER_MAX_AGE_MIN: u16 = 15;
+pub const MAX_DXCLUSTER_MAX_AGE_MIN: u16 = 360;
+
 const DB_COMMAND_BUFFER: usize = 64;
 
 enum DbCommand {
@@ -343,8 +383,11 @@ enum DbCommand {
     AuthConfig {
         response: oneshot::Sender<rusqlite::Result<AuthConfig>>,
     },
-    UpdateAuthConfig {
-        config: UpdateAuthConfig,
+    DxClusterConfig {
+        response: oneshot::Sender<rusqlite::Result<DxClusterConfig>>,
+    },
+    UpdateConfig {
+        config: UpdateConfig,
         response: oneshot::Sender<rusqlite::Result<()>>,
     },
     CreateRadio {
@@ -480,18 +523,30 @@ impl Database {
             .await
     }
 
-    pub async fn auth_config_view(&self) -> rusqlite::Result<AuthConfigView> {
-        let config = self.auth_config().await?;
+    pub async fn dxcluster_config(&self) -> rusqlite::Result<DxClusterConfig> {
+        self.call(|response| DbCommand::DxClusterConfig { response })
+            .await
+    }
+
+    pub async fn config_view(&self) -> rusqlite::Result<ConfigView> {
+        let auth_config = self.auth_config().await?;
+        let dxcluster_config = self.dxcluster_config().await?;
         let login_enabled =
-            !config.login_user.trim().is_empty() && !config.login_password.is_empty();
-        Ok(AuthConfigView {
-            login_user: config.login_user,
+            !auth_config.login_user.trim().is_empty() && !auth_config.login_password.is_empty();
+        Ok(ConfigView {
+            login_user: auth_config.login_user,
             login_enabled,
+            dxcluster_enabled: dxcluster_config.enabled,
+            dxcluster_host: dxcluster_config.host,
+            dxcluster_port: dxcluster_config.port,
+            dxcluster_callsign: dxcluster_config.callsign,
+            dxcluster_max_age_min: dxcluster_config.max_age_min,
+            dxcluster_commands: dxcluster_config.commands,
         })
     }
 
-    pub async fn update_auth_config(&self, config: UpdateAuthConfig) -> rusqlite::Result<()> {
-        self.call(|response| DbCommand::UpdateAuthConfig { config, response })
+    pub async fn update_config(&self, config: UpdateConfig) -> rusqlite::Result<()> {
+        self.call(|response| DbCommand::UpdateConfig { config, response })
             .await
     }
 
@@ -581,8 +636,11 @@ fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbComm
             DbCommand::AuthConfig { response } => {
                 let _ = response.send(db_auth_config(&connection));
             }
-            DbCommand::UpdateAuthConfig { config, response } => {
-                let _ = response.send(db_update_auth_config(&connection, config));
+            DbCommand::DxClusterConfig { response } => {
+                let _ = response.send(db_dxcluster_config(&connection));
+            }
+            DbCommand::UpdateConfig { config, response } => {
+                let _ = response.send(db_update_config(&connection, config));
             }
             DbCommand::CreateRadio { radio, response } => {
                 let _ = response.send(db_create_radio(&connection, radio));
@@ -706,18 +764,61 @@ fn db_auth_config(connection: &Connection) -> rusqlite::Result<AuthConfig> {
     }
 }
 
-fn db_update_auth_config(
-    connection: &Connection,
-    config: UpdateAuthConfig,
-) -> rusqlite::Result<()> {
+fn db_dxcluster_config(connection: &Connection) -> rusqlite::Result<DxClusterConfig> {
+    match connection
+        .query_row(
+            "SELECT DXCLUSTER_ENABLED, DXCLUSTER_HOST, DXCLUSTER_PORT, DXCLUSTER_CALLSIGN, DXCLUSTER_MAX_AGE_MIN, DXCLUSTER_COMMANDS FROM config LIMIT 1",
+            [],
+            |row| {
+                Ok(DxClusterConfig {
+                    enabled: row.get(0)?,
+                    host: row.get(1)?,
+                    port: row.get(2)?,
+                    callsign: row.get(3)?,
+                    max_age_min: row.get(4)?,
+                    commands: row.get(5)?,
+                })
+            },
+        )
+        .optional()
+    {
+        Ok(Some(config)) => Ok(config),
+        Ok(None) => Ok(DxClusterConfig::default()),
+        Err(error) if is_missing_config_column(&error) => Ok(DxClusterConfig::default()),
+        Err(error) => Err(error),
+    }
+}
+
+fn db_update_config(connection: &Connection, config: UpdateConfig) -> rusqlite::Result<()> {
+    let max_age_min = config
+        .dxcluster_max_age_min
+        .clamp(MIN_DXCLUSTER_MAX_AGE_MIN, MAX_DXCLUSTER_MAX_AGE_MIN);
     let updated = connection.execute(
-        "UPDATE config SET LOGIN_USER = ?1, LOGIN_PASSWORD = ?2",
-        params![config.login_user.trim(), config.login_password],
+        "UPDATE config SET LOGIN_USER = ?1, LOGIN_PASSWORD = ?2, DXCLUSTER_ENABLED = ?3, DXCLUSTER_HOST = ?4, DXCLUSTER_PORT = ?5, DXCLUSTER_CALLSIGN = ?6, DXCLUSTER_MAX_AGE_MIN = ?7, DXCLUSTER_COMMANDS = ?8",
+        params![
+            config.login_user.trim(),
+            config.login_password,
+            config.dxcluster_enabled,
+            config.dxcluster_host.trim(),
+            config.dxcluster_port,
+            config.dxcluster_callsign.trim().to_uppercase(),
+            max_age_min,
+            config.dxcluster_commands
+        ],
     )?;
     if updated == 0 {
         connection.execute(
-            "INSERT INTO config (version, LOGIN_USER, LOGIN_PASSWORD) VALUES (1, ?1, ?2)",
-            params![config.login_user.trim(), config.login_password],
+            "INSERT INTO config (version, LOGIN_USER, LOGIN_PASSWORD, DXCLUSTER_ENABLED, DXCLUSTER_HOST, DXCLUSTER_PORT, DXCLUSTER_CALLSIGN, DXCLUSTER_MAX_AGE_MIN, DXCLUSTER_COMMANDS) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                config.login_user.trim(),
+                config.login_password,
+                config.dxcluster_enabled,
+                config.dxcluster_host.trim(),
+                config.dxcluster_port,
+                config.dxcluster_callsign.trim().to_uppercase(),
+                max_age_min,
+                config.dxcluster_commands
+            ],
         )?;
     }
     Ok(())
@@ -828,7 +929,13 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS config (
             version INTEGER NOT NULL,
             LOGIN_USER TEXT NOT NULL DEFAULT '',
-            LOGIN_PASSWORD TEXT NOT NULL DEFAULT ''
+            LOGIN_PASSWORD TEXT NOT NULL DEFAULT '',
+            DXCLUSTER_ENABLED INTEGER NOT NULL DEFAULT 0 CHECK (DXCLUSTER_ENABLED IN (0, 1)),
+            DXCLUSTER_HOST TEXT NOT NULL DEFAULT '',
+            DXCLUSTER_PORT INTEGER NOT NULL DEFAULT 23 CHECK (DXCLUSTER_PORT >= 0 AND DXCLUSTER_PORT <= 65535),
+            DXCLUSTER_CALLSIGN TEXT NOT NULL DEFAULT '',
+            DXCLUSTER_MAX_AGE_MIN INTEGER NOT NULL DEFAULT 60 CHECK (DXCLUSTER_MAX_AGE_MIN >= 15 AND DXCLUSTER_MAX_AGE_MIN <= 360),
+            DXCLUSTER_COMMANDS TEXT NOT NULL DEFAULT ''
         ) STRICT;
 
         CREATE TABLE IF NOT EXISTS logs (
@@ -1204,6 +1311,42 @@ mod tests {
             })
             .await
             .expect("test log is created")
+    }
+
+    #[tokio::test]
+    async fn dxcluster_config_defaults_and_updates() {
+        let database = test_database();
+
+        let defaults = database
+            .dxcluster_config()
+            .await
+            .expect("dxcluster config loads");
+        assert!(!defaults.enabled);
+        assert_eq!(defaults.port, DEFAULT_DXCLUSTER_PORT);
+        assert_eq!(defaults.max_age_min, DEFAULT_DXCLUSTER_MAX_AGE_MIN);
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "greg".to_string(),
+                login_password: "hash".to_string(),
+                dxcluster_enabled: true,
+                dxcluster_host: "cluster.example.test".to_string(),
+                dxcluster_port: 7300,
+                dxcluster_callsign: "n0call".to_string(),
+                dxcluster_max_age_min: 120,
+                dxcluster_commands: "set/page 0\nsh/dx".to_string(),
+            })
+            .await
+            .expect("config updates");
+
+        let config = database.config_view().await.expect("config view loads");
+        assert!(config.login_enabled);
+        assert!(config.dxcluster_enabled);
+        assert_eq!(config.dxcluster_host, "cluster.example.test");
+        assert_eq!(config.dxcluster_port, 7300);
+        assert_eq!(config.dxcluster_callsign, "N0CALL");
+        assert_eq!(config.dxcluster_max_age_min, 120);
+        assert_eq!(config.dxcluster_commands, "set/page 0\nsh/dx");
     }
 
     fn tcp_radio() -> NewRadio {

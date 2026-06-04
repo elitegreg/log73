@@ -7,6 +7,7 @@ mod contest_rules;
 mod cw;
 mod db;
 mod dxcc;
+mod dxcluster;
 mod log_cache;
 mod radio;
 mod radio_manager;
@@ -29,6 +30,7 @@ use axum::{
 use clap::Parser;
 use contest_rules::{ContestRules, ContestRulesStore};
 use db::{Contact, Database, NewLog, NewRadio, UpdateLog};
+use dxcluster::{DxClusterEvent, DxClusterManager};
 use futures_util::{SinkExt, StreamExt};
 use log_cache::LogCache;
 use radio::{ClientMessage, RadioCommand, ServerMessage};
@@ -58,6 +60,7 @@ struct AppState {
     incremental_scoring: IncrementalScoreTracker,
     supercheckpartial: SuperCheckPartial,
     dxcc: std::sync::Arc<dxcc::DxccDatabase>,
+    dxcluster: DxClusterManager,
 }
 
 const MAX_CLIENT_ERROR_TEXT_LENGTH: usize = 4096;
@@ -249,6 +252,11 @@ async fn main() {
         "loaded DXCC country data"
     );
     let db = Database::open(&paths.database_path).expect("failed to open log73 database");
+    let dxcluster = DxClusterManager::new();
+    match db.dxcluster_config().await {
+        Ok(config) => dxcluster.apply_config(config).await,
+        Err(error) => warn!(%error, "failed to load dxcluster config; listener task not started"),
+    }
     let radio_manager = RadioManager::new(db.clone());
     let scoring_modules = ScoringModules::new();
     let incremental_scoring = IncrementalScoreTracker::new();
@@ -264,6 +272,7 @@ async fn main() {
         incremental_scoring,
         supercheckpartial,
         dxcc: std::sync::Arc::new(dxcc),
+        dxcluster,
     };
 
     let request_trace_layer = TraceLayer::new_for_http()
@@ -301,6 +310,10 @@ async fn main() {
         .route("/client-errors", post(report_client_error))
         .route("/supercheckpartial", get(supercheckpartial_matches))
         .route("/dxcc", get(dxcc_data))
+        .route(
+            "/dxcluster/spots",
+            get(dxcluster_spots).delete(clear_dxcluster_spots),
+        )
         .route("/logs", get(logs).post(create_log))
         .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
         .route("/logs/{id}/qso-count", get(log_qso_count))
@@ -460,6 +473,8 @@ async fn handle_socket(
     let mut radio_updates = radio_handle.subscribe();
     let mut log_events = app_state.log_events.subscribe();
     let (direct_tx, mut direct_rx) = mpsc::channel::<ServerMessage>(32);
+    let mut dxcluster_enabled = false;
+    let mut dxcluster_subscription: Option<tokio::task::JoinHandle<()>> = None;
     let outbound_session_id = session_id.clone();
     let outbound = tokio::spawn(async move {
         loop {
@@ -519,6 +534,27 @@ async fn handle_socket(
                         radio_id, "failed to queue websocket pong; session closed"
                     );
                     break;
+                }
+            }
+            Ok(ClientMessage::SetDxClusterEnabled { enabled }) => {
+                debug!(
+                    session_id,
+                    radio_id, enabled, "websocket set_dxcluster_enabled command received"
+                );
+                if dxcluster_enabled == enabled {
+                    continue;
+                }
+                dxcluster_enabled = enabled;
+                if let Some(subscription) = dxcluster_subscription.take() {
+                    subscription.abort();
+                }
+                if enabled {
+                    dxcluster_subscription = Some(spawn_dxcluster_websocket_subscription(
+                        app_state.dxcluster.clone(),
+                        direct_tx.clone(),
+                        session_id.clone(),
+                        radio_id,
+                    ));
                 }
             }
             Ok(ClientMessage::SetFrequency { frequency_hz }) => {
@@ -709,9 +745,41 @@ async fn handle_socket(
         }
     }
 
+    if let Some(subscription) = dxcluster_subscription {
+        subscription.abort();
+    }
     outbound.abort();
     app_state.radio_manager.release(radio_id).await;
     info!(session_id, radio_id, "backend websocket disconnected");
+}
+
+fn spawn_dxcluster_websocket_subscription(
+    dxcluster: DxClusterManager,
+    direct_tx: mpsc::Sender<ServerMessage>,
+    session_id: String,
+    radio_id: i64,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut events = dxcluster.subscribe();
+        loop {
+            let message = match events.recv().await {
+                Ok(DxClusterEvent::SpotAdded(spot)) => ServerMessage::DxClusterSpot { spot },
+                Ok(DxClusterEvent::SpotDeleted { id }) => {
+                    ServerMessage::DxClusterSpotDeleted { id }
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    warn!(session_id = %session_id, radio_id, skipped, "websocket dxcluster subscription lagged");
+                    continue;
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            };
+
+            if direct_tx.send(message).await.is_err() {
+                debug!(session_id = %session_id, radio_id, "websocket dxcluster subscription closed");
+                break;
+            }
+        }
+    })
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -747,8 +815,17 @@ async fn dxcc_data(State(app_state): State<AppState>) -> Json<serde_json::Value>
     Json(serde_json::json!({ "ok": true, "dxcc": app_state.dxcc.as_ref() }))
 }
 
+async fn dxcluster_spots(State(app_state): State<AppState>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "ok": true, "spots": app_state.dxcluster.spots().await }))
+}
+
+async fn clear_dxcluster_spots(State(app_state): State<AppState>) -> Json<serde_json::Value> {
+    let deleted_ids = app_state.dxcluster.clear_spots().await;
+    Json(serde_json::json!({ "ok": true, "deleted_ids": deleted_ids }))
+}
+
 async fn config(State(app_state): State<AppState>) -> Json<serde_json::Value> {
-    match app_state.db.auth_config_view().await {
+    match app_state.db.config_view().await {
         Ok(config) => Json(serde_json::json!({ "ok": true, "config": config })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -759,6 +836,26 @@ struct UpdateConfigPayload {
     login_user: String,
     login_password: String,
     login_password_confirm: String,
+    #[serde(default)]
+    dxcluster_enabled: bool,
+    #[serde(default)]
+    dxcluster_host: String,
+    #[serde(default = "default_dxcluster_port")]
+    dxcluster_port: u16,
+    #[serde(default)]
+    dxcluster_callsign: String,
+    #[serde(default = "default_dxcluster_max_age_min")]
+    dxcluster_max_age_min: u16,
+    #[serde(default)]
+    dxcluster_commands: String,
+}
+
+fn default_dxcluster_port() -> u16 {
+    db::DEFAULT_DXCLUSTER_PORT
+}
+
+fn default_dxcluster_max_age_min() -> u16 {
+    db::DEFAULT_DXCLUSTER_MAX_AGE_MIN
 }
 
 #[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
@@ -864,6 +961,15 @@ async fn update_config(
     ) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
+    if let Err(error) = validation::validate_dxcluster_config(
+        &payload.dxcluster_host,
+        payload.dxcluster_port,
+        &payload.dxcluster_callsign,
+        payload.dxcluster_max_age_min,
+        &payload.dxcluster_commands,
+    ) {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
 
     let login_password = match auth::hash_password(&payload.login_password) {
         Ok(login_password) => login_password,
@@ -872,16 +978,28 @@ async fn update_config(
 
     match app_state
         .db
-        .update_auth_config(db::UpdateAuthConfig {
+        .update_config(db::UpdateConfig {
             login_user: payload.login_user,
             login_password,
+            dxcluster_enabled: payload.dxcluster_enabled,
+            dxcluster_host: payload.dxcluster_host,
+            dxcluster_port: payload.dxcluster_port,
+            dxcluster_callsign: payload.dxcluster_callsign,
+            dxcluster_max_age_min: payload.dxcluster_max_age_min,
+            dxcluster_commands: payload.dxcluster_commands,
         })
         .await
     {
-        Ok(()) => match app_state.db.auth_config_view().await {
-            Ok(config) => Json(serde_json::json!({ "ok": true, "config": config })),
-            Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-        },
+        Ok(()) => {
+            match app_state.db.dxcluster_config().await {
+                Ok(config) => app_state.dxcluster.apply_config(config).await,
+                Err(error) => warn!(%error, "failed to reload dxcluster config after update"),
+            }
+            match app_state.db.config_view().await {
+                Ok(config) => Json(serde_json::json!({ "ok": true, "config": config })),
+                Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+            }
+        }
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
 }

@@ -1,5 +1,6 @@
 use crate::bands::band_for_frequency;
 use crate::db::RadioConfig;
+use crate::dxcluster::DxClusterSpot;
 use radio_cat_rs::{Frequency, Mode};
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +28,14 @@ pub enum ServerMessage {
     },
     MessageSent {
         request_id: String,
+    },
+    #[serde(rename = "dxcluster_spot")]
+    DxClusterSpot {
+        spot: DxClusterSpot,
+    },
+    #[serde(rename = "dxcluster_spot_deleted")]
+    DxClusterSpotDeleted {
+        id: u64,
     },
 }
 
@@ -66,6 +75,10 @@ pub enum ClientMessage {
     StopCw,
     SetWpm {
         wpm: u8,
+    },
+    #[serde(rename = "set_dxcluster_enabled")]
+    SetDxClusterEnabled {
+        enabled: bool,
     },
 }
 
@@ -170,6 +183,41 @@ mod tests {
     }
 
     #[test]
+    fn serializes_dxcluster_spot_server_message() {
+        let message = ServerMessage::DxClusterSpot {
+            spot: DxClusterSpot {
+                id: 7,
+                received_at: 1_700_000_000,
+                call_de: "N0CALL".to_string(),
+                call_dx: "K1ABC".to_string(),
+                frequency_hz: 14_074_000,
+                utc: 1234,
+                loc: None,
+                comment: Some("test".to_string()),
+            },
+        };
+        let json = serde_json::to_value(message).expect("dxcluster spot should serialize");
+
+        assert_eq!(json["type"], "dxcluster_spot");
+        assert_eq!(json["spot"]["id"], 7);
+        assert_eq!(json["spot"]["call_dx"], "K1ABC");
+    }
+
+    #[test]
+    fn serializes_dxcluster_spot_deleted_server_message() {
+        let message = ServerMessage::DxClusterSpotDeleted { id: 7 };
+        let json = serde_json::to_value(message).expect("dxcluster delete should serialize");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "dxcluster_spot_deleted",
+                "id": 7
+            })
+        );
+    }
+
+    #[test]
     fn deserializes_ping_client_message() {
         let message: ClientMessage = serde_json::from_value(serde_json::json!({
             "type": "ping",
@@ -179,6 +227,20 @@ mod tests {
 
         match message {
             ClientMessage::Ping { request_id } => assert_eq!(request_id, "ping-123"),
+            other => panic!("unexpected client message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deserializes_set_dxcluster_enabled_client_message() {
+        let message: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "set_dxcluster_enabled",
+            "enabled": true
+        }))
+        .expect("set_dxcluster_enabled should deserialize");
+
+        match message {
+            ClientMessage::SetDxClusterEnabled { enabled } => assert!(enabled),
             other => panic!("unexpected client message: {other:?}"),
         }
     }

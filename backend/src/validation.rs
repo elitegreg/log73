@@ -1,7 +1,7 @@
 use crate::bands::{USA_AMATEUR_BANDS, band_for_frequency};
 use crate::contest_rules::{ContestParam, ContestRules, ContestRulesStore, ExchangeField};
 use crate::cw;
-use crate::db::{Contact, Database, NewLog, NewRadio, UpdateLog};
+use crate::db::{self, Contact, Database, NewLog, NewRadio, UpdateLog};
 use radio_cat_rs::{Frequency, RadioKind};
 use regex::Regex;
 use serde_json::Value;
@@ -17,6 +17,9 @@ const MIN_RADIO_SECONDS: f64 = 0.01;
 const MAX_RADIO_SECONDS: f64 = 3600.0;
 const MAX_LOGIN_USER_LEN: usize = 64;
 const MAX_LOGIN_PASSWORD_LEN: usize = 256;
+const MAX_DXCLUSTER_HOST_LEN: usize = 255;
+const MAX_DXCLUSTER_CALLSIGN_LEN: usize = 32;
+const MAX_DXCLUSTER_COMMANDS_LEN: usize = 16_384;
 const MAX_CONTACTS_PER_UPLOAD: usize = 100;
 const MAX_CONTACT_FIELDS: usize = 100;
 const MAX_CONTACT_KEY_LEN: usize = 64;
@@ -228,6 +231,41 @@ pub fn validate_auth_config(
 
     if login_password.chars().any(char::is_control) {
         return Err("password cannot contain control characters".to_string());
+    }
+
+    Ok(())
+}
+
+pub fn validate_dxcluster_config(
+    host: &str,
+    _port: u16,
+    callsign: &str,
+    max_age_min: u16,
+    commands: &str,
+) -> Result<(), String> {
+    validate_optional_plain_text("DX cluster host", host, MAX_DXCLUSTER_HOST_LEN)?;
+    validate_host("DX cluster host", host)?;
+    validate_optional_plain_text("DX cluster callsign", callsign, MAX_DXCLUSTER_CALLSIGN_LEN)?;
+    if callsign.trim().chars().any(char::is_whitespace) {
+        return Err("DX cluster callsign cannot contain whitespace".to_string());
+    }
+    if !(db::MIN_DXCLUSTER_MAX_AGE_MIN..=db::MAX_DXCLUSTER_MAX_AGE_MIN).contains(&max_age_min) {
+        return Err(format!(
+            "DX cluster max age must be between {} and {} minutes",
+            db::MIN_DXCLUSTER_MAX_AGE_MIN,
+            db::MAX_DXCLUSTER_MAX_AGE_MIN
+        ));
+    }
+    if commands.chars().count() > MAX_DXCLUSTER_COMMANDS_LEN {
+        return Err(format!(
+            "DX cluster commands must be at most {MAX_DXCLUSTER_COMMANDS_LEN} characters"
+        ));
+    }
+    if commands
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err("DX cluster commands cannot contain control characters".to_string());
     }
 
     Ok(())
@@ -768,6 +806,17 @@ fn validate_required_text(label: &str, value: &str, max_length: usize) -> Result
     if value.is_empty() {
         return Err(format!("{label} is required"));
     }
+    if value.chars().count() > max_length {
+        return Err(format!("{label} must be at most {max_length} characters"));
+    }
+    if value.chars().any(char::is_control) {
+        return Err(format!("{label} cannot contain control characters"));
+    }
+    Ok(())
+}
+
+fn validate_optional_plain_text(label: &str, value: &str, max_length: usize) -> Result<(), String> {
+    let value = value.trim();
     if value.chars().count() > max_length {
         return Err(format!("{label} must be at most {max_length} characters"));
     }
