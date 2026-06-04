@@ -11,6 +11,7 @@ body.theme-classic-terminal .app-container {
 }
 body.theme-classic-terminal .window,
 body.theme-classic-terminal .log-window,
+body.theme-classic-terminal .band-map-window,
 body.theme-classic-terminal .selection-window,
 body.theme-classic-terminal .form-window {
   border-color: #33ff66;
@@ -19,6 +20,7 @@ body.theme-classic-terminal .form-window {
 }
 body.theme-classic-terminal .title-bar,
 body.theme-classic-terminal .log-title-bar,
+body.theme-classic-terminal .band-map-title-bar,
 body.theme-classic-terminal .radio-controls,
 body.theme-classic-terminal .status-bar,
 body.theme-classic-terminal .log-table th {

@@ -11,10 +11,7 @@ import {
 } from '../domain/contactFields';
 import { dxccLabel, lookupDxcc } from '../domain/dxcc';
 import { dupeAlertText } from '../domain/dupes';
-import {
-  validateCallsign,
-  validateExchangeField,
-} from '../domain/validation';
+import { validateCallsign, validateExchangeField } from '../domain/validation';
 import { dxcc, supercheckpartial } from '../lib/api';
 import {
   CW_WPM_STORAGE_KEY,
@@ -71,6 +68,8 @@ function MainWindow({
   messageSentEvent,
   sessionId,
   logId,
+  bandMapEnabled,
+  onSetBandMapEnabled,
   onSetRadioFrequency,
   onSetRadioMode,
   onSendMessage,
@@ -238,7 +237,7 @@ function MainWindow({
     dxcc()
       .then((result) => {
         if (!cancelled) {
-          setDxccData(result?.ok ? result.dxcc ?? null : null);
+          setDxccData(result?.ok ? (result.dxcc ?? null) : null);
         }
       })
       .catch(() => {
@@ -267,11 +266,7 @@ function MainWindow({
     setSupercheckpartialMatches(
       callsignCompletionMatches(supercheckpartialCallsigns, query),
     );
-  }, [
-    activeCompletionField,
-    debouncedCallSign,
-    supercheckpartialCallsigns,
-  ]);
+  }, [activeCompletionField, debouncedCallSign, supercheckpartialCallsigns]);
 
   const messageModeKey = operatingMode === 'Run' ? 'run' : 's&p';
   const activeMessageLabels =
@@ -379,9 +374,9 @@ function MainWindow({
       activeMessageTimeoutsRef.current.delete(requestId);
     }
     setActiveMessageKeys((current) => {
-      const stillActive = [...activeMessageRequestsRef.current.values()].includes(
-        key,
-      );
+      const stillActive = [
+        ...activeMessageRequestsRef.current.values(),
+      ].includes(key);
       if (stillActive) return current;
       const next = new Set(current);
       next.delete(key);
@@ -399,7 +394,11 @@ function MainWindow({
   }
 
   function performMessageAction(action) {
-    switch (String(action ?? '').trim().toLowerCase()) {
+    switch (
+      String(action ?? '')
+        .trim()
+        .toLowerCase()
+    ) {
       case 'clear':
         clearEntryFields();
         return true;
@@ -435,7 +434,8 @@ function MainWindow({
   callSignValueRef.current = callSign;
 
   function sendMessageKey(key) {
-    const shouldRepeat = messageModeKey === 'run' && key === 'F1' && repeatRunF1;
+    const shouldRepeat =
+      messageModeKey === 'run' && key === 'F1' && repeatRunF1;
     stopRepeat();
     const requestId = sendSingleMessageKey(key);
     if (!requestId) return;
@@ -469,7 +469,8 @@ function MainWindow({
   );
 
   useEffect(() => {
-    if (messageSentEvent?.requestId) clearMessageRequest(messageSentEvent.requestId);
+    if (messageSentEvent?.requestId)
+      clearMessageRequest(messageSentEvent.requestId);
     if (
       !repeatActiveRef.current ||
       !messageSentEvent?.requestId ||
@@ -1022,6 +1023,8 @@ function MainWindow({
         cwWpmMin={CW_WPM_MIN}
         cwWpmMax={CW_WPM_MAX}
         handleCwWpmChange={handleCwWpmChange}
+        bandMapEnabled={bandMapEnabled}
+        onSetBandMapEnabled={onSetBandMapEnabled}
         backendSocketStatus={backendSocketStatus}
         catStatus={catStatus}
       />

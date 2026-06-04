@@ -12,6 +12,12 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
   const [loginPassword, setLoginPassword] = useState('');
   const [loginPasswordConfirm, setLoginPasswordConfirm] = useState('');
   const [loginEnabled, setLoginEnabled] = useState(false);
+  const [dxClusterEnabled, setDxClusterEnabled] = useState(false);
+  const [dxClusterHost, setDxClusterHost] = useState('');
+  const [dxClusterPort, setDxClusterPort] = useState('23');
+  const [dxClusterCallsign, setDxClusterCallsign] = useState('');
+  const [dxClusterMaxAgeMin, setDxClusterMaxAgeMin] = useState('60');
+  const [dxClusterCommands, setDxClusterCommands] = useState('');
 
   const notifyOperationalError = useCallback(
     (source, fallback, error, details = {}) => {
@@ -34,6 +40,14 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
           throw new Error(result.error ?? 'Unable to load config');
         setLoginUser(result.config.login_user ?? '');
         setLoginEnabled(Boolean(result.config.login_enabled));
+        setDxClusterEnabled(Boolean(result.config.dxcluster_enabled));
+        setDxClusterHost(result.config.dxcluster_host ?? '');
+        setDxClusterPort(String(result.config.dxcluster_port ?? 23));
+        setDxClusterCallsign(result.config.dxcluster_callsign ?? '');
+        setDxClusterMaxAgeMin(
+          String(result.config.dxcluster_max_age_min ?? 60),
+        );
+        setDxClusterCommands(result.config.dxcluster_commands ?? '');
       })
       .catch((error) =>
         notifyOperationalError(
@@ -59,6 +73,12 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
         login_user: loginUser,
         login_password: loginPassword,
         login_password_confirm: loginPasswordConfirm,
+        dxcluster_enabled: dxClusterEnabled,
+        dxcluster_host: dxClusterHost,
+        dxcluster_port: Number.parseInt(dxClusterPort, 10) || 23,
+        dxcluster_callsign: dxClusterCallsign,
+        dxcluster_max_age_min: Number.parseInt(dxClusterMaxAgeMin, 10) || 60,
+        dxcluster_commands: dxClusterCommands,
       }),
     });
 
@@ -76,7 +96,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
 
   return (
     <form className="form-window" onSubmit={saveConfig}>
-      <div className="title-bar">Log73 - Configure Login</div>
+      <div className="title-bar">Log73 - Configure</div>
       <div
         className="selection-actions"
         style={{ justifyContent: 'space-between', padding: '8px 12px 0' }}
@@ -132,6 +152,64 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
           onChange={(event) => setLoginPasswordConfirm(event.target.value)}
         />
       </label>
+      <div
+        className="selection-actions"
+        style={{ justifyContent: 'flex-start', padding: '0 12px' }}
+      >
+        <span>Leave both password fields blank to disable login.</span>
+      </div>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={dxClusterEnabled}
+          onChange={(event) => setDxClusterEnabled(event.target.checked)}
+        />
+        Enable DxCluster
+      </label>
+      <label>
+        DxCluster Host
+        <input
+          value={dxClusterHost}
+          onChange={(event) => setDxClusterHost(event.target.value)}
+        />
+      </label>
+      <label>
+        DxCluster Port
+        <input
+          type="number"
+          min="0"
+          max="65535"
+          value={dxClusterPort}
+          onChange={(event) => setDxClusterPort(event.target.value)}
+        />
+      </label>
+      <label>
+        DxCluster Callsign
+        <input
+          value={dxClusterCallsign}
+          onChange={(event) =>
+            setDxClusterCallsign(event.target.value.toUpperCase())
+          }
+        />
+      </label>
+      <label>
+        DxCluster Max Age (minutes)
+        <input
+          type="number"
+          min="15"
+          max="360"
+          value={dxClusterMaxAgeMin}
+          onChange={(event) => setDxClusterMaxAgeMin(event.target.value)}
+        />
+      </label>
+      <label>
+        DxCluster Commands
+        <textarea
+          value={dxClusterCommands}
+          onChange={(event) => setDxClusterCommands(event.target.value)}
+          placeholder="One optional command per line"
+        />
+      </label>
       <div className="selection-actions">
         <button className="cmd-btn primary" type="submit">
           Save
@@ -143,12 +221,6 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
         >
           Cancel
         </button>
-      </div>
-      <div
-        className="selection-actions"
-        style={{ justifyContent: 'flex-start', padding: '0 12px 10px' }}
-      >
-        <span>Leave both password fields blank to disable login.</span>
       </div>
     </form>
   );

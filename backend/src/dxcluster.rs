@@ -1,6 +1,6 @@
 use crate::db::DxClusterConfig;
 use dxcllistener::Listener;
-use dxclparser::{DX, ParseError, Spot};
+use dxclparser::{DX, ParseError, RBN, Spot};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
@@ -14,15 +14,27 @@ const DXCLUSTER_PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 const DXCLUSTER_EVENT_BUFFER: usize = 512;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DxClusterRbnSpot {
+    pub mode: String,
+    pub db: i16,
+    pub speed: Option<u16>,
+    pub speed_unit: Option<String>,
+    pub info: String,
+    pub loc: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DxClusterSpot {
     pub id: u64,
     pub received_at: u64,
+    pub source: String,
     pub call_de: String,
     pub call_dx: String,
     pub frequency_hz: u64,
     pub utc: u16,
     pub loc: Option<String>,
     pub comment: Option<String>,
+    pub rbn: Option<DxClusterRbnSpot>,
 }
 
 #[derive(Debug, Clone)]
@@ -42,11 +54,18 @@ struct DxClusterManagerInner {
     task: Mutex<Option<JoinHandle<()>>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct DxClusterDedupeKey {
+    frequency_tenth_khz: u64,
+    call_dx: String,
+}
+
 #[derive(Default)]
 struct DxClusterSpotStore {
     next_id: u64,
     ids_by_time: VecDeque<u64>,
     ids_by_callsign: HashMap<String, BTreeSet<u64>>,
+    ids_by_dedupe_key: HashMap<DxClusterDedupeKey, u64>,
     spots_by_id: HashMap<u64, DxClusterSpot>,
 }
 
@@ -106,7 +125,9 @@ impl DxClusterManager {
         };
 
         self.broadcast_deletes(&deleted_ids);
-        let _ = self.inner.events.send(DxClusterEvent::SpotAdded(spot));
+        if let Some(spot) = spot {
+            let _ = self.inner.events.send(DxClusterEvent::SpotAdded(spot));
+        }
     }
 
     async fn prune_old_spots(&self, max_age: Duration) {
@@ -131,18 +152,46 @@ impl Default for DxClusterManager {
 }
 
 impl DxClusterSpotStore {
-    fn add(&mut self, dx: DX) -> DxClusterSpot {
+    fn add(&mut self, dx: DX) -> Option<DxClusterSpot> {
+        let now = unix_timestamp_secs();
+        let call_dx = dx.call_dx.to_uppercase();
+        let rbn = parsed_rbn(&dx);
+        let source = if rbn.is_some() { "rbn" } else { "dx" }.to_string();
+        let new_dedupe_key = dedupe_key(dx.freq, &call_dx);
+
+        if let Some(id) = self.find_duplicate_id(&new_dedupe_key) {
+            if let Some(spot) = self.spots_by_id.get_mut(&id) {
+                let old_dedupe_key = dedupe_key(spot.frequency_hz, &spot.call_dx);
+                spot.received_at = now;
+                spot.source = source;
+                spot.call_de = dx.call_de;
+                spot.call_dx = call_dx;
+                spot.frequency_hz = dx.freq;
+                spot.utc = dx.utc;
+                spot.loc = dx.loc;
+                spot.comment = dx.comment;
+                spot.rbn = rbn;
+                self.ids_by_time.retain(|current_id| *current_id != id);
+                self.ids_by_time.push_back(id);
+                self.ids_by_dedupe_key.remove(&old_dedupe_key);
+                self.ids_by_dedupe_key.insert(new_dedupe_key, id);
+                return None;
+            }
+        }
+
         self.next_id = self.next_id.saturating_add(1).max(1);
         let id = self.next_id;
         let spot = DxClusterSpot {
             id,
-            received_at: unix_timestamp_secs(),
+            received_at: now,
+            source,
             call_de: dx.call_de,
-            call_dx: dx.call_dx.to_uppercase(),
+            call_dx,
             frequency_hz: dx.freq,
             utc: dx.utc,
             loc: dx.loc,
             comment: dx.comment,
+            rbn,
         };
 
         self.ids_by_time.push_back(id);
@@ -150,8 +199,35 @@ impl DxClusterSpotStore {
             .entry(spot.call_dx.clone())
             .or_default()
             .insert(id);
+        self.ids_by_dedupe_key.insert(new_dedupe_key, id);
         self.spots_by_id.insert(id, spot.clone());
-        spot
+        Some(spot)
+    }
+
+    fn find_duplicate_id(&mut self, key: &DxClusterDedupeKey) -> Option<u64> {
+        let mut candidate_keys = Vec::with_capacity(3);
+        candidate_keys.push(key.clone());
+        if let Some(previous) = key.frequency_tenth_khz.checked_sub(1) {
+            candidate_keys.push(DxClusterDedupeKey {
+                frequency_tenth_khz: previous,
+                call_dx: key.call_dx.clone(),
+            });
+        }
+        candidate_keys.push(DxClusterDedupeKey {
+            frequency_tenth_khz: key.frequency_tenth_khz.saturating_add(1),
+            call_dx: key.call_dx.clone(),
+        });
+
+        for candidate_key in candidate_keys {
+            if let Some(id) = self.ids_by_dedupe_key.get(&candidate_key).copied() {
+                if self.spots_by_id.contains_key(&id) {
+                    return Some(id);
+                }
+                self.ids_by_dedupe_key.remove(&candidate_key);
+            }
+        }
+
+        None
     }
 
     fn spots(&self) -> Vec<DxClusterSpot> {
@@ -184,6 +260,7 @@ impl DxClusterSpotStore {
         let deleted_ids: Vec<u64> = self.ids_by_time.drain(..).collect();
         self.spots_by_id.clear();
         self.ids_by_callsign.clear();
+        self.ids_by_dedupe_key.clear();
         deleted_ids
     }
 
@@ -198,8 +275,35 @@ impl DxClusterSpotStore {
                 self.ids_by_callsign.remove(&spot.call_dx);
             }
         }
+        self.ids_by_dedupe_key
+            .remove(&dedupe_key(spot.frequency_hz, &spot.call_dx));
 
         deleted_ids.push(id);
+    }
+}
+
+fn dedupe_key(frequency_hz: u64, call_dx: &str) -> DxClusterDedupeKey {
+    DxClusterDedupeKey {
+        frequency_tenth_khz: (frequency_hz + 50) / 100,
+        call_dx: call_dx.to_uppercase(),
+    }
+}
+
+fn parsed_rbn(dx: &DX) -> Option<DxClusterRbnSpot> {
+    dx.comment
+        .as_deref()
+        .and_then(|comment| dxclparser::parse_rbn(comment).ok())
+        .map(rbn_spot)
+}
+
+fn rbn_spot(rbn: RBN) -> DxClusterRbnSpot {
+    DxClusterRbnSpot {
+        mode: rbn.mode,
+        db: rbn.db,
+        speed: rbn.speed,
+        speed_unit: rbn.speed_unit,
+        info: rbn.info,
+        loc: rbn.loc,
     }
 }
 
@@ -296,14 +400,148 @@ mod tests {
     use super::*;
 
     fn dx(call_dx: &str) -> DX {
+        dx_with_freq(call_dx, 14_074_000)
+    }
+
+    fn dx_with_freq(call_dx: &str, freq: u64) -> DX {
         DX {
             call_de: "N0CALL".to_string(),
             call_dx: call_dx.to_string(),
-            freq: 14_074_000,
+            freq,
             utc: 1234,
             loc: Some("EM73".to_string()),
             comment: Some("test".to_string()),
         }
+    }
+
+    #[tokio::test]
+    async fn deduplicates_same_callsign_and_tenth_khz_without_broadcast() {
+        let manager = DxClusterManager::new();
+        manager
+            .add_dx_spot(dx_with_freq("k1abc", 14_074_241), Duration::from_secs(60))
+            .await;
+        let mut events = manager.subscribe();
+        let mut duplicate = dx_with_freq("K1ABC", 14_074_249);
+        duplicate.call_de = "W9XYZ".to_string();
+        duplicate.comment = Some("updated".to_string());
+
+        manager
+            .add_dx_spot(duplicate, Duration::from_secs(60))
+            .await;
+
+        let spots = manager.spots().await;
+        assert_eq!(spots.len(), 1);
+        assert_eq!(spots[0].call_de, "W9XYZ");
+        assert_eq!(spots[0].comment.as_deref(), Some("updated"));
+        assert!(matches!(
+            events.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn deduplicates_adjacent_tenth_khz_for_same_callsign() {
+        let manager = DxClusterManager::new();
+        manager
+            .add_dx_spot(dx_with_freq("K1ABC", 14_074_000), Duration::from_secs(60))
+            .await;
+        let mut adjacent = dx_with_freq("K1ABC", 14_074_100);
+        adjacent.comment = Some("adjacent".to_string());
+
+        manager.add_dx_spot(adjacent, Duration::from_secs(60)).await;
+
+        let spots = manager.spots().await;
+        assert_eq!(spots.len(), 1);
+        assert_eq!(spots[0].frequency_hz, 14_074_100);
+        assert_eq!(spots[0].comment.as_deref(), Some("adjacent"));
+    }
+
+    #[tokio::test]
+    async fn keeps_spots_two_tenths_khz_apart() {
+        let manager = DxClusterManager::new();
+        manager
+            .add_dx_spot(dx_with_freq("K1ABC", 14_074_000), Duration::from_secs(60))
+            .await;
+        manager
+            .add_dx_spot(dx_with_freq("K1ABC", 14_074_200), Duration::from_secs(60))
+            .await;
+
+        assert_eq!(manager.spots().await.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn detects_rbn_comment_metadata() {
+        let manager = DxClusterManager::new();
+        let mut rbn = dx_with_freq("K1ABC", 14_074_241);
+        rbn.comment = Some("CW 12 dB 24 WPM CQ".to_string());
+
+        manager.add_dx_spot(rbn, Duration::from_secs(60)).await;
+
+        let spots = manager.spots().await;
+        assert_eq!(spots.len(), 1);
+        assert_eq!(spots[0].source, "rbn");
+        let rbn = spots[0].rbn.as_ref().expect("rbn metadata should exist");
+        assert_eq!(rbn.mode, "CW");
+        assert_eq!(rbn.db, 12);
+        assert_eq!(rbn.speed, Some(24));
+        assert_eq!(rbn.speed_unit.as_deref(), Some("WPM"));
+        assert_eq!(rbn.info, "CQ");
+    }
+
+    #[tokio::test]
+    async fn rbn_and_dx_same_callsign_and_tenth_khz_dedupe_to_latest() {
+        let manager = DxClusterManager::new();
+        let mut rbn = dx_with_freq("K1ABC", 14_074_241);
+        rbn.comment = Some("CW 12 dB 24 WPM CQ".to_string());
+        manager.add_dx_spot(rbn, Duration::from_secs(60)).await;
+        let mut events = manager.subscribe();
+        let mut dx = dx_with_freq("K1ABC", 14_074_249);
+        dx.comment = Some("normal spot".to_string());
+
+        manager.add_dx_spot(dx, Duration::from_secs(60)).await;
+
+        let spots = manager.spots().await;
+        assert_eq!(spots.len(), 1);
+        assert_eq!(spots[0].source, "dx");
+        assert!(spots[0].rbn.is_none());
+        assert_eq!(spots[0].comment.as_deref(), Some("normal spot"));
+        assert!(matches!(
+            events.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    #[tokio::test]
+    async fn dx_and_rbn_same_callsign_and_tenth_khz_dedupe_to_latest_rbn() {
+        let manager = DxClusterManager::new();
+        manager
+            .add_dx_spot(dx_with_freq("K1ABC", 14_074_241), Duration::from_secs(60))
+            .await;
+        let mut rbn = dx_with_freq("K1ABC", 14_074_249);
+        rbn.comment = Some("FT8 -7 dB EM73 CQ".to_string());
+
+        manager.add_dx_spot(rbn, Duration::from_secs(60)).await;
+
+        let spots = manager.spots().await;
+        assert_eq!(spots.len(), 1);
+        assert_eq!(spots[0].source, "rbn");
+        assert_eq!(
+            spots[0].rbn.as_ref().map(|rbn| rbn.mode.as_str()),
+            Some("FT8")
+        );
+    }
+
+    #[tokio::test]
+    async fn permits_same_tenth_khz_for_different_callsigns() {
+        let manager = DxClusterManager::new();
+        manager
+            .add_dx_spot(dx_with_freq("K1ABC", 14_074_241), Duration::from_secs(60))
+            .await;
+        manager
+            .add_dx_spot(dx_with_freq("N5DEF", 14_074_249), Duration::from_secs(60))
+            .await;
+
+        assert_eq!(manager.spots().await.len(), 2);
     }
 
     #[tokio::test]

@@ -10,6 +10,7 @@ body.theme-default .app-container {
 }
 body.theme-default .window,
 body.theme-default .log-window,
+body.theme-default .band-map-window,
 body.theme-default .selection-window,
 body.theme-default .form-window {
   border-color: #202020;
@@ -17,7 +18,8 @@ body.theme-default .form-window {
   box-shadow: 0 0 8px rgba(0, 0, 0, 0.55);
 }
 body.theme-default .title-bar,
-body.theme-default .log-title-bar {
+body.theme-default .log-title-bar,
+body.theme-default .band-map-title-bar {
   background-color: #003399;
   color: #ffffff;
 }
@@ -80,10 +82,7 @@ body.theme-default .log-table tbody tr.uncommitted-contact {
 body.theme-default .log-table tbody tr.selected-contact,
 body.theme-default .log-table tbody tr.selected-contact:nth-child(odd),
 body.theme-default .log-table tbody tr.selected-contact:nth-child(even),
-body.theme-default
-  .log-table
-  tbody
-  tr.selected-contact.uncommitted-contact {
+body.theme-default .log-table tbody tr.selected-contact.uncommitted-contact {
   background-color: #004fe0;
 }
 body.theme-default .log-table td {

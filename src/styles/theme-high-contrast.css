@@ -10,6 +10,7 @@ body.theme-high-contrast .app-container {
 }
 body.theme-high-contrast .window,
 body.theme-high-contrast .log-window,
+body.theme-high-contrast .band-map-window,
 body.theme-high-contrast .selection-window,
 body.theme-high-contrast .form-window {
   border: 2px solid #ffffff;
@@ -17,7 +18,8 @@ body.theme-high-contrast .form-window {
   box-shadow: none;
 }
 body.theme-high-contrast .title-bar,
-body.theme-high-contrast .log-title-bar {
+body.theme-high-contrast .log-title-bar,
+body.theme-high-contrast .band-map-title-bar {
   background-color: #000000;
   color: #ffffff;
   border-bottom: 2px solid #ffffff;

@@ -7,11 +7,13 @@ import React, {
   useState,
 } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { apiJson, websocketUrl } from '../lib/api';
+import { apiJson, dxclusterSpots, websocketUrl } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
+import BandMapWindow from '../logger/BandMapWindow';
 import LogWindow from '../logger/LogWindow';
 import MainWindow from '../logger/MainWindow';
+import { BAND_MAP_ENABLED_STORAGE_KEY } from '../logger/mainWindowHelpers';
 import {
   BACKEND_WS_IDLE_PING_DELAY_MS,
   BACKEND_WS_INITIAL_RECONNECT_DELAY_MS,
@@ -32,6 +34,11 @@ import {
   markContactFailed,
   contactIdentifier,
 } from './loggerScreenHelpers';
+import {
+  addBandMapSpot,
+  createBandMapSpotStore,
+  removeBandMapSpot,
+} from '../domain/bandMap';
 
 let promptedOperatorCallsign;
 const SOCKET_READY_STATE_LABELS = ['connecting', 'open', 'closing', 'closed'];
@@ -113,7 +120,9 @@ function LoggerScreen() {
   const [radio, setRadio] = useState(null);
   const [messageLabels, setMessageLabels] = useState(null);
   const [messageSentEvent, setMessageSentEvent] = useState(null);
-  const [allContacts, setAllContacts] = useState(() => loadLocalContacts(logId));
+  const [allContacts, setAllContacts] = useState(() =>
+    loadLocalContacts(logId),
+  );
   const [debouncedCallsignSearch, setDebouncedCallsignSearch] = useState('');
   const [operatorCallsign, setOperatorCallsign] = useState('');
   const [sessionId] = useState(getSessionId);
@@ -122,6 +131,12 @@ function LoggerScreen() {
     useState('disconnected');
   const [catStatus, setCatStatus] = useState('offline');
   const [scoreSummary, setScoreSummary] = useState(EMPTY_SCORE_SUMMARY);
+  const [bandMapEnabled, setBandMapEnabled] = useState(() => {
+    return localStorage.getItem(BAND_MAP_ENABLED_STORAGE_KEY) === '1';
+  });
+  const [bandMapSpotStore, setBandMapSpotStore] = useState(() =>
+    createBandMapSpotStore(),
+  );
   const [isContextLoading, setIsContextLoading] = useState(true);
   const [contactsLoadState, setContactsLoadState] = useState('initial-loading');
   const [hasMoreContacts, setHasMoreContacts] = useState(false);
@@ -136,6 +151,9 @@ function LoggerScreen() {
   const commitContactErrorNotifiedRef = useRef(false);
   const socketDebugSequenceRef = useRef(0);
   const activeCallsignPrefixRef = useRef('');
+  const bandMapEnabledRef = useRef(false);
+  const loggerMainColumnRef = useRef(null);
+  const [bandMapHeight, setBandMapHeight] = useState(null);
 
   const notifyOperationalError = useCallback(
     (source, fallback, error, details = {}) => {
@@ -151,8 +169,23 @@ function LoggerScreen() {
     [notifyError],
   );
 
+  const sendRadioMessage = useCallback((message) => {
+    const socket = backendSocketRef.current;
+    if (socket?.readyState === WebSocket.OPEN)
+      socket.send(JSON.stringify(message));
+  }, []);
+
+  const sendBandMapSubscription = useCallback(
+    (enabled) => {
+      sendRadioMessage({ type: 'set_dxcluster_enabled', enabled });
+    },
+    [sendRadioMessage],
+  );
+
   const handleDebouncedCallsignChange = useCallback((value) => {
-    const normalizedValue = String(value ?? '').trim().toUpperCase();
+    const normalizedValue = String(value ?? '')
+      .trim()
+      .toUpperCase();
     setDebouncedCallsignSearch(normalizedValue);
   }, []);
 
@@ -170,9 +203,50 @@ function LoggerScreen() {
   }, [numericLogId]);
 
   useEffect(() => {
-    activeCallsignPrefixRef.current =
-      debouncedCallsignSearch.trim().toUpperCase();
+    activeCallsignPrefixRef.current = debouncedCallsignSearch
+      .trim()
+      .toUpperCase();
   }, [debouncedCallsignSearch]);
+
+  useEffect(() => {
+    localStorage.setItem(
+      BAND_MAP_ENABLED_STORAGE_KEY,
+      bandMapEnabled ? '1' : '0',
+    );
+  }, [bandMapEnabled]);
+
+  useEffect(() => {
+    bandMapEnabledRef.current = bandMapEnabled;
+    if (bandMapEnabled) {
+      setBandMapSpotStore(createBandMapSpotStore());
+    }
+    sendBandMapSubscription(bandMapEnabled);
+
+    if (!bandMapEnabled) return undefined;
+
+    let isCancelled = false;
+    dxclusterSpots()
+      .then((result) => {
+        if (isCancelled) return;
+        if (!result.ok)
+          throw new Error(result.error ?? 'Unable to load band map spots');
+        const spots = Array.isArray(result.spots) ? result.spots : [];
+        setBandMapSpotStore((currentStore) =>
+          spots.reduce(addBandMapSpot, currentStore),
+        );
+      })
+      .catch((error) =>
+        notifyOperationalError(
+          'LoggerScreen.loadBandMapSpots',
+          'Unable to load band map spots.',
+          error,
+        ),
+      );
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [bandMapEnabled, notifyOperationalError, sendBandMapSubscription]);
 
   const visibleContacts = useMemo(() => {
     const callsignPrefix = debouncedCallsignSearch.trim().toUpperCase();
@@ -185,6 +259,25 @@ function LoggerScreen() {
       return true;
     });
   }, [allContacts, debouncedCallsignSearch]);
+
+  useEffect(() => {
+    const element = loggerMainColumnRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') {
+      setBandMapHeight(null);
+      return undefined;
+    }
+
+    const updateHeight = () => setBandMapHeight(element.offsetHeight || null);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [
+    bandMapEnabled,
+    isContextLoading,
+    contactsLoadState,
+    visibleContacts.length,
+  ]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -666,6 +759,29 @@ function LoggerScreen() {
           clearedPendingPingRequestId,
         });
         refreshContactsRef.current();
+        if (bandMapEnabledRef.current) {
+          setBandMapSpotStore(createBandMapSpotStore());
+          dxclusterSpots()
+            .then((result) => {
+              if (backendSocketRef.current !== socket) return;
+              if (!result.ok)
+                throw new Error(
+                  result.error ?? 'Unable to load band map spots',
+                );
+              const spots = Array.isArray(result.spots) ? result.spots : [];
+              setBandMapSpotStore((currentStore) =>
+                spots.reduce(addBandMapSpot, currentStore),
+              );
+            })
+            .catch((error) =>
+              notifyOperationalError(
+                'LoggerScreen.reloadBandMapSpots',
+                'Unable to reload band map spots.',
+                error,
+              ),
+            );
+          sendBandMapSubscription(true);
+        }
       });
       socket.addEventListener('message', (event) => {
         if (backendSocketRef.current !== socket) return;
@@ -697,6 +813,14 @@ function LoggerScreen() {
               frequency_hz: message.frequency_hz,
               mode: message.mode,
             });
+          } else if (message.type === 'dxcluster_spot') {
+            setBandMapSpotStore((currentStore) =>
+              addBandMapSpot(currentStore, message.spot),
+            );
+          } else if (message.type === 'dxcluster_spot_deleted') {
+            setBandMapSpotStore((currentStore) =>
+              removeBandMapSpot(currentStore, message.id),
+            );
           } else if (message.type === 'message_sent') {
             setMessageSentEvent({
               requestId: message.request_id,
@@ -804,7 +928,14 @@ function LoggerScreen() {
       setCatStatus('offline');
       socket?.close();
     };
-  }, [sessionId, numericLogId, numericRadioId, isSocketDebugPanelEnabled]);
+  }, [
+    sessionId,
+    numericLogId,
+    numericRadioId,
+    isSocketDebugPanelEnabled,
+    notifyOperationalError,
+    sendBandMapSubscription,
+  ]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -1088,12 +1219,6 @@ function LoggerScreen() {
     commitContact(pendingContact);
   }, [allContacts, numericLogId, notifyOperationalError]);
 
-  function sendRadioMessage(message) {
-    const socket = backendSocketRef.current;
-    if (socket?.readyState === WebSocket.OPEN)
-      socket.send(JSON.stringify(message));
-  }
-
   async function handleRescore() {
     if (isRescoreLoading || contactsLoadState !== 'idle') return;
     setIsRescoreLoading(true);
@@ -1203,58 +1328,76 @@ function LoggerScreen() {
 
   return (
     <div className="app-container">
-      <MainWindow
-        settings={settings}
-        log={log}
-        radio={radio}
-        isContextLoading={isContextLoading}
-        contactsLoadState={contactsLoadState}
-        contacts={visibleContacts}
-        stationCallsign={log?.station_callsign ?? ''}
-        operatorCallsign={operatorCallsign}
-        radioState={radioState}
-        backendSocketStatus={backendSocketStatus}
-        catStatus={catStatus}
-        messageLabels={messageLabels}
-        messageSentEvent={messageSentEvent}
-        sessionId={sessionId}
-        logId={numericLogId}
-        onSetRadioFrequency={(frequencyHz) =>
-          sendRadioMessage({ type: 'set_frequency', frequency_hz: frequencyHz })
-        }
-        onSetRadioMode={(mode) => sendRadioMessage({ type: 'set_mode', mode })}
-        onSendMessage={(payload) =>
-          sendRadioMessage({ type: 'send_message', ...payload })
-        }
-        onSendCwText={(payload) =>
-          sendRadioMessage({ type: 'send_cw_text', ...payload })
-        }
-        onStopCw={() => sendRadioMessage({ type: 'stop_cw' })}
-        onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}
-        onDebouncedCallsignChange={handleDebouncedCallsignChange}
-        onLogContact={(contact) => {
-          setDebouncedCallsignSearch('');
-          setAllContacts((currentContacts) =>
-            sortContacts([...currentContacts, contact]),
-          );
-        }}
-        onRescore={handleRescore}
-        isRescoreLoading={isRescoreLoading}
-        scoreSummary={scoreSummary}
-        onExit={exitLogger}
-      />
-      <LogWindow
-        settings={settings}
-        contacts={visibleContacts}
-        log={log}
-        contactsLoadState={contactsLoadState}
-        radioMode={radioState?.mode ?? 'CW'}
-        onDeleteContacts={deleteContacts}
-        onUpdateContacts={updateContacts}
-        hasMoreContacts={hasMoreContacts}
-        isLoadingMoreContacts={isLoadingMoreContacts}
-        onLoadMoreContacts={loadMoreContacts}
-      />
+      <div className="logger-workspace">
+        <div className="logger-main-column" ref={loggerMainColumnRef}>
+          <MainWindow
+            settings={settings}
+            log={log}
+            radio={radio}
+            isContextLoading={isContextLoading}
+            contactsLoadState={contactsLoadState}
+            contacts={visibleContacts}
+            stationCallsign={log?.station_callsign ?? ''}
+            operatorCallsign={operatorCallsign}
+            radioState={radioState}
+            backendSocketStatus={backendSocketStatus}
+            catStatus={catStatus}
+            messageLabels={messageLabels}
+            messageSentEvent={messageSentEvent}
+            sessionId={sessionId}
+            logId={numericLogId}
+            bandMapEnabled={bandMapEnabled}
+            onSetBandMapEnabled={setBandMapEnabled}
+            onSetRadioFrequency={(frequencyHz) =>
+              sendRadioMessage({
+                type: 'set_frequency',
+                frequency_hz: frequencyHz,
+              })
+            }
+            onSetRadioMode={(mode) =>
+              sendRadioMessage({ type: 'set_mode', mode })
+            }
+            onSendMessage={(payload) =>
+              sendRadioMessage({ type: 'send_message', ...payload })
+            }
+            onSendCwText={(payload) =>
+              sendRadioMessage({ type: 'send_cw_text', ...payload })
+            }
+            onStopCw={() => sendRadioMessage({ type: 'stop_cw' })}
+            onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}
+            onDebouncedCallsignChange={handleDebouncedCallsignChange}
+            onLogContact={(contact) => {
+              setDebouncedCallsignSearch('');
+              setAllContacts((currentContacts) =>
+                sortContacts([...currentContacts, contact]),
+              );
+            }}
+            onRescore={handleRescore}
+            isRescoreLoading={isRescoreLoading}
+            scoreSummary={scoreSummary}
+            onExit={exitLogger}
+          />
+          <LogWindow
+            settings={settings}
+            contacts={visibleContacts}
+            log={log}
+            contactsLoadState={contactsLoadState}
+            radioMode={radioState?.mode ?? 'CW'}
+            onDeleteContacts={deleteContacts}
+            onUpdateContacts={updateContacts}
+            hasMoreContacts={hasMoreContacts}
+            isLoadingMoreContacts={isLoadingMoreContacts}
+            onLoadMoreContacts={loadMoreContacts}
+          />
+        </div>
+        {bandMapEnabled ? (
+          <BandMapWindow
+            spotStore={bandMapSpotStore}
+            radioFrequencyHz={radioState?.frequency_hz}
+            height={bandMapHeight}
+          />
+        ) : null}
+      </div>
       {isSocketDebugPanelEnabled && (
         <div
           style={{

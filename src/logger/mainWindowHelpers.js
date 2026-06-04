@@ -1,8 +1,5 @@
 import { fieldDefault } from '../domain/contactFields.js';
-import {
-  LOGGER_MODE_OPTIONS,
-  normalizeLoggerMode,
-} from '../domain/modes.js';
+import { LOGGER_MODE_OPTIONS, normalizeLoggerMode } from '../domain/modes.js';
 
 export {
   adifModeForLoggerMode,
@@ -13,6 +10,7 @@ export {
 export const MODE_OPTIONS = LOGGER_MODE_OPTIONS;
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
 export const ESM_ENABLED_STORAGE_KEY = 'log73.esm_enabled';
+export const BAND_MAP_ENABLED_STORAGE_KEY = 'log73.band_map_enabled';
 export const DEFAULT_MESSAGE_LABELS = {
   run: Array.from({ length: 12 }, (_, index) => ({
     key: `F${index + 1}`,
@@ -121,8 +119,14 @@ export function cwActionFromTemplate(template) {
 
 export function cwActionForMessage(config, mode, key) {
   const normalizedMode =
-    String(mode ?? '').trim().toLowerCase() === 'run' ? 'run' : 's&p';
-  const normalizedKey = String(key ?? '').trim().toUpperCase();
+    String(mode ?? '')
+      .trim()
+      .toLowerCase() === 'run'
+      ? 'run'
+      : 's&p';
+  const normalizedKey = String(key ?? '')
+    .trim()
+    .toUpperCase();
   if (!normalizedKey) return null;
 
   let currentMode = null;
@@ -170,7 +174,9 @@ export function typedModeFromCallsignInput(value, settings) {
 }
 
 export function callsignHasQuery(value) {
-  return String(value ?? '').trim().includes('?');
+  return String(value ?? '')
+    .trim()
+    .includes('?');
 }
 
 export function shouldBlockEsmCallEnter(callsign, callsignIsValid) {
@@ -206,7 +212,9 @@ export function esmEnterAction({
     };
   }
 
-  const normalizedCallsign = String(callsign ?? '').trim().toUpperCase();
+  const normalizedCallsign = String(callsign ?? '')
+    .trim()
+    .toUpperCase();
   const normalizedRunCallsignAttempt = String(runCallsignAttempt ?? '')
     .trim()
     .toUpperCase();

@@ -1,9 +1,5 @@
 import React from 'react';
-import {
-  MODE_OPTIONS,
-  isSelectableMode,
-  modeIsCw,
-} from '../mainWindowHelpers';
+import { MODE_OPTIONS, isSelectableMode, modeIsCw } from '../mainWindowHelpers';
 
 function RadioControls({
   operatingMode,
@@ -21,6 +17,8 @@ function RadioControls({
   cwWpmMin,
   cwWpmMax,
   handleCwWpmChange,
+  bandMapEnabled,
+  onSetBandMapEnabled,
   backendSocketStatus,
   catStatus,
 }) {
@@ -57,7 +55,9 @@ function RadioControls({
         </select>
       </label>
       <label
-        className={modeSelectable ? 'radio-control' : 'radio-control unsupported'}
+        className={
+          modeSelectable ? 'radio-control' : 'radio-control unsupported'
+        }
       >
         Mode:
         <select
@@ -92,6 +92,14 @@ function RadioControls({
           />
         </label>
       )}
+      <label className="radio-control band-map-toggle">
+        Band Map:
+        <input
+          type="checkbox"
+          checked={bandMapEnabled}
+          onChange={(event) => onSetBandMapEnabled?.(event.target.checked)}
+        />
+      </label>
       <div className="backend-status-group">
         <div className="backend-socket-status" title={`CAT ${catStatus}`}>
           <span

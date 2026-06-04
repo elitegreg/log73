@@ -188,7 +188,8 @@
   width: 5ch;
 }
 
-.esm-toggle input {
+.esm-toggle input,
+.band-map-toggle input {
   margin-left: 6px;
 }
 
@@ -265,14 +266,114 @@
   border-top: 1px solid #808080;
 }
 
+.logger-workspace {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0 auto;
+}
+
+.logger-main-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .log-window {
   width: 800px;
   border: 1px solid #000;
   background-color: #add8e6;
-  margin: 10px auto;
+  margin: 0 auto;
   font-family: 'Arial', sans-serif;
   font-size: 12px;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.logger-main-column .log-window {
+  margin: 0;
+}
+
+.band-map-window {
+  box-sizing: border-box;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  width: 190px;
+  max-height: 100%;
+  overflow: hidden;
+  border: 1px solid #000;
+  background-color: #add8e6;
+  font-family: 'Arial', sans-serif;
+  font-size: 12px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
+.band-map-title-bar {
+  background-color: #0000ff;
+  color: white;
+  padding: 2px 5px;
+  font-weight: bold;
+}
+
+.band-map-table-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  background-color: white;
+}
+
+.band-map-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background-color: white;
+}
+
+.band-map-vfo-col {
+  width: 24px;
+}
+
+.band-map-frequency-col {
+  width: 78px;
+}
+
+.band-map-callsign-col {
+  width: auto;
+}
+
+.band-map-table td {
+  height: 18px;
+  padding: 2px 4px;
+  border: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #000;
+}
+
+.band-map-vfo-marker {
+  text-align: center;
+  font-weight: bold;
+}
+
+.band-map-frequency {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.band-map-callsign {
+  text-align: left;
+  font-weight: bold;
+}
+
+.band-map-vfo-row td {
+  background-color: #fff8c6;
+}
+
+.band-map-empty {
+  text-align: center;
+  color: #555;
+  font-style: italic;
 }
 
 .log-title-bar {

@@ -188,12 +188,14 @@ mod tests {
             spot: DxClusterSpot {
                 id: 7,
                 received_at: 1_700_000_000,
+                source: "dx".to_string(),
                 call_de: "N0CALL".to_string(),
                 call_dx: "K1ABC".to_string(),
                 frequency_hz: 14_074_000,
                 utc: 1234,
                 loc: None,
                 comment: Some("test".to_string()),
+                rbn: None,
             },
         };
         let json = serde_json::to_value(message).expect("dxcluster spot should serialize");
