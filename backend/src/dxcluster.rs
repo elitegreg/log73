@@ -141,6 +141,40 @@ impl DxClusterManager {
         deleted_ids
     }
 
+    pub async fn add_manual_spot(
+        &self,
+        frequency_hz: u64,
+        call_dx: String,
+        comment: Option<String>,
+    ) -> Option<DxClusterSpot> {
+        let normalized_call_dx = call_dx.trim().to_uppercase();
+        let spot = {
+            let mut store = self.inner.store.lock().await;
+            store
+                .add(DX {
+                    call_de: "LOCAL".to_string(),
+                    call_dx: normalized_call_dx.clone(),
+                    freq: frequency_hz,
+                    utc: current_utc_hhmm(),
+                    loc: None,
+                    comment,
+                })
+                .or_else(|| {
+                    let key = dedupe_key(frequency_hz, &normalized_call_dx);
+                    store
+                        .spots_by_id
+                        .values()
+                        .find(|spot| dedupe_key(spot.frequency_hz, &spot.call_dx) == key)
+                        .cloned()
+                })
+        };
+
+        if let Some(spot) = spot.clone() {
+            let _ = self.inner.events.send(DxClusterEvent::SpotAdded(spot));
+        }
+        spot
+    }
+
     async fn stop_task(&self) {
         *self.inner.outbound.lock().await = None;
         if let Some(task) = self.inner.task.lock().await.take() {
@@ -445,6 +479,13 @@ pub fn format_dxcluster_frequency_khz(frequency_hz: u64) -> String {
         fraction.pop();
     }
     format!("{whole_khz}.{fraction}")
+}
+
+fn current_utc_hhmm() -> u16 {
+    let seconds_since_midnight = unix_timestamp_secs() % 86_400;
+    let hours = seconds_since_midnight / 3_600;
+    let minutes = (seconds_since_midnight % 3_600) / 60;
+    (hours * 100 + minutes) as u16
 }
 
 fn unix_timestamp_secs() -> u64 {

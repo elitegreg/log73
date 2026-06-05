@@ -10,6 +10,7 @@ import {
   sanitizeExchangeValue,
 } from '../domain/contactFields';
 import {
+  lastCqFrequencyForBand,
   nextBandMapSpotAbove,
   nextBandMapSpotBelow,
 } from '../domain/bandMap';
@@ -80,6 +81,9 @@ function MainWindow({
   bandMapSelection,
   onSetBandMapEnabled,
   onActivateBandMapSpot,
+  onStoreCqFrequency,
+  onMarkFrequency,
+  onStoreBandMapSpot,
   onSetRadioFrequency,
   onSetRadioMode,
   onSendMessage,
@@ -368,6 +372,33 @@ function MainWindow({
     return callSign.trim().toUpperCase();
   }
 
+  function storeCurrentCqFrequency() {
+    if (!currentBand) return;
+    onStoreCqFrequency?.(radioFrequencyHz, currentBand.meters);
+  }
+
+  function jumpToLastCqFrequency() {
+    const frequencyHz = lastCqFrequencyForBand(
+      bandMapSpotStore,
+      currentBand?.meters,
+    );
+    if (frequencyHz) onSetRadioFrequency?.(frequencyHz);
+  }
+
+  function markCurrentFrequency() {
+    onMarkFrequency?.(radioFrequencyHz);
+  }
+
+  function storeCurrentBandMapSpot() {
+    const callsign = currentCallsign();
+    if (!callsign) return;
+    onStoreBandMapSpot?.({
+      frequency_hz: radioFrequencyHz,
+      call: callsign,
+      comment: '',
+    });
+  }
+
   function activateBandMapSpot(spot) {
     if (!spot) return;
     onActivateBandMapSpot?.(spot);
@@ -495,6 +526,9 @@ function MainWindow({
       (label) => label.key === key,
     );
     if (isEmptyMessageButton(button)) return null;
+    if (mode === 'run' && key === 'F1') {
+      storeCurrentCqFrequency();
+    }
     const requestId = createMessageRequestId();
     markMessageKeyActive(requestId, key);
     onSendMessage?.({
@@ -642,6 +676,36 @@ function MainWindow({
 
   useEffect(() => {
     function handleFunctionKey(event) {
+      if (
+        event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        event.key.toLowerCase() === 'm'
+      ) {
+        event.preventDefault();
+        markCurrentFrequency();
+        return;
+      }
+      if (
+        event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        event.key.toLowerCase() === 'o'
+      ) {
+        event.preventDefault();
+        storeCurrentBandMapSpot();
+        return;
+      }
+      if (
+        event.altKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        event.key.toLowerCase() === 'q'
+      ) {
+        event.preventDefault();
+        jumpToLastCqFrequency();
+        return;
+      }
       if (
         event.ctrlKey &&
         !event.altKey &&
@@ -1243,6 +1307,8 @@ function MainWindow({
         isRescoreLoading={isRescoreLoading}
         disableRescore={isContextLoading || contactsLoadState !== 'idle'}
         handleQrzClick={handleQrzClick}
+        handleMark={markCurrentFrequency}
+        handleStore={storeCurrentBandMapSpot}
         handleSpotIt={handleSpotIt}
         highlightLogIt={highlightLogIt}
       />

@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  BAND_MAP_CQ_CALLSIGN,
+  BAND_MAP_IN_USE_CALLSIGN,
   BAND_MAP_VFO_CALLSIGN,
   addBandMapSpot,
+  addCqBandMapSpot,
+  addInUseBandMapSpot,
   bandMapRows,
   createBandMapSpotStore,
   formatBandMapKhz,
   frequencyTenthKhz,
+  lastCqFrequencyForBand,
   nextBandMapSpotAbove,
   nextBandMapSpotBelow,
   removeBandMapSpot,
@@ -81,17 +86,54 @@ test('band map rows insert VFO row when no spot matches', () => {
   );
 });
 
-test('band map navigation finds the nearest spot above and below VFO', () => {
-  const store = createBandMapSpotStore([
-    spot(1, 14074100, 'N5DEF'),
-    spot(2, 14074200, 'K1ABC'),
-    spot(3, 14074400, 'W9XYZ'),
-  ]);
+test('band map navigation finds the nearest callsign spot above and below VFO', () => {
+  const store = addInUseBandMapSpot(
+    addCqBandMapSpot(
+      createBandMapSpotStore([
+        spot(1, 14074100, 'N5DEF'),
+        spot(2, 14074200, 'K1ABC'),
+        spot(3, 14074400, 'W9XYZ'),
+      ]),
+      14074300,
+      20,
+    ),
+    14074150,
+  );
 
   assert.equal(nextBandMapSpotAbove(store, 14074150).call_dx, 'K1ABC');
   assert.equal(nextBandMapSpotBelow(store, 14074350).call_dx, 'K1ABC');
   assert.equal(nextBandMapSpotAbove(store, 14074400), null);
   assert.equal(nextBandMapSpotBelow(store, 14074100), null);
+});
+
+test('band map special spots display labels and track CQ frequencies', () => {
+  const store = addInUseBandMapSpot(
+    addCqBandMapSpot(createBandMapSpotStore(), 14074000, 20),
+    14075000,
+  );
+  const rows = bandMapRows(store, 14073000);
+
+  assert.deepEqual(
+    rows.filter((row) => row.type === 'spot').map((row) => row.callsign),
+    [BAND_MAP_CQ_CALLSIGN, BAND_MAP_IN_USE_CALLSIGN],
+  );
+  assert.equal(lastCqFrequencyForBand(store, 20), 14074000);
+});
+
+test('band map supports multiple in-use markers by frequency', () => {
+  const store = addInUseBandMapSpot(
+    addInUseBandMapSpot(
+      addInUseBandMapSpot(createBandMapSpotStore(), 14074100),
+      14074200,
+    ),
+    14074249,
+  );
+
+  assert.equal(store.sortedSpots.length, 2);
+  assert.deepEqual(
+    store.sortedSpots.map((currentSpot) => currentSpot.frequency_tenth_khz),
+    [140741, 140742],
+  );
 });
 
 test('band map frequency helpers round and format to one decimal kHz', () => {

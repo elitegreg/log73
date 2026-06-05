@@ -61,6 +61,13 @@ export async function dxclusterSpots() {
   return apiJson('/dxcluster/spots');
 }
 
+export async function saveDxclusterSpot(payload) {
+  return apiJson('/dxcluster/spots', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
 export function websocketUrl(params) {
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   const search = new URLSearchParams(params);

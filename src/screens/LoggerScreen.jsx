@@ -7,7 +7,12 @@ import React, {
   useState,
 } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { apiJson, dxclusterSpots, websocketUrl } from '../lib/api';
+import {
+  apiJson,
+  dxclusterSpots,
+  saveDxclusterSpot,
+  websocketUrl,
+} from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
 import BandMapWindow from '../logger/BandMapWindow';
@@ -39,6 +44,8 @@ import {
 } from './loggerScreenHelpers';
 import {
   addBandMapSpot,
+  addCqBandMapSpot,
+  addInUseBandMapSpot,
   createBandMapSpotStore,
   removeBandMapSpot,
 } from '../domain/bandMap';
@@ -190,9 +197,10 @@ function LoggerScreen() {
   const handleActivateBandMapSpot = useCallback(
     (spot) => {
       const frequencyHz = Number(spot?.frequency_hz);
-      const callsign = String(spot?.call_dx ?? '').trim();
-      if (!frequencyHz || !callsign) return;
+      if (!frequencyHz) return;
       sendRadioMessage({ type: 'set_frequency', frequency_hz: frequencyHz });
+      const callsign = String(spot?.call_dx ?? '').trim();
+      if (!callsign) return;
       bandMapSelectionSequenceRef.current += 1;
       setBandMapSelection({
         sequence: bandMapSelectionSequenceRef.current,
@@ -200,6 +208,40 @@ function LoggerScreen() {
       });
     },
     [sendRadioMessage],
+  );
+
+  const handleStoreCqFrequency = useCallback((frequencyHz, bandMeters) => {
+    setBandMapSpotStore((currentStore) =>
+      addCqBandMapSpot(currentStore, frequencyHz, bandMeters),
+    );
+  }, []);
+
+  const handleMarkFrequency = useCallback((frequencyHz) => {
+    setBandMapSpotStore((currentStore) =>
+      addInUseBandMapSpot(currentStore, frequencyHz),
+    );
+  }, []);
+
+  const handleStoreBandMapSpot = useCallback(
+    async (payload) => {
+      try {
+        const result = await saveDxclusterSpot(payload);
+        if (!result.ok)
+          throw new Error(result.error ?? 'Unable to store band map spot');
+        if (result.spot) {
+          setBandMapSpotStore((currentStore) =>
+            addBandMapSpot(currentStore, result.spot),
+          );
+        }
+      } catch (error) {
+        notifyOperationalError(
+          'LoggerScreen.storeBandMapSpot',
+          'Unable to store band map spot.',
+          error,
+        );
+      }
+    },
+    [notifyOperationalError],
   );
 
   const handleDebouncedCallsignChange = useCallback((value) => {
@@ -1384,6 +1426,9 @@ function LoggerScreen() {
             bandMapSelection={bandMapSelection}
             onSetBandMapEnabled={setBandMapEnabled}
             onActivateBandMapSpot={handleActivateBandMapSpot}
+            onStoreCqFrequency={handleStoreCqFrequency}
+            onMarkFrequency={handleMarkFrequency}
+            onStoreBandMapSpot={handleStoreBandMapSpot}
             onSetRadioFrequency={(frequencyHz) =>
               sendRadioMessage({
                 type: 'set_frequency',

@@ -312,7 +312,9 @@ async fn main() {
         .route("/dxcc", get(dxcc_data))
         .route(
             "/dxcluster/spots",
-            get(dxcluster_spots).delete(clear_dxcluster_spots),
+            get(dxcluster_spots)
+                .post(save_dxcluster_spot)
+                .delete(clear_dxcluster_spots),
         )
         .route("/logs", get(logs).post(create_log))
         .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
@@ -849,6 +851,39 @@ async fn dxcluster_spots(State(app_state): State<AppState>) -> Json<serde_json::
 async fn clear_dxcluster_spots(State(app_state): State<AppState>) -> Json<serde_json::Value> {
     let deleted_ids = app_state.dxcluster.clear_spots().await;
     Json(serde_json::json!({ "ok": true, "deleted_ids": deleted_ids }))
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct SaveDxClusterSpotPayload {
+    frequency_hz: u64,
+    call: String,
+    #[serde(default)]
+    comment: String,
+}
+
+async fn save_dxcluster_spot(
+    State(app_state): State<AppState>,
+    Json(payload): Json<SaveDxClusterSpotPayload>,
+) -> Json<serde_json::Value> {
+    if let Err(error) = validation::validate_dxcluster_spot_request(
+        payload.frequency_hz,
+        &payload.call,
+        &payload.comment,
+    ) {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
+
+    let comment = payload.comment.trim();
+    let spot = app_state
+        .dxcluster
+        .add_manual_spot(
+            payload.frequency_hz,
+            payload.call.trim().to_uppercase(),
+            (!comment.is_empty()).then(|| comment.to_string()),
+        )
+        .await;
+
+    Json(serde_json::json!({ "ok": true, "spot": spot }))
 }
 
 async fn config(State(app_state): State<AppState>) -> Json<serde_json::Value> {

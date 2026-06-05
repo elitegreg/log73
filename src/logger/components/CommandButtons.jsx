@@ -8,6 +8,8 @@ function CommandButtons({
   isRescoreLoading,
   disableRescore,
   handleQrzClick,
+  handleMark,
+  handleStore,
   handleSpotIt,
   highlightLogIt = false,
 }) {
@@ -38,8 +40,22 @@ function CommandButtons({
       >
         {isRescoreLoading ? 'Rescoring...' : 'Rescore'}
       </button>
-      <button className="cmd-btn">Mark</button>
-      <button className="cmd-btn">Store</button>
+      <button
+        className="cmd-btn"
+        type="button"
+        title="Keyboard shortcut: Alt-M"
+        onClick={handleMark}
+      >
+        Mark
+      </button>
+      <button
+        className="cmd-btn"
+        type="button"
+        title="Keyboard shortcut: Alt-O"
+        onClick={handleStore}
+      >
+        Store
+      </button>
       <button
         className="cmd-btn"
         type="button"
