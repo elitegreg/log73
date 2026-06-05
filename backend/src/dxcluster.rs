@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
@@ -52,6 +52,12 @@ struct DxClusterManagerInner {
     store: Mutex<DxClusterSpotStore>,
     events: broadcast::Sender<DxClusterEvent>,
     task: Mutex<Option<JoinHandle<()>>>,
+    outbound: Mutex<Option<mpsc::Sender<DxClusterOutboundCommand>>>,
+}
+
+struct DxClusterOutboundCommand {
+    text: String,
+    completed: oneshot::Sender<Result<(), String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -77,6 +83,7 @@ impl DxClusterManager {
                 store: Mutex::new(DxClusterSpotStore::default()),
                 events,
                 task: Mutex::new(None),
+                outbound: Mutex::new(None),
             }),
         }
     }
@@ -94,10 +101,34 @@ impl DxClusterManager {
         }
 
         let manager = self.clone();
+        let (outbound_tx, outbound_rx) = mpsc::channel(64);
+        *self.inner.outbound.lock().await = Some(outbound_tx);
         let handle = tokio::spawn(async move {
-            run_dxcluster_task(config, manager).await;
+            run_dxcluster_task(config, manager, outbound_rx).await;
         });
         *self.inner.task.lock().await = Some(handle);
+    }
+
+    pub async fn send_text(&self, text: impl Into<String>) -> Result<(), String> {
+        let (completed_tx, completed_rx) = oneshot::channel();
+        let command = DxClusterOutboundCommand {
+            text: text.into(),
+            completed: completed_tx,
+        };
+        let sender = self
+            .inner
+            .outbound
+            .lock()
+            .await
+            .clone()
+            .ok_or_else(|| "DX cluster listener is not running".to_string())?;
+        sender
+            .send(command)
+            .await
+            .map_err(|_| "DX cluster listener is not running".to_string())?;
+        completed_rx
+            .await
+            .map_err(|_| "DX cluster listener stopped before sending text".to_string())?
     }
 
     pub async fn spots(&self) -> Vec<DxClusterSpot> {
@@ -111,6 +142,7 @@ impl DxClusterManager {
     }
 
     async fn stop_task(&self) {
+        *self.inner.outbound.lock().await = None;
         if let Some(task) = self.inner.task.lock().await.take() {
             task.abort();
         }
@@ -307,7 +339,11 @@ fn rbn_spot(rbn: RBN) -> DxClusterRbnSpot {
     }
 }
 
-async fn run_dxcluster_task(config: DxClusterConfig, manager: DxClusterManager) {
+async fn run_dxcluster_task(
+    config: DxClusterConfig,
+    manager: DxClusterManager,
+    mut outbound_rx: mpsc::Receiver<DxClusterOutboundCommand>,
+) {
     let host = config.host.trim().to_string();
     let callsign = config.callsign.trim().to_uppercase();
     let port = config.port;
@@ -364,6 +400,15 @@ async fn run_dxcluster_task(config: DxClusterConfig, manager: DxClusterManager) 
                     break;
                 }
             }
+            command = outbound_rx.recv() => {
+                let Some(command) = command else {
+                    break;
+                };
+                let result = listener
+                    .send_text(command.text)
+                    .map_err(|error| error.to_string());
+                let _ = command.completed.send(result);
+            }
         }
     }
 
@@ -386,6 +431,20 @@ async fn handle_cluster_line(line: &str, manager: &DxClusterManager, max_age: Du
         Err(ParseError::UnknownType) => debug!(line, "ignoring non-spot dxcluster line"),
         Err(error) => debug!(line, %error, "failed to parse dxcluster line"),
     }
+}
+
+pub fn format_dxcluster_frequency_khz(frequency_hz: u64) -> String {
+    let whole_khz = frequency_hz / 1000;
+    let fractional_hz = frequency_hz % 1000;
+    if fractional_hz == 0 {
+        return whole_khz.to_string();
+    }
+
+    let mut fraction = format!("{fractional_hz:03}");
+    while fraction.ends_with('0') {
+        fraction.pop();
+    }
+    format!("{whole_khz}.{fraction}")
 }
 
 fn unix_timestamp_secs() -> u64 {
@@ -412,6 +471,13 @@ mod tests {
             loc: Some("EM73".to_string()),
             comment: Some("test".to_string()),
         }
+    }
+
+    #[test]
+    fn formats_dxcluster_frequency_in_khz() {
+        assert_eq!(format_dxcluster_frequency_khz(14_074_000), "14074");
+        assert_eq!(format_dxcluster_frequency_khz(14_074_100), "14074.1");
+        assert_eq!(format_dxcluster_frequency_khz(14_074_125), "14074.125");
     }
 
     #[tokio::test]

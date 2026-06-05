@@ -20,6 +20,7 @@ const MAX_LOGIN_PASSWORD_LEN: usize = 256;
 const MAX_DXCLUSTER_HOST_LEN: usize = 255;
 const MAX_DXCLUSTER_CALLSIGN_LEN: usize = 32;
 const MAX_DXCLUSTER_COMMANDS_LEN: usize = 16_384;
+const MAX_DXCLUSTER_SPOT_COMMENT_LEN: usize = 256;
 const MAX_CONTACTS_PER_UPLOAD: usize = 100;
 const MAX_CONTACT_FIELDS: usize = 100;
 const MAX_CONTACT_KEY_LEN: usize = 64;
@@ -389,6 +390,20 @@ pub fn validate_message_request(
 pub fn validate_cw_text_request(request_id: &str, text: &str) -> Result<(), String> {
     validate_required_text("CW request id", request_id, MAX_CW_REQUEST_ID_LEN)?;
     validate_required_text("CW text", text, MAX_CW_TEXT_LEN)?;
+    Ok(())
+}
+
+pub fn validate_dxcluster_spot_request(
+    frequency_hz: u64,
+    call: &str,
+    comment: &str,
+) -> Result<(), String> {
+    validate_radio_frequency_hz(frequency_hz)?;
+    validate_required_text("DX spot callsign", call, MAX_CALLSIGN_LEN)?;
+    if call.trim().chars().any(char::is_whitespace) {
+        return Err("DX spot callsign cannot contain whitespace".to_string());
+    }
+    validate_optional_plain_text("DX spot comment", comment, MAX_DXCLUSTER_SPOT_COMMENT_LEN)?;
     Ok(())
 }
 

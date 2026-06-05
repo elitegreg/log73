@@ -7,6 +7,8 @@ import {
   createBandMapSpotStore,
   formatBandMapKhz,
   frequencyTenthKhz,
+  nextBandMapSpotAbove,
+  nextBandMapSpotBelow,
   removeBandMapSpot,
 } from './bandMap.js';
 
@@ -77,6 +79,19 @@ test('band map rows insert VFO row when no spot matches', () => {
     rows.map((row) => row.callsign),
     ['W9XYZ', BAND_MAP_VFO_CALLSIGN, 'K1ABC'],
   );
+});
+
+test('band map navigation finds the nearest spot above and below VFO', () => {
+  const store = createBandMapSpotStore([
+    spot(1, 14074100, 'N5DEF'),
+    spot(2, 14074200, 'K1ABC'),
+    spot(3, 14074400, 'W9XYZ'),
+  ]);
+
+  assert.equal(nextBandMapSpotAbove(store, 14074150).call_dx, 'K1ABC');
+  assert.equal(nextBandMapSpotBelow(store, 14074350).call_dx, 'K1ABC');
+  assert.equal(nextBandMapSpotAbove(store, 14074400), null);
+  assert.equal(nextBandMapSpotBelow(store, 14074100), null);
 });
 
 test('band map frequency helpers round and format to one decimal kHz', () => {

@@ -30,7 +30,7 @@ use axum::{
 use clap::Parser;
 use contest_rules::{ContestRules, ContestRulesStore};
 use db::{Contact, Database, NewLog, NewRadio, UpdateLog};
-use dxcluster::{DxClusterEvent, DxClusterManager};
+use dxcluster::{DxClusterEvent, DxClusterManager, format_dxcluster_frequency_khz};
 use futures_util::{SinkExt, StreamExt};
 use log_cache::LogCache;
 use radio::{ClientMessage, RadioCommand, ServerMessage};
@@ -724,6 +724,33 @@ async fn handle_socket(
                         session_id,
                         radio_id, request_id, "failed to queue cw text command"
                     );
+                }
+            }
+            Ok(ClientMessage::SendDxClusterSpot {
+                frequency_hz,
+                call,
+                comment,
+            }) => {
+                debug!(
+                    session_id,
+                    radio_id, frequency_hz, call, "websocket send_dxcluster_spot command received"
+                );
+                if let Err(error) =
+                    validation::validate_dxcluster_spot_request(frequency_hz, &call, &comment)
+                {
+                    warn!(session_id, radio_id, frequency_hz, call, %error, "invalid websocket send_dxcluster_spot command");
+                    continue;
+                }
+                let frequency_khz = format_dxcluster_frequency_khz(frequency_hz);
+                let normalized_call = call.trim().to_uppercase();
+                let text = format!(
+                    "DX {} {} {}",
+                    frequency_khz,
+                    normalized_call,
+                    comment.trim()
+                );
+                if let Err(error) = app_state.dxcluster.send_text(text).await {
+                    warn!(session_id, radio_id, frequency_hz, call = %normalized_call, %error, "failed to send DX cluster spot");
                 }
             }
             Ok(ClientMessage::StopCw) => {

@@ -8,6 +8,7 @@ function CommandButtons({
   isRescoreLoading,
   disableRescore,
   handleQrzClick,
+  handleSpotIt,
   highlightLogIt = false,
 }) {
   return (
@@ -39,7 +40,14 @@ function CommandButtons({
       </button>
       <button className="cmd-btn">Mark</button>
       <button className="cmd-btn">Store</button>
-      <button className="cmd-btn">Spot It</button>
+      <button
+        className="cmd-btn"
+        type="button"
+        title="Keyboard shortcut: Ctrl-P"
+        onClick={handleSpotIt}
+      >
+        Spot It
+      </button>
       <button className="cmd-btn" type="button" onClick={handleQrzClick}>
         QRZ
       </button>

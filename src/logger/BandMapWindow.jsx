@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { BAND_MAP_ROW_HEIGHT_PX, bandMapRows } from '../domain/bandMap';
 
-function BandMapWindow({ spotStore, radioFrequencyHz, height = null }) {
+function BandMapWindow({
+  spotStore,
+  radioFrequencyHz,
+  height = null,
+  onSpotClick,
+}) {
   const scrollContainerRef = useRef(null);
   const userScrolledRef = useRef(false);
   const autoScrollingRef = useRef(false);
@@ -114,16 +119,38 @@ function BandMapWindow({ spotStore, radioFrequencyHz, height = null }) {
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
-                <tr
-                  key={row.key}
-                  className={row.isVfo ? 'band-map-vfo-row' : undefined}
-                >
+              rows.map((row) => {
+                const isClickableSpot = row.type === 'spot' && onSpotClick;
+                return (
+                  <tr
+                    key={row.key}
+                    className={[
+                      row.isVfo ? 'band-map-vfo-row' : '',
+                      isClickableSpot ? 'band-map-spot-row' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={
+                      isClickableSpot ? () => onSpotClick(row.spot) : undefined
+                    }
+                    onKeyDown={
+                      isClickableSpot
+                        ? (event) => {
+                            if (event.key !== 'Enter' && event.key !== ' ')
+                              return;
+                            event.preventDefault();
+                            onSpotClick(row.spot);
+                          }
+                        : undefined
+                    }
+                    tabIndex={isClickableSpot ? 0 : undefined}
+                  >
                   <td className="band-map-vfo-marker">{row.marker}</td>
                   <td className="band-map-frequency">{row.khz}</td>
                   <td className="band-map-callsign">{row.callsign}</td>
-                </tr>
-              ))
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

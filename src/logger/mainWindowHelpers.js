@@ -37,6 +37,10 @@ export const FUNCTION_KEY_PATTERN = /^F([1-9]|1[0-2])$/;
 export const HZ_PER_KHZ = 1000;
 export const EPOCH_MS_PER_SECOND = 1000;
 export const CALLSIGN_FIELD_WIDTH_CHARS = 13;
+export const CW_DIGITAL_CALLSIGN_CLEAR_THRESHOLD_HZ = 100;
+export const PHONE_CALLSIGN_CLEAR_THRESHOLD_HZ = 200;
+
+const PHONE_MODES = new Set(['SSB', 'FM', 'AM']);
 
 const AMATEUR_BANDS = [
   { meters: 160, name: '160m', lowerHz: 1800000, upperHz: 2000000 },
@@ -76,6 +80,20 @@ export function cwActiveTimeoutMs(cwKeyerType) {
 
 export function formatFrequency(frequencyHz) {
   return Math.round(frequencyHz / HZ_PER_KHZ);
+}
+
+export function callsignClearThresholdHz(mode) {
+  return PHONE_MODES.has(normalizeLoggerMode(mode))
+    ? PHONE_CALLSIGN_CLEAR_THRESHOLD_HZ
+    : CW_DIGITAL_CALLSIGN_CLEAR_THRESHOLD_HZ;
+}
+
+export function normalizedContactFrequencyHz(value) {
+  const frequency = Number.parseFloat(String(value ?? ''));
+  if (!Number.isFinite(frequency) || frequency <= 0) return 0;
+  return Math.round(
+    Math.abs(frequency) < 1000000 ? frequency * 1000000 : frequency,
+  );
 }
 
 export function isFrequencyInput(value) {

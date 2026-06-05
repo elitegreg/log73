@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   callsignCompletionMatches,
   exchangeCompletionMatches,
@@ -9,6 +9,10 @@ import {
   sanitizeCallsign,
   sanitizeExchangeValue,
 } from '../domain/contactFields';
+import {
+  nextBandMapSpotAbove,
+  nextBandMapSpotBelow,
+} from '../domain/bandMap';
 import { dxccLabel, lookupDxcc } from '../domain/dxcc';
 import { dupeAlertText } from '../domain/dupes';
 import { validateCallsign, validateExchangeField } from '../domain/validation';
@@ -45,6 +49,8 @@ import {
   cwActionForMessage,
   callsignHasQuery,
   shouldBlockEsmCallEnter,
+  callsignClearThresholdHz,
+  normalizedContactFrequencyHz,
 } from './mainWindowHelpers';
 import RadioControls from './components/RadioControls';
 import EntryFields from './components/EntryFields';
@@ -59,6 +65,7 @@ function MainWindow({
   isContextLoading,
   contactsLoadState,
   contacts = [],
+  lastContact = null,
   stationCallsign,
   operatorCallsign,
   radioState,
@@ -69,11 +76,15 @@ function MainWindow({
   sessionId,
   logId,
   bandMapEnabled,
+  bandMapSpotStore,
+  bandMapSelection,
   onSetBandMapEnabled,
+  onActivateBandMapSpot,
   onSetRadioFrequency,
   onSetRadioMode,
   onSendMessage,
   onSendCwText,
+  onSendDxClusterSpot,
   onStopCw,
   onSetCwWpm,
   onLogContact,
@@ -123,6 +134,9 @@ function MainWindow({
   const exchangeInputRefs = useRef({});
   const cwTextInputRef = useRef(null);
   const callSignEditedAtRef = useRef(new Date());
+  const callsignFrequencyBaselineRef = useRef(null);
+  const pendingBandMapTuneFrequencyRef = useRef(null);
+  const bandMapSelectionSequenceRef = useRef(null);
   const radioMode = radioState?.mode ?? 'CW';
   const radioFrequencyHz =
     radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
@@ -251,6 +265,23 @@ function MainWindow({
     };
   }, []);
 
+  const combinedSupercheckpartialCallsigns = useMemo(() => {
+    const callsigns = new Set(
+      supercheckpartialCallsigns.map((callsign) =>
+        String(callsign ?? '')
+          .trim()
+          .toUpperCase(),
+      ),
+    );
+    for (const spot of bandMapSpotStore?.sortedSpots ?? []) {
+      const callsign = String(spot?.call_dx ?? '')
+        .trim()
+        .toUpperCase();
+      if (callsign) callsigns.add(callsign);
+    }
+    return [...callsigns].filter(Boolean);
+  }, [supercheckpartialCallsigns, bandMapSpotStore]);
+
   useEffect(() => {
     if (activeCompletionField !== 'CALL') {
       setSupercheckpartialMatches([]);
@@ -264,9 +295,13 @@ function MainWindow({
     }
 
     setSupercheckpartialMatches(
-      callsignCompletionMatches(supercheckpartialCallsigns, query),
+      callsignCompletionMatches(combinedSupercheckpartialCallsigns, query),
     );
-  }, [activeCompletionField, debouncedCallSign, supercheckpartialCallsigns]);
+  }, [
+    activeCompletionField,
+    debouncedCallSign,
+    combinedSupercheckpartialCallsigns,
+  ]);
 
   const messageModeKey = operatingMode === 'Run' ? 'run' : 's&p';
   const activeMessageLabels =
@@ -333,10 +368,53 @@ function MainWindow({
     return callSign.trim().toUpperCase();
   }
 
+  function activateBandMapSpot(spot) {
+    if (!spot) return;
+    onActivateBandMapSpot?.(spot);
+  }
+
   function clearEsmState() {
     setEsmRunCallsignAttempt('');
     setEsmExchangeSentCallsign('');
   }
+
+  useEffect(() => {
+    if (!bandMapSelection?.spot) return;
+    if (bandMapSelectionSequenceRef.current === bandMapSelection.sequence)
+      return;
+    bandMapSelectionSequenceRef.current = bandMapSelection.sequence;
+    const callsign = sanitizeCallsign(bandMapSelection.spot?.call_dx ?? '');
+    setCallSign(callsign);
+    callsignFrequencyBaselineRef.current =
+      Number(bandMapSelection.spot?.frequency_hz) || null;
+    pendingBandMapTuneFrequencyRef.current =
+      callsignFrequencyBaselineRef.current;
+    setEsmRunCallsignAttempt('');
+    setEsmExchangeSentCallsign('');
+    callSignEditedAtRef.current = new Date();
+    window.requestAnimationFrame(() => callSignRef.current?.focus());
+  }, [bandMapSelection]);
+
+  useEffect(() => {
+    const baseline = callsignFrequencyBaselineRef.current;
+    if (!callSign.trim() || !baseline) return;
+    const thresholdHz = callsignClearThresholdHz(radioMode);
+    const pendingBandMapTuneFrequency = pendingBandMapTuneFrequencyRef.current;
+    if (pendingBandMapTuneFrequency) {
+      if (
+        Math.abs(radioFrequencyHz - pendingBandMapTuneFrequency) < thresholdHz
+      ) {
+        pendingBandMapTuneFrequencyRef.current = null;
+      }
+      return;
+    }
+    if (Math.abs(radioFrequencyHz - baseline) < thresholdHz) return;
+    setCallSign('');
+    callsignFrequencyBaselineRef.current = null;
+    setEsmRunCallsignAttempt('');
+    setEsmExchangeSentCallsign('');
+    callSignEditedAtRef.current = new Date();
+  }, [callSign, radioFrequencyHz, radioMode]);
 
   function markEsmExchangeSentForCurrentCallsign() {
     const normalizedCallsign = currentCallsign();
@@ -564,6 +642,30 @@ function MainWindow({
 
   useEffect(() => {
     function handleFunctionKey(event) {
+      if (
+        event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        event.key.toLowerCase() === 'p'
+      ) {
+        event.preventDefault();
+        handleSpotIt();
+        return;
+      }
+      if (
+        event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        (event.key === 'ArrowDown' || event.key === 'ArrowUp')
+      ) {
+        event.preventDefault();
+        const spot =
+          event.key === 'ArrowDown'
+            ? nextBandMapSpotAbove(bandMapSpotStore, radioFrequencyHz)
+            : nextBandMapSpotBelow(bandMapSpotStore, radioFrequencyHz);
+        if (spot) activateBandMapSpot(spot);
+        return;
+      }
       if (event.target?.closest?.('.log-window')) return;
       if (
         event.ctrlKey &&
@@ -631,6 +733,10 @@ function MainWindow({
       setEsmExchangeSentCallsign('');
     }
     setCallSign(sanitizedCallsign);
+    callsignFrequencyBaselineRef.current = normalizedCallsign
+      ? radioFrequencyHz
+      : null;
+    pendingBandMapTuneFrequencyRef.current = null;
     callSignEditedAtRef.current = new Date();
   }
 
@@ -674,6 +780,8 @@ function MainWindow({
 
   function clearEntryFields() {
     setCallSign('');
+    callsignFrequencyBaselineRef.current = null;
+    pendingBandMapTuneFrequencyRef.current = null;
     setExchangeValues(
       exchangeDefaults(settings, radioMode, log?.contest_params ?? {}),
     );
@@ -892,6 +1000,8 @@ function MainWindow({
       event.preventDefault();
       onSetRadioFrequency?.(Math.round(Number.parseFloat(value) * HZ_PER_KHZ));
       setCallSign('');
+      callsignFrequencyBaselineRef.current = null;
+      pendingBandMapTuneFrequencyRef.current = null;
       clearEsmState();
       return;
     }
@@ -901,6 +1011,8 @@ function MainWindow({
       event.preventDefault();
       onSetRadioMode?.(typedMode);
       setCallSign('');
+      callsignFrequencyBaselineRef.current = null;
+      pendingBandMapTuneFrequencyRef.current = null;
       clearEsmState();
       return;
     }
@@ -972,6 +1084,31 @@ function MainWindow({
       return;
     }
     setCwWpm(Math.min(Math.max(wpm, CW_WPM_MIN), CW_WPM_MAX));
+  }
+
+  function handleSpotIt() {
+    const normalizedCallsign = currentCallsign();
+    let spotCallsign = normalizedCallsign;
+    let frequencyHz = radioFrequencyHz;
+
+    if (!spotCallsign) {
+      spotCallsign = String(lastContact?.CALL ?? lastContact?.Call ?? '')
+        .trim()
+        .toUpperCase();
+      frequencyHz = normalizedContactFrequencyHz(
+        lastContact?.FREQ ?? lastContact?.Freq,
+      );
+    }
+
+    if (!spotCallsign || !frequencyHz) return;
+    const comment = window.prompt('Spot comment', '');
+    if (comment === null) return;
+
+    onSendDxClusterSpot?.({
+      frequency_hz: frequencyHz,
+      call: spotCallsign,
+      comment: String(comment ?? '').trim(),
+    });
   }
 
   function handleQrzClick() {
@@ -1106,6 +1243,7 @@ function MainWindow({
         isRescoreLoading={isRescoreLoading}
         disableRescore={isContextLoading || contactsLoadState !== 'idle'}
         handleQrzClick={handleQrzClick}
+        handleSpotIt={handleSpotIt}
         highlightLogIt={highlightLogIt}
       />
       <StatusBar

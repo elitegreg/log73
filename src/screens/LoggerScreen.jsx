@@ -13,7 +13,10 @@ import { useNotifications } from '../lib/notificationsContext';
 import BandMapWindow from '../logger/BandMapWindow';
 import LogWindow from '../logger/LogWindow';
 import MainWindow from '../logger/MainWindow';
-import { BAND_MAP_ENABLED_STORAGE_KEY } from '../logger/mainWindowHelpers';
+import {
+  BAND_MAP_ENABLED_STORAGE_KEY,
+  bandForFrequency,
+} from '../logger/mainWindowHelpers';
 import {
   BACKEND_WS_IDLE_PING_DELAY_MS,
   BACKEND_WS_INITIAL_RECONNECT_DELAY_MS,
@@ -137,6 +140,7 @@ function LoggerScreen() {
   const [bandMapSpotStore, setBandMapSpotStore] = useState(() =>
     createBandMapSpotStore(),
   );
+  const [bandMapSelection, setBandMapSelection] = useState(null);
   const [isContextLoading, setIsContextLoading] = useState(true);
   const [contactsLoadState, setContactsLoadState] = useState('initial-loading');
   const [hasMoreContacts, setHasMoreContacts] = useState(false);
@@ -152,6 +156,7 @@ function LoggerScreen() {
   const socketDebugSequenceRef = useRef(0);
   const activeCallsignPrefixRef = useRef('');
   const bandMapEnabledRef = useRef(false);
+  const bandMapSelectionSequenceRef = useRef(0);
   const loggerMainColumnRef = useRef(null);
   const [bandMapHeight, setBandMapHeight] = useState(null);
 
@@ -178,6 +183,21 @@ function LoggerScreen() {
   const sendBandMapSubscription = useCallback(
     (enabled) => {
       sendRadioMessage({ type: 'set_dxcluster_enabled', enabled });
+    },
+    [sendRadioMessage],
+  );
+
+  const handleActivateBandMapSpot = useCallback(
+    (spot) => {
+      const frequencyHz = Number(spot?.frequency_hz);
+      const callsign = String(spot?.call_dx ?? '').trim();
+      if (!frequencyHz || !callsign) return;
+      sendRadioMessage({ type: 'set_frequency', frequency_hz: frequencyHz });
+      bandMapSelectionSequenceRef.current += 1;
+      setBandMapSelection({
+        sequence: bandMapSelectionSequenceRef.current,
+        spot,
+      });
     },
     [sendRadioMessage],
   );
@@ -247,6 +267,18 @@ function LoggerScreen() {
       isCancelled = true;
     };
   }, [bandMapEnabled, notifyOperationalError, sendBandMapSubscription]);
+
+  const visibleBandMapSpotStore = useMemo(() => {
+    const allowedBands = settings?.allowed_bands ?? [];
+    if (allowedBands.length === 0) return bandMapSpotStore;
+
+    return createBandMapSpotStore(
+      (bandMapSpotStore?.sortedSpots ?? []).filter((spot) => {
+        const band = bandForFrequency(Number(spot?.frequency_hz));
+        return band ? allowedBands.includes(band.meters) : false;
+      }),
+    );
+  }, [bandMapSpotStore, settings]);
 
   const visibleContacts = useMemo(() => {
     const callsignPrefix = debouncedCallsignSearch.trim().toUpperCase();
@@ -1337,6 +1369,7 @@ function LoggerScreen() {
             isContextLoading={isContextLoading}
             contactsLoadState={contactsLoadState}
             contacts={visibleContacts}
+            lastContact={allContacts[0] ?? null}
             stationCallsign={log?.station_callsign ?? ''}
             operatorCallsign={operatorCallsign}
             radioState={radioState}
@@ -1347,7 +1380,10 @@ function LoggerScreen() {
             sessionId={sessionId}
             logId={numericLogId}
             bandMapEnabled={bandMapEnabled}
+            bandMapSpotStore={visibleBandMapSpotStore}
+            bandMapSelection={bandMapSelection}
             onSetBandMapEnabled={setBandMapEnabled}
+            onActivateBandMapSpot={handleActivateBandMapSpot}
             onSetRadioFrequency={(frequencyHz) =>
               sendRadioMessage({
                 type: 'set_frequency',
@@ -1362,6 +1398,9 @@ function LoggerScreen() {
             }
             onSendCwText={(payload) =>
               sendRadioMessage({ type: 'send_cw_text', ...payload })
+            }
+            onSendDxClusterSpot={(payload) =>
+              sendRadioMessage({ type: 'send_dxcluster_spot', ...payload })
             }
             onStopCw={() => sendRadioMessage({ type: 'stop_cw' })}
             onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}
@@ -1392,9 +1431,10 @@ function LoggerScreen() {
         </div>
         {bandMapEnabled ? (
           <BandMapWindow
-            spotStore={bandMapSpotStore}
+            spotStore={visibleBandMapSpotStore}
             radioFrequencyHz={radioState?.frequency_hz}
             height={bandMapHeight}
+            onSpotClick={handleActivateBandMapSpot}
           />
         ) : null}
       </div>

@@ -72,6 +72,12 @@ pub enum ClientMessage {
         request_id: String,
         text: String,
     },
+    #[serde(rename = "send_dxcluster_spot")]
+    SendDxClusterSpot {
+        frequency_hz: u64,
+        call: String,
+        comment: String,
+    },
     StopCw,
     SetWpm {
         wpm: u8,
@@ -289,6 +295,30 @@ mod tests {
             ClientMessage::SendCwText { request_id, text } => {
                 assert_eq!(request_id, "cw-123");
                 assert_eq!(text, "CQ ");
+            }
+            other => panic!("unexpected client message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deserializes_send_dxcluster_spot_client_message() {
+        let message: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "send_dxcluster_spot",
+            "frequency_hz": 14_074_000,
+            "call": "K1ABC",
+            "comment": "CQ TEST"
+        }))
+        .expect("send_dxcluster_spot should deserialize");
+
+        match message {
+            ClientMessage::SendDxClusterSpot {
+                frequency_hz,
+                call,
+                comment,
+            } => {
+                assert_eq!(frequency_hz, 14_074_000);
+                assert_eq!(call, "K1ABC");
+                assert_eq!(comment, "CQ TEST");
             }
             other => panic!("unexpected client message: {other:?}"),
         }

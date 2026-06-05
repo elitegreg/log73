@@ -96,6 +96,27 @@ export function removeBandMapSpot(store, id) {
   };
 }
 
+export function nextBandMapSpotAbove(store, vfoFrequencyHz) {
+  const frequencyHz = normalizedFrequencyHz(vfoFrequencyHz);
+  if (!frequencyHz) return null;
+  return (
+    (store?.sortedSpots ?? []).find(
+      (spot) => normalizedFrequencyHz(spot.frequency_hz) > frequencyHz,
+    ) ?? null
+  );
+}
+
+export function nextBandMapSpotBelow(store, vfoFrequencyHz) {
+  const frequencyHz = normalizedFrequencyHz(vfoFrequencyHz);
+  if (!frequencyHz) return null;
+  const spots = store?.sortedSpots ?? [];
+  for (let index = spots.length - 1; index >= 0; index -= 1) {
+    const spot = spots[index];
+    if (normalizedFrequencyHz(spot.frequency_hz) < frequencyHz) return spot;
+  }
+  return null;
+}
+
 export function bandMapRows(store, vfoFrequencyHz) {
   const spots = store?.sortedSpots ?? [];
   const vfoTenthKhz = frequencyTenthKhz(vfoFrequencyHz);

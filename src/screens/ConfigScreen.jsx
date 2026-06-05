@@ -166,50 +166,54 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
         />
         Enable DxCluster
       </label>
-      <label>
-        DxCluster Host
-        <input
-          value={dxClusterHost}
-          onChange={(event) => setDxClusterHost(event.target.value)}
-        />
-      </label>
-      <label>
-        DxCluster Port
-        <input
-          type="number"
-          min="0"
-          max="65535"
-          value={dxClusterPort}
-          onChange={(event) => setDxClusterPort(event.target.value)}
-        />
-      </label>
-      <label>
-        DxCluster Callsign
-        <input
-          value={dxClusterCallsign}
-          onChange={(event) =>
-            setDxClusterCallsign(event.target.value.toUpperCase())
-          }
-        />
-      </label>
-      <label>
-        DxCluster Max Age (minutes)
-        <input
-          type="number"
-          min="15"
-          max="360"
-          value={dxClusterMaxAgeMin}
-          onChange={(event) => setDxClusterMaxAgeMin(event.target.value)}
-        />
-      </label>
-      <label>
-        DxCluster Commands
-        <textarea
-          value={dxClusterCommands}
-          onChange={(event) => setDxClusterCommands(event.target.value)}
-          placeholder="One optional command per line"
-        />
-      </label>
+      {dxClusterEnabled ? (
+        <>
+          <label>
+            DxCluster Host
+            <input
+              value={dxClusterHost}
+              onChange={(event) => setDxClusterHost(event.target.value)}
+            />
+          </label>
+          <label>
+            DxCluster Port
+            <input
+              type="number"
+              min="0"
+              max="65535"
+              value={dxClusterPort}
+              onChange={(event) => setDxClusterPort(event.target.value)}
+            />
+          </label>
+          <label>
+            DxCluster Callsign
+            <input
+              value={dxClusterCallsign}
+              onChange={(event) =>
+                setDxClusterCallsign(event.target.value.toUpperCase())
+              }
+            />
+          </label>
+          <label>
+            DxCluster Max Age (minutes)
+            <input
+              type="number"
+              min="15"
+              max="360"
+              value={dxClusterMaxAgeMin}
+              onChange={(event) => setDxClusterMaxAgeMin(event.target.value)}
+            />
+          </label>
+          <label>
+            DxCluster Commands
+            <textarea
+              value={dxClusterCommands}
+              onChange={(event) => setDxClusterCommands(event.target.value)}
+              placeholder="One optional command per line"
+            />
+          </label>
+        </>
+      ) : null}
       <div className="selection-actions">
         <button className="cmd-btn primary" type="submit">
           Save

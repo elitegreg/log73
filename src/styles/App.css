@@ -370,6 +370,15 @@
   background-color: #fff8c6;
 }
 
+.band-map-spot-row {
+  cursor: pointer;
+}
+
+.band-map-spot-row:hover td,
+.band-map-spot-row:focus td {
+  background-color: #e8f0ff;
+}
+
 .band-map-empty {
   text-align: center;
   color: #555;

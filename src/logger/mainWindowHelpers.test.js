@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   availableModeOptions,
+  callsignClearThresholdHz,
   callsignHasQuery,
   cwActionForMessage,
   shouldBlockEsmCallEnter,
@@ -10,6 +11,7 @@ import {
   esmEnterAction,
   modeIsCw,
   nextCwWpm,
+  normalizedContactFrequencyHz,
   typedModeFromCallsignInput,
 } from './mainWindowHelpers.js';
 
@@ -46,6 +48,19 @@ test('modeIsCw treats CW-R as CW', () => {
   assert.equal(modeIsCw('CW'), true);
   assert.equal(modeIsCw('CW-R'), true);
   assert.equal(modeIsCw('RTTY'), false);
+});
+
+test('callsign clear threshold distinguishes phone modes', () => {
+  assert.equal(callsignClearThresholdHz('CW'), 100);
+  assert.equal(callsignClearThresholdHz('FT8'), 100);
+  assert.equal(callsignClearThresholdHz('SSB'), 200);
+  assert.equal(callsignClearThresholdHz('FM'), 200);
+});
+
+test('normalizedContactFrequencyHz accepts hertz and MHz values', () => {
+  assert.equal(normalizedContactFrequencyHz(14074000), 14074000);
+  assert.equal(normalizedContactFrequencyHz('14.074'), 14074000);
+  assert.equal(normalizedContactFrequencyHz(''), 0);
 });
 
 test('callsignHasQuery detects incomplete queried callsigns', () => {
