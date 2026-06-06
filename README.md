@@ -304,6 +304,7 @@ DELETE /api/logs/:id
 GET    /api/logs/:id/qso-count
 POST   /api/logs/:id/adif
 POST   /api/logs/:id/cabrillo
+POST   /api/logs/:id/serial-allocation
 
 GET    /api/logs/:log_id/contacts
 POST   /api/logs/:log_id/contacts
@@ -393,6 +394,7 @@ Important schema notes:
 - `logs` stores log name, contest id, station callsign, and contest parameter JSON.
 - `radios` stores radio kind, CAT transport settings, poll frequency, CAT timeout, Winkeyer settings, and CW message text.
 - `qsos.LOG_ID` references `logs.ID`.
+- `log_serial_state` stores durable next-serial counters by log id and sent serial ADIF field.
 - `idx_qsos_log_id` indexes `qsos(LOG_ID)`.
 - Foreign keys are enabled.
 - Tables are SQLite `STRICT` tables.
@@ -499,21 +501,27 @@ Scoring-related YAML settings live under a `scoring` block (`qso_points`, `dupe_
 Contest-specific Cabrillo metadata lives under a `cabrillo` block (`fixed_fields`, `log_fields`, `export_fields`).
 ADIF export uses committed QSO data from the database and derives `QSO_DATE` and `TIME_ON` from the stored `QSO_DATE_TIME_ON` epoch.
 
-Current SC QSO Party rule IDs:
+Current contest rule IDs include:
 
 ```text
-SC-QSO-PARTY             out-of-state
-SC-QSO-PARTY (In State)  in-state
+ARRL-FD                  ARRL Field Day
+CWT                      CWOps CWT
+K1USNSST                 K1USN SST
+MST                      MST (Medium Speed Test)
+SC-QSO-PARTY             SC QSO Party out-of-state
+SC-QSO-PARTY (In State)  SC QSO Party in-state
 ```
 
-Both variants use bands `160, 80, 40, 20, 15, 10, 6, 2` and modes `SSB, FM, CW`.
+Log creation dynamically requests required rule parameters where needed:
 
-Log creation dynamically requests required rule parameters:
-
+- `ARRL-FD`: `Class`, `Section`
+- `CWT`: `NAME`, `EXCHANGE`
+- `K1USNSST`: `NAME`, `QTH`
+- `MST`: `SERIAL_BATCH_SIZE`
 - `SC-QSO-PARTY`: `State`
 - `SC-QSO-PARTY (In State)`: `County`
 
-Those values populate fixed sent exchange fields in the logger. The previous `BERK` default is no longer used. The SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
+Those values populate fixed sent exchange fields in the logger. Contests with a sent `Serial` exchange field also get a `SERIAL_BATCH_SIZE` parameter, defaulting to 10; the backend reserves durable serial ranges by log id and field, the browser refills after 90% of the batch is consumed, and the logger blocks logging if no reserved serial is available. The previous `BERK` default is no longer used. The SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
 For `SC-QSO-PARTY (In State)`, the received value is labeled `Exchange` because it may be a county, state/province, or `DX`.
 
 ## UI themes

@@ -12,6 +12,8 @@ function CommandButtons({
   handleStore,
   handleSpotIt,
   highlightLogIt = false,
+  disableLogIt = false,
+  logItTitle,
 }) {
   return (
     <div className="command-buttons">
@@ -29,6 +31,8 @@ function CommandButtons({
       <button
         className={`cmd-btn${highlightLogIt ? ' esm-next' : ''}`}
         onClick={() => logContact(false)}
+        disabled={disableLogIt}
+        title={logItTitle}
       >
         Log it
       </button>

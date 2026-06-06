@@ -44,7 +44,9 @@ function ConfiguredFields({
         <input
           {...commonProps}
           pattern={field.regex ?? undefined}
-          inputMode={kind === 'NUMERIC' ? 'numeric' : 'text'}
+          inputMode={
+            kind === 'NUMERIC' || kind === 'SERIAL' ? 'numeric' : 'text'
+          }
           maxLength={maxLength}
           autoCapitalize={field.preserve_case === true ? 'off' : 'characters'}
           spellCheck={field.preserve_case === true}

@@ -59,6 +59,8 @@ function EntryFields({
         const value = exchangeValue(field);
         const validation = validateExchangeField(field, value, radioMode);
         const fieldWidthChars = Math.max(maxLength + 1, field.name.length, 4);
+        const readOnly =
+          field.fixed === true || (field.is_sent && kind === 'SERIAL');
 
         return (
           <label
@@ -74,7 +76,9 @@ function EntryFields({
               }}
               type="text"
               inputMode={
-                kind === 'NUMERIC' || kind === 'RST' ? 'numeric' : 'text'
+                kind === 'NUMERIC' || kind === 'SERIAL' || kind === 'RST'
+                  ? 'numeric'
+                  : 'text'
               }
               value={value}
               onChange={(event) =>
@@ -82,14 +86,12 @@ function EntryFields({
               }
               onKeyDown={(event) => handleExchangeKeyDown(event, index)}
               onFocus={() =>
-                setActiveCompletionField(
-                  field.fixed === true ? null : field.name,
-                )
+                setActiveCompletionField(readOnly ? null : field.name)
               }
               onBlur={() => setActiveCompletionField(null)}
-              readOnly={field.fixed === true}
-              tabIndex={field.fixed === true ? -1 : undefined}
-              className={`${field.fixed === true ? 'fixed-field' : ''}${validation.ok ? '' : ' invalid-field'}`.trim()}
+              readOnly={readOnly}
+              tabIndex={readOnly ? -1 : undefined}
+              className={`${readOnly ? 'fixed-field' : ''}${validation.ok ? '' : ' invalid-field'}`.trim()}
               title={validation.ok ? undefined : validation.error}
               aria-invalid={validation.ok ? undefined : true}
               maxLength={maxLength}

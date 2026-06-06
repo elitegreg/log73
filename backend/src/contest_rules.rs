@@ -417,6 +417,8 @@ fn resolve_scoring_condition_in_sets(
 }
 
 const STANDARD_QSO_COLUMNS: &[&str] = &["Date/Time (UTC)", "Freq", "Mode", "Call"];
+const SERIAL_BATCH_SIZE_PARAM: &str = "SERIAL_BATCH_SIZE";
+const DEFAULT_SERIAL_BATCH_SIZE: i64 = 10;
 
 fn prepend_standard_qso_columns(contest: &mut ContestRules) {
     let existing = contest.qso_columns.clone();
@@ -429,6 +431,49 @@ fn prepend_standard_qso_columns(contest: &mut ContestRules) {
                 .filter(|column| !STANDARD_QSO_COLUMNS.contains(&column.as_str())),
         )
         .collect();
+}
+
+fn field_type_kind(field_type: &str) -> String {
+    field_type
+        .split(':')
+        .next()
+        .unwrap_or("STRING")
+        .trim()
+        .to_uppercase()
+}
+
+fn is_sent_serial_field(field: &ExchangeField) -> bool {
+    field.is_sent && field_type_kind(&field.field_type) == "SERIAL"
+}
+
+fn ensure_serial_batch_size_param(contest: &mut ContestRules) {
+    if !contest.exchange.iter().any(is_sent_serial_field) {
+        return;
+    }
+    if contest
+        .log_params
+        .iter()
+        .any(|param| param.name == SERIAL_BATCH_SIZE_PARAM)
+    {
+        return;
+    }
+
+    contest.log_params.push(ContestParam {
+        name: SERIAL_BATCH_SIZE_PARAM.to_string(),
+        label: "Serial Batch Size".to_string(),
+        field_type: "Numeric:4".to_string(),
+        required: Some(true),
+        regex: None,
+        default: Some(Value::from(DEFAULT_SERIAL_BATCH_SIZE)),
+        in_sets: Vec::new(),
+        valid_values: Vec::new(),
+        widget: None,
+        help_text: Some(
+            "How many sent serial numbers to reserve at a time for offline logging.".to_string(),
+        ),
+        max_lines: None,
+        preserve_case: None,
+    });
 }
 
 fn apply_field_valid_values(
@@ -591,6 +636,7 @@ fn resolve_contest(
         contest.metadata = Some(metadata.clone());
     }
 
+    ensure_serial_batch_size_param(&mut contest);
     resolve_in_sets(&mut contest)?;
     prepend_standard_qso_columns(&mut contest);
 

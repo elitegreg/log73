@@ -1,5 +1,5 @@
 use crate::cw::DEFAULT_CW_MESSAGES;
-use rusqlite::types::Value as SqlValue;
+use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -55,6 +55,15 @@ pub struct RadioConfig {
     pub cw_serial_baud_rate: u32,
     pub cw_serial_line: String,
     pub cw_messages: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SerialAllocation {
+    pub log_id: i64,
+    pub field_adif: String,
+    pub start: i64,
+    pub end: i64,
+    pub count: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -407,6 +416,10 @@ enum DbCommand {
         log_id: i64,
         response: oneshot::Sender<rusqlite::Result<Vec<Contact>>>,
     },
+    Contact {
+        id: i64,
+        response: oneshot::Sender<rusqlite::Result<Option<Contact>>>,
+    },
     UpsertContacts {
         log_id: i64,
         contacts: Vec<Contact>,
@@ -415,6 +428,12 @@ enum DbCommand {
     ContactLogId {
         id: i64,
         response: oneshot::Sender<rusqlite::Result<Option<i64>>>,
+    },
+    AllocateSerials {
+        log_id: i64,
+        field_adif: String,
+        count: i64,
+        response: oneshot::Sender<rusqlite::Result<SerialAllocation>>,
     },
     DeleteContact {
         id: i64,
@@ -578,6 +597,11 @@ impl Database {
             .await
     }
 
+    pub async fn contact(&self, id: i64) -> rusqlite::Result<Option<Contact>> {
+        self.call(|response| DbCommand::Contact { id, response })
+            .await
+    }
+
     pub async fn upsert_contacts(
         &self,
         log_id: i64,
@@ -594,6 +618,21 @@ impl Database {
     pub async fn contact_log_id(&self, id: i64) -> rusqlite::Result<Option<i64>> {
         self.call(|response| DbCommand::ContactLogId { id, response })
             .await
+    }
+
+    pub async fn allocate_serials(
+        &self,
+        log_id: i64,
+        field_adif: String,
+        count: i64,
+    ) -> rusqlite::Result<SerialAllocation> {
+        self.call(|response| DbCommand::AllocateSerials {
+            log_id,
+            field_adif,
+            count,
+            response,
+        })
+        .await
     }
 
     pub async fn delete_contact(&self, id: i64) -> rusqlite::Result<Option<i64>> {
@@ -658,6 +697,9 @@ fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbComm
             DbCommand::Contacts { log_id, response } => {
                 let _ = response.send(db_contacts(&connection, log_id));
             }
+            DbCommand::Contact { id, response } => {
+                let _ = response.send(select_contact(&connection, id));
+            }
             DbCommand::UpsertContacts {
                 log_id,
                 contacts,
@@ -667,6 +709,19 @@ fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbComm
             }
             DbCommand::ContactLogId { id, response } => {
                 let _ = response.send(select_contact_log_id(&connection, id));
+            }
+            DbCommand::AllocateSerials {
+                log_id,
+                field_adif,
+                count,
+                response,
+            } => {
+                let _ = response.send(db_allocate_serials(
+                    &mut connection,
+                    log_id,
+                    &field_adif,
+                    count,
+                ));
             }
             DbCommand::DeleteContact { id, response } => {
                 let _ = response.send(db_delete_contact(&connection, id));
@@ -998,6 +1053,13 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
         ) STRICT;
 
         CREATE INDEX IF NOT EXISTS idx_qsos_log_id ON qsos(LOG_ID);
+
+        CREATE TABLE IF NOT EXISTS log_serial_state (
+            LOG_ID INTEGER NOT NULL REFERENCES logs(ID) ON DELETE CASCADE,
+            FIELD_ADIF TEXT NOT NULL,
+            NEXT_SERIAL INTEGER NOT NULL CHECK (NEXT_SERIAL > 0),
+            PRIMARY KEY (LOG_ID, FIELD_ADIF)
+        ) STRICT;
         "#,
     )?;
 
@@ -1093,6 +1155,135 @@ fn select_contact_log_id(connection: &Connection, id: i64) -> rusqlite::Result<O
             |row| row.get::<_, i64>(0),
         )
         .optional()
+}
+
+fn db_allocate_serials(
+    connection: &mut Connection,
+    log_id: i64,
+    field_adif: &str,
+    count: i64,
+) -> rusqlite::Result<SerialAllocation> {
+    if log_id <= 0 {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "log id must be positive".to_string(),
+        ));
+    }
+    if count <= 0 {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "serial allocation count must be positive".to_string(),
+        ));
+    }
+    let field_adif = field_adif.trim();
+    if field_adif.is_empty() {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "serial field ADIF name is required".to_string(),
+        ));
+    }
+
+    let transaction = connection.transaction()?;
+    let committed_next = max_committed_serial(&transaction, log_id, field_adif)?
+        .and_then(|serial| serial.checked_add(1))
+        .unwrap_or(1);
+    let stored_next = transaction
+        .query_row(
+            "SELECT NEXT_SERIAL FROM log_serial_state WHERE LOG_ID = ?1 AND FIELD_ADIF = ?2",
+            params![log_id, field_adif],
+            |row| row.get::<_, i64>(0),
+        )
+        .optional()?;
+    let start = stored_next
+        .unwrap_or(committed_next)
+        .max(committed_next)
+        .max(1);
+    let end = start.checked_add(count - 1).ok_or_else(|| {
+        rusqlite::Error::InvalidParameterName("serial allocation overflow".to_string())
+    })?;
+    let next_serial = end.checked_add(1).ok_or_else(|| {
+        rusqlite::Error::InvalidParameterName("serial allocation overflow".to_string())
+    })?;
+
+    transaction.execute(
+        "INSERT INTO log_serial_state (LOG_ID, FIELD_ADIF, NEXT_SERIAL) VALUES (?1, ?2, ?3)
+         ON CONFLICT(LOG_ID, FIELD_ADIF) DO UPDATE SET NEXT_SERIAL = excluded.NEXT_SERIAL",
+        params![log_id, field_adif, next_serial],
+    )?;
+    transaction.commit()?;
+
+    Ok(SerialAllocation {
+        log_id,
+        field_adif: field_adif.to_string(),
+        start,
+        end,
+        count,
+    })
+}
+
+fn max_committed_serial(
+    connection: &Connection,
+    log_id: i64,
+    field_adif: &str,
+) -> rusqlite::Result<Option<i64>> {
+    if let Some(column) = qso_column_for_adif(field_adif) {
+        return max_committed_column_serial(connection, log_id, column);
+    }
+
+    let mut statement =
+        connection.prepare("SELECT JSON FROM qsos WHERE LOG_ID = ?1 AND JSON IS NOT NULL")?;
+    let mut rows = statement.query(params![log_id])?;
+    let mut max_serial = None;
+    while let Some(row) = rows.next()? {
+        let json_text: Option<String> = row.get(0)?;
+        let Some(json_text) = json_text else {
+            continue;
+        };
+        let Ok(Value::Object(extra)) = serde_json::from_str::<Value>(&json_text) else {
+            continue;
+        };
+        if let Some(serial) = extra.get(field_adif).and_then(json_serial_value) {
+            max_serial = Some(max_serial.map_or(serial, |current: i64| current.max(serial)));
+        }
+    }
+    Ok(max_serial)
+}
+
+fn qso_column_for_adif(field_adif: &str) -> Option<&'static str> {
+    QSO_COLUMNS.iter().copied().find(|column| {
+        !matches!(*column, "LOG_ID" | "JSON") && column.eq_ignore_ascii_case(field_adif)
+    })
+}
+
+fn max_committed_column_serial(
+    connection: &Connection,
+    log_id: i64,
+    column: &str,
+) -> rusqlite::Result<Option<i64>> {
+    let sql = format!("SELECT {column} FROM qsos WHERE LOG_ID = ?1 AND {column} IS NOT NULL");
+    let mut statement = connection.prepare(&sql)?;
+    let mut rows = statement.query(params![log_id])?;
+    let mut max_serial = None;
+    while let Some(row) = rows.next()? {
+        if let Some(serial) = sql_serial_value(row.get_ref(0)?) {
+            max_serial = Some(max_serial.map_or(serial, |current: i64| current.max(serial)));
+        }
+    }
+    Ok(max_serial)
+}
+
+fn sql_serial_value(value: ValueRef<'_>) -> Option<i64> {
+    match value {
+        ValueRef::Integer(value) => Some(value),
+        ValueRef::Real(value) if value.is_finite() && value.fract() == 0.0 => Some(value as i64),
+        ValueRef::Text(value) => std::str::from_utf8(value).ok()?.trim().parse().ok(),
+        _ => None,
+    }
+}
+
+fn json_serial_value(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number.as_i64(),
+        Value::String(value) => value.trim().parse().ok(),
+        _ => None,
+    }
 }
 
 fn upsert_contact(connection: &Connection, contact: Contact) -> rusqlite::Result<i64> {
@@ -1404,6 +1595,70 @@ mod tests {
             .await
             .expect("contacts are listed");
         assert_eq!(contacts.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn allocate_serials_reserves_ranges_by_log_and_field() {
+        let database = test_database();
+        let first_log = create_test_log(&database).await;
+        let second_log = database
+            .create_log(NewLog {
+                name: "Second log".to_string(),
+                contest_id: "test-contest".to_string(),
+                station_callsign: "N0CALL".to_string(),
+                contest_params: Value::Object(Map::new()),
+            })
+            .await
+            .expect("second log is created");
+
+        let first = database
+            .allocate_serials(first_log.id, "STX".to_string(), 10)
+            .await
+            .expect("serials are allocated");
+        let second = database
+            .allocate_serials(first_log.id, "STX".to_string(), 10)
+            .await
+            .expect("next serials are allocated");
+        let other_log = database
+            .allocate_serials(second_log.id, "STX".to_string(), 10)
+            .await
+            .expect("other log serials are allocated");
+        let other_field = database
+            .allocate_serials(first_log.id, "CUSTOM_SERIAL".to_string(), 3)
+            .await
+            .expect("other field serials are allocated");
+
+        assert_eq!((first.start, first.end), (1, 10));
+        assert_eq!((second.start, second.end), (11, 20));
+        assert_eq!((other_log.start, other_log.end), (1, 10));
+        assert_eq!((other_field.start, other_field.end), (1, 3));
+    }
+
+    #[tokio::test]
+    async fn allocate_serials_starts_after_committed_column_or_json_serials() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+        let mut stx_contact = base_contact();
+        stx_contact.insert("STX".to_string(), json!(42));
+        let mut json_contact = base_contact();
+        json_contact.insert("CALL".to_string(), json!("K1ABD"));
+        json_contact.insert("CUSTOM_SERIAL".to_string(), json!(77));
+        database
+            .upsert_contacts(log.id, vec![stx_contact, json_contact])
+            .await
+            .expect("contacts are inserted");
+
+        let stx = database
+            .allocate_serials(log.id, "STX".to_string(), 5)
+            .await
+            .expect("STX serials are allocated");
+        let custom = database
+            .allocate_serials(log.id, "CUSTOM_SERIAL".to_string(), 5)
+            .await
+            .expect("custom serials are allocated");
+
+        assert_eq!((stx.start, stx.end), (43, 47));
+        assert_eq!((custom.start, custom.end), (78, 82));
     }
 
     #[tokio::test]

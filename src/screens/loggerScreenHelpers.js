@@ -2,6 +2,9 @@ import { reportClientErrorLater } from '../lib/errorReporting.js';
 
 export const CONTACTS_STORAGE_KEY = 'log73.contacts';
 export const SESSION_STORAGE_KEY = 'log73.session_id';
+export const SERIAL_ALLOCATION_STORAGE_PREFIX = 'log73.serial.v1';
+export const SERIAL_INSTANCE_STORAGE_KEY = 'log73.serial.instance_id';
+export const SERIAL_BATCH_SIZE_PARAM = 'SERIAL_BATCH_SIZE';
 export const BACKEND_WS_INITIAL_RECONNECT_DELAY_MS = 2000;
 export const BACKEND_WS_MAX_RECONNECT_DELAY_MS = 16000;
 export const BACKEND_WS_IDLE_PING_DELAY_MS = 15000;
@@ -10,6 +13,9 @@ export const CONTACTS_LOAD_INITIAL_RETRY_DELAY_MS = 2000;
 export const CONTACTS_LOAD_MAX_RETRY_DELAY_MS = 16000;
 export const CONTACTS_PAGE_SIZE = 200;
 export const CONTACT_COMMIT_RETRY_DELAY_MS = 5000;
+export const SERIAL_ALLOCATION_RETRY_DELAY_MS = 5000;
+export const DEFAULT_SERIAL_BATCH_SIZE = 10;
+export const MAX_SERIAL_BATCH_SIZE = 1000;
 export const DEFAULT_RADIO_STATE = { mode: 'CW', frequency_hz: 14000000 };
 export const EMPTY_SCORE_SUMMARY = {
   qsoCount: 0,
@@ -138,6 +144,128 @@ export function saveLocalContacts(logId, contacts) {
     contactStorageKey(logId),
     JSON.stringify(contacts.filter(shouldPersistLocally)),
   );
+}
+
+export function serialBatchSize(contestParams = {}) {
+  const parsed = Number.parseInt(
+    String(
+      contestParams?.[SERIAL_BATCH_SIZE_PARAM] ?? DEFAULT_SERIAL_BATCH_SIZE,
+    ),
+    10,
+  );
+  if (!Number.isFinite(parsed)) return DEFAULT_SERIAL_BATCH_SIZE;
+  return Math.min(Math.max(parsed, 1), MAX_SERIAL_BATCH_SIZE);
+}
+
+export function serialRefillRemainingThreshold(batchSize) {
+  return Math.max(
+    1,
+    Math.floor(serialBatchSize({ [SERIAL_BATCH_SIZE_PARAM]: batchSize }) * 0.1),
+  );
+}
+
+export function serialFieldTypeKind(field) {
+  return String(field?.type ?? 'String')
+    .split(':')[0]
+    .trim()
+    .toUpperCase();
+}
+
+export function sentSerialField(settings) {
+  return (settings?.exchange ?? []).find(
+    (field) =>
+      field?.is_sent === true && serialFieldTypeKind(field) === 'SERIAL',
+  );
+}
+
+export function getSerialInstanceId() {
+  let instanceId = sessionStorage.getItem(SERIAL_INSTANCE_STORAGE_KEY);
+  if (instanceId) return instanceId;
+  instanceId = window.crypto?.randomUUID
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  sessionStorage.setItem(SERIAL_INSTANCE_STORAGE_KEY, instanceId);
+  return instanceId;
+}
+
+export function serialAllocationStorageKey(logId, fieldAdif, instanceId) {
+  return `${SERIAL_ALLOCATION_STORAGE_PREFIX}.${logId}.${fieldAdif}.${instanceId}`;
+}
+
+export function loadSerialAllocation(logId, fieldAdif, instanceId) {
+  try {
+    const parsed = JSON.parse(
+      localStorage.getItem(
+        serialAllocationStorageKey(logId, fieldAdif, instanceId),
+      ) ?? '{}',
+    );
+    return {
+      ranges: normalizeSerialRanges(parsed?.ranges),
+    };
+  } catch (error) {
+    reportClientErrorLater({
+      source: 'loggerScreenHelpers.loadSerialAllocation',
+      message: 'Unable to load locally stored serial allocation.',
+      error,
+      details: { logId, fieldAdif },
+    });
+    return { ranges: [] };
+  }
+}
+
+export function saveSerialAllocation(logId, fieldAdif, instanceId, allocation) {
+  localStorage.setItem(
+    serialAllocationStorageKey(logId, fieldAdif, instanceId),
+    JSON.stringify({ ranges: normalizeSerialRanges(allocation?.ranges) }),
+  );
+}
+
+export function normalizeSerialRanges(ranges) {
+  return (Array.isArray(ranges) ? ranges : [])
+    .map((range) => ({
+      next: Number.parseInt(String(range?.next), 10),
+      end: Number.parseInt(String(range?.end), 10),
+    }))
+    .filter(
+      (range) =>
+        Number.isFinite(range.next) &&
+        Number.isFinite(range.end) &&
+        range.next > 0 &&
+        range.end >= range.next,
+    )
+    .sort((left, right) => left.next - right.next);
+}
+
+export function serialRangesRemaining(allocation) {
+  return normalizeSerialRanges(allocation?.ranges).reduce(
+    (total, range) => total + (range.end - range.next + 1),
+    0,
+  );
+}
+
+export function appendSerialRange(allocation, start, end) {
+  const parsedStart = Number.parseInt(String(start), 10);
+  const parsedEnd = Number.parseInt(String(end), 10);
+  return {
+    ranges: normalizeSerialRanges([
+      ...(allocation?.ranges ?? []),
+      { next: parsedStart, end: parsedEnd },
+    ]),
+  };
+}
+
+export function reserveNextSerial(allocation) {
+  const ranges = normalizeSerialRanges(allocation?.ranges);
+  const [firstRange, ...remainingRanges] = ranges;
+  if (!firstRange) return { serial: null, allocation: { ranges } };
+
+  const serial = firstRange.next;
+  const nextRange = { ...firstRange, next: firstRange.next + 1 };
+  const nextRanges =
+    nextRange.next <= nextRange.end
+      ? [nextRange, ...remainingRanges]
+      : remainingRanges;
+  return { serial, allocation: { ranges: nextRanges } };
 }
 
 export function committedBackendContact(contact) {

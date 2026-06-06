@@ -22,7 +22,10 @@ function validateSingleValue(field, value, radioMode) {
         error: `${label} must be a valid ${expectedLength}-digit RST.`,
       };
     }
-  } else if (kind === 'NUMERIC' && !/^\d+$/.test(normalizedValue)) {
+  } else if (
+    (kind === 'NUMERIC' || kind === 'SERIAL') &&
+    !/^\d+$/.test(normalizedValue)
+  ) {
     return { ok: false, error: `${label} must be numeric.` };
   }
 
@@ -56,7 +59,9 @@ function validateSingleValue(field, value, radioMode) {
 }
 
 export function validateCallsign(value) {
-  const normalizedValue = String(value ?? '').trim().toUpperCase();
+  const normalizedValue = String(value ?? '')
+    .trim()
+    .toUpperCase();
 
   if (normalizedValue === '') {
     return { ok: false, error: 'Callsign is required.' };

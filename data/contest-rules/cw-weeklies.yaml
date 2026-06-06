@@ -1,0 +1,187 @@
+contests:
+  - id: 'K1USNSST'
+    display_name: 'K1USN SST'
+    allowed_bands: [160, 80, 40, 20, 15, 10]
+    allowed_modes: ['CW']
+    scoring:
+      qso_points:
+        points: 1
+      dupe_key:
+        - 'CALL'
+        - 'BAND'
+      multipliers:
+        - name: 'QTH'
+          field: 'QTH'
+          key:
+            - 'SRX_STRING'
+    log_params:
+      - name: 'NAME'
+        label: 'Operator Name'
+        type: 'String:20'
+        required: true
+        preserve_case: true
+      - name: 'QTH'
+        label: 'State/Province/DX'
+        type: 'String:8'
+        required: true
+        help_text: 'Use state/province abbreviation, or DX for DX stations.'
+    exchange:
+      - name: 'Name(s)'
+        type: 'String:20'
+        adif: 'MY_NAME'
+        fixed: true
+        source_param: 'NAME'
+        is_sent: true
+      - name: 'QTH(s)'
+        type: 'String:8'
+        adif: 'STX_STRING'
+        fixed: true
+        source_param: 'QTH'
+        is_sent: true
+      - name: 'Name'
+        type: 'String:20'
+        adif: 'NAME'
+        is_sent: false
+      - name: 'QTH'
+        type: 'String:8'
+        adif: 'SRX_STRING'
+        is_sent: false
+    qso_columns:
+      - 'Name'
+      - 'QTH'
+      - 'Mult'
+      - 'Pts'
+      - 'Op'
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'Name(s)': 'MY_NAME'
+      'QTH(s)': 'STX_STRING'
+      Name: 'NAME'
+      QTH: 'SRX_STRING'
+    metadata:
+      source: 'https://www.k1usn.com/sst_rules.html'
+      notes: 'Exchange is name and state/province/DX. Received operator name is stored in ADIF NAME; sent operator name is stored as MY_NAME. DXCC-specific SST multiplier handling is approximated from the entered QTH value.'
+
+  - id: 'MST'
+    display_name: 'MST (Medium Speed Test)'
+    allowed_bands: [160, 80, 40, 20, 15, 10]
+    allowed_modes: ['CW']
+    scoring:
+      qso_points:
+        points: 1
+      dupe_key:
+        - 'CALL'
+        - 'BAND'
+    log_params:
+      - name: 'NAME'
+        label: 'Operator Name'
+        type: 'String:20'
+        required: true
+        preserve_case: true
+    exchange:
+      - name: 'Serial(s)'
+        type: 'Serial:4'
+        adif: 'STX'
+        fixed: true
+        is_sent: true
+      - name: 'Name(s)'
+        type: 'String:20'
+        adif: 'MY_NAME'
+        fixed: true
+        source_param: 'NAME'
+        is_sent: true
+      - name: 'Serial'
+        type: 'Serial:4'
+        adif: 'SRX'
+        is_sent: false
+      - name: 'Name'
+        type: 'String:20'
+        adif: 'NAME'
+        is_sent: false
+    qso_columns:
+      - 'Serial(s)'
+      - 'Serial'
+      - 'Name'
+      - 'Pts'
+      - 'Op'
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'Serial(s)': 'STX'
+      'Name(s)': 'MY_NAME'
+      Serial: 'SRX'
+      Name: 'NAME'
+    metadata:
+      source: 'https://internationalcwcouncil.org/mst-contest/'
+      notes: 'Exchange is serial number and name. Sent and received serial numbers are stored in ADIF STX and SRX; received names are stored in ADIF NAME.'
+
+  - id: 'CWT'
+    display_name: 'CWOps CWT'
+    allowed_bands: [160, 80, 40, 20, 15, 10]
+    allowed_modes: ['CW']
+    scoring:
+      qso_points:
+        points: 1
+      dupe_key:
+        - 'CALL'
+        - 'BAND'
+      multipliers:
+        - name: 'Callsign'
+          field: 'CALL'
+          key:
+            - 'CALL'
+    log_params:
+      - name: 'NAME'
+        label: 'First Name'
+        type: 'String:20'
+        required: true
+        preserve_case: true
+      - name: 'EXCHANGE'
+        label: 'Member Number/SPC/DX/CWA'
+        type: 'String:16'
+        required: true
+        help_text: 'CWops member number, state/province/DX prefix for non-members, or CWA.'
+    exchange:
+      - name: 'Name(s)'
+        type: 'String:20'
+        adif: 'MY_NAME'
+        fixed: true
+        source_param: 'NAME'
+        is_sent: true
+      - name: 'Exchange(s)'
+        type: 'String:16'
+        adif: 'STX_STRING'
+        fixed: true
+        source_param: 'EXCHANGE'
+        is_sent: true
+      - name: 'Name'
+        type: 'String:20'
+        adif: 'NAME'
+        is_sent: false
+      - name: 'Exchange'
+        type: 'String:16'
+        adif: 'SRX_STRING'
+        is_sent: false
+    qso_columns:
+      - 'Name'
+      - 'Exchange'
+      - 'Mult'
+      - 'Pts'
+      - 'Op'
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'Name(s)': 'MY_NAME'
+      'Exchange(s)': 'STX_STRING'
+      Name: 'NAME'
+      Exchange: 'SRX_STRING'
+    metadata:
+      source: 'https://cwops.org/cwops-tests/'
+      notes: 'Exchange is first name plus CWops member number; non-members send first name plus state/province/DX country prefix, and CW Academy students send CWA. Score is modeled as 1 point per QSO times unique callsigns worked.'

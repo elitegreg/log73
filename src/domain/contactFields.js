@@ -39,7 +39,7 @@ function sanitizeSingleLine(
 
   if (kind === 'RST') {
     nextValue = sanitizeRST(nextValue, radioMode);
-  } else if (kind === 'NUMERIC') {
+  } else if (kind === 'NUMERIC' || kind === 'SERIAL') {
     nextValue = nextValue.replace(/\D/g, '');
   } else if (!preserveCase) {
     nextValue = nextValue.toUpperCase();
@@ -92,7 +92,10 @@ export function fieldDefault(field, radioMode, contestParams = {}) {
 }
 
 export function cutNumberString(value) {
-  return String(value ?? '').trim().toUpperCase().replaceAll('9', 'N');
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replaceAll('9', 'N');
 }
 
 export function sentExchangeToken(
@@ -102,8 +105,11 @@ export function sentExchangeToken(
   contestParams = {},
 ) {
   const value =
-    exchangeValues?.[field?.name] ?? fieldDefault(field, radioMode, contestParams);
-  const normalized = String(value ?? '').trim().toUpperCase();
+    exchangeValues?.[field?.name] ??
+    fieldDefault(field, radioMode, contestParams);
+  const normalized = String(value ?? '')
+    .trim()
+    .toUpperCase();
 
   if (field?.adif === 'RST_SENT') {
     return cutNumberString(normalized);

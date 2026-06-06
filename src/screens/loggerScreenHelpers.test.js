@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   committedBackendContact,
+  appendSerialRange,
   mergeContact,
+  reserveNextSerial,
+  serialBatchSize,
+  serialRangesRemaining,
+  serialRefillRemainingThreshold,
   sortContacts,
   sortContactsByCallsignThenTime,
 } from './loggerScreenHelpers.js';
@@ -64,6 +69,20 @@ test('sortContactsByCallsignThenTime uses contact id as a final tie breaker', ()
     ),
     [10, 12, 'b'],
   );
+});
+
+test('serial allocation helpers reserve ranges and calculate threshold', () => {
+  const allocation = appendSerialRange({ ranges: [] }, 10, 12);
+  assert.equal(serialRangesRemaining(allocation), 3);
+
+  const first = reserveNextSerial(allocation);
+  assert.equal(first.serial, 10);
+  assert.equal(serialRangesRemaining(first.allocation), 2);
+
+  assert.equal(serialBatchSize({ SERIAL_BATCH_SIZE: '25' }), 25);
+  assert.equal(serialBatchSize({ SERIAL_BATCH_SIZE: '0' }), 1);
+  assert.equal(serialRefillRemainingThreshold(10), 1);
+  assert.equal(serialRefillRemainingThreshold(100), 10);
 });
 
 test('committedBackendContact assigns _client_id from _id', () => {

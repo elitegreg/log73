@@ -96,6 +96,8 @@ function MainWindow({
   onRescore,
   isRescoreLoading,
   scoreSummary,
+  serialAllocation,
+  onSerialContactLogged,
   onExit,
 }) {
   const [callSign, setCallSign] = useState('');
@@ -173,6 +175,22 @@ function MainWindow({
       exchangeDefaults(settings, radioMode, log?.contest_params ?? {}),
     );
   }, [settings, radioMode, log]);
+
+  useEffect(() => {
+    if (!serialAllocation?.required || !serialAllocation.fieldAdif) return;
+    const serialField = (settings?.exchange ?? []).find(
+      (field) => field.is_sent && field.adif === serialAllocation.fieldAdif,
+    );
+    if (!serialField) return;
+    setExchangeValues((currentValues) => ({
+      ...currentValues,
+      [serialField.name]:
+        serialAllocation.current === null ||
+        serialAllocation.current === undefined
+          ? ''
+          : String(serialAllocation.current),
+    }));
+  }, [settings, serialAllocation]);
 
   useEffect(() => {
     setCwWpmRef.current = onSetCwWpm;
@@ -811,6 +829,14 @@ function MainWindow({
     );
   }
 
+  function fieldEditable(field) {
+    const typeKind = String(field?.type ?? '')
+      .split(':')[0]
+      .trim()
+      .toUpperCase();
+    return field?.fixed !== true && !(field?.is_sent && typeKind === 'SERIAL');
+  }
+
   function exchangeValidation(field) {
     return validateExchangeField(field, exchangeValue(field), radioMode);
   }
@@ -835,8 +861,15 @@ function MainWindow({
     return validateCallsign(callSign);
   }
 
+  const serialBlockMessage =
+    serialAllocation?.required && !serialAllocation.available
+      ? serialAllocation.message ||
+        'No serial number is currently available. Waiting for backend allocation.'
+      : '';
+
   function canLogContact(force = false) {
     return (
+      !serialBlockMessage &&
       allRequiredFieldsFilled() &&
       (force || (callsignValidation().ok && !firstInvalidExchangeField()))
     );
@@ -891,6 +924,9 @@ function MainWindow({
     }
 
     onLogContact?.(contact);
+    if (serialAllocation?.required) {
+      onSerialContactLogged?.();
+    }
     clearEntryFields();
     return true;
   }
@@ -902,7 +938,7 @@ function MainWindow({
         name: field.name,
         value: exchangeValues[field.name] ?? '',
         ref: { current: exchangeInputRefs.current[field.name] },
-        editable: field.fixed !== true,
+        editable: fieldEditable(field),
       })),
     ];
     const currentIndex = fields.findIndex(
@@ -926,7 +962,7 @@ function MainWindow({
       ...(settings?.exchange ?? []).map((field) => ({
         name: field.name,
         ref: { current: exchangeInputRefs.current[field.name] },
-        editable: field.fixed !== true,
+        editable: fieldEditable(field),
       })),
     ];
     const currentIndex = fields.findIndex(
@@ -969,7 +1005,7 @@ function MainWindow({
     const field = (settings?.exchange ?? []).find(
       (item) => item.name === fieldName,
     );
-    if (!field || field.fixed === true) return false;
+    if (!field || !fieldEditable(field)) return false;
     const value = String(exchangeValue(field)).trim();
     return value !== '' && exchangeValidation(field).ok;
   }
@@ -982,7 +1018,7 @@ function MainWindow({
     for (let step = 1; step <= totalFields; step += 1) {
       const nextIndex = (currentIndex + step) % totalFields;
       const field = exchangeFields[nextIndex];
-      if (!field || field.fixed === true) continue;
+      if (!field || !fieldEditable(field)) continue;
 
       const value = String(exchangeValue(field)).trim();
       if (value === '' || !exchangeValidation(field).ok) {
@@ -1244,6 +1280,11 @@ function MainWindow({
         updateExchangeField={updateExchangeField}
         handleExchangeKeyDown={handleExchangeKeyDown}
       />
+      {serialAllocation?.message ? (
+        <div className="serial-allocation-status" aria-live="polite">
+          {serialAllocation.message}
+        </div>
+      ) : null}
       <textarea
         className="supercheckpartial-box"
         rows="3"
@@ -1311,6 +1352,8 @@ function MainWindow({
         handleStore={storeCurrentBandMapSpot}
         handleSpotIt={handleSpotIt}
         highlightLogIt={highlightLogIt}
+        disableLogIt={Boolean(serialBlockMessage)}
+        logItTitle={serialBlockMessage || undefined}
       />
       <StatusBar
         stationCallsign={stationCallsign}

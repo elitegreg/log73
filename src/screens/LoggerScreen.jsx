@@ -27,8 +27,6 @@ import {
   BACKEND_WS_INITIAL_RECONNECT_DELAY_MS,
   BACKEND_WS_MAX_RECONNECT_DELAY_MS,
   BACKEND_WS_PING_TIMEOUT_MS,
-  CONTACTS_LOAD_INITIAL_RETRY_DELAY_MS,
-  CONTACTS_LOAD_MAX_RETRY_DELAY_MS,
   CONTACTS_PAGE_SIZE,
   CONTACT_COMMIT_RETRY_DELAY_MS,
   DEFAULT_RADIO_STATE,
@@ -41,6 +39,16 @@ import {
   sortContacts,
   markContactFailed,
   contactIdentifier,
+  sentSerialField,
+  serialBatchSize,
+  serialRefillRemainingThreshold,
+  getSerialInstanceId,
+  loadSerialAllocation,
+  saveSerialAllocation,
+  appendSerialRange,
+  reserveNextSerial,
+  serialRangesRemaining,
+  SERIAL_ALLOCATION_RETRY_DELAY_MS,
 } from './loggerScreenHelpers';
 import {
   addBandMapSpot,
@@ -155,10 +163,18 @@ function LoggerScreen() {
   const [isRescoreLoading, setIsRescoreLoading] = useState(false);
   const [isSocketDebugPanelEnabled] = useState(readSocketDebugPanelEnabled);
   const [socketDebugEntries, setSocketDebugEntries] = useState([]);
+  const [serialAllocationStatus, setSerialAllocationStatus] = useState({
+    required: false,
+    available: true,
+    current: null,
+    message: '',
+  });
   const backendSocketRef = useRef(null);
+  const serialAllocatorRef = useRef(null);
   const committingContactIdsRef = useRef(new Set());
   const refreshContactsRef = useRef(() => Promise.resolve(false));
   const contactsLoadErrorNotifiedRef = useRef(false);
+  const loadMoreContactsErrorNotifiedRef = useRef(false);
   const commitContactErrorNotifiedRef = useRef(false);
   const socketDebugSequenceRef = useRef(0);
   const activeCallsignPrefixRef = useRef('');
@@ -333,6 +349,202 @@ function LoggerScreen() {
       return true;
     });
   }, [allContacts, debouncedCallsignSearch]);
+
+  useEffect(() => {
+    const field = sentSerialField(settings);
+    if (!field || !numericLogId) {
+      serialAllocatorRef.current = null;
+      setSerialAllocationStatus({
+        required: false,
+        available: true,
+        current: null,
+        message: '',
+      });
+      return;
+    }
+
+    let cancelled = false;
+    const batchSize = serialBatchSize(log?.contest_params ?? {});
+    const threshold = serialRefillRemainingThreshold(batchSize);
+    const instanceId = getSerialInstanceId();
+    const manager = {
+      allocation: loadSerialAllocation(numericLogId, field.adif, instanceId),
+      batchSize,
+      current: null,
+      errorReported: false,
+      field,
+      instanceId,
+      message: '',
+      requestInFlight: false,
+      retryTimerId: undefined,
+    };
+    serialAllocatorRef.current = manager;
+
+    function isActive() {
+      return !cancelled && serialAllocatorRef.current === manager;
+    }
+
+    function remaining() {
+      return serialRangesRemaining(manager.allocation);
+    }
+
+    function persist() {
+      saveSerialAllocation(
+        numericLogId,
+        field.adif,
+        instanceId,
+        manager.allocation,
+      );
+    }
+
+    function publish() {
+      if (!isActive()) return;
+      const available =
+        manager.current !== null && manager.current !== undefined;
+      const message = available
+        ? manager.message
+        : manager.message ||
+          (manager.requestInFlight
+            ? 'Requesting serial numbers...'
+            : 'No serial number is currently available. Waiting for backend allocation.');
+      setSerialAllocationStatus({
+        required: true,
+        available,
+        current: manager.current,
+        fieldAdif: field.adif,
+        fieldName: field.name,
+        message,
+        remaining: remaining(),
+        batchSize,
+        threshold,
+      });
+    }
+
+    function reserveLocalSerial() {
+      if (manager.current !== null && manager.current !== undefined)
+        return true;
+      const reservation = reserveNextSerial(manager.allocation);
+      if (reservation.serial === null || reservation.serial === undefined) {
+        manager.allocation = reservation.allocation;
+        persist();
+        return false;
+      }
+      manager.current = reservation.serial;
+      manager.allocation = reservation.allocation;
+      persist();
+      return true;
+    }
+
+    function clearRetryTimer() {
+      if (manager.retryTimerId !== undefined) {
+        window.clearTimeout(manager.retryTimerId);
+        manager.retryTimerId = undefined;
+      }
+    }
+
+    function scheduleRetry() {
+      if (!isActive() || manager.retryTimerId !== undefined) return;
+      manager.retryTimerId = window.setTimeout(() => {
+        manager.retryTimerId = undefined;
+        requestAllocation('retry');
+      }, SERIAL_ALLOCATION_RETRY_DELAY_MS);
+    }
+
+    async function requestAllocation(reason) {
+      if (!isActive() || manager.requestInFlight) return;
+      clearRetryTimer();
+      manager.requestInFlight = true;
+      if (manager.current === null || manager.current === undefined) {
+        manager.message = 'Requesting serial numbers...';
+      }
+      publish();
+
+      try {
+        const result = await apiJson(
+          `/logs/${numericLogId}/serial-allocation`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              field_adif: field.adif,
+              count: manager.batchSize,
+              reason,
+            }),
+          },
+        );
+        if (!result.ok) {
+          throw new Error(result.error ?? 'Unable to allocate serial numbers');
+        }
+        const allocation = result.allocation ?? {};
+        manager.allocation = appendSerialRange(
+          manager.allocation,
+          allocation.start,
+          allocation.end,
+        );
+        persist();
+        reserveLocalSerial();
+        manager.errorReported = false;
+        manager.message = '';
+      } catch (error) {
+        if (!isActive()) return;
+        manager.message =
+          manager.current !== null && manager.current !== undefined
+            ? `Serial number refill failed; ${remaining()} reserved serial numbers remain.`
+            : 'No serial numbers are currently available. Retrying backend allocation.';
+        if (!manager.errorReported) {
+          manager.errorReported = true;
+          reportClientErrorLater({
+            source: 'LoggerScreen.serialAllocation',
+            message: 'Unable to allocate sent serial numbers.',
+            error,
+            details: {
+              logId: numericLogId,
+              fieldAdif: field.adif,
+              batchSize: manager.batchSize,
+              reason,
+            },
+          });
+        }
+        scheduleRetry();
+      } finally {
+        if (isActive()) {
+          manager.requestInFlight = false;
+          publish();
+        }
+      }
+    }
+
+    function ensureSerials(reason) {
+      reserveLocalSerial();
+      publish();
+      if (
+        manager.current === null ||
+        manager.current === undefined ||
+        remaining() <= threshold
+      ) {
+        requestAllocation(reason);
+      }
+    }
+
+    manager.consumeLoggedSerial = () => {
+      manager.current = null;
+      manager.message = '';
+      ensureSerials('after-log');
+    };
+
+    ensureSerials('startup');
+
+    return () => {
+      cancelled = true;
+      clearRetryTimer();
+      if (serialAllocatorRef.current === manager) {
+        serialAllocatorRef.current = null;
+      }
+    };
+  }, [settings, log?.contest_params, numericLogId]);
+
+  const handleSerialContactLogged = useCallback(() => {
+    serialAllocatorRef.current?.consumeLoggedSerial?.();
+  }, []);
 
   useEffect(() => {
     const element = loggerMainColumnRef.current;
@@ -1013,9 +1225,6 @@ function LoggerScreen() {
 
   useEffect(() => {
     let isCancelled = false;
-    let shouldRetryContactsLoad = true;
-    let contactsLoadRetryDelayMs = CONTACTS_LOAD_INITIAL_RETRY_DELAY_MS;
-    let contactsLoadRetryTimerId;
     let contactsLoadInFlightPromise = null;
     let offset = 0;
     let hasMore = true;
@@ -1061,20 +1270,6 @@ function LoggerScreen() {
       }
 
       return sortContacts([...committedById.values(), ...localUncommitted]);
-    }
-
-    function scheduleContactsLoadRetry() {
-      if (isCancelled || !shouldRetryContactsLoad) return false;
-      if (contactsLoadRetryTimerId !== undefined) return true;
-      contactsLoadRetryTimerId = window.setTimeout(() => {
-        contactsLoadRetryTimerId = undefined;
-        loadContacts({ mode: 'retry', reset: true });
-      }, contactsLoadRetryDelayMs);
-      contactsLoadRetryDelayMs = Math.min(
-        contactsLoadRetryDelayMs * 2,
-        CONTACTS_LOAD_MAX_RETRY_DELAY_MS,
-      );
-      return true;
     }
 
     function loadContacts({ mode = 'refresh', reset = true } = {}) {
@@ -1123,31 +1318,36 @@ function LoggerScreen() {
           setHasMoreContacts(hasMore);
 
           if (mode !== 'load-more') {
-            shouldRetryContactsLoad = false;
             contactsLoadErrorNotifiedRef.current = false;
+            loadMoreContactsErrorNotifiedRef.current = false;
             setContactsLoadState('idle');
+          } else {
+            loadMoreContactsErrorNotifiedRef.current = false;
           }
           return committedPage.length > 0;
         } catch (error) {
           if (isCancelled) return false;
           if (mode === 'load-more') {
-            notifyOperationalError(
-              'LoggerScreen.loadMoreContacts',
-              'Unable to load more contacts.',
-              error,
-              {
-                logId: numericLogId,
-                callsignPrefix,
-                offset,
-              },
-            );
+            if (!loadMoreContactsErrorNotifiedRef.current) {
+              loadMoreContactsErrorNotifiedRef.current = true;
+              notifyOperationalError(
+                'LoggerScreen.loadMoreContacts',
+                'Unable to load more contacts.',
+                error,
+                {
+                  logId: numericLogId,
+                  callsignPrefix,
+                  offset,
+                },
+              );
+            }
             return false;
           }
           if (!contactsLoadErrorNotifiedRef.current) {
             contactsLoadErrorNotifiedRef.current = true;
             notifyOperationalError(
               'LoggerScreen.loadContacts',
-              'Unable to load backend contacts. Using local contacts and retrying.',
+              'Unable to load backend contacts. Using local contacts until the backend reconnects.',
               error,
               {
                 logId: numericLogId,
@@ -1155,8 +1355,7 @@ function LoggerScreen() {
               },
             );
           }
-          const retryScheduled = scheduleContactsLoadRetry();
-          setContactsLoadState(retryScheduled ? 'retrying' : 'idle');
+          setContactsLoadState('idle');
           return false;
         } finally {
           if (mode === 'load-more') {
@@ -1176,9 +1375,6 @@ function LoggerScreen() {
     return () => {
       isCancelled = true;
       refreshContactsRef.current = () => Promise.resolve(false);
-      shouldRetryContactsLoad = false;
-      if (contactsLoadRetryTimerId !== undefined)
-        window.clearTimeout(contactsLoadRetryTimerId);
     };
   }, [numericLogId, logId, debouncedCallsignSearch, notifyOperationalError]);
 
@@ -1305,6 +1501,7 @@ function LoggerScreen() {
 
   function loadMoreContacts() {
     if (contactsLoadState === 'initial-loading') return Promise.resolve(false);
+    if (backendSocketStatus !== 'connected') return Promise.resolve(false);
     return refreshContactsRef.current({ mode: 'load-more', reset: false });
   }
 
@@ -1459,6 +1656,8 @@ function LoggerScreen() {
             onRescore={handleRescore}
             isRescoreLoading={isRescoreLoading}
             scoreSummary={scoreSummary}
+            serialAllocation={serialAllocationStatus}
+            onSerialContactLogged={handleSerialContactLogged}
             onExit={exitLogger}
           />
           <LogWindow

@@ -321,6 +321,7 @@ async fn main() {
         .route("/logs/{id}/qso-count", get(log_qso_count))
         .route("/logs/{id}/adif", post(export_adif))
         .route("/logs/{id}/cabrillo", post(export_cabrillo))
+        .route("/logs/{id}/serial-allocation", post(allocate_serials))
         .route(
             "/logs/{log_id}/contacts",
             get(contacts).post(commit_contact),
@@ -1415,8 +1416,76 @@ async fn delete_radio(
     }
 }
 
+const DEFAULT_SERIAL_BATCH_SIZE: i64 = 10;
+const MAX_SERIAL_BATCH_SIZE: i64 = 1000;
 const DEFAULT_CONTACTS_PAGE_LIMIT: usize = 200;
 const MAX_CONTACTS_PAGE_LIMIT: usize = 1000;
+
+#[derive(Debug, serde::Deserialize)]
+struct SerialAllocationPayload {
+    field_adif: String,
+    count: Option<i64>,
+}
+
+async fn allocate_serials(
+    State(app_state): State<AppState>,
+    Path(log_id): Path<i64>,
+    Json(payload): Json<SerialAllocationPayload>,
+) -> Json<serde_json::Value> {
+    let field_adif = payload.field_adif.trim();
+    if field_adif.is_empty() {
+        return Json(
+            serde_json::json!({ "ok": false, "error": "serial field ADIF name is required" }),
+        );
+    }
+    let count = payload
+        .count
+        .unwrap_or(DEFAULT_SERIAL_BATCH_SIZE)
+        .clamp(1, MAX_SERIAL_BATCH_SIZE);
+
+    let log = match app_state.db.log(log_id).await {
+        Ok(Some(log)) => log,
+        Ok(None) => {
+            return Json(
+                serde_json::json!({ "ok": false, "error": format!("log {log_id} not found") }),
+            );
+        }
+        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    };
+    let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
+        return Json(
+            serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id) }),
+        );
+    };
+    let Some(serial_field) = rules.exchange.iter().find(|field| {
+        field.is_sent
+            && field.adif.eq_ignore_ascii_case(field_adif)
+            && exchange_field_type_kind(&field.field_type) == "SERIAL"
+    }) else {
+        return Json(serde_json::json!({
+            "ok": false,
+            "error": format!("{} is not a sent serial field for contest {}", field_adif, rules.contest),
+        }));
+    };
+
+    match app_state
+        .db
+        .allocate_serials(log_id, serial_field.adif.clone(), count)
+        .await
+    {
+        Ok(allocation) => Json(serde_json::json!({ "ok": true, "allocation": allocation })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+fn exchange_field_type_kind(field_type: &str) -> String {
+    field_type
+        .split(':')
+        .next()
+        .unwrap_or("STRING")
+        .trim()
+        .to_uppercase()
+}
 
 #[derive(Debug, Default, serde::Deserialize)]
 struct ContactsQuery {

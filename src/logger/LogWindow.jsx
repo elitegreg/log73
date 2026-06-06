@@ -200,8 +200,17 @@ function contactRowTitle(entry) {
     : 'Contact upload failed.';
 }
 
-function editableFieldForColumn(column, columnFieldMap) {
+function isSentSerialExchangeField(field) {
+  return (
+    field?.is_sent === true && parseFieldType(field?.type).kind === 'SERIAL'
+  );
+}
+
+function editableFieldForColumn(settings, column, columnFieldMap) {
   if (READ_ONLY_COLUMNS.has(column)) return null;
+  if (isSentSerialExchangeField(exchangeFieldForColumn(settings, column))) {
+    return null;
+  }
   if (column === 'Date/Time (UTC)') return 'QSO_DATE_TIME_ON';
   return columnFieldMap[column] ?? column;
 }
@@ -280,8 +289,7 @@ function parseUpdateValue(settings, column, value, radioMode, entry = null) {
     if (
       (settings?.allowed_modes ?? []).length > 0 &&
       !settings.allowed_modes.some(
-        (allowedMode) =>
-          String(allowedMode).trim().toUpperCase() === mode,
+        (allowedMode) => String(allowedMode).trim().toUpperCase() === mode,
       )
     ) {
       return {
@@ -420,29 +428,6 @@ function LogWindow({
     return () => window.removeEventListener('resize', updateViewportHeight);
   }, []);
 
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-    if (
-      !hasMoreContacts ||
-      isLoadingMoreContacts ||
-      typeof onLoadMoreContacts !== 'function'
-    ) {
-      return;
-    }
-
-    const remainingPx =
-      container.scrollHeight - (container.scrollTop + container.clientHeight);
-    if (remainingPx <= LOAD_MORE_THRESHOLD_PX) {
-      onLoadMoreContacts();
-    }
-  }, [
-    contacts.length,
-    hasMoreContacts,
-    isLoadingMoreContacts,
-    onLoadMoreContacts,
-  ]);
-
   function maybeLoadMoreContacts(container) {
     if (
       !container ||
@@ -522,7 +507,11 @@ function LogWindow({
 
   function beginUpdate() {
     if (!contextMenu) return;
-    const field = editableFieldForColumn(contextMenu.column, columnFieldMap);
+    const field = editableFieldForColumn(
+      settings,
+      contextMenu.column,
+      columnFieldMap,
+    );
     if (!field) return;
     const contactIndex = contacts.findIndex(
       (entry, index) => contactKey(entry, index) === contextMenu.contactKey,
@@ -547,7 +536,11 @@ function LogWindow({
 
   function finishUpdate() {
     if (!editingCell) return;
-    const field = editableFieldForColumn(editingCell.column, columnFieldMap);
+    const field = editableFieldForColumn(
+      settings,
+      editingCell.column,
+      columnFieldMap,
+    );
     if (!field) return;
 
     const contactIndex = contacts.findIndex(
@@ -636,7 +629,8 @@ function LogWindow({
                     >
                       {columns.map((column) => {
                         const isEditing =
-                          editingCell?.key === key && editingCell.column === column;
+                          editingCell?.key === key &&
+                          editingCell.column === column;
                         const validation = cellValidation(
                           settings,
                           column,
@@ -647,7 +641,9 @@ function LogWindow({
                         return (
                           <td
                             key={column}
-                            className={validation.ok ? undefined : 'invalid-cell'}
+                            className={
+                              validation.ok ? undefined : 'invalid-cell'
+                            }
                             title={validation.ok ? undefined : validation.error}
                             onContextMenu={(event) =>
                               openContextMenu(event, entry, index, column)
@@ -719,7 +715,11 @@ function LogWindow({
               <button
                 type="button"
                 disabled={
-                  !editableFieldForColumn(contextMenu.column, columnFieldMap)
+                  !editableFieldForColumn(
+                    settings,
+                    contextMenu.column,
+                    columnFieldMap,
+                  )
                 }
                 onClick={beginUpdate}
               >

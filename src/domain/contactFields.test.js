@@ -20,6 +20,10 @@ test('parseFieldType uses contest lengths and RST mode lengths', () => {
     kind: 'NUMERIC',
     maxLength: 3,
   });
+  assert.deepEqual(parseFieldType('Serial:4'), {
+    kind: 'SERIAL',
+    maxLength: 4,
+  });
   assert.deepEqual(parseFieldType('RST', 'CW'), { kind: 'RST', maxLength: 3 });
   assert.deepEqual(parseFieldType('RST', 'CW-R'), {
     kind: 'RST',
@@ -47,6 +51,7 @@ test('sanitizeCallsign uppercases, filters chars, and truncates callsigns', () =
 
 test('sanitizeExchangeValue applies type-specific normalization', () => {
   assert.equal(sanitizeExchangeValue({ type: 'Numeric:3' }, '123A'), '123');
+  assert.equal(sanitizeExchangeValue({ type: 'Serial:4' }, '001A'), '001');
   assert.equal(sanitizeExchangeValue({ type: 'String:4' }, 'scqp'), 'SCQP');
   assert.equal(sanitizeExchangeValue({ type: 'RST' }, '599', 'SSB'), '59');
 });

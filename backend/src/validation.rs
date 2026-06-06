@@ -320,6 +320,10 @@ pub async fn validate_contacts(
                 index + 1
             ));
         }
+
+        validate_immutable_sent_serial_fields(database, rules, contact)
+            .await
+            .map_err(|error| format!("contact {}: {error}", index + 1))?;
     }
 
     Ok(())
@@ -330,6 +334,51 @@ pub fn force_commit_requested(contact: &Contact) -> bool {
         .get("_force")
         .and_then(Value::as_bool)
         .unwrap_or(false)
+}
+
+async fn validate_immutable_sent_serial_fields(
+    database: &Database,
+    rules: &ContestRules,
+    contact: &Contact,
+) -> Result<(), String> {
+    let sent_serial_fields = rules
+        .exchange
+        .iter()
+        .filter(|field| field.is_sent && parse_field_type(&field.field_type, "CW").kind == "SERIAL")
+        .collect::<Vec<_>>();
+    if sent_serial_fields.is_empty() {
+        return Ok(());
+    }
+
+    let Some(contact_id) = contact_id(contact) else {
+        return Ok(());
+    };
+    let Some(existing) = database
+        .contact(contact_id)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok(());
+    };
+
+    for field in sent_serial_fields {
+        let previous = serial_field_value(existing.get(&field.adif));
+        let next = serial_field_value(contact.get(&field.adif));
+        if previous != next {
+            return Err(format!("{} cannot be changed after logging", field.name));
+        }
+    }
+
+    Ok(())
+}
+
+fn serial_field_value(value: Option<&Value>) -> Option<String> {
+    match value? {
+        Value::Number(number) => Some(number.to_string()),
+        Value::String(value) => Some(value.trim().to_string()),
+        _ => None,
+    }
+    .filter(|value| !value.is_empty())
 }
 
 pub fn validate_radio_frequency_hz(frequency_hz: u64) -> Result<(), String> {
@@ -754,7 +803,7 @@ fn validate_typed_field(
                 "{label} must be a valid {expected_length}-digit RST"
             ));
         }
-    } else if parsed.kind == "NUMERIC"
+    } else if matches!(parsed.kind.as_str(), "NUMERIC" | "SERIAL")
         && !normalized_value
             .chars()
             .all(|character| character.is_ascii_digit())
@@ -1065,7 +1114,9 @@ mod tests {
         assert!(validate_typed_field("RST", "RST", "599", &[], None, "CW-R").is_ok());
         assert!(validate_typed_field("RST", "RST", "59", &[], None, "CW").is_err());
         assert!(validate_typed_field("Serial", "Numeric:3", "123", &[], None, "CW").is_ok());
+        assert!(validate_typed_field("Serial", "Serial:3", "123", &[], None, "CW").is_ok());
         assert!(validate_typed_field("Serial", "Numeric:3", "12A", &[], None, "CW").is_err());
+        assert!(validate_typed_field("Serial", "Serial:3", "12A", &[], None, "CW").is_err());
         assert!(
             validate_typed_field("Section", "String:3", "SC", &["SC".to_string()], None, "CW")
                 .is_ok()

@@ -63,7 +63,15 @@ test('validateExchangeField validates numeric fields', () => {
     true,
   );
   assert.equal(
+    validateExchangeField({ name: 'Serial', type: 'Serial:3' }, '123').ok,
+    true,
+  );
+  assert.equal(
     validateExchangeField({ name: 'Serial', type: 'Numeric:3' }, '12A').ok,
+    false,
+  );
+  assert.equal(
+    validateExchangeField({ name: 'Serial', type: 'Serial:3' }, '12A').ok,
     false,
   );
 });

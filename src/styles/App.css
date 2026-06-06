@@ -131,6 +131,12 @@
   line-height: 1.2;
 }
 
+.serial-allocation-status {
+  margin: 4px 8px 0;
+  color: var(--invalid-border-color);
+  font-weight: bold;
+}
+
 :root {
   --invalid-border-color: #b00020;
   --invalid-background-color: #ffd6dd;

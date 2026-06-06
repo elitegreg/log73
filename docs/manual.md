@@ -231,6 +231,14 @@ Use Open Log screen:
 - **ARRL Field Day**
   - `Class` required (e.g. `1A`, `2B`)
   - `Section` required (valid ARRL section list)
+- **CWOps CWT**
+  - `First Name` required
+  - `Member Number/SPC/DX/CWA` required
+- **K1USN SST**
+  - `Operator Name` required
+  - `State/Province/DX` required
+- **MST (Medium Speed Test)**
+  - `Serial Batch Size` required, default `10`; refill starts after 90% of the batch is consumed
 - **SC QSO Party**
   - `State` required (state/province list or `DX`)
 - **SC QSO Party (In State)**
@@ -499,6 +507,7 @@ The right-hand log table supports multi-select and inline editing.
 - `Freq` expects kHz value; converted internally to Hz
 - `Mode` must be one of allowed contest modes
 - Exchange fields are validated by contest field definitions
+- Sent serial-number exchange columns are read-only
 - `Mult` and `Pts` are read-only
 
 ---
@@ -506,6 +515,9 @@ The right-hand log table supports multi-select and inline editing.
 ## 15) Supported contests (current)
 
 - **ARRL Field Day**
+- **CWOps CWT**
+- **K1USN SST**
+- **MST (Medium Speed Test)**
 - **SC QSO Party**
 - **SC QSO Party (In State)**
 
