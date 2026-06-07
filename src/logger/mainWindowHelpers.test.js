@@ -12,6 +12,8 @@ import {
   modeIsCw,
   nextCwWpm,
   normalizedContactFrequencyHz,
+  tuningIncrementHzForMode,
+  steppedFrequencyHz,
   typedModeFromCallsignInput,
 } from './mainWindowHelpers.js';
 
@@ -84,6 +86,30 @@ test('nextCwWpm clamps page-up and page-down changes to valid range', () => {
   assert.equal(nextCwWpm(60, 1), 60);
   assert.equal(nextCwWpm(5, -1), 5);
   assert.equal(nextCwWpm(Number.NaN, 1), 21);
+});
+
+test('tuningIncrementHzForMode picks mode-specific configured values', () => {
+  assert.equal(
+    tuningIncrementHzForMode(
+      { cw_tuning_increment_hz: 20, ssb_tuning_increment_hz: 100 },
+      'CW',
+    ),
+    20,
+  );
+  assert.equal(
+    tuningIncrementHzForMode(
+      { cw_tuning_increment_hz: 20, ssb_tuning_increment_hz: 125 },
+      'SSB',
+    ),
+    125,
+  );
+  assert.equal(tuningIncrementHzForMode({}, 'CW-R'), 20);
+  assert.equal(tuningIncrementHzForMode({}, 'FT8'), 100);
+});
+
+test('steppedFrequencyHz clamps values at 1 Hz minimum', () => {
+  assert.equal(steppedFrequencyHz(7000000, 100), 7000100);
+  assert.equal(steppedFrequencyHz(20, -100), 1);
 });
 
 test('cwActiveTimeoutMs waits for completion-capable keyers', () => {

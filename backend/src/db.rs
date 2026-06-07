@@ -49,6 +49,9 @@ pub struct RadioConfig {
     pub options: String,
     pub poll_frequency: f64,
     pub cat_timeout: f64,
+    pub cw_tuning_increment_hz: u32,
+    pub ssb_tuning_increment_hz: u32,
+    pub rit_clear_on_log: bool,
     pub cw_keyer_type: String,
     pub winkeyer_serial_port: String,
     pub cw_serial_port: String,
@@ -132,6 +135,12 @@ pub struct NewRadio {
     pub options: String,
     pub poll_frequency: f64,
     pub cat_timeout: f64,
+    #[serde(default = "default_cw_tuning_increment_hz")]
+    pub cw_tuning_increment_hz: u32,
+    #[serde(default = "default_ssb_tuning_increment_hz")]
+    pub ssb_tuning_increment_hz: u32,
+    #[serde(default)]
+    pub rit_clear_on_log: bool,
     pub cw_keyer_type: String,
     pub winkeyer_serial_port: String,
     #[serde(default)]
@@ -142,6 +151,17 @@ pub struct NewRadio {
     pub cw_serial_line: String,
     #[serde(default = "default_cw_messages")]
     pub cw_messages: String,
+}
+
+pub const DEFAULT_CW_TUNING_INCREMENT_HZ: u32 = 20;
+pub const DEFAULT_SSB_TUNING_INCREMENT_HZ: u32 = 100;
+
+fn default_cw_tuning_increment_hz() -> u32 {
+    DEFAULT_CW_TUNING_INCREMENT_HZ
+}
+
+fn default_ssb_tuning_increment_hz() -> u32 {
+    DEFAULT_SSB_TUNING_INCREMENT_HZ
 }
 
 fn default_cw_serial_baud_rate() -> u32 {
@@ -786,7 +806,7 @@ fn db_log_qso_count(connection: &Connection, id: i64) -> rusqlite::Result<usize>
 
 fn db_radios(connection: &Connection) -> rusqlite::Result<Vec<RadioConfig>> {
     let mut statement = connection.prepare(
-        "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, POLL_FREQUENCY, CAT_TIMEOUT, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES FROM radios ORDER BY ID",
+        "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, POLL_FREQUENCY, CAT_TIMEOUT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES FROM radios ORDER BY ID",
     )?;
     let rows = statement.query_map([], row_to_radio)?;
     rows.collect()
@@ -881,7 +901,7 @@ fn db_update_config(connection: &Connection, config: UpdateConfig) -> rusqlite::
 
 fn db_create_radio(connection: &Connection, radio: NewRadio) -> rusqlite::Result<RadioConfig> {
     connection.execute(
-        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, POLL_FREQUENCY, CAT_TIMEOUT, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, POLL_FREQUENCY, CAT_TIMEOUT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         params![
             radio.name.trim(),
             radio.radio_kind.trim(),
@@ -893,6 +913,9 @@ fn db_create_radio(connection: &Connection, radio: NewRadio) -> rusqlite::Result
             radio.options,
             radio.poll_frequency,
             radio.cat_timeout,
+            radio.cw_tuning_increment_hz,
+            radio.ssb_tuning_increment_hz,
+            radio.rit_clear_on_log,
             radio.cw_keyer_type.trim(),
             radio.winkeyer_serial_port.trim(),
             radio.cw_serial_port.trim(),
@@ -911,7 +934,7 @@ fn db_update_radio(
     radio: NewRadio,
 ) -> rusqlite::Result<Option<RadioConfig>> {
     let updated = connection.execute(
-        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, OPTIONS = ?8, POLL_FREQUENCY = ?9, CAT_TIMEOUT = ?10, CW_KEYER_TYPE = ?11, WINKEYER_SERIAL_PORT = ?12, CW_SERIAL_PORT = ?13, CW_SERIAL_BAUD_RATE = ?14, CW_SERIAL_LINE = ?15, CW_MESSAGES = ?16 WHERE ID = ?17",
+        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, OPTIONS = ?8, POLL_FREQUENCY = ?9, CAT_TIMEOUT = ?10, CW_TUNING_INCREMENT_HZ = ?11, SSB_TUNING_INCREMENT_HZ = ?12, RIT_CLEAR_ON_LOG = ?13, CW_KEYER_TYPE = ?14, WINKEYER_SERIAL_PORT = ?15, CW_SERIAL_PORT = ?16, CW_SERIAL_BAUD_RATE = ?17, CW_SERIAL_LINE = ?18, CW_MESSAGES = ?19 WHERE ID = ?20",
         params![
             radio.name.trim(),
             radio.radio_kind.trim(),
@@ -923,6 +946,9 @@ fn db_update_radio(
             radio.options,
             radio.poll_frequency,
             radio.cat_timeout,
+            radio.cw_tuning_increment_hz,
+            radio.ssb_tuning_increment_hz,
+            radio.rit_clear_on_log,
             radio.cw_keyer_type.trim(),
             radio.winkeyer_serial_port.trim(),
             radio.cw_serial_port.trim(),
@@ -1013,6 +1039,9 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
             OPTIONS TEXT NOT NULL DEFAULT '',
             POLL_FREQUENCY REAL NOT NULL DEFAULT 0.25 CHECK (POLL_FREQUENCY > 0),
             CAT_TIMEOUT REAL NOT NULL DEFAULT 2.0 CHECK (CAT_TIMEOUT > 0),
+            CW_TUNING_INCREMENT_HZ INTEGER NOT NULL DEFAULT 20 CHECK (CW_TUNING_INCREMENT_HZ > 0),
+            SSB_TUNING_INCREMENT_HZ INTEGER NOT NULL DEFAULT 100 CHECK (SSB_TUNING_INCREMENT_HZ > 0),
+            RIT_CLEAR_ON_LOG INTEGER NOT NULL DEFAULT 0 CHECK (RIT_CLEAR_ON_LOG IN (0, 1)),
             CW_KEYER_TYPE TEXT NOT NULL DEFAULT 'none',
             WINKEYER_SERIAL_PORT TEXT NOT NULL DEFAULT '',
             CW_SERIAL_PORT TEXT NOT NULL DEFAULT '',
@@ -1105,7 +1134,7 @@ fn row_to_log(row: &rusqlite::Row<'_>) -> rusqlite::Result<Log> {
 fn select_radio(connection: &Connection, id: i64) -> rusqlite::Result<Option<RadioConfig>> {
     connection
         .query_row(
-            "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, POLL_FREQUENCY, CAT_TIMEOUT, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES FROM radios WHERE ID = ?1",
+            "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, POLL_FREQUENCY, CAT_TIMEOUT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES FROM radios WHERE ID = ?1",
             params![id],
             row_to_radio,
         )
@@ -1115,6 +1144,8 @@ fn select_radio(connection: &Connection, id: i64) -> rusqlite::Result<Option<Rad
 fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioConfig> {
     let tcp_port: i64 = row.get("TCP_PORT")?;
     let serial_baud_rate: i64 = row.get("SERIAL_BAUD_RATE")?;
+    let cw_tuning_increment_hz: i64 = row.get("CW_TUNING_INCREMENT_HZ")?;
+    let ssb_tuning_increment_hz: i64 = row.get("SSB_TUNING_INCREMENT_HZ")?;
     let cw_serial_baud_rate: i64 = row.get("CW_SERIAL_BAUD_RATE")?;
     Ok(RadioConfig {
         id: row.get("ID")?,
@@ -1128,6 +1159,9 @@ fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioConfig> {
         options: row.get("OPTIONS")?,
         poll_frequency: row.get("POLL_FREQUENCY")?,
         cat_timeout: row.get("CAT_TIMEOUT")?,
+        cw_tuning_increment_hz: cw_tuning_increment_hz as u32,
+        ssb_tuning_increment_hz: ssb_tuning_increment_hz as u32,
+        rit_clear_on_log: row.get("RIT_CLEAR_ON_LOG")?,
         cw_keyer_type: row.get("CW_KEYER_TYPE")?,
         winkeyer_serial_port: row.get("WINKEYER_SERIAL_PORT")?,
         cw_serial_port: row.get("CW_SERIAL_PORT")?,
@@ -1552,6 +1586,9 @@ mod tests {
             options: String::new(),
             poll_frequency: 0.25,
             cat_timeout: 2.0,
+            cw_tuning_increment_hz: DEFAULT_CW_TUNING_INCREMENT_HZ,
+            ssb_tuning_increment_hz: DEFAULT_SSB_TUNING_INCREMENT_HZ,
+            rit_clear_on_log: false,
             cw_keyer_type: "none".to_string(),
             winkeyer_serial_port: String::new(),
             cw_serial_port: String::new(),
@@ -1882,6 +1919,12 @@ mod tests {
         assert_eq!(radio.serial_baud_rate, 115_200);
         assert_eq!(radio.options, "");
         assert_eq!(radio.cat_timeout, 2.0);
+        assert_eq!(radio.cw_tuning_increment_hz, DEFAULT_CW_TUNING_INCREMENT_HZ);
+        assert_eq!(
+            radio.ssb_tuning_increment_hz,
+            DEFAULT_SSB_TUNING_INCREMENT_HZ
+        );
+        assert!(!radio.rit_clear_on_log);
         assert_eq!(radio.cw_keyer_type, "none");
         assert_eq!(radio.cw_serial_port, "");
         assert_eq!(radio.cw_serial_baud_rate, 9_600);

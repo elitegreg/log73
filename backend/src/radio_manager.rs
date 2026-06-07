@@ -20,6 +20,8 @@ use tracing::{debug, error, info, trace, warn};
 
 const CAT_RECONNECT_MIN_DELAY: Duration = Duration::from_secs(1);
 const CAT_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(10);
+const MIN_RIT_OFFSET_HZ: i32 = -9_999;
+const MAX_RIT_OFFSET_HZ: i32 = 9_999;
 
 #[derive(Clone)]
 pub struct RadioManager {
@@ -457,12 +459,13 @@ async fn run_managed_radio(
             run_cw_task(cw_config, cw_radio, shared_cw_serial_keyer, cw_rx).await
         });
         let mut interval = tokio::time::interval(poll_interval);
-        let mut last_frequency_hz = current
+        let (mut last_frequency_hz, mut last_rit_offset_hz) = current
             .read()
             .await
             .as_ref()
-            .map(|state| state.frequency_hz)
-            .unwrap_or(0);
+            .map(|state| (state.frequency_hz, state.rit_offset_hz))
+            .unwrap_or((0, 0));
+        let mut rit_commands_authoritative = false;
 
         loop {
             tokio::select! {
@@ -476,14 +479,39 @@ async fn run_managed_radio(
                     match poll_radio(radio.as_ref()).await {
                         Ok(state) => {
                             last_frequency_hz = state.frequency_hz;
-                            *current.write().await = Some(state.clone());
-                            trace!(
-                                radio_id = config.id,
-                                frequency_hz = state.frequency_hz,
-                                mode = %state.mode,
-                                "polled radio state"
-                            );
-                            let _ = updates.send(state);
+                            if rit_commands_authoritative {
+                                if state.rit_offset_hz != last_rit_offset_hz {
+                                    debug!(
+                                        radio_id = config.id,
+                                        polled_rit_offset_hz = state.rit_offset_hz,
+                                        tracked_rit_offset_hz = last_rit_offset_hz,
+                                        "polled RIT offset differs from tracked RIT; keeping tracked value for incremental RIT commands"
+                                    );
+                                }
+                            } else {
+                                last_rit_offset_hz = state.rit_offset_hz;
+                            }
+                            let mut current_state = current.write().await;
+                            let changed = current_state.as_ref() != Some(&state);
+                            if changed {
+                                *current_state = Some(state.clone());
+                                trace!(
+                                    radio_id = config.id,
+                                    frequency_hz = state.frequency_hz,
+                                    mode = %state.mode,
+                                    rit_offset_hz = state.rit_offset_hz,
+                                    "polled radio state changed"
+                                );
+                                let _ = updates.send(state);
+                            } else {
+                                trace!(
+                                    radio_id = config.id,
+                                    frequency_hz = state.frequency_hz,
+                                    mode = %state.mode,
+                                    rit_offset_hz = state.rit_offset_hz,
+                                    "polled radio state unchanged; not broadcasting"
+                                );
+                            }
                         }
                         Err(error) => {
                             set_radio_status(&current_status, &status_updates, false).await;
@@ -552,14 +580,43 @@ async fn run_managed_radio(
                             break;
                         }
                         command => {
-                            debug!(radio_id = config.id, ?command, last_frequency_hz, "applying CAT radio command");
-                            if let Err(error) = apply_command(radio.as_ref(), command, last_frequency_hz).await {
+                            let is_rit_command = matches!(
+                                command,
+                                RadioCommand::RitClear
+                                    | RadioCommand::RitIncrement(_)
+                                    | RadioCommand::RitDecrement(_)
+                            );
+                            debug!(
+                                radio_id = config.id,
+                                ?command,
+                                last_frequency_hz,
+                                last_rit_offset_hz,
+                                rit_commands_authoritative,
+                                "applying CAT radio command"
+                            );
+                            if let Err(error) = apply_command(
+                                radio.as_ref(),
+                                command,
+                                last_frequency_hz,
+                                &mut last_rit_offset_hz,
+                            )
+                            .await
+                            {
                                 set_radio_status(&current_status, &status_updates, false).await;
                                 reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
                                 error!(radio_id = config.id, %error, "failed to apply radio command");
                                 let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
                                 let _ = cw_task.await;
                                 break;
+                            }
+                            if is_rit_command {
+                                rit_commands_authoritative = true;
+                                debug!(
+                                    radio_id = config.id,
+                                    last_rit_offset_hz,
+                                    rit_commands_authoritative,
+                                    "RIT command applied; using tracked RIT for subsequent incremental commands"
+                                );
                             }
                         }
                     }
@@ -604,6 +661,9 @@ fn fail_unavailable_radio_command(command: RadioCommand, reason: &str) {
         | RadioCommand::SetWpm(_)
         | RadioCommand::SetFrequency(_)
         | RadioCommand::SetMode(_)
+        | RadioCommand::RitClear
+        | RadioCommand::RitIncrement(_)
+        | RadioCommand::RitDecrement(_)
         | RadioCommand::ReloadConfig(_) => {}
     }
 }
@@ -1764,15 +1824,22 @@ async fn ensure_winkeyer_connected(
 async fn poll_radio(radio: &dyn ControllableRadio) -> Result<RadioState, radio_cat_rs::RadioError> {
     let frequency_hz = radio.get_frequency().await?.hz();
     let mode = radio.get_mode().await?;
+    let rit_offset_hz = match radio.get_rit().await {
+        Ok(offset_hz) => offset_hz,
+        Err(radio_cat_rs::RadioError::UnsupportedOperation { .. }) => 0,
+        Err(error) => return Err(error),
+    };
     trace!(
         frequency_hz,
         raw_mode = %mode,
+        rit_offset_hz,
         "polled raw CAT radio state"
     );
 
     Ok(RadioState {
         frequency_hz,
         mode: normalize_mode(&mode),
+        rit_offset_hz,
     })
 }
 
@@ -1780,6 +1847,7 @@ async fn apply_command(
     radio: &dyn ControllableRadio,
     command: RadioCommand,
     last_frequency_hz: u64,
+    last_rit_offset_hz: &mut i32,
 ) -> Result<(), radio_cat_rs::RadioError> {
     match command {
         RadioCommand::SetFrequency(frequency_hz) => {
@@ -1837,11 +1905,122 @@ async fn apply_command(
                 Ok(())
             }
         }
+        RadioCommand::RitClear => {
+            debug!(
+                tracked_rit_offset_hz = *last_rit_offset_hz,
+                "clearing CAT radio RIT"
+            );
+            let applied = set_rit_offset_hz(radio, 0).await?;
+            if applied {
+                *last_rit_offset_hz = 0;
+            }
+            debug!(
+                tracked_rit_offset_hz = *last_rit_offset_hz,
+                applied, "RIT clear command completed"
+            );
+            Ok(())
+        }
+        RadioCommand::RitIncrement(hz) => {
+            let current_offset_hz = *last_rit_offset_hz;
+            let next_offset_hz = next_rit_offset_hz(current_offset_hz, hz);
+            debug!(
+                hz,
+                current_offset_hz, next_offset_hz, "incrementing CAT radio RIT"
+            );
+            if next_offset_hz == current_offset_hz {
+                debug!(
+                    current_offset_hz,
+                    "RIT increment did not change offset after clamping"
+                );
+                return Ok(());
+            }
+            let applied = set_rit_offset_hz(radio, next_offset_hz).await?;
+            if applied {
+                *last_rit_offset_hz = next_offset_hz;
+            }
+            debug!(
+                hz,
+                current_offset_hz,
+                tracked_rit_offset_hz = *last_rit_offset_hz,
+                next_offset_hz,
+                applied,
+                "RIT increment command completed"
+            );
+            Ok(())
+        }
+        RadioCommand::RitDecrement(hz) => {
+            let delta_hz = hz.saturating_neg();
+            let current_offset_hz = *last_rit_offset_hz;
+            let next_offset_hz = next_rit_offset_hz(current_offset_hz, delta_hz);
+            debug!(
+                hz,
+                delta_hz, current_offset_hz, next_offset_hz, "decrementing CAT radio RIT"
+            );
+            if next_offset_hz == current_offset_hz {
+                debug!(
+                    current_offset_hz,
+                    "RIT decrement did not change offset after clamping"
+                );
+                return Ok(());
+            }
+            let applied = set_rit_offset_hz(radio, next_offset_hz).await?;
+            if applied {
+                *last_rit_offset_hz = next_offset_hz;
+            }
+            debug!(
+                hz,
+                delta_hz,
+                current_offset_hz,
+                tracked_rit_offset_hz = *last_rit_offset_hz,
+                next_offset_hz,
+                applied,
+                "RIT decrement command completed"
+            );
+            Ok(())
+        }
         RadioCommand::SendMessage { .. }
         | RadioCommand::SendCwText { .. }
         | RadioCommand::StopCw
         | RadioCommand::SetWpm(_)
         | RadioCommand::ReloadConfig(_) => Ok(()),
+    }
+}
+
+fn next_rit_offset_hz(current_offset_hz: i32, delta_hz: i32) -> i32 {
+    current_offset_hz
+        .saturating_add(delta_hz)
+        .clamp(MIN_RIT_OFFSET_HZ, MAX_RIT_OFFSET_HZ)
+}
+
+async fn set_rit_offset_hz(
+    radio: &dyn ControllableRadio,
+    target_offset_hz: i32,
+) -> Result<bool, radio_cat_rs::RadioError> {
+    debug!(target_offset_hz, "applying CAT RIT offset");
+    if target_offset_hz == 0 {
+        match radio.clear_rit().await {
+            Ok(()) => {
+                debug!(target_offset_hz, "CAT RIT clear applied");
+                Ok(true)
+            }
+            Err(radio_cat_rs::RadioError::UnsupportedOperation { .. }) => {
+                debug!(target_offset_hz, "CAT RIT clear unsupported by radio");
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    } else {
+        match radio.set_rit(target_offset_hz).await {
+            Ok(()) => {
+                debug!(target_offset_hz, "CAT RIT absolute offset applied");
+                Ok(true)
+            }
+            Err(radio_cat_rs::RadioError::UnsupportedOperation { .. }) => {
+                debug!(target_offset_hz, "CAT RIT set unsupported by radio");
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
     }
 }
 
@@ -1863,6 +2042,9 @@ mod tests {
             options: String::new(),
             poll_frequency: 0.25,
             cat_timeout: 2.0,
+            cw_tuning_increment_hz: 20,
+            ssb_tuning_increment_hz: 100,
+            rit_clear_on_log: false,
             cw_keyer_type: "none".to_string(),
             winkeyer_serial_port: String::new(),
             cw_serial_port: String::new(),
@@ -2013,6 +2195,19 @@ mod tests {
             completed_rx.await.unwrap(),
             Err("radio disconnected".to_string())
         );
+    }
+
+    #[test]
+    fn next_rit_offset_hz_applies_delta_from_tracked_offset() {
+        assert_eq!(next_rit_offset_hz(0, 20), 20);
+        assert_eq!(next_rit_offset_hz(35, 15), 50);
+        assert_eq!(next_rit_offset_hz(35, -15), 20);
+    }
+
+    #[test]
+    fn next_rit_offset_hz_clamps_to_supported_range() {
+        assert_eq!(next_rit_offset_hz(MAX_RIT_OFFSET_HZ, 1), MAX_RIT_OFFSET_HZ);
+        assert_eq!(next_rit_offset_hz(MIN_RIT_OFFSET_HZ, -1), MIN_RIT_OFFSET_HZ);
     }
 
     #[test]

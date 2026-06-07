@@ -584,6 +584,36 @@ async fn handle_socket(
                 }
                 let _ = radio_handle.send_command(RadioCommand::SetMode(mode)).await;
             }
+            Ok(ClientMessage::RitClear) => {
+                debug!(session_id, radio_id, "websocket rit_clear command received");
+                let _ = radio_handle.send_command(RadioCommand::RitClear).await;
+            }
+            Ok(ClientMessage::RitIncrement { hz }) => {
+                debug!(
+                    session_id,
+                    radio_id, hz, "websocket rit_increment command received"
+                );
+                if let Err(error) = validation::validate_rit_adjustment_hz(hz) {
+                    warn!(session_id, radio_id, hz, %error, "invalid websocket rit_increment command");
+                    continue;
+                }
+                let _ = radio_handle
+                    .send_command(RadioCommand::RitIncrement(hz))
+                    .await;
+            }
+            Ok(ClientMessage::RitDecrement { hz }) => {
+                debug!(
+                    session_id,
+                    radio_id, hz, "websocket rit_decrement command received"
+                );
+                if let Err(error) = validation::validate_rit_adjustment_hz(hz) {
+                    warn!(session_id, radio_id, hz, %error, "invalid websocket rit_decrement command");
+                    continue;
+                }
+                let _ = radio_handle
+                    .send_command(RadioCommand::RitDecrement(hz))
+                    .await;
+            }
             Ok(ClientMessage::SendMessage {
                 request_id,
                 mode,

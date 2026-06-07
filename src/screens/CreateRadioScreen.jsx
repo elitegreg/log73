@@ -8,6 +8,8 @@ const DEFAULT_TRANSPORT_KIND = 'tcp';
 const DEFAULT_CW_KEYER_TYPE = 'none';
 const DEFAULT_CW_SERIAL_BAUD_RATE = 9600;
 const DEFAULT_CW_SERIAL_LINE = 'dtr';
+const DEFAULT_CW_TUNING_INCREMENT_HZ = 20;
+const DEFAULT_SSB_TUNING_INCREMENT_HZ = 100;
 
 function CreateRadioScreen() {
   const navigate = useNavigate();
@@ -25,6 +27,13 @@ function CreateRadioScreen() {
   const [options, setOptions] = useState('');
   const [pollFrequency, setPollFrequency] = useState(0.25);
   const [catTimeout, setCatTimeout] = useState(2);
+  const [cwTuningIncrementHz, setCwTuningIncrementHz] = useState(
+    DEFAULT_CW_TUNING_INCREMENT_HZ,
+  );
+  const [ssbTuningIncrementHz, setSsbTuningIncrementHz] = useState(
+    DEFAULT_SSB_TUNING_INCREMENT_HZ,
+  );
+  const [ritClearOnLog, setRitClearOnLog] = useState(false);
   const [cwKeyerType, setCwKeyerType] = useState(DEFAULT_CW_KEYER_TYPE);
   const [winkeyerSerialPort, setWinkeyerSerialPort] = useState('');
   const [cwSerialPort, setCwSerialPort] = useState('');
@@ -108,6 +117,13 @@ function CreateRadioScreen() {
       setOptions(result.radio.options ?? '');
       setPollFrequency(result.radio.poll_frequency ?? 0.25);
       setCatTimeout(result.radio.cat_timeout ?? 2);
+      setCwTuningIncrementHz(
+        result.radio.cw_tuning_increment_hz ?? DEFAULT_CW_TUNING_INCREMENT_HZ,
+      );
+      setSsbTuningIncrementHz(
+        result.radio.ssb_tuning_increment_hz ?? DEFAULT_SSB_TUNING_INCREMENT_HZ,
+      );
+      setRitClearOnLog(Boolean(result.radio.rit_clear_on_log));
       setCwKeyerType(result.radio.cw_keyer_type ?? DEFAULT_CW_KEYER_TYPE);
       setWinkeyerSerialPort(result.radio.winkeyer_serial_port ?? '');
       setCwSerialPort(result.radio.cw_serial_port ?? '');
@@ -170,6 +186,9 @@ function CreateRadioScreen() {
         options: options,
         poll_frequency: Number(pollFrequency),
         cat_timeout: Number(catTimeout),
+        cw_tuning_increment_hz: Number(cwTuningIncrementHz),
+        ssb_tuning_increment_hz: Number(ssbTuningIncrementHz),
+        rit_clear_on_log: Boolean(ritClearOnLog),
         cw_keyer_type: cwKeyerType,
         winkeyer_serial_port:
           cwKeyerType === 'winkeyer' ? winkeyerSerialPort : '',
@@ -311,6 +330,34 @@ function CreateRadioScreen() {
           onChange={(event) => setCatTimeout(event.target.value)}
           required
         />
+      </label>
+      <label>
+        Tuning Increment (CW) in Hz
+        <input
+          type="number"
+          min="1"
+          value={cwTuningIncrementHz}
+          onChange={(event) => setCwTuningIncrementHz(event.target.value)}
+          required
+        />
+      </label>
+      <label>
+        Tuning Increment (SSB) in Hz
+        <input
+          type="number"
+          min="1"
+          value={ssbTuningIncrementHz}
+          onChange={(event) => setSsbTuningIncrementHz(event.target.value)}
+          required
+        />
+      </label>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={ritClearOnLog}
+          onChange={(event) => setRitClearOnLog(event.target.checked)}
+        />
+        RIT Clear on Log
       </label>
       <label>
         CW Keying

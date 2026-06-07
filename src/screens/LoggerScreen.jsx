@@ -1093,11 +1093,13 @@ function LoggerScreen() {
             debugSocket('radio_state_received', {
               frequencyHz: message.frequency_hz,
               mode: message.mode,
+              ritOffsetHz: message.rit_offset_hz,
               socketState: socketStateLabel(socket),
             });
             setRadioState({
               frequency_hz: message.frequency_hz,
               mode: message.mode,
+              rit_offset_hz: Number(message.rit_offset_hz ?? 0),
             });
           } else if (message.type === 'dxcluster_spot') {
             setBandMapSpotStore((currentStore) =>
@@ -1634,6 +1636,13 @@ function LoggerScreen() {
             }
             onSetRadioMode={(mode) =>
               sendRadioMessage({ type: 'set_mode', mode })
+            }
+            onClearRit={() => sendRadioMessage({ type: 'rit_clear' })}
+            onIncrementRit={(hz) =>
+              sendRadioMessage({ type: 'rit_increment', hz })
+            }
+            onDecrementRit={(hz) =>
+              sendRadioMessage({ type: 'rit_decrement', hz })
             }
             onSendMessage={(payload) =>
               sendRadioMessage({ type: 'send_message', ...payload })

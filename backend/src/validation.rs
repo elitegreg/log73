@@ -31,6 +31,8 @@ const MAX_CONTACT_JSON_DEPTH: usize = 4;
 const MIN_QSO_EPOCH: i64 = 0;
 const MAX_QSO_EPOCH: i64 = 4_102_444_800; // 2100-01-01T00:00:00Z
 const MAX_RADIO_FREQUENCY_HZ: u64 = 500_000_000;
+const MAX_RADIO_TUNING_INCREMENT_HZ: u32 = 9_999;
+const MAX_RIT_OFFSET_HZ: i32 = 9_999;
 const MIN_CW_WPM: u8 = 5;
 const MAX_CW_WPM: u8 = 60;
 const MAX_CW_REQUEST_ID_LEN: usize = 64;
@@ -97,6 +99,8 @@ pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
 
     validate_seconds("poll frequency", payload.poll_frequency)?;
     validate_seconds("CAT timeout", payload.cat_timeout)?;
+    validate_tuning_increment_hz("CW tuning increment", payload.cw_tuning_increment_hz)?;
+    validate_tuning_increment_hz("SSB tuning increment", payload.ssb_tuning_increment_hz)?;
     let cw_keyer_type = payload.cw_keyer_type.trim().to_ascii_lowercase();
     if !ALLOWED_CW_KEYER_TYPES.contains(&cw_keyer_type.as_str()) {
         return Err("CW keyer type must be one of: none, winkeyer, cat, serial".to_string());
@@ -460,6 +464,15 @@ pub fn validate_cw_wpm(wpm: u8) -> Result<(), String> {
     if !(MIN_CW_WPM..=MAX_CW_WPM).contains(&wpm) {
         return Err(format!(
             "CW WPM must be between {MIN_CW_WPM} and {MAX_CW_WPM}"
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_rit_adjustment_hz(hz: i32) -> Result<(), String> {
+    if hz <= 0 || hz > MAX_RIT_OFFSET_HZ {
+        return Err(format!(
+            "RIT adjustment must be between 1 and {MAX_RIT_OFFSET_HZ} Hz"
         ));
     }
     Ok(())
@@ -919,6 +932,15 @@ fn validate_seconds(label: &str, value: f64) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_tuning_increment_hz(label: &str, value: u32) -> Result<(), String> {
+    if value == 0 || value > MAX_RADIO_TUNING_INCREMENT_HZ {
+        return Err(format!(
+            "{label} must be between 1 and {MAX_RADIO_TUNING_INCREMENT_HZ} Hz"
+        ));
+    }
+    Ok(())
+}
+
 fn allowed_bands(rules: &ContestRules) -> String {
     rules
         .allowed_bands
@@ -1099,6 +1121,9 @@ mod tests {
             options: String::new(),
             poll_frequency: 0.25,
             cat_timeout: 2.0,
+            cw_tuning_increment_hz: db::DEFAULT_CW_TUNING_INCREMENT_HZ,
+            ssb_tuning_increment_hz: db::DEFAULT_SSB_TUNING_INCREMENT_HZ,
+            rit_clear_on_log: false,
             cw_keyer_type: "none".to_string(),
             winkeyer_serial_port: String::new(),
             cw_serial_port: String::new(),
@@ -1160,6 +1185,29 @@ mod tests {
     #[test]
     fn validates_tcp_radio_config() {
         assert!(validate_radio(&test_radio()).is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_tuning_increment_values() {
+        let mut radio = test_radio();
+        radio.cw_tuning_increment_hz = 0;
+
+        let error = validate_radio(&radio).expect_err("CW tuning increment should be rejected");
+        assert!(error.contains("CW tuning increment"));
+
+        radio.cw_tuning_increment_hz = db::DEFAULT_CW_TUNING_INCREMENT_HZ;
+        radio.ssb_tuning_increment_hz = 0;
+
+        let error = validate_radio(&radio).expect_err("SSB tuning increment should be rejected");
+        assert!(error.contains("SSB tuning increment"));
+    }
+
+    #[test]
+    fn validates_rit_adjustment_hz_range() {
+        assert!(validate_rit_adjustment_hz(1).is_ok());
+        assert!(validate_rit_adjustment_hz(MAX_RIT_OFFSET_HZ).is_ok());
+        assert!(validate_rit_adjustment_hz(0).is_err());
+        assert!(validate_rit_adjustment_hz(MAX_RIT_OFFSET_HZ + 1).is_err());
     }
 
     #[test]

@@ -44,10 +44,11 @@ pub struct RadioStatus {
     pub online: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RadioState {
     pub frequency_hz: u64,
     pub mode: String,
+    pub rit_offset_hz: i32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -61,6 +62,16 @@ pub enum ClientMessage {
     },
     SetMode {
         mode: String,
+    },
+    #[serde(rename = "rit_clear")]
+    RitClear,
+    #[serde(rename = "rit_increment")]
+    RitIncrement {
+        hz: i32,
+    },
+    #[serde(rename = "rit_decrement")]
+    RitDecrement {
+        hz: i32,
     },
     SendMessage {
         request_id: String,
@@ -92,6 +103,9 @@ pub enum ClientMessage {
 pub enum RadioCommand {
     SetFrequency(u64),
     SetMode(String),
+    RitClear,
+    RitIncrement(i32),
+    RitDecrement(i32),
     SendMessage {
         mode: String,
         key: String,
@@ -249,6 +263,35 @@ mod tests {
 
         match message {
             ClientMessage::SetDxClusterEnabled { enabled } => assert!(enabled),
+            other => panic!("unexpected client message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deserializes_rit_client_messages() {
+        let clear_message: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "rit_clear"
+        }))
+        .expect("rit_clear should deserialize");
+        assert!(matches!(clear_message, ClientMessage::RitClear));
+
+        let increment_message: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "rit_increment",
+            "hz": 25
+        }))
+        .expect("rit_increment should deserialize");
+        match increment_message {
+            ClientMessage::RitIncrement { hz } => assert_eq!(hz, 25),
+            other => panic!("unexpected client message: {other:?}"),
+        }
+
+        let decrement_message: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "rit_decrement",
+            "hz": 10
+        }))
+        .expect("rit_decrement should deserialize");
+        match decrement_message {
+            ClientMessage::RitDecrement { hz } => assert_eq!(hz, 10),
             other => panic!("unexpected client message: {other:?}"),
         }
     }

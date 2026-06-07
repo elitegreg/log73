@@ -3450,7 +3450,7 @@ dependencies = [
 [[package]]
 name = "radio-cat-rs"
 version = "0.1.0"
-source = "git+https://github.com/elitegreg/radio-cat-rs.git#01b4be0543f75a57cf53825ac4d2154a2aab10a0"
+source = "git+https://github.com/elitegreg/radio-cat-rs.git#c16399626863830c6041258e3707d57e70c5a736"
 dependencies = [
  "async-trait",
  "thiserror 1.0.69",

@@ -16,7 +16,11 @@ export const CONTACT_COMMIT_RETRY_DELAY_MS = 5000;
 export const SERIAL_ALLOCATION_RETRY_DELAY_MS = 5000;
 export const DEFAULT_SERIAL_BATCH_SIZE = 10;
 export const MAX_SERIAL_BATCH_SIZE = 1000;
-export const DEFAULT_RADIO_STATE = { mode: 'CW', frequency_hz: 14000000 };
+export const DEFAULT_RADIO_STATE = {
+  mode: 'CW',
+  frequency_hz: 14000000,
+  rit_offset_hz: 0,
+};
 export const EMPTY_SCORE_SUMMARY = {
   qsoCount: 0,
   multipliers: 0,

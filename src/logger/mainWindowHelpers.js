@@ -1,11 +1,13 @@
 import { fieldDefault } from '../domain/contactFields.js';
-import { LOGGER_MODE_OPTIONS, normalizeLoggerMode } from '../domain/modes.js';
-
-export {
+import {
+  LOGGER_MODE_OPTIONS,
   adifModeForLoggerMode,
   isSelectableMode,
   modeIsCw,
+  normalizeLoggerMode,
 } from '../domain/modes.js';
+
+export { adifModeForLoggerMode, isSelectableMode, modeIsCw };
 
 export const MODE_OPTIONS = LOGGER_MODE_OPTIONS;
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
@@ -33,6 +35,8 @@ export const CW_ACTIVE_TIMEOUT_WIKEYER_MS = 30000;
 export const CW_ACTIVE_TIMEOUT_CAT_MS = 30000;
 export const CW_ACTIVE_TIMEOUT_NONE_MS = 500;
 export const CW_REPEAT_DELAY_MS = 2000;
+export const DEFAULT_CW_TUNING_INCREMENT_HZ = 20;
+export const DEFAULT_SSB_TUNING_INCREMENT_HZ = 100;
 export const FUNCTION_KEY_PATTERN = /^F([1-9]|1[0-2])$/;
 export const HZ_PER_KHZ = 1000;
 export const EPOCH_MS_PER_SECOND = 1000;
@@ -211,6 +215,28 @@ export function nextCwWpm(currentWpm, delta) {
     CW_WPM_MAX,
     Math.max(CW_WPM_MIN, normalizedCurrentWpm + delta),
   );
+}
+
+function normalizedPositiveHz(value, fallbackHz) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallbackHz;
+  return parsed;
+}
+
+export function tuningIncrementHzForMode(radio, mode) {
+  const defaultIncrementHz = modeIsCw(mode)
+    ? DEFAULT_CW_TUNING_INCREMENT_HZ
+    : DEFAULT_SSB_TUNING_INCREMENT_HZ;
+  const configuredIncrementHz = modeIsCw(mode)
+    ? radio?.cw_tuning_increment_hz
+    : radio?.ssb_tuning_increment_hz;
+  return normalizedPositiveHz(configuredIncrementHz, defaultIncrementHz);
+}
+
+export function steppedFrequencyHz(frequencyHz, deltaHz) {
+  const nextFrequencyHz = Math.round(Number(frequencyHz) + Number(deltaHz));
+  if (!Number.isFinite(nextFrequencyHz)) return 1;
+  return Math.max(1, nextFrequencyHz);
 }
 
 export function esmEnterAction({

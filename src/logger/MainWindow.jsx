@@ -52,6 +52,8 @@ import {
   shouldBlockEsmCallEnter,
   callsignClearThresholdHz,
   normalizedContactFrequencyHz,
+  tuningIncrementHzForMode,
+  steppedFrequencyHz,
 } from './mainWindowHelpers';
 import RadioControls from './components/RadioControls';
 import EntryFields from './components/EntryFields';
@@ -86,6 +88,9 @@ function MainWindow({
   onStoreBandMapSpot,
   onSetRadioFrequency,
   onSetRadioMode,
+  onClearRit,
+  onIncrementRit,
+  onDecrementRit,
   onSendMessage,
   onSendCwText,
   onSendDxClusterSpot,
@@ -420,6 +425,51 @@ function MainWindow({
   function activateBandMapSpot(spot) {
     if (!spot) return;
     onActivateBandMapSpot?.(spot);
+  }
+
+  function clearRitIfEnabled() {
+    if (!radio?.rit_clear_on_log) return;
+    onClearRit?.();
+  }
+
+  function tuningIncrementHz() {
+    return tuningIncrementHzForMode(radio, radioMode);
+  }
+
+  function tuneByIncrement(direction) {
+    const incrementHz = tuningIncrementHz();
+    if (incrementHz <= 0) return;
+
+    const isRunMode = operatingMode === 'Run';
+    if (isRunMode && onIncrementRit && onDecrementRit) {
+      if (direction > 0) onIncrementRit(incrementHz);
+      else onDecrementRit(incrementHz);
+      return;
+    }
+
+    const deltaHz = direction > 0 ? incrementHz : -incrementHz;
+    onSetRadioFrequency?.(steppedFrequencyHz(radioFrequencyHz, deltaHz));
+  }
+
+  function shiftBand(direction) {
+    if (!currentBand || bandOptions.length === 0) return;
+
+    const sortedBands = [...new Map(bandOptions.map((band) => [band.meters, band])).values()].sort(
+      (left, right) => left.lowerHz - right.lowerHz,
+    );
+    const currentIndex = sortedBands.findIndex(
+      (band) => band.meters === currentBand.meters,
+    );
+    if (currentIndex === -1) return;
+
+    const nextIndex = currentIndex + direction;
+    if (nextIndex < 0 || nextIndex >= sortedBands.length) return;
+
+    const nextBand = sortedBands[nextIndex];
+    onSetRadioFrequency?.(nextBand.lowerHz);
+    if (isSelectableMode(radioMode)) {
+      onSetRadioMode?.(radioMode);
+    }
   }
 
   function clearEsmState() {
@@ -767,17 +817,57 @@ function MainWindow({
         }
         return;
       }
+      if (
+        event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        event.key === 'PageUp'
+      ) {
+        event.preventDefault();
+        shiftBand(1);
+        return;
+      }
+      if (
+        event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        event.key === 'PageDown'
+      ) {
+        event.preventDefault();
+        shiftBand(-1);
+        return;
+      }
+      if (
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+      ) {
+        event.preventDefault();
+        tuneByIncrement(event.key === 'ArrowUp' ? 1 : -1);
+        return;
+      }
       if (event.key === 'Escape') {
         event.preventDefault();
         stopMessageSending();
         return;
       }
-      if (event.key === 'PageUp') {
+      if (
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        event.key === 'PageUp'
+      ) {
         event.preventDefault();
         setCwWpm((current) => nextCwWpm(current, 1));
         return;
       }
-      if (event.key === 'PageDown') {
+      if (
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.metaKey &&
+        event.key === 'PageDown'
+      ) {
         event.preventDefault();
         setCwWpm((current) => nextCwWpm(current, -1));
         return;
@@ -875,7 +965,8 @@ function MainWindow({
     );
   }
 
-  function clearEntryFields() {
+  function clearEntryFields({ clearRit = true } = {}) {
+    if (clearRit) clearRitIfEnabled();
     setCallSign('');
     callsignFrequencyBaselineRef.current = null;
     pendingBandMapTuneFrequencyRef.current = null;
