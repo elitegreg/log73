@@ -160,6 +160,8 @@ pub struct ContestRules {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bonus_points: Vec<BonusPointRule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power_multiplier_param: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cabrillo: Option<CabrilloRules>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<ContestMetadata>,
@@ -216,6 +218,8 @@ struct RawContestRules {
     #[serde(default)]
     bonus_points: Option<Vec<BonusPointRule>>,
     #[serde(default)]
+    power_multiplier_param: Option<String>,
+    #[serde(default)]
     metadata: Option<ContestMetadata>,
 }
 
@@ -239,6 +243,8 @@ struct RawScoringRules {
     multipliers: Option<Vec<MultiplierRule>>,
     #[serde(default)]
     bonus_points: Option<Vec<BonusPointRule>>,
+    #[serde(default)]
+    power_multiplier_param: Option<String>,
 }
 
 impl ContestRulesStore {
@@ -501,6 +507,9 @@ fn apply_scoring_rules(contest: &mut ContestRules, scoring: &RawScoringRules) {
     if let Some(bonus_points) = &scoring.bonus_points {
         contest.bonus_points = bonus_points.clone();
     }
+    if let Some(power_multiplier_param) = &scoring.power_multiplier_param {
+        contest.power_multiplier_param = Some(power_multiplier_param.clone());
+    }
 }
 
 fn apply_cabrillo_rules(contest: &mut ContestRules, cabrillo: &RawCabrilloRules) {
@@ -585,6 +594,7 @@ fn resolve_contest(
             dupe_key: Vec::new(),
             multipliers: Vec::new(),
             bonus_points: Vec::new(),
+            power_multiplier_param: None,
             cabrillo: None,
             metadata: None,
         }
@@ -627,6 +637,7 @@ fn resolve_contest(
             dupe_key: raw.dupe_key.clone(),
             multipliers: raw.multipliers.clone(),
             bonus_points: raw.bonus_points.clone(),
+            power_multiplier_param: raw.power_multiplier_param.clone(),
         },
     );
     if let Some(scoring) = &raw.scoring {
@@ -838,6 +849,7 @@ contests:
           key: ['CALL']
           values:
             W1AW: 100
+      power_multiplier_param: 'Power Multiplier'
 "#,
             "TEST",
         );
@@ -861,6 +873,10 @@ contests:
         assert_eq!(contest.multipliers[0].valid_values, vec!["SC".to_string()]);
         assert_eq!(contest.bonus_points.len(), 1);
         assert_eq!(contest.bonus_points[0].values.get("W1AW"), Some(&100));
+        assert_eq!(
+            contest.power_multiplier_param,
+            Some("Power Multiplier".to_string())
+        );
     }
 
     #[test]

@@ -15,6 +15,7 @@ contests:
         - 'CALL'
         - 'BAND'
         - 'MODE'
+      power_multiplier_param: 'Power Multiplier'
     define:
       - name: 'DX'
         values:
@@ -117,6 +118,13 @@ contests:
         type: 'String:3'
         required: true
         in_sets: ['Sections']
+      - name: 'Power Multiplier'
+        label: 'Power Multiplier'
+        type: 'Numeric:1'
+        required: true
+        default: '1'
+        widget: 'select'
+        valid_values: ['1', '2', '5']
     exchange:
       - name: 'Class(s)'
         type: 'String:3'

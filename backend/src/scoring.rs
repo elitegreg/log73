@@ -236,6 +236,7 @@ pub struct ContestScoringModule {
     rules: ContestRules,
     #[allow(dead_code)]
     contest_params: Value,
+    power_multiplier: i64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -258,9 +259,11 @@ pub struct ContestScorer {
 
 impl ContestScoringModule {
     fn new(rules: ContestRules, contest_params: Value) -> Self {
+        let power_multiplier = power_multiplier_for(&rules, &contest_params);
         Self {
             rules,
             contest_params,
+            power_multiplier,
         }
     }
 
@@ -273,6 +276,10 @@ impl ContestScoringModule {
 
     pub fn has_multipliers(&self) -> bool {
         !self.rules.multipliers.is_empty()
+    }
+
+    pub fn power_multiplier(&self) -> i64 {
+        self.power_multiplier
     }
 
     pub fn dupe_key_for(&self, contact: &Contact) -> Option<String> {
@@ -345,10 +352,12 @@ impl Default for ContestScoringModule {
                 dupe_key: Vec::new(),
                 multipliers: Vec::new(),
                 bonus_points: Vec::new(),
+                power_multiplier_param: None,
                 cabrillo: None,
                 metadata: None,
             },
             contest_params: Value::Null,
+            power_multiplier: 1,
         }
     }
 }
@@ -409,11 +418,14 @@ impl ContestScorer {
     }
 
     fn recalculate_score(&mut self) {
-        self.totals.score = if self.module.has_multipliers() {
-            self.totals.qso_points * self.totals.multipliers + self.totals.bonus_points
+        let multiplier_factor = if self.module.has_multipliers() {
+            self.totals.multipliers
         } else {
-            self.totals.qso_points + self.totals.bonus_points
+            1
         };
+        self.totals.score =
+            self.totals.qso_points * multiplier_factor * self.module.power_multiplier()
+                + self.totals.bonus_points;
     }
 
     fn is_dupe(&mut self, contact: &Contact) -> bool {
@@ -477,6 +489,28 @@ pub fn score_contacts(
         scorer.add_qso(contact);
     }
     scorer.totals()
+}
+
+fn power_multiplier_for(rules: &ContestRules, contest_params: &Value) -> i64 {
+    let Some(param_name) = rules.power_multiplier_param.as_deref() else {
+        return 1;
+    };
+    let Some(params) = contest_params.as_object() else {
+        return 1;
+    };
+    let Some(value) = params.get(param_name) else {
+        return 1;
+    };
+
+    match value {
+        Value::Number(number) => number
+            .as_i64()
+            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok())),
+        Value::String(string) => string.trim().parse::<i64>().ok(),
+        _ => None,
+    }
+    .filter(|value| *value > 0)
+    .unwrap_or(1)
 }
 
 fn scoring_key(contact: &Contact, rules: &ContestRules, fields: &[String]) -> String {
@@ -1008,11 +1042,14 @@ impl IncrementalLogState {
     }
 
     fn recalculate_score(&mut self) {
-        self.totals.score = if self.module.has_multipliers() {
-            self.totals.qso_points * self.totals.multipliers + self.totals.bonus_points
+        let multiplier_factor = if self.module.has_multipliers() {
+            self.totals.multipliers
         } else {
-            self.totals.qso_points + self.totals.bonus_points
+            1
         };
+        self.totals.score =
+            self.totals.qso_points * multiplier_factor * self.module.power_multiplier()
+                + self.totals.bonus_points;
     }
 }
 
@@ -1072,6 +1109,7 @@ mod tests {
         dupe_key: Vec<&str>,
         multipliers: Vec<MultiplierRule>,
         bonus_points: Vec<BonusPointRule>,
+        power_multiplier_param: Option<&str>,
     ) -> ContestRules {
         ContestRules {
             contest: "TEST".to_string(),
@@ -1087,6 +1125,7 @@ mod tests {
             dupe_key: dupe_key.into_iter().map(str::to_string).collect(),
             multipliers,
             bonus_points,
+            power_multiplier_param: power_multiplier_param.map(str::to_string),
             cabrillo: None,
             metadata: None,
         }
@@ -1154,6 +1193,7 @@ mod tests {
             vec!["CALL", "BAND", "MODE"],
             Vec::new(),
             Vec::new(),
+            None,
         );
         let mut contacts = vec![
             contact(vec![
@@ -1185,6 +1225,7 @@ mod tests {
             Vec::new(),
             vec![state_multiplier()],
             Vec::new(),
+            None,
         );
         let mut contacts = vec![
             contact(vec![("STATE", json!("SC"))]),
@@ -1203,12 +1244,80 @@ mod tests {
     }
 
     #[test]
+    fn power_multiplier_scales_score_as_separate_multiplier() {
+        let rules = test_rules(
+            fixed_points(1),
+            Vec::new(),
+            vec![state_multiplier()],
+            Vec::new(),
+            Some("Power Multiplier"),
+        );
+        let mut contacts = vec![
+            contact(vec![("STATE", json!("SC"))]),
+            contact(vec![("STATE", json!("NC"))]),
+        ];
+
+        let totals = score_contacts(
+            &rules,
+            json!({
+                "Power Multiplier": "2"
+            }),
+            &mut contacts,
+        );
+
+        assert_eq!(totals.qso_points, 2);
+        assert_eq!(totals.multipliers, 2);
+        assert_eq!(totals.score, 8);
+    }
+
+    #[test]
+    fn power_multiplier_defaults_to_one_when_not_configured() {
+        let rules = test_rules(fixed_points(2), Vec::new(), Vec::new(), Vec::new(), None);
+        let mut contacts = vec![contact(vec![("CALL", json!("K1ABC"))])];
+
+        let totals = score_contacts(
+            &rules,
+            json!({
+                "Power Multiplier": "5"
+            }),
+            &mut contacts,
+        );
+
+        assert_eq!(totals.qso_points, 2);
+        assert_eq!(totals.score, 2);
+    }
+
+    #[test]
+    fn power_multiplier_defaults_to_one_for_invalid_value() {
+        let rules = test_rules(
+            fixed_points(2),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Some("Power Multiplier"),
+        );
+        let mut contacts = vec![contact(vec![("CALL", json!("K1ABC"))])];
+
+        let totals = score_contacts(
+            &rules,
+            json!({
+                "Power Multiplier": "oops"
+            }),
+            &mut contacts,
+        );
+
+        assert_eq!(totals.qso_points, 2);
+        assert_eq!(totals.score, 2);
+    }
+
+    #[test]
     fn duplicate_qsos_score_zero() {
         let rules = test_rules(
             fixed_points(2),
             vec!["CALL", "BAND", "MODE"],
             Vec::new(),
             Vec::new(),
+            None,
         );
         let mut contacts = vec![
             contact(vec![
@@ -1240,6 +1349,7 @@ mod tests {
             Vec::new(),
             vec![state_multiplier()],
             vec![bonus_station(350)],
+            None,
         );
         let mut contacts = vec![
             contact(vec![
@@ -1271,6 +1381,7 @@ mod tests {
             vec!["CALL", "BAND", "MODE"],
             Vec::new(),
             Vec::new(),
+            None,
         );
         let module = Arc::new(ContestScoringModule::new(rules, Value::Null));
         let tracker = IncrementalScoreTracker::new();
@@ -1314,6 +1425,7 @@ mod tests {
             vec!["CALL", "BAND", "MODE"],
             vec![state_multiplier()],
             Vec::new(),
+            None,
         );
         let module = Arc::new(ContestScoringModule::new(rules, Value::Null));
         let tracker = IncrementalScoreTracker::new();

@@ -387,6 +387,7 @@ mod tests {
             dupe_key: Vec::new(),
             multipliers: Vec::new(),
             bonus_points: Vec::new(),
+            power_multiplier_param: None,
             cabrillo: Some(CabrilloRules {
                 fixed_fields: vec![CabrilloFixedField {
                     name: "CATEGORY-BAND".to_string(),
