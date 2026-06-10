@@ -279,6 +279,21 @@
   margin: 0 auto;
 }
 
+.logger-image-panel {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+}
+
+.logger-side-image {
+  display: block;
+  max-width: 260px;
+  height: auto;
+  border: 1px solid #000;
+  background-color: #fff;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+}
+
 .logger-main-column {
   display: flex;
   flex-direction: column;

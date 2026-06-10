@@ -3,6 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
+import {
+  DEFAULT_LOGGER_IMAGE_URL,
+  loadLoggerImageUrl,
+  saveLoggerImageUrl,
+} from '../domain/loggerImageSettings';
 import { THEME_OPTIONS, ZOOM_OPTIONS } from '../themes/themes';
 
 function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
@@ -18,6 +23,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
   const [dxClusterCallsign, setDxClusterCallsign] = useState('');
   const [dxClusterMaxAgeMin, setDxClusterMaxAgeMin] = useState('60');
   const [dxClusterCommands, setDxClusterCommands] = useState('');
+  const [loggerImageUrl, setLoggerImageUrl] = useState(loadLoggerImageUrl);
 
   const notifyOperationalError = useCallback(
     (source, fallback, error, details = {}) => {
@@ -58,6 +64,22 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
       );
   }, [notifyOperationalError]);
 
+  function resetToDefaults() {
+    setLoginUser('');
+    setLoginPassword('');
+    setLoginPasswordConfirm('');
+    setLoginEnabled(false);
+    setDxClusterEnabled(false);
+    setDxClusterHost('');
+    setDxClusterPort('23');
+    setDxClusterCallsign('');
+    setDxClusterMaxAgeMin('60');
+    setDxClusterCommands('');
+    setLoggerImageUrl(DEFAULT_LOGGER_IMAGE_URL);
+    onSetTheme?.('default');
+    onSetZoom?.(1);
+  }
+
   async function saveConfig(event) {
     event.preventDefault();
     if (loginPassword !== loginPasswordConfirm) {
@@ -91,6 +113,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
       return;
     }
 
+    saveLoggerImageUrl(loggerImageUrl);
     navigate('/ui/open_log');
   }
 
@@ -158,6 +181,20 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
       >
         <span>Leave both password fields blank to disable login.</span>
       </div>
+      <label>
+        Logger side image URL
+        <input
+          value={loggerImageUrl}
+          onChange={(event) => setLoggerImageUrl(event.target.value)}
+          placeholder="https://www.hamqsl.com/solarn0nbh.php"
+        />
+      </label>
+      <div
+        className="selection-actions"
+        style={{ justifyContent: 'flex-start', padding: '0 12px' }}
+      >
+        <span>Stored in this browser only.</span>
+      </div>
       <label className="checkbox-label">
         <input
           type="checkbox"
@@ -215,6 +252,9 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
         </>
       ) : null}
       <div className="selection-actions">
+        <button className="cmd-btn" type="button" onClick={resetToDefaults}>
+          Reset to Defaults
+        </button>
         <button className="cmd-btn primary" type="submit">
           Save
         </button>

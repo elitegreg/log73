@@ -57,6 +57,10 @@ import {
   createBandMapSpotStore,
   removeBandMapSpot,
 } from '../domain/bandMap';
+import {
+  loadLoggerImageUrl,
+  loggerImageRefreshUrl,
+} from '../domain/loggerImageSettings';
 
 let promptedOperatorCallsign;
 const SOCKET_READY_STATE_LABELS = ['connecting', 'open', 'closing', 'closed'];
@@ -66,6 +70,7 @@ const SOCKET_DEBUG_PANEL_QUERY_PARAM = 'socket_debug';
 const SOCKET_DEBUG_PANEL_STORAGE_KEY = 'log73.socket_debug_panel';
 const MAX_SOCKET_DEBUG_ENTRIES = 80;
 const MAX_SOCKET_DEBUG_DETAILS_LENGTH = 240;
+const LOGGER_IMAGE_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
 function promptForOperatorCallsign(defaultCallsign) {
   const enteredCallsign = window.prompt(
@@ -156,6 +161,8 @@ function LoggerScreen() {
     createBandMapSpotStore(),
   );
   const [bandMapSelection, setBandMapSelection] = useState(null);
+  const [loggerImageUrl] = useState(loadLoggerImageUrl);
+  const [loggerImageSrc, setLoggerImageSrc] = useState(null);
   const [isContextLoading, setIsContextLoading] = useState(true);
   const [contactsLoadState, setContactsLoadState] = useState('initial-loading');
   const [hasMoreContacts, setHasMoreContacts] = useState(false);
@@ -285,6 +292,46 @@ function LoggerScreen() {
       .trim()
       .toUpperCase();
   }, [debouncedCallsignSearch]);
+
+  useEffect(() => {
+    if (!loggerImageUrl) {
+      setLoggerImageSrc(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+    let currentLoader = null;
+
+    function tryLoadImage() {
+      const refreshSrc = loggerImageRefreshUrl(loggerImageUrl, Date.now());
+      if (!refreshSrc) return;
+      const loader = new window.Image();
+      currentLoader = loader;
+      loader.onload = () => {
+        if (cancelled || currentLoader !== loader) return;
+        setLoggerImageSrc(refreshSrc);
+      };
+      loader.onerror = () => {
+        if (cancelled || currentLoader !== loader) return;
+      };
+      loader.src = refreshSrc;
+    }
+
+    tryLoadImage();
+    const intervalId = window.setInterval(
+      tryLoadImage,
+      LOGGER_IMAGE_REFRESH_INTERVAL_MS,
+    );
+
+    return () => {
+      cancelled = true;
+      if (currentLoader) {
+        currentLoader.onload = null;
+        currentLoader.onerror = null;
+      }
+      window.clearInterval(intervalId);
+    };
+  }, [loggerImageUrl]);
 
   useEffect(() => {
     localStorage.setItem(
@@ -1602,6 +1649,11 @@ function LoggerScreen() {
   return (
     <div className="app-container">
       <div className="logger-workspace">
+        {loggerImageSrc ? (
+          <div className="logger-image-panel" aria-hidden="true">
+            <img className="logger-side-image" src={loggerImageSrc} alt="" />
+          </div>
+        ) : null}
         <div className="logger-main-column" ref={loggerMainColumnRef}>
           <MainWindow
             settings={settings}
