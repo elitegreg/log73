@@ -93,6 +93,10 @@ function ExportLogScreen() {
     }));
   }
 
+  function openHelpWindow() {
+    window.open('/help/index.html', '_blank', 'noopener,noreferrer');
+  }
+
   async function exportLog(event) {
     event.preventDefault();
     const normalizedParams = normalizedExportValues(exportFields, exportParams);
@@ -148,7 +152,18 @@ function ExportLogScreen() {
 
   return (
     <form className="form-window" onSubmit={exportLog}>
-      <div className="title-bar">Log73 - Export Cabrillo</div>
+      <div className="title-bar">
+        <span>Log73 - Export Cabrillo</span>
+        <button
+          className="title-button title-help-button"
+          type="button"
+          aria-label="Open help"
+          title="Open help"
+          onClick={openHelpWindow}
+        >
+          ?
+        </button>
+      </div>
       <label>
         Log
         <input

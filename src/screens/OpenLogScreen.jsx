@@ -134,6 +134,10 @@ function OpenLogScreen() {
     navigate(`/ui/logger/${selectedLogId}/${selectedRadioId}`);
   }
 
+  function openHelpWindow() {
+    window.open('/help/index.html', '_blank', 'noopener,noreferrer');
+  }
+
   async function exportAdif() {
     if (!selectedLogId) return;
 
@@ -166,7 +170,18 @@ function OpenLogScreen() {
 
   return (
     <div className="selection-window">
-      <div className="title-bar">Log73 - Open Log</div>
+      <div className="title-bar">
+        <span>Log73 - Open Log</span>
+        <button
+          className="title-button title-help-button"
+          type="button"
+          aria-label="Open help"
+          title="Open help"
+          onClick={openHelpWindow}
+        >
+          ?
+        </button>
+      </div>
       <div
         className="selection-actions"
         style={{ justifyContent: 'space-between', padding: '8px 12px 0' }}

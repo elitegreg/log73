@@ -19,19 +19,19 @@ You are writing a **standalone operator manual** for Log73.
 
 - Write/overwrite: `docs/manual.md`
 - Markdown only.
-- Standalone document (do not require reader to open README or source code).
+- Standalone document (do not require reader to open README or source code). Exceptions: Can reference `docs/keyboard-shortcuts.md`
 
 ### Hard requirements
 
 1. Production-only operation.
 2. Assume distributable backend layout and default Linux paths:
-   - `/opt/log73/bin/log73-backend`
+   - `/opt/log73/bin/log73-launcher`
    - config: `~/.config/log73/`
    - data/db/SCP/DXCC: `~/.local/share/log73/`
    - contest rules: `~/.local/share/log73/contest-rules`
 3. Explain Basic Auth in plain language and include trust warning:
    - Any trusted operator with access can change credentials.
-4. Include **full hotkey and keyboard behavior coverage**.
+4. Include link to keyboard-shortcuts
 5. Include **offline mode** for both cases:
    - backend unreachable at start/navigation
    - logger already open then websocket/backend drops
@@ -40,7 +40,7 @@ You are writing a **standalone operator manual** for Log73.
 8. Include validation details for creating/editing logs and radios.
 9. Explicitly document CAT + CW Serial same-port behavior.
 10. Supported contests: **names only**.
-11. Supported radios: **full list**, not summary.
+11. Supported radios: **full list**, not summary. Look into radio-cat-rs crate. Add documentation for radio options.
 12. Supported CW keyers: full list.
 13. Mention known non-functional UI controls (`Mark`, `Store`, `Spot It`).
 

@@ -749,6 +749,12 @@
   white-space: nowrap;
 }
 
+.title-help-button {
+  min-width: 20px;
+  padding: 1px 0;
+  font-weight: bold;
+}
+
 .cw-text-dialog-overlay {
   position: fixed;
   inset: 0;

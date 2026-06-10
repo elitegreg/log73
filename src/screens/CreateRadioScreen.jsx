@@ -169,6 +169,10 @@ function CreateRadioScreen() {
     return true;
   }
 
+  function openHelpWindow() {
+    window.open('/help/index.html', '_blank', 'noopener,noreferrer');
+  }
+
   async function saveRadio(event) {
     event.preventDefault();
     if (!(await validateCwMessages())) return;
@@ -220,7 +224,16 @@ function CreateRadioScreen() {
   return (
     <form className="form-window" onSubmit={saveRadio}>
       <div className="title-bar">
-        Log73 - {isEditing ? 'Edit' : 'Create'} Radio
+        <span>Log73 - {isEditing ? 'Edit' : 'Create'} Radio</span>
+        <button
+          className="title-button title-help-button"
+          type="button"
+          aria-label="Open help"
+          title="Open help"
+          onClick={openHelpWindow}
+        >
+          ?
+        </button>
       </div>
       <label>
         Radio Type

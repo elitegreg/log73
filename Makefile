@@ -3,7 +3,7 @@ VERSION ?= $(shell awk -F '"' '/^version =/ { print $$2; exit }' backend/Cargo.t
 DIST ?= $(shell command -v dist 2>/dev/null || printf '%s' "$$HOME/.cargo/bin/dist")
 NFPM ?= $(shell command -v nfpm 2>/dev/null || { command -v go >/dev/null 2>&1 && printf '%s' "$$(go env GOPATH)/bin/nfpm"; } || printf '%s' nfpm)
 
-.PHONY: all release deb \
+.PHONY: all release deb help \
 	backend launcher frontend \
 	backend-build backend-release backend-test backend-fmt backend-lint \
 	launcher-build launcher-test launcher-fmt launcher-lint launcher-run \
@@ -21,6 +21,12 @@ deb:
 	pnpm run build:production
 	"$(DIST)" build --artifacts=local --target="$(DEB_TARGET)" --allow-dirty
 	NFPM="$(NFPM)" scripts/build_native_linux_packages.sh "$(DEB_TARGET)" "$(VERSION)"
+
+help:
+	mkdir -p docs/help
+	pandoc docs/index.md -s -c docs/help.css --lua-filter=docs/replace-links.lua -o docs/help/index.html
+	pandoc docs/keyboard-shortcuts.md -s -c docs/help.css --lua-filter=docs/replace-links.lua -o docs/help/keyboard-shortcuts.html
+	pandoc docs/manual.md -s -c docs/help.css --lua-filter=docs/replace-links.lua -o docs/help/manual.html
 
 backend: backend-fmt backend-lint backend-test backend-build
 

@@ -1,0 +1,120 @@
+/* Log73-style docs theme (simple) */
+
+:root {
+  --log73-bg: #f0f0f0;
+  --log73-window-bg: #add8e6;
+  --log73-title-bg: #0000ff;
+  --log73-title-fg: #ffffff;
+  --log73-border: #000000;
+  --log73-header-bg: #d3d3d3;
+  --log73-text: #000000;
+  --log73-link: #0033cc;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--log73-bg);
+  color: var(--log73-text);
+  font-family: Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+body {
+  padding-left: 20%;
+  padding-right: 20%;
+}
+
+main {
+  box-sizing: border-box;
+  width: min(980px, calc(100vw - 24px));
+  margin: 12px auto;
+  border: 1px solid var(--log73-border);
+  background: var(--log73-window-bg);
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.35);
+}
+
+header {
+  background: var(--log73-title-bg);
+  color: var(--log73-title-fg);
+  padding: 6px 10px;
+  font-weight: bold;
+}
+
+article {
+  padding: 12px;
+  background: #fff;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 10px;
+}
+
+h1 {
+  font-size: 22px;
+}
+
+h2 {
+  margin-top: 20px;
+  font-size: 18px;
+}
+
+p,
+ul,
+ol,
+table,
+blockquote,
+pre {
+  margin: 0 0 12px;
+}
+
+a {
+  color: var(--log73-link);
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+}
+
+th,
+td {
+  border: 1px solid #808080;
+  padding: 6px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+th {
+  background: var(--log73-header-bg);
+  font-weight: bold;
+}
+
+code,
+pre {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 13px;
+}
+
+pre {
+  padding: 8px;
+  border: 1px solid #808080;
+  background: #f8f8f8;
+  overflow-x: auto;
+}
+
+@media (max-width: 900px) {
+  body {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}

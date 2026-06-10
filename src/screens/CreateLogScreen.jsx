@@ -138,6 +138,10 @@ function CreateLogScreen() {
     }));
   }
 
+  function openHelpWindow() {
+    window.open('/help/index.html', '_blank', 'noopener,noreferrer');
+  }
+
   async function saveLog(event) {
     event.preventDefault();
     const normalizedParams = normalizedParamObject(
@@ -198,7 +202,16 @@ function CreateLogScreen() {
   return (
     <form className="form-window" onSubmit={saveLog}>
       <div className="title-bar">
-        Log73 - {isEditing ? 'Edit' : 'Create'} Log
+        <span>Log73 - {isEditing ? 'Edit' : 'Create'} Log</span>
+        <button
+          className="title-button title-help-button"
+          type="button"
+          aria-label="Open help"
+          title="Open help"
+          onClick={openHelpWindow}
+        >
+          ?
+        </button>
       </div>
       <label>
         Contest

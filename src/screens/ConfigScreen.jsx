@@ -80,6 +80,10 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
     onSetZoom?.(1);
   }
 
+  function openHelpWindow() {
+    window.open('/help/index.html', '_blank', 'noopener,noreferrer');
+  }
+
   async function saveConfig(event) {
     event.preventDefault();
     if (loginPassword !== loginPasswordConfirm) {
@@ -119,7 +123,18 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
 
   return (
     <form className="form-window" onSubmit={saveConfig}>
-      <div className="title-bar">Log73 - Configure</div>
+      <div className="title-bar">
+        <span>Log73 - Configure</span>
+        <button
+          className="title-button title-help-button"
+          type="button"
+          aria-label="Open help"
+          title="Open help"
+          onClick={openHelpWindow}
+        >
+          ?
+        </button>
+      </div>
       <div
         className="selection-actions"
         style={{ justifyContent: 'space-between', padding: '8px 12px 0' }}

@@ -1311,6 +1311,10 @@ function MainWindow({
     window.open(qrzUrl, '_blank', 'noopener,noreferrer');
   }
 
+  function openHelpWindow() {
+    window.open('/help/index.html', '_blank', 'noopener,noreferrer');
+  }
+
   const esmNextAction = currentEsmAction();
   const esmHighlightedKeys = esmEnabled
     ? esmNextAction.shouldLog && operatingMode === 'Run'
@@ -1333,6 +1337,15 @@ function MainWindow({
         ) : null}
         <button className="title-button" onClick={onExit}>
           Exit Logger
+        </button>
+        <button
+          className="title-button title-help-button"
+          type="button"
+          aria-label="Open help"
+          title="Open help"
+          onClick={openHelpWindow}
+        >
+          ?
         </button>
       </div>
       <RadioControls
