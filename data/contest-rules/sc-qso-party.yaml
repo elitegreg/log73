@@ -53,6 +53,11 @@ contests:
           type: 'String:16'
           widget: 'select'
           valid_values: ['SINGLE-OP', 'MULTI-OP', 'CHECKLOG']
+        - name: 'CATEGORY-POWER'
+          label: 'Category Power'
+          type: 'String:16'
+          widget: 'select'
+          valid_values: ['HIGH', 'LOW', 'QRP']
         - name: 'CATEGORY-STATION'
           label: 'Category Station'
           type: 'String:16'
@@ -62,7 +67,7 @@ contests:
           label: 'Category Transmitter'
           type: 'String:16'
           widget: 'select'
-          valid_values: ['ONE', 'TWO', 'LIMITED', 'UNLIMITED']
+          valid_values: ['ONE', 'TWO', 'UNLIMITED']
       export_fields:
         - name: 'CLUB'
           label: 'Club'
