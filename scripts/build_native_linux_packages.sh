@@ -74,7 +74,12 @@ Terminal=false
 Categories=Utility;HamRadio;
 DESKTOP
 
-cat > "$config_path" <<EOF
+write_config() {
+  local config_path="$1"
+  local chromium_dep="$2"
+  local udev_dep="$3"
+
+  cat > "$config_path" <<EOF
 name: log73
 arch: ${nfpm_arch}
 platform: linux
@@ -103,10 +108,17 @@ contents:
   - src: ${package_root}/usr/share/icons/hicolor/512x512/apps/log73.png
     dst: /usr/share/icons/hicolor/512x512/apps/log73.png
 depends:
-  - libudev1
+  - ${udev_dep}
+  - ${chromium_dep}
 EOF
+}
 
-"$nfpm_bin" package --packager deb --config "$config_path" \
+deb_config_path="${config_path}.deb"
+rpm_config_path="${config_path}.rpm"
+write_config "$deb_config_path" chromium-browser libudev1
+write_config "$rpm_config_path" chromium systemd-libs
+
+"$nfpm_bin" package --packager deb --config "$deb_config_path" \
   --target "${output_dir}/log73_${version}_${artifact_arch}.deb"
-"$nfpm_bin" package --packager rpm --config "$config_path" \
+"$nfpm_bin" package --packager rpm --config "$rpm_config_path" \
   --target "${output_dir}/log73-${version}-1.${artifact_arch}.rpm"
