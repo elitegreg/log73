@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { callsignPrefix, dxccLabel, lookupDxcc } from './dxcc.js';
+import {
+  callsignPrefix,
+  dxccLabel,
+  lookupDxcc,
+  splitCallsign,
+} from './dxcc.js';
 
 const TEST_DXCC = {
   entities: [
@@ -42,6 +47,26 @@ const TEST_DXCC = {
     { pattern: '4O', exact: false, entity_index: 1 },
   ],
 };
+
+test('splitCallsign returns prefix number and suffix', () => {
+  assert.deepEqual(splitCallsign('KB1AWN'), {
+    prefix: 'KB',
+    number: '1',
+    suffix: 'AWN',
+  });
+  assert.deepEqual(splitCallsign('NK12A'), {
+    prefix: 'NK',
+    number: '12',
+    suffix: 'A',
+  });
+  assert.deepEqual(splitCallsign('4O9A'), {
+    prefix: '4O',
+    number: '9',
+    suffix: 'A',
+  });
+  assert.equal(splitCallsign('KP'), null);
+  assert.equal(splitCallsign('4O'), null);
+});
 
 test('callsignPrefix follows the digit-delimited prefix rule', () => {
   assert.equal(callsignPrefix('KP2M'), 'KP');

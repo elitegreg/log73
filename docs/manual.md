@@ -344,6 +344,7 @@ When ESM is enabled, Enter chooses message/log actions from state.
 | Callsign present, exchange incomplete (first attempt) | Send `F5`, then `F2` |
 | Callsign present, exchange incomplete (repeat attempt) | Send `F8` |
 | Callsign + valid exchange + exchange already sent for that callsign | Send `F3`, then log |
+| Callsign corrected after sending exchange (CW only) | Before `F3`, send corrected suffix if only suffix changed; otherwise send full corrected callsign |
 
 ### S&P mode
 

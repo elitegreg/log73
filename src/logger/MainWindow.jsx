@@ -901,9 +901,6 @@ function MainWindow({
     if (normalizedCallsign !== esmRunCallsignAttempt) {
       setEsmRunCallsignAttempt('');
     }
-    if (normalizedCallsign !== esmExchangeSentCallsign) {
-      setEsmExchangeSentCallsign('');
-    }
     setCallSign(sanitizedCallsign);
     callsignFrequencyBaselineRef.current = normalizedCallsign
       ? radioFrequencyHz
@@ -1163,6 +1160,16 @@ function MainWindow({
     }
 
     const esmAction = currentEsmAction();
+    if (
+      modeIsCw(radioMode) &&
+      operatingMode === 'Run' &&
+      esmAction.correctionText
+    ) {
+      onSendCwText?.({
+        request_id: createMessageRequestId(),
+        text: esmAction.correctionText,
+      });
+    }
     sendEsmKeys(esmAction.keys);
     setEsmRunCallsignAttempt(esmAction.nextRunCallsignAttempt);
     setEsmExchangeSentCallsign(esmAction.nextExchangeSentCallsign);

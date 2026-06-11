@@ -8,6 +8,7 @@ import {
   shouldBlockEsmCallEnter,
   cwActionFromTemplate,
   cwActiveTimeoutMs,
+  correctedEsmCallsignText,
   esmEnterAction,
   modeIsCw,
   nextCwWpm,
@@ -142,6 +143,13 @@ F12 Clear,CQ
   assert.equal(cwActionForMessage(config, 'run', 'F9'), null);
 });
 
+test('correctedEsmCallsignText returns suffix-only or full callsign corrections', () => {
+  assert.equal(correctedEsmCallsignText('KB1AWN', 'KB1AWM'), 'AWM');
+  assert.equal(correctedEsmCallsignText('KD1AWM', 'KB1AWM'), 'KB1AWM');
+  assert.equal(correctedEsmCallsignText('3DA0RU', '3DA0RW'), 'RW');
+  assert.equal(correctedEsmCallsignText('K1ABC', 'K1ABC'), '');
+});
+
 test('esmEnterAction follows run mode matrix states', () => {
   assert.deepEqual(
     esmEnterAction({
@@ -154,6 +162,7 @@ test('esmEnterAction follows run mode matrix states', () => {
     }),
     {
       keys: ['F1'],
+      correctionText: '',
       shouldLog: false,
       nextRunCallsignAttempt: '',
       nextExchangeSentCallsign: '',
@@ -171,6 +180,7 @@ test('esmEnterAction follows run mode matrix states', () => {
     }),
     {
       keys: ['F5', 'F2'],
+      correctionText: '',
       shouldLog: false,
       nextRunCallsignAttempt: 'K1ABC',
       nextExchangeSentCallsign: 'K1ABC',
@@ -188,6 +198,7 @@ test('esmEnterAction follows run mode matrix states', () => {
     }),
     {
       keys: ['F8'],
+      correctionText: '',
       shouldLog: false,
       nextRunCallsignAttempt: 'K1ABC',
       nextExchangeSentCallsign: '',
@@ -205,6 +216,7 @@ test('esmEnterAction follows run mode matrix states', () => {
     }),
     {
       keys: ['F5', 'F2'],
+      correctionText: '',
       shouldLog: false,
       nextRunCallsignAttempt: 'K1ABC',
       nextExchangeSentCallsign: 'K1ABC',
@@ -222,9 +234,46 @@ test('esmEnterAction follows run mode matrix states', () => {
     }),
     {
       keys: ['F3'],
+      correctionText: '',
       shouldLog: true,
       nextRunCallsignAttempt: 'K1ABC',
       nextExchangeSentCallsign: 'K1ABC',
+    },
+  );
+
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: true,
+      operatingMode: 'Run',
+      callsign: 'KB1AWM',
+      exchangeValid: true,
+      exchangeSentCallsign: 'KB1AWN',
+      runCallsignAttempt: 'KB1AWN',
+    }),
+    {
+      keys: ['F3'],
+      correctionText: 'AWM',
+      shouldLog: true,
+      nextRunCallsignAttempt: 'KB1AWM',
+      nextExchangeSentCallsign: 'KB1AWM',
+    },
+  );
+
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: true,
+      operatingMode: 'Run',
+      callsign: 'KB1AWM',
+      exchangeValid: true,
+      exchangeSentCallsign: 'KD1AWM',
+      runCallsignAttempt: 'KD1AWM',
+    }),
+    {
+      keys: ['F3'],
+      correctionText: 'KB1AWM',
+      shouldLog: true,
+      nextRunCallsignAttempt: 'KB1AWM',
+      nextExchangeSentCallsign: 'KB1AWM',
     },
   );
 });
@@ -241,6 +290,7 @@ test('esmEnterAction follows s&p mode matrix states', () => {
     }),
     {
       keys: ['F4'],
+      correctionText: '',
       shouldLog: false,
       nextRunCallsignAttempt: '',
       nextExchangeSentCallsign: '',
@@ -258,6 +308,7 @@ test('esmEnterAction follows s&p mode matrix states', () => {
     }),
     {
       keys: ['F4'],
+      correctionText: '',
       shouldLog: false,
       nextRunCallsignAttempt: '',
       nextExchangeSentCallsign: '',
@@ -275,6 +326,7 @@ test('esmEnterAction follows s&p mode matrix states', () => {
     }),
     {
       keys: ['F2'],
+      correctionText: '',
       shouldLog: true,
       nextRunCallsignAttempt: '',
       nextExchangeSentCallsign: 'K1ABC',
@@ -292,6 +344,7 @@ test('esmEnterAction follows s&p mode matrix states', () => {
     }),
     {
       keys: [],
+      correctionText: '',
       shouldLog: true,
       nextRunCallsignAttempt: '',
       nextExchangeSentCallsign: 'K1ABC',
@@ -311,6 +364,7 @@ test('esmEnterAction returns no action when disabled', () => {
     }),
     {
       keys: [],
+      correctionText: '',
       shouldLog: false,
       nextRunCallsignAttempt: '',
       nextExchangeSentCallsign: 'K1ABC',

@@ -1,4 +1,5 @@
 import { fieldDefault } from '../domain/contactFields.js';
+import { splitCallsign } from '../domain/dxcc.js';
 import {
   LOGGER_MODE_OPTIONS,
   adifModeForLoggerMode,
@@ -239,6 +240,41 @@ export function steppedFrequencyHz(frequencyHz, deltaHz) {
   return Math.max(1, nextFrequencyHz);
 }
 
+export function correctedEsmCallsignText(
+  exchangeSentCallsign,
+  correctedCallsign,
+) {
+  const normalizedSentCallsign = String(exchangeSentCallsign ?? '')
+    .trim()
+    .toUpperCase();
+  const normalizedCorrectedCallsign = String(correctedCallsign ?? '')
+    .trim()
+    .toUpperCase();
+
+  if (
+    !normalizedSentCallsign ||
+    !normalizedCorrectedCallsign ||
+    normalizedSentCallsign === normalizedCorrectedCallsign
+  ) {
+    return '';
+  }
+
+  const sentParts = splitCallsign(normalizedSentCallsign);
+  const correctedParts = splitCallsign(normalizedCorrectedCallsign);
+  if (!sentParts || !correctedParts) {
+    return normalizedCorrectedCallsign;
+  }
+
+  if (
+    sentParts.prefix === correctedParts.prefix &&
+    sentParts.number === correctedParts.number
+  ) {
+    return correctedParts.suffix || normalizedCorrectedCallsign;
+  }
+
+  return normalizedCorrectedCallsign;
+}
+
 export function esmEnterAction({
   esmEnabled,
   operatingMode,
@@ -250,6 +286,7 @@ export function esmEnterAction({
   if (!esmEnabled) {
     return {
       keys: [],
+      correctionText: '',
       shouldLog: false,
       nextRunCallsignAttempt: '',
       nextExchangeSentCallsign: exchangeSentCallsign ?? '',
@@ -270,6 +307,7 @@ export function esmEnterAction({
   if (!normalizedCallsign) {
     return {
       keys: [isRunMode ? 'F1' : 'F4'],
+      correctionText: '',
       shouldLog: false,
       nextRunCallsignAttempt: '',
       nextExchangeSentCallsign: '',
@@ -280,6 +318,7 @@ export function esmEnterAction({
     if (!isRunMode) {
       return {
         keys: ['F4'],
+        correctionText: '',
         shouldLog: false,
         nextRunCallsignAttempt: '',
         nextExchangeSentCallsign: normalizedExchangeSentCallsign,
@@ -290,6 +329,7 @@ export function esmEnterAction({
     if (isRepeatCall) {
       return {
         keys: ['F8'],
+        correctionText: '',
         shouldLog: false,
         nextRunCallsignAttempt: normalizedRunCallsignAttempt,
         nextExchangeSentCallsign: normalizedExchangeSentCallsign,
@@ -298,6 +338,7 @@ export function esmEnterAction({
 
     return {
       keys: ['F5', 'F2'],
+      correctionText: '',
       shouldLog: false,
       nextRunCallsignAttempt: normalizedCallsign,
       nextExchangeSentCallsign: normalizedCallsign,
@@ -310,6 +351,21 @@ export function esmEnterAction({
     if (exchangeAlreadySentForCallsign) {
       return {
         keys: ['F3'],
+        correctionText: '',
+        shouldLog: true,
+        nextRunCallsignAttempt: normalizedCallsign,
+        nextExchangeSentCallsign: normalizedCallsign,
+      };
+    }
+
+    const correctionText = correctedEsmCallsignText(
+      normalizedExchangeSentCallsign,
+      normalizedCallsign,
+    );
+    if (correctionText) {
+      return {
+        keys: ['F3'],
+        correctionText,
         shouldLog: true,
         nextRunCallsignAttempt: normalizedCallsign,
         nextExchangeSentCallsign: normalizedCallsign,
@@ -318,6 +374,7 @@ export function esmEnterAction({
 
     return {
       keys: ['F5', 'F2'],
+      correctionText: '',
       shouldLog: false,
       nextRunCallsignAttempt: normalizedCallsign,
       nextExchangeSentCallsign: normalizedCallsign,
@@ -329,6 +386,7 @@ export function esmEnterAction({
   if (exchangeAlreadySentForCallsign) {
     return {
       keys: [],
+      correctionText: '',
       shouldLog: true,
       nextRunCallsignAttempt: '',
       nextExchangeSentCallsign: normalizedCallsign,
@@ -337,6 +395,7 @@ export function esmEnterAction({
 
   return {
     keys: ['F2'],
+    correctionText: '',
     shouldLog: true,
     nextRunCallsignAttempt: '',
     nextExchangeSentCallsign: normalizedCallsign,

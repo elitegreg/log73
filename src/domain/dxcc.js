@@ -2,26 +2,39 @@ function normalizeCallsign(callsign) {
   return String(callsign ?? '').trim().toUpperCase();
 }
 
-export function callsignPrefix(callsign) {
+export function splitCallsign(callsign) {
   const normalized = normalizeCallsign(callsign);
   if (!normalized) return null;
 
   const characters = [...normalized];
-  if (/^\d$/.test(characters[0])) {
-    const secondDigitIndex = characters.findIndex(
-      (character, index) => index > 0 && /^\d$/.test(character),
-    );
-    return secondDigitIndex > 0
-      ? characters.slice(0, secondDigitIndex).join('')
-      : null;
+  const firstSearchIndex = /^\d$/.test(characters[0]) ? 1 : 0;
+  let separatorStart = -1;
+  let separatorEnd = -1;
+
+  for (let index = firstSearchIndex; index < characters.length; index += 1) {
+    if (!/^\d$/.test(characters[index])) continue;
+    separatorStart = index;
+    separatorEnd = index + 1;
+    while (
+      separatorEnd < characters.length &&
+      /^\d$/.test(characters[separatorEnd])
+    ) {
+      separatorEnd += 1;
+    }
+    break;
   }
 
-  const firstDigitIndex = characters.findIndex((character) =>
-    /^\d$/.test(character),
-  );
-  return firstDigitIndex > 0
-    ? characters.slice(0, firstDigitIndex).join('')
-    : null;
+  if (separatorStart <= 0) return null;
+
+  return {
+    prefix: characters.slice(0, separatorStart).join(''),
+    number: characters.slice(separatorStart, separatorEnd).join(''),
+    suffix: characters.slice(separatorEnd).join(''),
+  };
+}
+
+export function callsignPrefix(callsign) {
+  return splitCallsign(callsign)?.prefix ?? null;
 }
 
 export function lookupDxcc(database, callsign) {
