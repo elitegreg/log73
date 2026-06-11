@@ -1,4 +1,8 @@
-import { fieldDefault } from '../domain/contactFields.js';
+import {
+  fieldDefault,
+  parseFieldType,
+  sanitizeExchangeValue,
+} from '../domain/contactFields.js';
 import { splitCallsign } from '../domain/dxcc.js';
 import {
   LOGGER_MODE_OPTIONS,
@@ -68,6 +72,111 @@ export function exchangeDefaults(settings, radioMode, contestParams = {}) {
       field.name,
       fieldDefault(field, radioMode, contestParams),
     ]),
+  );
+}
+
+function normalizedAutofillCallsign(value) {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase();
+}
+
+function contactAutofillCallsign(contact) {
+  return normalizedAutofillCallsign(contact?.CALL ?? contact?.Call ?? '');
+}
+
+function contactExchangeRawValue(contact, field) {
+  for (const key of [field?.adif, field?.name].filter(Boolean)) {
+    if (Object.prototype.hasOwnProperty.call(contact ?? {}, key)) {
+      return contact[key];
+    }
+  }
+  return undefined;
+}
+
+function shouldReplaceWithAutofillValue(field, currentValue, defaultValue) {
+  const currentText = String(currentValue ?? '');
+  if (currentText.trim() === '') return true;
+  if (field?.fixed === true) return false;
+  return currentText === String(defaultValue ?? '');
+}
+
+function isSerialExchangeField(field, radioMode) {
+  return parseFieldType(field?.type, radioMode).kind === 'SERIAL';
+}
+
+export function previousContactExchangeAutofill({
+  settings,
+  contacts = [],
+  callsign,
+  exchangeValues = {},
+  radioMode = 'CW',
+  contestParams = {},
+} = {}) {
+  const defaults = exchangeDefaults(settings, radioMode, contestParams);
+  const values = { ...defaults, ...(exchangeValues ?? {}) };
+  const normalizedCallsign = normalizedAutofillCallsign(callsign);
+  const matchedContact = normalizedCallsign
+    ? (contacts ?? []).find(
+        (contact) => contactAutofillCallsign(contact) === normalizedCallsign,
+      )
+    : null;
+
+  if (!matchedContact) {
+    return {
+      matchedContact: null,
+      changed: false,
+      copiedFields: [],
+      values,
+    };
+  }
+
+  const nextValues = { ...values };
+  const copiedFields = [];
+
+  for (const field of settings?.exchange ?? []) {
+    if (isSerialExchangeField(field, radioMode)) continue;
+
+    const rawValue = contactExchangeRawValue(matchedContact, field);
+    if (rawValue === undefined || rawValue === null) continue;
+
+    const previousValue = sanitizeExchangeValue(field, rawValue, radioMode);
+    if (String(previousValue).trim() === '') continue;
+
+    const currentValue = nextValues[field.name] ?? '';
+    if (
+      !shouldReplaceWithAutofillValue(
+        field,
+        currentValue,
+        defaults[field.name] ?? '',
+      )
+    ) {
+      continue;
+    }
+
+    if (String(currentValue ?? '') === previousValue) continue;
+
+    nextValues[field.name] = previousValue;
+    copiedFields.push(field.name);
+  }
+
+  return {
+    matchedContact,
+    changed: copiedFields.length > 0,
+    copiedFields,
+    values: nextValues,
+  };
+}
+
+export function shouldAdvanceFromCallsignAutofill({
+  esmEnabled,
+  autofillResult,
+  hasEditableExchangeField,
+} = {}) {
+  return Boolean(
+    esmEnabled &&
+      autofillResult?.matchedContact &&
+      hasEditableExchangeField,
   );
 }
 

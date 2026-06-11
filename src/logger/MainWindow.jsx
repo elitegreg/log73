@@ -36,6 +36,7 @@ import {
   cwActiveTimeoutMs,
   typedModeFromCallsignInput,
   exchangeDefaults,
+  previousContactExchangeAutofill,
   formatFrequency,
   isFrequencyInput,
   adifModeForLoggerMode,
@@ -52,6 +53,7 @@ import {
   shouldBlockEsmCallEnter,
   callsignClearThresholdHz,
   normalizedContactFrequencyHz,
+  shouldAdvanceFromCallsignAutofill,
   tuningIncrementHzForMode,
   steppedFrequencyHz,
 } from './mainWindowHelpers';
@@ -147,6 +149,7 @@ function MainWindow({
   const callSignEditedAtRef = useRef(new Date());
   const callsignFrequencyBaselineRef = useRef(null);
   const pendingBandMapTuneFrequencyRef = useRef(null);
+  const pendingPreviousContactAutofillRef = useRef('');
   const bandMapSelectionSequenceRef = useRef(null);
   const radioMode = radioState?.mode ?? 'CW';
   const radioFrequencyHz =
@@ -253,6 +256,33 @@ function MainWindow({
   }, [debouncedCallSign, onDebouncedCallsignChange]);
 
   useEffect(() => {
+    const pendingCallsign = pendingPreviousContactAutofillRef.current;
+    if (!pendingCallsign || !settings?.exchange) return;
+
+    const normalizedCallsign = callSign.trim().toUpperCase();
+    if (pendingCallsign !== normalizedCallsign) {
+      pendingPreviousContactAutofillRef.current = '';
+      return;
+    }
+
+    const autofillResult = previousContactExchangeAutofill({
+      settings,
+      contacts,
+      callsign: normalizedCallsign,
+      exchangeValues,
+      radioMode,
+      contestParams: log?.contest_params ?? {},
+    });
+
+    if (!autofillResult.matchedContact) return;
+
+    pendingPreviousContactAutofillRef.current = '';
+    if (autofillResult.changed) {
+      setExchangeValues(autofillResult.values);
+    }
+  }, [callSign, contacts, exchangeValues, log, radioMode, settings]);
+
+  useEffect(() => {
     let cancelled = false;
     supercheckpartial()
       .then((result) => {
@@ -351,7 +381,7 @@ function MainWindow({
       ? dupeAlertText(settings, currentContactFields(), contacts)
       : '';
 
-  function currentMessageFields() {
+  function currentMessageFields(values = exchangeValues) {
     const fields = {
       STATION_CALLSIGN: stationCallsign,
       CALL: callSign.trim().toUpperCase(),
@@ -359,7 +389,7 @@ function MainWindow({
 
     for (const field of settings?.exchange ?? []) {
       fields[field.adif] = String(
-        exchangeValues[field.name] ??
+        values?.[field.name] ??
           fieldDefault(field, radioMode, log?.contest_params ?? {}),
       )
         .trim()
@@ -368,7 +398,7 @@ function MainWindow({
 
     fields.EXCH = buildSentExchange(
       settings,
-      exchangeValues,
+      values,
       radioMode,
       log?.contest_params ?? {},
     );
@@ -376,7 +406,7 @@ function MainWindow({
     return fields;
   }
 
-  function currentContactFields() {
+  function currentContactFields(values = exchangeValues) {
     const contact = {
       CALL: callSign.trim().toUpperCase(),
       BAND: currentBand?.name ?? '',
@@ -385,7 +415,9 @@ function MainWindow({
     };
 
     for (const field of settings?.exchange ?? []) {
-      contact[field.adif] = String(exchangeValue(field)).trim().toUpperCase();
+      contact[field.adif] = String(exchangeValue(field, values))
+        .trim()
+        .toUpperCase();
     }
 
     return contact;
@@ -393,6 +425,48 @@ function MainWindow({
 
   function currentCallsign() {
     return callSign.trim().toUpperCase();
+  }
+
+  function requestPreviousContactAutofill(values = exchangeValues) {
+    const normalizedCallsign = currentCallsign();
+    if (!normalizedCallsign) {
+      return {
+        matchedContact: null,
+        changed: false,
+        copiedFields: [],
+        values,
+      };
+    }
+
+    pendingPreviousContactAutofillRef.current = normalizedCallsign;
+    setDebouncedCallSign(normalizedCallsign);
+
+    if (!settings?.exchange) {
+      return {
+        matchedContact: null,
+        changed: false,
+        copiedFields: [],
+        values,
+      };
+    }
+
+    const autofillResult = previousContactExchangeAutofill({
+      settings,
+      contacts,
+      callsign: normalizedCallsign,
+      exchangeValues: values,
+      radioMode,
+      contestParams: log?.contest_params ?? {},
+    });
+
+    if (autofillResult.matchedContact) {
+      pendingPreviousContactAutofillRef.current = '';
+      if (autofillResult.changed) {
+        setExchangeValues(autofillResult.values);
+      }
+    }
+
+    return autofillResult;
   }
 
   function storeCurrentCqFrequency() {
@@ -484,6 +558,7 @@ function MainWindow({
     bandMapSelectionSequenceRef.current = bandMapSelection.sequence;
     const callsign = sanitizeCallsign(bandMapSelection.spot?.call_dx ?? '');
     setCallSign(callsign);
+    pendingPreviousContactAutofillRef.current = '';
     callsignFrequencyBaselineRef.current =
       Number(bandMapSelection.spot?.frequency_hz) || null;
     pendingBandMapTuneFrequencyRef.current =
@@ -509,6 +584,7 @@ function MainWindow({
     }
     if (Math.abs(radioFrequencyHz - baseline) < thresholdHz) return;
     setCallSign('');
+    pendingPreviousContactAutofillRef.current = '';
     callsignFrequencyBaselineRef.current = null;
     setEsmRunCallsignAttempt('');
     setEsmExchangeSentCallsign('');
@@ -584,7 +660,11 @@ function MainWindow({
     }
   }
 
-  function sendSingleMessageKey(key, mode = messageModeKey) {
+  function sendSingleMessageKey(
+    key,
+    mode = messageModeKey,
+    values = exchangeValues,
+  ) {
     const action = cwActionForMessage(radio?.cw_messages, mode, key);
     if (action && performMessageAction(action)) {
       return null;
@@ -603,7 +683,7 @@ function MainWindow({
       request_id: requestId,
       mode,
       key,
-      fields: currentMessageFields(),
+      fields: currentMessageFields(values),
     });
     return requestId;
   }
@@ -722,10 +802,10 @@ function MainWindow({
     }
   }
 
-  function sendEsmKeys(keys) {
+  function sendEsmKeys(keys, values = exchangeValues) {
     stopRepeat();
     for (const key of keys) {
-      const requestId = sendSingleMessageKey(key);
+      const requestId = sendSingleMessageKey(key, messageModeKey, values);
       if (!requestId) continue;
       if (key === 'F2') {
         markEsmExchangeSentForCurrentCallsign();
@@ -902,6 +982,7 @@ function MainWindow({
       setEsmRunCallsignAttempt('');
     }
     setCallSign(sanitizedCallsign);
+    pendingPreviousContactAutofillRef.current = '';
     callsignFrequencyBaselineRef.current = normalizedCallsign
       ? radioFrequencyHz
       : null;
@@ -909,9 +990,9 @@ function MainWindow({
     callSignEditedAtRef.current = new Date();
   }
 
-  function exchangeValue(field) {
+  function exchangeValue(field, values = exchangeValues) {
     return (
-      exchangeValues[field.name] ??
+      values?.[field.name] ??
       fieldDefault(field, radioMode, log?.contest_params ?? {})
     );
   }
@@ -924,22 +1005,22 @@ function MainWindow({
     return field?.fixed !== true && !(field?.is_sent && typeKind === 'SERIAL');
   }
 
-  function exchangeValidation(field) {
-    return validateExchangeField(field, exchangeValue(field), radioMode);
+  function exchangeValidation(field, values = exchangeValues) {
+    return validateExchangeField(field, exchangeValue(field, values), radioMode);
   }
 
-  function firstInvalidExchangeField() {
+  function firstInvalidExchangeField(values = exchangeValues) {
     return (settings?.exchange ?? []).find(
-      (field) => !exchangeValidation(field).ok,
+      (field) => !exchangeValidation(field, values).ok,
     );
   }
 
-  function allRequiredFieldsFilled() {
+  function allRequiredFieldsFilled(values = exchangeValues) {
     return (
       Boolean(settings?.exchange) &&
       callSign.trim() !== '' &&
       settings.exchange.every(
-        (field) => String(exchangeValue(field)).trim() !== '',
+        (field) => String(exchangeValue(field, values)).trim() !== '',
       )
     );
   }
@@ -954,11 +1035,12 @@ function MainWindow({
         'No serial number is currently available. Waiting for backend allocation.'
       : '';
 
-  function canLogContact(force = false) {
+  function canLogContact(force = false, values = exchangeValues) {
     return (
       !serialBlockMessage &&
-      allRequiredFieldsFilled() &&
-      (force || (callsignValidation().ok && !firstInvalidExchangeField()))
+      allRequiredFieldsFilled(values) &&
+      (force ||
+        (callsignValidation().ok && !firstInvalidExchangeField(values)))
     );
   }
 
@@ -967,6 +1049,7 @@ function MainWindow({
     setCallSign('');
     callsignFrequencyBaselineRef.current = null;
     pendingBandMapTuneFrequencyRef.current = null;
+    pendingPreviousContactAutofillRef.current = '';
     setExchangeValues(
       exchangeDefaults(settings, radioMode, log?.contest_params ?? {}),
     );
@@ -975,14 +1058,14 @@ function MainWindow({
     callSignRef.current?.focus();
   }
 
-  function logContact(force = false) {
-    if (!canLogContact(force)) {
+  function logContact(force = false, values = exchangeValues) {
+    if (!canLogContact(force, values)) {
       if (!force && !callsignValidation().ok) {
         callSignRef.current?.focus();
         return false;
       }
 
-      const invalidField = firstInvalidExchangeField();
+      const invalidField = firstInvalidExchangeField(values);
       if (invalidField) {
         exchangeInputRefs.current[invalidField.name]?.focus();
       }
@@ -1008,7 +1091,9 @@ function MainWindow({
     };
 
     for (const field of settings.exchange) {
-      contact[field.adif] = String(exchangeValue(field)).trim().toUpperCase();
+      contact[field.adif] = String(exchangeValue(field, values))
+        .trim()
+        .toUpperCase();
     }
 
     onLogContact?.(contact);
@@ -1019,12 +1104,12 @@ function MainWindow({
     return true;
   }
 
-  function focusNextEmptyField(currentFieldName) {
+  function focusNextEmptyField(currentFieldName, values = exchangeValues) {
     const fields = [
       { name: 'CALL', value: callSign, ref: callSignRef, editable: true },
       ...(settings?.exchange ?? []).map((field) => ({
         name: field.name,
-        value: exchangeValues[field.name] ?? '',
+        value: exchangeValue(field, values),
         ref: { current: exchangeInputRefs.current[field.name] },
         editable: fieldEditable(field),
       })),
@@ -1068,25 +1153,25 @@ function MainWindow({
     return true;
   }
 
-  function handleFieldTab(event, currentFieldName) {
+  function handleFieldTab(event, currentFieldName, values = exchangeValues) {
     if (event.key !== 'Tab' || event.shiftKey) {
       return;
     }
 
-    if (focusNextEmptyField(currentFieldName)) {
+    if (focusNextEmptyField(currentFieldName, values)) {
       event.preventDefault();
     }
   }
 
-  function exchangeFieldsValid() {
+  function exchangeFieldsValid(values = exchangeValues) {
     return (
-      allRequiredFieldsFilled() &&
+      allRequiredFieldsFilled(values) &&
       callsignValidation().ok &&
-      !firstInvalidExchangeField()
+      !firstInvalidExchangeField(values)
     );
   }
 
-  function fieldFilledAndValid(fieldName) {
+  function fieldFilledAndValid(fieldName, values = exchangeValues) {
     if (fieldName === 'CALL') {
       return callsignValidation().ok;
     }
@@ -1094,11 +1179,11 @@ function MainWindow({
       (item) => item.name === fieldName,
     );
     if (!field || !fieldEditable(field)) return false;
-    const value = String(exchangeValue(field)).trim();
-    return value !== '' && exchangeValidation(field).ok;
+    const value = String(exchangeValue(field, values)).trim();
+    return value !== '' && exchangeValidation(field, values).ok;
   }
 
-  function nextInvalidExchangeFieldName(currentIndex) {
+  function nextInvalidExchangeFieldName(currentIndex, values = exchangeValues) {
     const exchangeFields = settings?.exchange ?? [];
     const totalFields = exchangeFields.length;
     if (totalFields === 0) return null;
@@ -1108,8 +1193,8 @@ function MainWindow({
       const field = exchangeFields[nextIndex];
       if (!field || !fieldEditable(field)) continue;
 
-      const value = String(exchangeValue(field)).trim();
-      if (value === '' || !exchangeValidation(field).ok) {
+      const value = String(exchangeValue(field, values)).trim();
+      if (value === '' || !exchangeValidation(field, values).ok) {
         return field.name;
       }
     }
@@ -1117,12 +1202,12 @@ function MainWindow({
     return null;
   }
 
-  function currentEsmAction() {
+  function currentEsmAction(values = exchangeValues) {
     return esmEnterAction({
       esmEnabled,
       operatingMode,
       callsign: callSign,
-      exchangeValid: exchangeFieldsValid(),
+      exchangeValid: exchangeFieldsValid(values),
       exchangeSentCallsign: esmExchangeSentCallsign,
       runCallsignAttempt: esmRunCallsignAttempt,
     });
@@ -1135,12 +1220,8 @@ function MainWindow({
 
     event.preventDefault();
 
-    if (event.altKey) {
-      logContact(true);
-      return true;
-    }
-
     if (
+      !event.altKey &&
       currentFieldName === 'CALL' &&
       modeIsCw(radioMode) &&
       callsignHasQuery(callSign)
@@ -1153,13 +1234,24 @@ function MainWindow({
     }
 
     if (
+      !event.altKey &&
       currentFieldName === 'CALL' &&
       shouldBlockEsmCallEnter(callSign, callsignValidation().ok)
     ) {
       return true;
     }
 
-    const esmAction = currentEsmAction();
+    const activeExchangeValues =
+      currentFieldName === 'CALL'
+        ? requestPreviousContactAutofill().values
+        : exchangeValues;
+
+    if (event.altKey) {
+      logContact(true, activeExchangeValues);
+      return true;
+    }
+
+    const esmAction = currentEsmAction(activeExchangeValues);
     if (
       modeIsCw(radioMode) &&
       operatingMode === 'Run' &&
@@ -1170,16 +1262,16 @@ function MainWindow({
         text: esmAction.correctionText,
       });
     }
-    sendEsmKeys(esmAction.keys);
+    sendEsmKeys(esmAction.keys, activeExchangeValues);
     setEsmRunCallsignAttempt(esmAction.nextRunCallsignAttempt);
     setEsmExchangeSentCallsign(esmAction.nextExchangeSentCallsign);
 
     if (esmAction.shouldLog) {
-      logContact(false);
+      logContact(false, activeExchangeValues);
       return true;
     }
 
-    if (fieldFilledAndValid(currentFieldName)) {
+    if (fieldFilledAndValid(currentFieldName, activeExchangeValues)) {
       focusNextEditableField(currentFieldName);
     }
 
@@ -1190,7 +1282,8 @@ function MainWindow({
     const value = callSign.trim();
 
     if (event.key === 'Tab') {
-      handleFieldTab(event, 'CALL');
+      const autofillResult = requestPreviousContactAutofill();
+      handleFieldTab(event, 'CALL', autofillResult.values);
       return;
     }
 
@@ -1198,6 +1291,7 @@ function MainWindow({
       event.preventDefault();
       onSetRadioFrequency?.(Math.round(Number.parseFloat(value) * HZ_PER_KHZ));
       setCallSign('');
+      pendingPreviousContactAutofillRef.current = '';
       callsignFrequencyBaselineRef.current = null;
       pendingBandMapTuneFrequencyRef.current = null;
       clearEsmState();
@@ -1209,10 +1303,38 @@ function MainWindow({
       event.preventDefault();
       onSetRadioMode?.(typedMode);
       setCallSign('');
+      pendingPreviousContactAutofillRef.current = '';
       callsignFrequencyBaselineRef.current = null;
       pendingBandMapTuneFrequencyRef.current = null;
       clearEsmState();
       return;
+    }
+
+    if (event.key === 'Enter' && esmEnabled) {
+      const autofillResult = previousContactExchangeAutofill({
+        settings,
+        contacts,
+        callsign: value,
+        exchangeValues,
+        radioMode,
+        contestParams: log?.contest_params ?? {},
+      });
+
+      if (
+        shouldAdvanceFromCallsignAutofill({
+          esmEnabled,
+          autofillResult,
+          hasEditableExchangeField: (settings?.exchange ?? []).some(
+            fieldEditable,
+          ),
+        })
+      ) {
+        requestPreviousContactAutofill();
+        if (focusNextEditableField('CALL')) {
+          event.preventDefault();
+          return;
+        }
+      }
     }
 
     if (handleEsmEnter(event, 'CALL')) {

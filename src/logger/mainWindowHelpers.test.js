@@ -12,7 +12,9 @@ import {
   esmEnterAction,
   modeIsCw,
   nextCwWpm,
+  previousContactExchangeAutofill,
   normalizedContactFrequencyHz,
+  shouldAdvanceFromCallsignAutofill,
   tuningIncrementHzForMode,
   steppedFrequencyHz,
   typedModeFromCallsignInput,
@@ -120,6 +122,41 @@ test('cwActiveTimeoutMs waits for completion-capable keyers', () => {
   assert.equal(cwActiveTimeoutMs('none'), 500);
 });
 
+test('shouldAdvanceFromCallsignAutofill advances only when ESM and editable exchange fields exist', () => {
+  assert.equal(
+    shouldAdvanceFromCallsignAutofill({
+      esmEnabled: true,
+      autofillResult: { matchedContact: { CALL: 'K1ABC' } },
+      hasEditableExchangeField: true,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldAdvanceFromCallsignAutofill({
+      esmEnabled: true,
+      autofillResult: { matchedContact: null },
+      hasEditableExchangeField: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAdvanceFromCallsignAutofill({
+      esmEnabled: false,
+      autofillResult: { matchedContact: { CALL: 'K1ABC' } },
+      hasEditableExchangeField: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAdvanceFromCallsignAutofill({
+      esmEnabled: true,
+      autofillResult: { matchedContact: { CALL: 'K1ABC' } },
+      hasEditableExchangeField: false,
+    }),
+    false,
+  );
+});
+
 test('cwActionFromTemplate parses {Action:...} tokens only', () => {
   assert.equal(cwActionFromTemplate('{Action:Clear}'), 'Clear');
   assert.equal(cwActionFromTemplate(' { action : Clear } '), 'Clear');
@@ -148,6 +185,73 @@ test('correctedEsmCallsignText returns suffix-only or full callsign corrections'
   assert.equal(correctedEsmCallsignText('KD1AWM', 'KB1AWM'), 'KB1AWM');
   assert.equal(correctedEsmCallsignText('3DA0RU', '3DA0RW'), 'RW');
   assert.equal(correctedEsmCallsignText('K1ABC', 'K1ABC'), '');
+});
+
+test('previousContactExchangeAutofill copies non-serial fields from exact callsign match', () => {
+  const settings = {
+    exchange: [
+      { name: 'Serial', type: 'Serial:4', adif: 'STX', is_sent: true },
+      { name: 'Name', type: 'String:10', adif: 'NAME' },
+      { name: 'QTH', type: 'String:5', adif: 'QTH' },
+    ],
+  };
+  const newestContact = {
+    CALL: 'K1ABC',
+    STX: '123',
+    NAME: 'alice',
+    QTH: 'ny',
+  };
+
+  const result = previousContactExchangeAutofill({
+    settings,
+    contacts: [
+      newestContact,
+      { CALL: 'K1ABC', STX: '122', NAME: 'older', QTH: 'ma' },
+    ],
+    callsign: ' k1abc ',
+    exchangeValues: { Serial: '999', Name: '', QTH: '' },
+    radioMode: 'CW',
+  });
+
+  assert.equal(result.matchedContact, newestContact);
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.copiedFields, ['Name', 'QTH']);
+  assert.deepEqual(result.values, {
+    Serial: '999',
+    Name: 'ALICE',
+    QTH: 'NY',
+  });
+});
+
+test('previousContactExchangeAutofill preserves user-entered values and requires exact callsign', () => {
+  const settings = {
+    exchange: [
+      { name: 'Name', type: 'String:10', adif: 'NAME' },
+      { name: 'Section', type: 'String:3', adif: 'ARRL_SECT' },
+    ],
+  };
+
+  const prefixOnly = previousContactExchangeAutofill({
+    settings,
+    contacts: [{ CALL: 'K1ABC', NAME: 'Alice', ARRL_SECT: 'SC' }],
+    callsign: 'K1A',
+    exchangeValues: { Name: '', Section: '' },
+  });
+
+  assert.equal(prefixOnly.matchedContact, null);
+  assert.equal(prefixOnly.changed, false);
+  assert.deepEqual(prefixOnly.values, { Name: '', Section: '' });
+
+  const exact = previousContactExchangeAutofill({
+    settings,
+    contacts: [{ Call: 'k1abc', NAME: 'Alice', ARRL_SECT: 'SC' }],
+    callsign: 'K1ABC',
+    exchangeValues: { Name: 'BOB', Section: '' },
+  });
+
+  assert.equal(exact.changed, true);
+  assert.deepEqual(exact.copiedFields, ['Section']);
+  assert.deepEqual(exact.values, { Name: 'BOB', Section: 'SC' });
 });
 
 test('esmEnterAction follows run mode matrix states', () => {
