@@ -91,7 +91,8 @@ pub enum ClientMessage {
         call: String,
         comment: String,
     },
-    StopCw,
+    #[serde(rename = "stop_keying")]
+    StopKeying,
     SetWpm {
         wpm: u8,
     },
@@ -119,7 +120,7 @@ pub enum RadioCommand {
         wait_for_completion: bool,
         completed: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
-    StopCw,
+    StopKeying,
     SetWpm(u8),
     ReloadConfig(Box<RadioConfig>),
 }
@@ -152,11 +153,16 @@ pub fn mode_candidates_for_request(requested: &str, frequency_hz: u64) -> Vec<Mo
         "CW" => vec![Mode::Cw],
         "CW-R" => vec![Mode::CwReverse, Mode::Cw],
         "FM" => vec![Mode::Fm],
+        "AM" => vec![Mode::Am],
         "SSB" => vec![ssb_mode_for_frequency(frequency_hz)],
         "FT8" | "JT65" | "JT9" | "MFSK" | "PSK" => vec![Mode::DataUsb, Mode::Rtty],
         "RTTY" => vec![Mode::Rtty, Mode::DataUsb],
         _ => Vec::new(),
     }
+}
+
+pub fn mode_is_phone(mode: &str) -> bool {
+    matches!(mode.trim().to_uppercase().as_str(), "SSB" | "FM" | "AM")
 }
 
 fn ssb_mode_for_frequency(frequency_hz: u64) -> Mode {
@@ -350,6 +356,22 @@ mod tests {
     }
 
     #[test]
+    fn deserializes_stop_keying_client_message() {
+        let message: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "stop_keying"
+        }))
+        .expect("stop_keying should deserialize");
+
+        assert!(matches!(message, ClientMessage::StopKeying));
+        assert!(
+            serde_json::from_value::<ClientMessage>(serde_json::json!({
+                "type": "stop_cw"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
     fn deserializes_send_dxcluster_spot_client_message() {
         let message: ClientMessage = serde_json::from_value(serde_json::json!({
             "type": "send_dxcluster_spot",
@@ -402,6 +424,19 @@ mod tests {
             mode_candidates_for_request("RTTY", 14_000_000),
             vec![Mode::Rtty, Mode::DataUsb]
         );
+        assert_eq!(
+            mode_candidates_for_request("AM", 14_000_000),
+            vec![Mode::Am]
+        );
+    }
+
+    #[test]
+    fn classifies_phone_modes() {
+        assert!(mode_is_phone("SSB"));
+        assert!(mode_is_phone("fm"));
+        assert!(mode_is_phone(" am "));
+        assert!(!mode_is_phone("CW"));
+        assert!(!mode_is_phone("RTTY"));
     }
 
     #[test]

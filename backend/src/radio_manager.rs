@@ -3,8 +3,10 @@ use crate::cw;
 use crate::db::{Database, RadioConfig};
 use crate::radio::{
     RadioCommand, RadioState, RadioStatus, ServerMessage, mode_candidates_for_request,
-    normalize_mode,
+    mode_is_phone, normalize_mode,
 };
+use crate::voice_keyer::{VoiceKeyer, VoicePlaybackThread};
+use crate::voice_messages;
 use backon::{BackoffBuilder, ExponentialBuilder};
 use cw_serial_keyer::{Config as CwSerialConfig, ControlLine, SerialKeyer as CwSerialDevice};
 use futures_util::future::{BoxFuture, FutureExt};
@@ -28,6 +30,7 @@ const MAX_RIT_OFFSET_HZ: i32 = 9_999;
 #[derive(Clone)]
 pub struct RadioManager {
     db: Database,
+    voice_keyer: VoiceKeyer,
     radios: Arc<Mutex<HashMap<i64, ManagedRadioSlot>>>,
 }
 
@@ -57,9 +60,10 @@ struct ManagedRadio {
 }
 
 impl RadioManager {
-    pub fn new(db: Database) -> Self {
+    pub fn new(db: Database, voice_keyer: VoiceKeyer) -> Self {
         Self {
             db,
+            voice_keyer,
             radios: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -99,12 +103,13 @@ impl RadioManager {
                 continue;
             }
 
-            let config = self
+            let mut config = self
                 .db
                 .radio(radio_id)
                 .await
                 .map_err(|error| error.to_string())?
                 .ok_or_else(|| format!("radio not found: {radio_id}"))?;
+            self.voice_keyer.sanitize_radio_config(&mut config);
 
             let mut wait_for_shutdown = None;
             {
@@ -145,15 +150,19 @@ impl RadioManager {
                     let task_current = current.clone();
                     let task_status_updates = status_updates.clone();
                     let task_updates = updates.clone();
+                    let task_voice_keyer = self.voice_keyer.clone();
                     let task = tokio::spawn(async move {
                         run_managed_radio(
                             config,
-                            task_current_status,
-                            task_current,
-                            task_status_updates,
-                            task_updates,
+                            ManagedRadioRuntime {
+                                current_status: task_current_status,
+                                current: task_current,
+                                status_updates: task_status_updates,
+                                updates: task_updates,
+                            },
                             command_rx,
                             shutdown_rx,
+                            task_voice_keyer,
                         )
                         .await;
                     });
@@ -304,15 +313,26 @@ impl RadioHandle {
     }
 }
 
-async fn run_managed_radio(
-    mut config: RadioConfig,
+struct ManagedRadioRuntime {
     current_status: Arc<RwLock<RadioStatus>>,
     current: Arc<RwLock<Option<RadioState>>>,
     status_updates: broadcast::Sender<RadioStatus>,
     updates: broadcast::Sender<RadioState>,
+}
+
+async fn run_managed_radio(
+    mut config: RadioConfig,
+    runtime: ManagedRadioRuntime,
     mut commands: mpsc::Receiver<RadioCommand>,
     mut shutdown: oneshot::Receiver<()>,
+    voice_keyer: VoiceKeyer,
 ) {
+    let ManagedRadioRuntime {
+        current_status,
+        current,
+        status_updates,
+        updates,
+    } = runtime;
     let mut reconnect_backoff = cat_reconnect_backoff().build();
     let mut reconnect_deadline = None;
 
@@ -415,8 +435,16 @@ async fn run_managed_radio(
         let (cw_tx, cw_rx) = mpsc::channel(32);
         let cw_config = config.clone();
         let cw_radio = radio.clone();
+        let cw_voice_keyer = voice_keyer.clone();
         let cw_task = tokio::spawn(async move {
-            run_cw_task(cw_config, cw_radio, shared_cw_serial_keyer, cw_rx).await
+            run_cw_task(
+                cw_config,
+                cw_radio,
+                shared_cw_serial_keyer,
+                cw_voice_keyer,
+                cw_rx,
+            )
+            .await
         });
 
         let mut last_rit_offset_hz = current
@@ -509,8 +537,8 @@ async fn run_managed_radio(
                                 let _ = completed.send(Err("cw task unavailable".to_string()));
                             }
                         }
-                        RadioCommand::StopCw => {
-                            debug!(radio_id = config.id, "forwarding cw stop command");
+                        RadioCommand::StopKeying => {
+                            debug!(radio_id = config.id, "forwarding keying stop command");
                             let _ = cw_tx.send(CwTaskCommand::Stop).await;
                         }
                         RadioCommand::SetWpm(wpm) => {
@@ -682,7 +710,7 @@ fn fail_unavailable_radio_command(command: RadioCommand, reason: &str) {
         | RadioCommand::SendCwText { completed, .. } => {
             let _ = completed.send(Err(reason.to_string()));
         }
-        RadioCommand::StopCw
+        RadioCommand::StopKeying
         | RadioCommand::SetWpm(_)
         | RadioCommand::SetFrequency(_)
         | RadioCommand::SetMode(_)
@@ -881,9 +909,11 @@ async fn run_cw_task(
     config: RadioConfig,
     radio: Radio,
     shared_cw_serial_keyer: Option<CwSerialDevice>,
+    voice_keyer: VoiceKeyer,
     mut commands: mpsc::Receiver<CwTaskCommand>,
 ) {
-    let mut controller = CwController::new(&config, radio, shared_cw_serial_keyer).await;
+    let mut controller =
+        CwController::new(&config, radio, shared_cw_serial_keyer, voice_keyer).await;
     let mut pending = VecDeque::new();
 
     loop {
@@ -974,7 +1004,14 @@ async fn run_cw_task(
             remaining_pending = pending.len(),
             "cw task send command finished"
         );
+        let should_shutdown = matches!(
+            result.as_ref().err().map(String::as_str),
+            Some("cw shutdown" | "keying shutdown")
+        );
         let _ = send.completed.send(result);
+        if should_shutdown {
+            break;
+        }
     }
 
     controller.close().await;
@@ -984,6 +1021,8 @@ struct CwController {
     radio_id: i64,
     radio: Radio,
     messages: String,
+    voice_messages: String,
+    voice_playback: Option<VoicePlaybackThread>,
     keyer: Option<Box<dyn CwKeyer>>,
 }
 
@@ -992,11 +1031,27 @@ impl CwController {
         config: &RadioConfig,
         radio: Radio,
         shared_cw_serial_keyer: Option<CwSerialDevice>,
+        voice_keyer: VoiceKeyer,
     ) -> Self {
+        if let Err(error) = voice_keyer.sync_radio_messages(config) {
+            warn!(radio_id = config.id, %error, "failed to sync voice keyer registrations for radio");
+        }
         let mut controller = Self {
             radio_id: config.id,
             radio: radio.clone(),
             messages: config.cw_messages.clone(),
+            voice_messages: config.voice_messages.clone(),
+            voice_playback: match VoicePlaybackThread::spawn(
+                config.id,
+                voice_keyer,
+                config.voice_output_device_id.clone(),
+            ) {
+                Ok(worker) => Some(worker),
+                Err(error) => {
+                    warn!(radio_id = config.id, %error, "failed to start voice keyer thread");
+                    None
+                }
+            },
             keyer: cw_keyer_for_config(config, radio, shared_cw_serial_keyer).await,
         };
         controller.connect().await;
@@ -1020,12 +1075,25 @@ impl CwController {
         commands: &mut mpsc::Receiver<CwTaskCommand>,
         pending: &mut VecDeque<PendingCwSend>,
     ) -> Result<(), String> {
-        if !self.radio_mode_is_cw().await {
+        let Some(logger_mode) = self.radio_logger_mode() else {
             debug!(
                 radio_id = self.radio_id,
                 mode,
                 ?keys,
-                "ignoring message send; radio mode is not CW/CW-R"
+                "ignoring message send; unable to determine radio mode"
+            );
+            return Ok(());
+        };
+        if mode_is_phone(&logger_mode) {
+            return self.send_voice_messages(mode, keys, commands, pending).await;
+        }
+        if logger_mode != "CW" && logger_mode != "CW-R" {
+            debug!(
+                radio_id = self.radio_id,
+                mode,
+                ?keys,
+                radio_mode = %logger_mode,
+                "ignoring message send; radio mode is not CW or phone"
             );
             return Ok(());
         }
@@ -1128,19 +1196,113 @@ impl CwController {
         }
     }
 
-    async fn radio_mode_is_cw(&mut self) -> bool {
-        let mode = self.radio.latest_state().main_rx.mode;
-        match mode {
-            Some(mode) => {
-                let logger_mode = normalize_mode(&mode);
-                logger_mode == "CW" || logger_mode == "CW-R"
+    async fn send_voice_messages(
+        &mut self,
+        mode: &str,
+        keys: &[String],
+        commands: &mut mpsc::Receiver<CwTaskCommand>,
+        pending: &mut VecDeque<PendingCwSend>,
+    ) -> Result<(), String> {
+        for key in keys {
+            if voice_messages::file_path_for(&self.voice_messages, mode, key).is_none() {
+                debug!(
+                    radio_id = self.radio_id,
+                    mode,
+                    key,
+                    "ignoring voice message without a file"
+                );
+                continue;
             }
+            let completed = {
+                let Some(voice_playback) = self.voice_playback.as_ref() else {
+                    return Err("voice keyer thread unavailable".to_string());
+                };
+                voice_playback.play_message(mode, key)?
+            };
+            debug!(
+                radio_id = self.radio_id,
+                mode,
+                key,
+                "queued voice keyer playback"
+            );
+            self.wait_until_voice_playback_done_or_stopped(key, completed, commands, pending)
+                .await?;
+        }
+
+        Ok(())
+    }
+
+    async fn wait_until_voice_playback_done_or_stopped(
+        &mut self,
+        key: &str,
+        mut completed: tokio::sync::oneshot::Receiver<Result<Duration, String>>,
+        commands: &mut mpsc::Receiver<CwTaskCommand>,
+        pending: &mut VecDeque<PendingCwSend>,
+    ) -> Result<(), String> {
+        loop {
+            tokio::select! {
+                result = &mut completed => {
+                    return match result {
+                        Ok(Ok(duration)) => {
+                            debug!(radio_id = self.radio_id, key, duration_ms = duration.as_millis(), "voice keyer playback completed");
+                            Ok(())
+                        }
+                        Ok(Err(error)) => Err(error),
+                        Err(_) => Err("voice keyer thread unavailable".to_string()),
+                    };
+                }
+                command = commands.recv() => {
+                    match command {
+                        Some(CwTaskCommand::Stop) => {
+                            debug!(radio_id = self.radio_id, key, "stop command interrupting voice keyer playback");
+                            fail_pending_cw_sends(pending, "keying stopped");
+                            self.stop().await;
+                            return Err("keying stopped".to_string());
+                        }
+                        Some(CwTaskCommand::SetWpm(wpm)) => {
+                            debug!(radio_id = self.radio_id, wpm, "set_wpm command received during voice keyer playback");
+                            self.set_wpm(wpm).await;
+                        }
+                        Some(CwTaskCommand::Shutdown) | None => {
+                            debug!(radio_id = self.radio_id, key, "shutdown interrupting voice keyer playback");
+                            fail_pending_cw_sends(pending, "keying shutdown");
+                            self.stop().await;
+                            return Err("keying shutdown".to_string());
+                        }
+                        Some(CwTaskCommand::SendMessage {
+                            mode,
+                            keys,
+                            fields,
+                            completed,
+                        }) => {
+                            debug!(radio_id = self.radio_id, mode, ?keys, pending_count = pending.len(), "queueing message send command while voice keyer is playing");
+                            pending.push_back(PendingCwSend {
+                                payload: PendingCwPayload::Message { mode, keys, fields },
+                                completed,
+                            });
+                        }
+                        Some(CwTaskCommand::SendText { text, wait_for_completion, completed }) => {
+                            debug!(radio_id = self.radio_id, text, pending_count = pending.len(), "queueing cw text send command while voice keyer is playing");
+                            pending.push_back(PendingCwSend {
+                                payload: PendingCwPayload::Text { text, wait_for_completion },
+                                completed,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn radio_logger_mode(&self) -> Option<String> {
+        match self.radio.latest_state().main_rx.mode {
+            Some(mode) => Some(normalize_mode(&mode)),
             None => {
                 warn!(
                     radio_id = self.radio_id,
                     "radio mode is unknown before message send"
                 );
-                false
+                None
             }
         }
     }
@@ -1456,6 +1618,10 @@ impl CwController {
     }
 
     async fn stop(&mut self) {
+        if let Some(voice_playback) = self.voice_playback.as_ref() {
+            voice_playback.stop_keying();
+        }
+
         if let Some(keyer) = self.keyer.as_mut() {
             let keyer_name = keyer.name();
             debug!(
@@ -1498,6 +1664,10 @@ impl CwController {
     }
 
     async fn close(&mut self) {
+        if let Some(voice_playback) = self.voice_playback.as_mut() {
+            voice_playback.shutdown();
+        }
+
         if let Some(keyer) = self.keyer.as_mut() {
             keyer.close(self.radio_id).await;
         }
@@ -2106,7 +2276,7 @@ async fn apply_command(
         }
         RadioCommand::SendMessage { .. }
         | RadioCommand::SendCwText { .. }
-        | RadioCommand::StopCw
+        | RadioCommand::StopKeying
         | RadioCommand::SetWpm(_)
         | RadioCommand::ReloadConfig(_) => Ok(()),
     }
@@ -2179,12 +2349,15 @@ mod tests {
             cw_tuning_increment_hz: 20,
             ssb_tuning_increment_hz: 100,
             rit_clear_on_log: false,
+            voice_input_device_id: None,
+            voice_output_device_id: None,
             cw_keyer_type: "none".to_string(),
             winkeyer_serial_port: String::new(),
             cw_serial_port: String::new(),
             cw_serial_baud_rate: 9_600,
             cw_serial_line: "dtr".to_string(),
             cw_messages: String::new(),
+            voice_messages: crate::voice_messages::DEFAULT_VOICE_MESSAGES.to_string(),
         }
     }
 

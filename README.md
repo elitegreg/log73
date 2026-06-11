@@ -314,6 +314,11 @@ GET    /api/radio-kinds
 GET    /api/radios/:id
 DELETE /api/radios/:id
 GET    /api/radios/:id/cw-labels
+GET    /api/radios/:id/message-labels
+GET    /api/radios/cw-messages/default
+POST   /api/radios/cw-messages/validate
+GET    /api/radios/voice-messages/default
+POST   /api/radios/voice-messages/validate
 ```
 
 Deletion rules:
@@ -364,7 +369,7 @@ Client CW commands:
 
 ```json
 { "type": "send_cw", "request_id": "uuid-or-client-id", "mode": "run", "key": "F1", "fields": { "CALL": "K1ABC" } }
-{ "type": "stop_cw" }
+{ "type": "stop_keying" }
 { "type": "set_wpm", "wpm": 25 }
 ```
 
@@ -390,7 +395,7 @@ qsos
 Important schema notes:
 
 - `logs` stores log name, contest id, station callsign, and contest parameter JSON.
-- `radios` stores radio driver, CAT transport settings, keyer settings, and CW message text.
+- `radios` stores radio driver, CAT transport settings, keyer settings, sound device ids, and CW/voice message text.
 - `qsos.LOG_ID` references `logs.ID`.
 - `log_serial_state` stores durable next-serial counters by log id and sent serial ADIF field.
 - `idx_qsos_log_id` indexes `qsos(LOG_ID)`.
@@ -415,12 +420,15 @@ options
 cw_tuning_increment_hz
 ssb_tuning_increment_hz
 rit_clear_on_log
+voice_input_device_id
+voice_output_device_id
 cw_keyer_type
 winkeyer_serial_port
 cw_serial_port
 cw_serial_baud_rate
 cw_serial_line
 cw_messages
+voice_messages
 ```
 
 Create-radio defaults:
@@ -436,13 +444,18 @@ options: ""
 cw_tuning_increment_hz: 20
 ssb_tuning_increment_hz: 100
 rit_clear_on_log: false
+voice_input_device_id: null
+voice_output_device_id: null
 cw_keyer_type: none
 winkeyer_serial_port: ""
 cw_serial_port: ""
 cw_serial_baud_rate: 9600
 cw_serial_line: dtr
-cw_messages: built-in default Run/S&P function-key messages
+cw_messages: built-in default Run/S&P CW function-key messages
+voice_messages: built-in default Run/S&P voice function-key messages
 ```
+
+Voice messages use the same Run/S&P F-key text format as CW messages. The value after the comma is a WAV path relative to `<data-dir>/voicekeyer/` (for example `operator1/CQ.wav`), or an action token such as `{Action:Clear}`. Empty voice-message file values unregister that radio/mode F-key.
 
 Radio connections are lazy. Opening a logger with `radio_id=X` starts or reuses that radio's managed connection. Closing the logger releases it. When the reference count reaches zero, the backend disconnects and removes the managed radio.
 
@@ -553,11 +566,11 @@ High Contrast
 - The server indicator shows websocket connection status.
 - The title bar shows log, radio, contest, mode, and frequency.
 - CW WPM is stored in browser local storage under `log73.cw_wpm` and sent to the backend when the websocket is connected.
-- CW function-key labels are loaded from `/api/radios/:id/cw-labels` for separate Run and S&P banks.
-- Run/S&P operating mode chooses which CW function-key bank is active.
-- Run F1 can be repeated automatically after CW send completion when repeat is enabled.
+- Function-key labels are loaded from `/api/radios/:id/message-labels` for separate CW/voice and Run/S&P banks.
+- Run/S&P operating mode chooses which function-key bank is active; radio mode chooses CW messages or voice messages.
+- Run F1 can be repeated automatically after CW or voice-keyer completion when repeat is enabled.
 - S&P F1 sends the QRL message and then switches to Run mode.
-- Stop CW sends a websocket `stop_cw` command.
+- Stop Sending sends a websocket `stop_keying` command to stop CW or voice keying.
 - Exit Logger returns to the log/radio selection screen.
 - Fixed exchange fields are read-only and skipped during tab navigation.
 - RST validation depends on mode:

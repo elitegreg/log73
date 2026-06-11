@@ -44,13 +44,14 @@ import {
   adifModeForLoggerMode,
   isSelectableMode,
   modeIsCw,
+  modeIsPhone,
   esmEnterAction,
   bandForFrequency,
   bandByMeters,
   createContactId,
   createMessageRequestId,
-  isEmptyMessageButton,
-  cwActionForMessage,
+  messageButtonIsSendable,
+  messageActionForRadioMode,
   callsignHasQuery,
   shouldBlockEsmCallEnter,
   callsignClearThresholdHz,
@@ -98,7 +99,7 @@ function MainWindow({
   onSendMessage,
   onSendCwText,
   onSendDxClusterSpot,
-  onStopCw,
+  onStopKeying,
   onSetCwWpm,
   onLogContact,
   onDebouncedCallsignChange,
@@ -363,8 +364,12 @@ function MainWindow({
   ]);
 
   const messageModeKey = operatingMode === 'Run' ? 'run' : 's&p';
+  const modeMessageLabels = modeIsPhone(radioMode)
+    ? (messageLabels?.voice ?? null)
+    : (messageLabels?.cw ?? messageLabels);
   const activeMessageLabels =
-    messageLabels?.[messageModeKey] ?? DEFAULT_MESSAGE_LABELS[messageModeKey];
+    modeMessageLabels?.[messageModeKey] ??
+    DEFAULT_MESSAGE_LABELS[messageModeKey];
   const activeExchangeCompletionField = (settings?.exchange ?? []).find(
     (field) => field.name === activeCompletionField && field.fixed !== true,
   );
@@ -674,17 +679,26 @@ function MainWindow({
     values = exchangeValues,
   ) {
     const sendableKeys = [];
+    const labels = modeIsPhone(radioMode)
+      ? (messageLabels?.voice ?? null)
+      : (messageLabels?.cw ?? messageLabels);
 
     for (const key of keys) {
-      const action = cwActionForMessage(radio?.cw_messages, mode, key);
+      const action = messageActionForRadioMode(
+        radio?.cw_messages,
+        radio?.voice_messages,
+        mode,
+        key,
+        radioMode,
+      );
       if (action && performMessageAction(action)) {
         continue;
       }
 
-      const button = (
-        messageLabels?.[mode] ?? DEFAULT_MESSAGE_LABELS[mode]
-      ).find((label) => label.key === key);
-      if (isEmptyMessageButton(button)) continue;
+      const button = (labels?.[mode] ?? DEFAULT_MESSAGE_LABELS[mode]).find(
+        (label) => label.key === key,
+      );
+      if (!messageButtonIsSendable(button)) continue;
       if (mode === 'run' && key === 'F1') {
         storeCurrentCqFrequency();
       }
@@ -741,7 +755,7 @@ function MainWindow({
   function stopMessageSending() {
     stopRepeat();
     clearAllMessageRequests();
-    onStopCw?.();
+    onStopKeying?.();
   }
 
   useEffect(

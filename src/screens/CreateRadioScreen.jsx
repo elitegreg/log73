@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiJson } from '../lib/api';
+import {
+  NONE_SOUND_DEVICE_ID,
+  normalizeSoundDeviceId,
+  soundDeviceOptions,
+} from '../domain/soundDevices';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
 
@@ -108,6 +113,12 @@ function CreateRadioScreen() {
     DEFAULT_SSB_TUNING_INCREMENT_HZ,
   );
   const [ritClearOnLog, setRitClearOnLog] = useState(false);
+  const [voiceInputDevices, setVoiceInputDevices] = useState([]);
+  const [voiceOutputDevices, setVoiceOutputDevices] = useState([]);
+  const [voiceInputDeviceId, setVoiceInputDeviceId] =
+    useState(NONE_SOUND_DEVICE_ID);
+  const [voiceOutputDeviceId, setVoiceOutputDeviceId] =
+    useState(NONE_SOUND_DEVICE_ID);
   const [cwKeyerType, setCwKeyerType] = useState(DEFAULT_CW_KEYER_TYPE);
   const [winkeyerSerialPort, setWinkeyerSerialPort] = useState('');
   const [cwSerialPort, setCwSerialPort] = useState('');
@@ -119,6 +130,11 @@ function CreateRadioScreen() {
   const [cwMessages, setCwMessages] = useState('');
   const [isCwMessagesOpen, setIsCwMessagesOpen] = useState(false);
   const [cwMessagesValidationMessage, setCwMessagesValidationMessage] =
+    useState('');
+  const [defaultVoiceMessages, setDefaultVoiceMessages] = useState('');
+  const [voiceMessages, setVoiceMessages] = useState('');
+  const [isVoiceMessagesOpen, setIsVoiceMessagesOpen] = useState(false);
+  const [voiceMessagesValidationMessage, setVoiceMessagesValidationMessage] =
     useState('');
 
   const selectedRadioKind = radioKind || defaultRadioKind(radioKinds);
@@ -198,10 +214,64 @@ function CreateRadioScreen() {
         );
       }
 
+      let loadedDefaultVoiceMessages = '';
+      try {
+        const defaultMessagesResult = await apiJson(
+          '/radios/voice-messages/default',
+        );
+        if (defaultMessagesResult.ok) {
+          loadedDefaultVoiceMessages =
+            defaultMessagesResult.voice_messages ?? '';
+        }
+      } catch (error) {
+        notifyOperationalError(
+          'CreateRadioScreen.loadDefaultVoiceMessages',
+          'Unable to load default voice messages.',
+          error,
+        );
+      }
+
+      let loadedVoiceInputDevices = [];
+      try {
+        const inputDevicesResult = await apiJson('/audio-devices/input');
+        if (
+          inputDevicesResult.ok &&
+          Array.isArray(inputDevicesResult.devices)
+        ) {
+          loadedVoiceInputDevices = inputDevicesResult.devices;
+        }
+      } catch (error) {
+        notifyOperationalError(
+          'CreateRadioScreen.loadVoiceInputDevices',
+          'Unable to load input sound devices.',
+          error,
+        );
+      }
+
+      let loadedVoiceOutputDevices = [];
+      try {
+        const outputDevicesResult = await apiJson('/audio-devices/output');
+        if (
+          outputDevicesResult.ok &&
+          Array.isArray(outputDevicesResult.devices)
+        ) {
+          loadedVoiceOutputDevices = outputDevicesResult.devices;
+        }
+      } catch (error) {
+        notifyOperationalError(
+          'CreateRadioScreen.loadVoiceOutputDevices',
+          'Unable to load output sound devices.',
+          error,
+        );
+      }
+
       if (isCancelled) return;
       setRadioKinds(kinds);
       setSerialPorts(serialPorts);
       setDefaultCwMessages(loadedDefaultCwMessages);
+      setDefaultVoiceMessages(loadedDefaultVoiceMessages);
+      setVoiceInputDevices(loadedVoiceInputDevices);
+      setVoiceOutputDevices(loadedVoiceOutputDevices);
 
       if (!isEditing) {
         const nextRadioKind = defaultRadioKind(kinds);
@@ -212,6 +282,7 @@ function CreateRadioScreen() {
             : DEFAULT_REAL_RADIO_TRANSPORT_KIND,
         );
         setCwMessages(loadedDefaultCwMessages);
+        setVoiceMessages(loadedDefaultVoiceMessages);
         return;
       }
 
@@ -234,6 +305,14 @@ function CreateRadioScreen() {
         result.radio.ssb_tuning_increment_hz ?? DEFAULT_SSB_TUNING_INCREMENT_HZ,
       );
       setRitClearOnLog(Boolean(result.radio.rit_clear_on_log));
+      setVoiceInputDeviceId(
+        normalizeSoundDeviceId(result.radio.voice_input_device_id) ??
+          NONE_SOUND_DEVICE_ID,
+      );
+      setVoiceOutputDeviceId(
+        normalizeSoundDeviceId(result.radio.voice_output_device_id) ??
+          NONE_SOUND_DEVICE_ID,
+      );
       setCwKeyerType(result.radio.cw_keyer_type ?? DEFAULT_CW_KEYER_TYPE);
       setWinkeyerSerialPort(result.radio.winkeyer_serial_port ?? '');
       setCwSerialPort(result.radio.cw_serial_port ?? '');
@@ -242,6 +321,9 @@ function CreateRadioScreen() {
       );
       setCwSerialLine(result.radio.cw_serial_line ?? DEFAULT_CW_SERIAL_LINE);
       setCwMessages(result.radio.cw_messages ?? loadedDefaultCwMessages);
+      setVoiceMessages(
+        result.radio.voice_messages ?? loadedDefaultVoiceMessages,
+      );
     }
 
     loadContext().catch((error) =>
@@ -281,6 +363,29 @@ function CreateRadioScreen() {
     return true;
   }
 
+  async function validateVoiceMessages() {
+    setVoiceMessagesValidationMessage('');
+    const result = await apiJson('/radios/voice-messages/validate', {
+      method: 'POST',
+      body: JSON.stringify({ voice_messages: voiceMessages }),
+    });
+
+    if (!result.ok) {
+      setVoiceMessagesValidationMessage(
+        result.error ?? 'Voice messages are invalid.',
+      );
+      notifyOperationalError(
+        'CreateRadioScreen.validateVoiceMessages',
+        'Voice messages are invalid.',
+        result.error,
+      );
+      return false;
+    }
+
+    setVoiceMessagesValidationMessage('Voice messages are valid.');
+    return true;
+  }
+
   function openHelpWindow() {
     window.open('/help/index.html', '_blank', 'noopener,noreferrer');
   }
@@ -288,6 +393,7 @@ function CreateRadioScreen() {
   async function saveRadio(event) {
     event.preventDefault();
     if (!(await validateCwMessages())) return;
+    if (!(await validateVoiceMessages())) return;
 
     const result = await apiJson(isEditing ? `/radios/${radioId}` : '/radios', {
       method: isEditing ? 'PUT' : 'POST',
@@ -303,6 +409,8 @@ function CreateRadioScreen() {
         cw_tuning_increment_hz: Number(cwTuningIncrementHz),
         ssb_tuning_increment_hz: Number(ssbTuningIncrementHz),
         rit_clear_on_log: Boolean(ritClearOnLog),
+        voice_input_device_id: normalizeSoundDeviceId(voiceInputDeviceId),
+        voice_output_device_id: normalizeSoundDeviceId(voiceOutputDeviceId),
         cw_keyer_type: cwKeyerType,
         winkeyer_serial_port:
           cwKeyerType === 'winkeyer' ? winkeyerSerialPort : '',
@@ -314,6 +422,7 @@ function CreateRadioScreen() {
         cw_serial_line:
           cwKeyerType === 'serial' ? cwSerialLine : DEFAULT_CW_SERIAL_LINE,
         cw_messages: cwMessages,
+        voice_messages: voiceMessages,
       }),
     });
     if (!result.ok) {
@@ -471,6 +580,36 @@ function CreateRadioScreen() {
         RIT Clear on Log
       </label>
       <label>
+        Voice Input Sound Device
+        <select
+          value={voiceInputDeviceId}
+          onChange={(event) => setVoiceInputDeviceId(event.target.value)}
+        >
+          {soundDeviceOptions(voiceInputDevices, voiceInputDeviceId).map(
+            (option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ),
+          )}
+        </select>
+      </label>
+      <label>
+        Voice Output Sound Device
+        <select
+          value={voiceOutputDeviceId}
+          onChange={(event) => setVoiceOutputDeviceId(event.target.value)}
+        >
+          {soundDeviceOptions(voiceOutputDevices, voiceOutputDeviceId).map(
+            (option) => (
+              <option key={option.id} value={option.id}>
+                {option.label}
+              </option>
+            ),
+          )}
+        </select>
+      </label>
+      <label>
         CW Keying
         <select
           value={cwKeyerType}
@@ -581,6 +720,53 @@ function CreateRadioScreen() {
               onClick={() => validateCwMessages()}
             >
               Validate CW Messages
+            </button>
+          </div>
+        </div>
+      ) : null}
+      <div className="selection-actions">
+        <button
+          className="cmd-btn"
+          type="button"
+          onClick={() => setIsVoiceMessagesOpen((current) => !current)}
+        >
+          {isVoiceMessagesOpen ? 'Hide Voice Messages' : 'Edit Voice Messages'}
+        </button>
+      </div>
+      {isVoiceMessagesOpen ? (
+        <div className="cw-messages-editor">
+          <label>
+            Voice Messages
+            <textarea
+              value={voiceMessages}
+              onChange={(event) => {
+                setVoiceMessages(event.target.value);
+                setVoiceMessagesValidationMessage('');
+              }}
+              rows={18}
+              spellCheck={false}
+            />
+          </label>
+          {voiceMessagesValidationMessage ? (
+            <div className="cw-messages-validation-status">
+              {voiceMessagesValidationMessage}
+            </div>
+          ) : null}
+          <div className="selection-actions">
+            <button
+              className="cmd-btn"
+              type="button"
+              onClick={() => setVoiceMessages(defaultVoiceMessages)}
+              disabled={!defaultVoiceMessages}
+            >
+              Reset to Defaults
+            </button>
+            <button
+              className="cmd-btn"
+              type="button"
+              onClick={() => validateVoiceMessages()}
+            >
+              Validate Voice Messages
             </button>
           </div>
         </div>

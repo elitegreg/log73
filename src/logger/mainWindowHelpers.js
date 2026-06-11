@@ -9,10 +9,11 @@ import {
   adifModeForLoggerMode,
   isSelectableMode,
   modeIsCw,
+  modeIsPhone,
   normalizeLoggerMode,
 } from '../domain/modes.js';
 
-export { adifModeForLoggerMode, isSelectableMode, modeIsCw };
+export { adifModeForLoggerMode, isSelectableMode, modeIsCw, modeIsPhone };
 
 export const MODE_OPTIONS = LOGGER_MODE_OPTIONS;
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
@@ -242,11 +243,26 @@ export function isEmptyMessageButton(button) {
   return String(button?.label ?? '').trim() === '-';
 }
 
+export function messageButtonIsSendable(button) {
+  return !isEmptyMessageButton(button);
+}
+
 export function cwActionFromTemplate(template) {
   const match = String(template ?? '')
     .trim()
     .match(/^\{\s*action\s*:\s*([^}]+?)\s*\}$/i);
   return match ? match[1].trim() : null;
+}
+
+export function messageActionForRadioMode(
+  cwConfig,
+  voiceConfig,
+  mode,
+  key,
+  radioMode,
+) {
+  const config = modeIsPhone(radioMode) ? voiceConfig : cwConfig;
+  return cwActionForMessage(config, mode, key);
 }
 
 export function cwActionForMessage(config, mode, key) {
