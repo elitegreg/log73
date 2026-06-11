@@ -159,6 +159,7 @@ impl VoicePlaybackThread {
         })
     }
 
+    #[allow(dead_code)]
     pub fn play_key(
         &self,
         key: &str,
@@ -316,6 +317,7 @@ impl VoiceKeyer {
         )
     }
 
+    #[allow(dead_code)]
     fn with_backend(audio: Arc<dyn AudioBackend>) -> Self {
         Self::with_backend_and_voicekeyer_dir(
             audio,
@@ -471,6 +473,7 @@ impl VoiceKeyer {
         Ok(registered)
     }
 
+    #[allow(dead_code)]
     pub fn play_key(
         &self,
         key: &str,

@@ -140,6 +140,7 @@ pub fn validate(config: &str) -> Result<VoiceLabels, String> {
     Ok(labels(config))
 }
 
+#[allow(dead_code)]
 pub fn validate_with_voicekeyer_dir(
     config: &str,
     voicekeyer_dir: &Path,
@@ -344,6 +345,7 @@ fn validate_voice_file_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn mode_label(mode: &str) -> &'static str {
     if mode == "run" { "Run" } else { "S&P" }
 }

@@ -4,6 +4,7 @@ use crate::dxcluster::DxClusterSpot;
 use radio_cat_rs::{Frequency, Mode};
 use serde::{Deserialize, Serialize};
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
@@ -102,6 +103,7 @@ pub enum ClientMessage {
     },
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum RadioCommand {
     SetFrequency(u64),
