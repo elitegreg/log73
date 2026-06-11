@@ -31,7 +31,7 @@ pub enum ServerMessage {
     },
     #[serde(rename = "dxcluster_spot")]
     DxClusterSpot {
-        spot: DxClusterSpot,
+        spot: Box<DxClusterSpot>,
     },
     #[serde(rename = "dxcluster_spot_deleted")]
     DxClusterSpotDeleted {
@@ -118,7 +118,7 @@ pub enum RadioCommand {
     },
     StopCw,
     SetWpm(u8),
-    ReloadConfig(RadioConfig),
+    ReloadConfig(Box<RadioConfig>),
 }
 
 pub fn normalize_mode(mode: &Mode) -> String {
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn serializes_dxcluster_spot_server_message() {
         let message = ServerMessage::DxClusterSpot {
-            spot: DxClusterSpot {
+            spot: Box::new(DxClusterSpot {
                 id: 7,
                 received_at: 1_700_000_000,
                 source: "dx".to_string(),
@@ -216,7 +216,7 @@ mod tests {
                 loc: None,
                 comment: Some("test".to_string()),
                 rbn: None,
-            },
+            }),
         };
         let json = serde_json::to_value(message).expect("dxcluster spot should serialize");
 

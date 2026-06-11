@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use radio_cat_rs::Frequency;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,11 +87,4 @@ pub fn band_for_frequency(frequency: Frequency) -> Option<&'static Band> {
     USA_AMATEUR_BANDS
         .iter()
         .find(|band| frequency >= band.lower && frequency <= band.upper)
-}
-
-pub fn first_frequency_for_band(meters: u16) -> Option<Frequency> {
-    USA_AMATEUR_BANDS
-        .iter()
-        .find(|band| band.meters == meters)
-        .map(|band| band.lower)
 }

@@ -75,7 +75,10 @@ mod tests {
 
     #[test]
     fn help_asset_key_maps_help_css_alias() {
-        assert_eq!(help_asset_key("docs/help.css"), Some("help.css".to_string()));
+        assert_eq!(
+            help_asset_key("docs/help.css"),
+            Some("help.css".to_string())
+        );
         assert_eq!(help_asset_key("help.css"), Some("help.css".to_string()));
     }
 

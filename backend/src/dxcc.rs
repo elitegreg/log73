@@ -277,12 +277,12 @@ fn parse_rule(token: &str, entity_index: usize) -> Result<DxccRule, String> {
     Ok(rule)
 }
 
-fn parse_wrapped_modifier<'a, F>(
-    input: &'a str,
+fn parse_wrapped_modifier<F>(
+    input: &str,
     open: char,
     close: char,
     mut apply: F,
-) -> Result<Option<&'a str>, String>
+) -> Result<Option<&str>, String>
 where
     F: FnMut(&str) -> Result<(), String>,
 {

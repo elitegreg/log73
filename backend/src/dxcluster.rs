@@ -39,7 +39,7 @@ pub struct DxClusterSpot {
 
 #[derive(Debug, Clone)]
 pub enum DxClusterEvent {
-    SpotAdded(DxClusterSpot),
+    SpotAdded(Box<DxClusterSpot>),
     SpotDeleted { id: u64 },
 }
 
@@ -170,7 +170,10 @@ impl DxClusterManager {
         };
 
         if let Some(spot) = spot.clone() {
-            let _ = self.inner.events.send(DxClusterEvent::SpotAdded(spot));
+            let _ = self
+                .inner
+                .events
+                .send(DxClusterEvent::SpotAdded(Box::new(spot)));
         }
         spot
     }
@@ -192,7 +195,10 @@ impl DxClusterManager {
 
         self.broadcast_deletes(&deleted_ids);
         if let Some(spot) = spot {
-            let _ = self.inner.events.send(DxClusterEvent::SpotAdded(spot));
+            let _ = self
+                .inner
+                .events
+                .send(DxClusterEvent::SpotAdded(Box::new(spot)));
         }
     }
 
@@ -225,24 +231,24 @@ impl DxClusterSpotStore {
         let source = if rbn.is_some() { "rbn" } else { "dx" }.to_string();
         let new_dedupe_key = dedupe_key(dx.freq, &call_dx);
 
-        if let Some(id) = self.find_duplicate_id(&new_dedupe_key) {
-            if let Some(spot) = self.spots_by_id.get_mut(&id) {
-                let old_dedupe_key = dedupe_key(spot.frequency_hz, &spot.call_dx);
-                spot.received_at = now;
-                spot.source = source;
-                spot.call_de = dx.call_de;
-                spot.call_dx = call_dx;
-                spot.frequency_hz = dx.freq;
-                spot.utc = dx.utc;
-                spot.loc = dx.loc;
-                spot.comment = dx.comment;
-                spot.rbn = rbn;
-                self.ids_by_time.retain(|current_id| *current_id != id);
-                self.ids_by_time.push_back(id);
-                self.ids_by_dedupe_key.remove(&old_dedupe_key);
-                self.ids_by_dedupe_key.insert(new_dedupe_key, id);
-                return None;
-            }
+        if let Some(id) = self.find_duplicate_id(&new_dedupe_key)
+            && let Some(spot) = self.spots_by_id.get_mut(&id)
+        {
+            let old_dedupe_key = dedupe_key(spot.frequency_hz, &spot.call_dx);
+            spot.received_at = now;
+            spot.source = source;
+            spot.call_de = dx.call_de;
+            spot.call_dx = call_dx;
+            spot.frequency_hz = dx.freq;
+            spot.utc = dx.utc;
+            spot.loc = dx.loc;
+            spot.comment = dx.comment;
+            spot.rbn = rbn;
+            self.ids_by_time.retain(|current_id| *current_id != id);
+            self.ids_by_time.push_back(id);
+            self.ids_by_dedupe_key.remove(&old_dedupe_key);
+            self.ids_by_dedupe_key.insert(new_dedupe_key, id);
+            return None;
         }
 
         self.next_id = self.next_id.saturating_add(1).max(1);

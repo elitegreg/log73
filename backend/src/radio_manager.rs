@@ -299,7 +299,7 @@ impl RadioManager {
             "requesting active radio config reload"
         );
         command_sender
-            .send(RadioCommand::ReloadConfig(config))
+            .send(RadioCommand::ReloadConfig(Box::new(config)))
             .await
             .map_err(|_| "radio task unavailable".to_string())
     }
@@ -357,7 +357,7 @@ async fn run_managed_radio(
                         match command {
                             Some(RadioCommand::ReloadConfig(new_config)) => {
                                 info!(radio_id = new_config.id, "reloading radio config while waiting to reconnect CAT");
-                                config = new_config;
+                                config = *new_config;
                                 reconnect_backoff = cat_reconnect_backoff().build();
                                 reconnect_deadline = None;
                                 break;
@@ -411,7 +411,7 @@ async fn run_managed_radio(
                 match command {
                     Some(RadioCommand::ReloadConfig(new_config)) => {
                         info!(radio_id = new_config.id, "reloading radio config before CAT connect");
-                        config = new_config;
+                        config = *new_config;
                         continue;
                     }
                     Some(command) => {
@@ -576,7 +576,7 @@ async fn run_managed_radio(
                             let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
                             let _ = cw_task.await;
                             debug!(radio_id = config.id, "dropping CAT radio for config reload");
-                            config = new_config;
+                            config = *new_config;
                             break;
                         }
                         command => {
