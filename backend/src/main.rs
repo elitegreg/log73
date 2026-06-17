@@ -34,7 +34,7 @@ use dxcluster::{DxClusterEvent, DxClusterManager, format_dxcluster_frequency_khz
 use futures_util::{SinkExt, StreamExt};
 use log_cache::LogCache;
 use radio::{ClientMessage, RadioCommand, ServerMessage};
-use radio_cat_rs::supported_radio_kinds;
+use radio_cat_rs::supported_drivers;
 use radio_manager::RadioManager;
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use std::{
@@ -1335,11 +1335,22 @@ async fn radios(State(app_state): State<AppState>) -> Json<Vec<db::RadioConfig>>
     }
 }
 
-async fn radio_kinds() -> Json<Vec<String>> {
+#[derive(Debug, serde::Serialize)]
+struct RadioKindOption {
+    id: &'static str,
+    display_name: &'static str,
+    description: &'static str,
+}
+
+async fn radio_kinds() -> Json<Vec<RadioKindOption>> {
     Json(
-        supported_radio_kinds()
+        supported_drivers()
             .iter()
-            .map(|kind| kind.display_name())
+            .map(|driver| RadioKindOption {
+                id: driver.id,
+                display_name: driver.display_name,
+                description: driver.description,
+            })
             .collect(),
     )
 }

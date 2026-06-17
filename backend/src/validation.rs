@@ -2,7 +2,7 @@ use crate::bands::{USA_AMATEUR_BANDS, band_for_frequency};
 use crate::contest_rules::{ContestParam, ContestRules, ContestRulesStore, ExchangeField};
 use crate::cw;
 use crate::db::{self, Contact, Database, NewLog, NewRadio, UpdateLog};
-use radio_cat_rs::{Frequency, RadioKind};
+use radio_cat_rs::{Frequency, supported_drivers};
 use regex::Regex;
 use serde_json::Value;
 use std::collections::HashSet;
@@ -13,8 +13,6 @@ const MAX_CALLSIGN_LEN: usize = 12;
 const MAX_RADIO_NAME_LEN: usize = 100;
 const MAX_RADIO_HOST_LEN: usize = 255;
 const MAX_SERIAL_PORT_LEN: usize = 255;
-const MIN_RADIO_SECONDS: f64 = 0.01;
-const MAX_RADIO_SECONDS: f64 = 3600.0;
 const MAX_LOGIN_USER_LEN: usize = 64;
 const MAX_LOGIN_PASSWORD_LEN: usize = 256;
 const MAX_DXCLUSTER_HOST_LEN: usize = 255;
@@ -86,19 +84,22 @@ pub fn validate_cabrillo_export_params(
 pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
     validate_required_text("radio name", &payload.name, MAX_RADIO_NAME_LEN)?;
 
-    payload
-        .radio_kind
-        .trim()
-        .parse::<RadioKind>()
-        .map_err(|error| error.to_string())?;
-
-    let transport_kind = payload.transport_kind.trim().to_ascii_lowercase();
-    if !matches!(transport_kind.as_str(), "tcp" | "serial") {
-        return Err("transport kind must be tcp or serial".to_string());
+    let radio_kind = payload.radio_kind.trim();
+    if !supported_drivers()
+        .iter()
+        .any(|driver| driver.id.eq_ignore_ascii_case(radio_kind))
+    {
+        return Err(format!("unsupported radio driver: {radio_kind}"));
     }
 
-    validate_seconds("poll frequency", payload.poll_frequency)?;
-    validate_seconds("CAT timeout", payload.cat_timeout)?;
+    let transport_kind = payload.transport_kind.trim().to_ascii_lowercase();
+    if !matches!(transport_kind.as_str(), "none" | "tcp" | "serial") {
+        return Err("transport kind must be none, tcp, or serial".to_string());
+    }
+    if transport_kind == "none" && !radio_kind.eq_ignore_ascii_case("dummy") {
+        return Err("transport is required for non-dummy radios".to_string());
+    }
+
     validate_tuning_increment_hz("CW tuning increment", payload.cw_tuning_increment_hz)?;
     validate_tuning_increment_hz("SSB tuning increment", payload.ssb_tuning_increment_hz)?;
     let cw_keyer_type = payload.cw_keyer_type.trim().to_ascii_lowercase();
@@ -128,6 +129,18 @@ pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
             if payload.tcp_host.chars().count() > MAX_RADIO_HOST_LEN {
                 return Err(format!(
                     "TCP host must be at most {MAX_RADIO_HOST_LEN} characters"
+                ));
+            }
+        }
+        "none" => {
+            if payload.tcp_host.chars().count() > MAX_RADIO_HOST_LEN {
+                return Err(format!(
+                    "TCP host must be at most {MAX_RADIO_HOST_LEN} characters"
+                ));
+            }
+            if payload.serial_port.chars().count() > MAX_SERIAL_PORT_LEN {
+                return Err(format!(
+                    "serial port must be at most {MAX_SERIAL_PORT_LEN} characters"
                 ));
             }
         }
@@ -923,15 +936,6 @@ fn validate_serial_port(label: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_seconds(label: &str, value: f64) -> Result<(), String> {
-    if !value.is_finite() || !(MIN_RADIO_SECONDS..=MAX_RADIO_SECONDS).contains(&value) {
-        return Err(format!(
-            "{label} must be between {MIN_RADIO_SECONDS} and {MAX_RADIO_SECONDS} seconds"
-        ));
-    }
-    Ok(())
-}
-
 fn validate_tuning_increment_hz(label: &str, value: u32) -> Result<(), String> {
     if value == 0 || value > MAX_RADIO_TUNING_INCREMENT_HZ {
         return Err(format!(
@@ -1113,15 +1117,13 @@ mod tests {
     fn test_radio() -> NewRadio {
         NewRadio {
             name: "Elecraft TCP".to_string(),
-            radio_kind: "k4".to_string(),
+            radio_kind: "elecraft-k4".to_string(),
             transport_kind: "tcp".to_string(),
             tcp_host: "127.0.0.1".to_string(),
             tcp_port: 5002,
             serial_port: String::new(),
             serial_baud_rate: 115_200,
             options: String::new(),
-            poll_frequency: 0.25,
-            cat_timeout: 2.0,
             cw_tuning_increment_hz: db::DEFAULT_CW_TUNING_INCREMENT_HZ,
             ssb_tuning_increment_hz: db::DEFAULT_SSB_TUNING_INCREMENT_HZ,
             rit_clear_on_log: false,
@@ -1228,7 +1230,18 @@ mod tests {
         radio.radio_kind = "not-a-radio".to_string();
 
         let error = validate_radio(&radio).expect_err("radio kind should be rejected");
-        assert!(error.contains("unsupported radio kind"));
+        assert!(error.contains("unsupported radio driver"));
+    }
+
+    #[test]
+    fn validates_dummy_radio_without_transport() {
+        let mut radio = test_radio();
+        radio.radio_kind = "dummy".to_string();
+        radio.transport_kind = "none".to_string();
+        radio.tcp_host = String::new();
+        radio.tcp_port = 0;
+
+        assert!(validate_radio(&radio).is_ok());
     }
 
     #[test]

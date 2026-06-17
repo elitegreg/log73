@@ -296,8 +296,7 @@ Creating/editing radios (with validation details)</h2>
 <ul>
 <li>Radio type (<code>/api/radio-kinds</code>)</li>
 <li>Name</li>
-<li>Transport: <code>tcp</code> or <code>serial</code></li>
-<li>Poll frequency / CAT timeout</li>
+<li>Transport: <code>none</code>, <code>tcp</code>, or <code>serial</code> (<code>none</code> is for the dummy driver)</li>
 <li>CW tuning increment / SSB tuning increment</li>
 <li>CW keyer type: <code>none</code>, <code>winkeyer</code>,
 <code>cat</code>, <code>serial</code></li>
@@ -306,10 +305,9 @@ Creating/editing radios (with validation details)</h2>
 <h3 id="validation-behavior-1">Validation behavior</h3>
 <ul>
 <li>Radio name required (max 100 chars)</li>
-<li>Radio kind must be supported/parseable</li>
-<li>Transport must be <code>tcp</code> or <code>serial</code></li>
-<li>Poll frequency and CAT timeout must be between <code>0.01</code> and
-<code>3600</code> seconds</li>
+<li>Radio driver must be supported</li>
+<li>Transport must be <code>none</code>, <code>tcp</code>, or <code>serial</code></li>
+<li>Non-dummy radios require TCP or serial transport</li>
 <li>Tuning increments must be <code>1..9999</code> Hz</li>
 </ul>
 <p>Transport-specific:</p>
@@ -658,152 +656,27 @@ and more rows exist)</li>
 <li>Serial (DTR/RTS)</li>
 </ul>
 <hr />
-<h2 id="supported-radios-full-list">16) Supported radios (full
-list)</h2>
-<p>Current runtime-exposed radio kinds: <strong>128</strong></p>
+<h2 id="supported-radios-full-list">16) Supported radios</h2>
+<p>The backend exposes the current <code>radio-cat-rs</code> driver descriptors at <code>/api/radio-kinds</code>. Each option includes a stable driver <code>id</code>, display name, and description.</p>
+<p>Common driver IDs include:</p>
 <ul>
-<li>Kenwood TS-140S</li>
-<li>Kenwood TS-680S</li>
-<li>Kenwood TS-711</li>
-<li>Kenwood TS-790</li>
-<li>Kenwood TS-811</li>
-<li>Kenwood TS-690S</li>
-<li>Kenwood TS-50S</li>
-<li>Kenwood TS-930</li>
-<li>Kenwood TS-940S</li>
-<li>Kenwood TS-950S</li>
-<li>Kenwood TS-950SDX</li>
-<li>Kenwood TS-440S</li>
-<li>Kenwood TS-450S</li>
-<li>Kenwood TS-850</li>
-<li>Kenwood TS-870S</li>
-<li>Kenwood TS-570S</li>
-<li>Kenwood TS-570D</li>
-<li>Kenwood TS-2000</li>
-<li>SDRConsole</li>
-<li>Kenwood TS-480</li>
-<li>TruSDX</li>
-<li>QRPLabs QCX</li>
-<li>QRPLabs QDX</li>
-<li>QRPLabs QMX</li>
-<li>Hilberling PT-8000A</li>
-<li>SDRPlay SDRUno</li>
-<li>Kenwood TS-590S</li>
-<li>Kenwood TS-590SG</li>
-<li>BG2FX FX-4</li>
-<li>BG2FX FX-4C</li>
-<li>BG2FX FX-4CR</li>
-<li>BG2FX FX-4L</li>
-<li>Kenwood TS-890S</li>
-<li>Kenwood TS-990S</li>
-<li>Kenwood TRC-80</li>
-<li>Elecraft K2</li>
-<li>Elecraft K3</li>
-<li>Elecraft K3S</li>
-<li>Elecraft K4</li>
-<li>Elecraft KX3</li>
-<li>Elecraft KX2</li>
-<li>FlexRadio FLEX-6XXX (KENWOOD COMPAT.)</li>
-<li>PowerSDR</li>
-<li>Thetis</li>
-<li>PiHPSDR</li>
-<li>HamGeek USDX</li>
-<li>Lab599 TX-500</li>
-<li>Icom IC-707</li>
-<li>Icom IC-725</li>
-<li>Icom IC-726</li>
-<li>Icom IC-728</li>
-<li>Icom IC-729</li>
-<li>Icom IC-735</li>
-<li>Icom IC-736</li>
-<li>Icom IC-737</li>
-<li>Icom IC-738</li>
-<li>Icom IC-751</li>
-<li>Icom IC-761</li>
-<li>Icom IC-765</li>
-<li>Icom IC-775</li>
-<li>Icom IC-781</li>
-<li>Icom IC-271</li>
-<li>Icom IC-275</li>
-<li>Icom IC-375</li>
-<li>Icom IC-471</li>
-<li>Icom IC-475</li>
-<li>Icom IC-575</li>
-<li>Icom IC-820H</li>
-<li>Icom IC-821H</li>
-<li>Icom IC-970</li>
-<li>Icom IC-1275</li>
-<li>Icom IC-706</li>
-<li>Icom IC-706MKII</li>
-<li>Icom IC-706MKIIG</li>
-<li>Icom IC-78</li>
-<li>Icom IC-703</li>
-<li>Icom IC-718</li>
-<li>Icom IC-746</li>
-<li>Icom IC-746PRO</li>
-<li>Icom IC-756</li>
-<li>Icom IC-756PRO</li>
-<li>Icom IC-756PROII</li>
-<li>Icom IC-756PROIII</li>
-<li>Icom IC-7000</li>
-<li>Icom IC-7200</li>
-<li>Icom IC-7410</li>
-<li>Icom IC-910</li>
-<li>Icom IC-9100</li>
-<li>Icom IC-7100</li>
-<li>Icom IC-7600</li>
-<li>Icom IC-7700</li>
-<li>Icom IC-7800</li>
-<li>Icom IC-7300</li>
-<li>Icom IC-7300MK2</li>
-<li>Icom IC-705</li>
-<li>Icom IC-7610</li>
-<li>Icom IC-7760</li>
-<li>Icom IC-7850</li>
-<li>Icom IC-7851</li>
-<li>Icom IC-905</li>
-<li>Icom IC-9700</li>
-<li>Xiegu X108G</li>
-<li>Xiegu X6100</li>
-<li>Xiegu X6200</li>
-<li>Xiegu G90</li>
-<li>Xiegu X5105</li>
-<li>Yaesu FT-450</li>
-<li>Yaesu FT-950</li>
-<li>Yaesu FT-2000</li>
-<li>Yaesu FTDX-1200</li>
-<li>Yaesu FTDX-3000</li>
-<li>Yaesu FTDX-5000</li>
-<li>Yaesu FTDX-9000</li>
-<li>Yaesu FT-991</li>
-<li>Yaesu FT-891</li>
-<li>Yaesu FT-710</li>
-<li>Yaesu FTDX-10</li>
-<li>Yaesu FTDX-101D</li>
-<li>Yaesu FTDX-101MP</li>
-<li>FlexRadio SMARTSDR-SLICE-A</li>
-<li>FlexRadio SMARTSDR-SLICE-B</li>
-<li>FlexRadio SMARTSDR-SLICE-C</li>
-<li>FlexRadio SMARTSDR-SLICE-D</li>
-<li>FlexRadio SMARTSDR-SLICE-E</li>
-<li>FlexRadio SMARTSDR-SLICE-F</li>
-<li>FlexRadio SMARTSDR-SLICE-G</li>
-<li>FlexRadio SMARTSDR-SLICE-H</li>
-<li>Dummy (test)</li>
+<li><code>dummy</code></li>
+<li><code>elecraft-k4</code></li>
+<li><code>elecraft-k3</code></li>
+<li><code>elecraft-k2</code></li>
+<li><code>kenwood-ts590</code></li>
+<li><code>kenwood-ts890</code></li>
+<li><code>kenwood-ts990</code></li>
+<li><code>icom-ic705</code></li>
+<li><code>icom-ic7300</code></li>
+<li><code>icom-ic7610</code></li>
+<li><code>yaesu-ftdx10</code></li>
+<li><code>yaesu-ftdx101</code></li>
+<li><code>yaesu-ft710</code></li>
+<li><code>yaesu-ft891</code></li>
+<li><code>yaesu-ft991</code></li>
 </ul>
-<h3 id="radio-option-footnotes">Radio option footnotes</h3>
-<p>[1] <code>radio-cat-rs</code> supports advanced CI-V options (for
-custom integrations), such as <code>civ.rig_addr</code>,
-<code>civ.controller_addr</code>, <code>civ.retry_max</code>, and
-<code>civ.retry_backoff_ms</code>.</p>
-<p>[2] <code>radio-cat-rs</code> supports Yaesu-family options such as
-<code>yaesu.retry_max</code>, <code>yaesu.retry_backoff_ms</code>, and
-<code>yaesu.stop_cw_cmd</code>.</p>
-<p>[3] <code>radio-cat-rs</code> supports Flex native options such as
-<code>flex.retry_max</code>, <code>flex.retry_backoff_ms</code>, and
-<code>flex.verify_timeout_ms</code>.</p>
-<p>[4] Log73 UI currently does not expose dedicated fields for these
-protocol-family options; backend defaults are used.</p>
+<p>The create-radio screen defaults to the in-memory <code>dummy</code> driver with <code>none</code> transport.</p>
 <hr />
 <h2 id="core-feature-checklist">17) Core feature checklist</h2>
 <ul>
@@ -812,7 +685,7 @@ protocol-family options; backend defaults are used.</p>
 <li>Contest-rule-driven log setup and exchange validation</li>
 <li>Multi-log create/edit/delete</li>
 <li>Multi-radio create/edit/delete</li>
-<li>CAT polling and websocket radio-state updates</li>
+<li>Async CAT and websocket radio-state updates</li>
 <li>Run/S&amp;P CW message banks</li>
 <li>ESM Enter workflows</li>
 <li>Local pending queue durability in browser storage</li>

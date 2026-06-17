@@ -1,5 +1,4 @@
-use radio_cat_rs::ControllableRadio;
-use std::sync::Arc;
+use radio_cat_rs::Radio;
 use std::time::Duration;
 use tracing::{debug, trace, warn};
 
@@ -8,28 +7,27 @@ const CW_SECONDS_PER_CHARACTER_AT_ONE_WPM: f64 = 12.0;
 
 pub struct CatKeyer {
     radio_id: i64,
-    radio: Arc<dyn ControllableRadio>,
+    radio: Radio,
     wpm: u8,
 }
 
 impl CatKeyer {
-    pub async fn open(radio_id: i64, radio: Arc<dyn ControllableRadio>) -> Self {
-        let wpm = match radio.get_cw_wpm().await {
-            Ok(wpm) => {
-                let wpm = wpm.min(u16::from(u8::MAX)) as u8;
-                debug!(radio_id, wpm, "initialized CAT keyer WPM from radio");
-                wpm
-            }
-            Err(error) => {
+    pub async fn open(radio_id: i64, radio: Radio) -> Self {
+        let wpm = radio
+            .latest_state()
+            .keyer
+            .as_ref()
+            .and_then(|keyer| keyer.speed_wpm)
+            .unwrap_or_else(|| {
                 warn!(
                     radio_id,
                     default_wpm = DEFAULT_WPM,
-                    %error,
-                    "failed to read CAT keyer WPM; using default"
+                    "CAT keyer WPM is unknown; using default"
                 );
                 DEFAULT_WPM
-            }
-        };
+            });
+
+        debug!(radio_id, wpm, "initialized CAT keyer WPM from radio state");
 
         Self {
             radio_id,
@@ -57,7 +55,7 @@ impl CatKeyer {
     pub async fn set_wpm(&mut self, wpm: u8) -> Result<(), String> {
         debug!(radio_id = self.radio_id, wpm, "setting CAT CW WPM");
         self.radio
-            .set_cw_wpm(u16::from(wpm))
+            .set_keyer_speed(wpm)
             .await
             .map_err(|error| error.to_string())?;
         self.wpm = wpm;

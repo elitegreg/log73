@@ -67,14 +67,14 @@ Show CLI help:
 
 Current options:
 
-| Option | Meaning | Default |
-|---|---|---|
-| `--bind <BIND>` | Bind address/port for browser/API/websocket | `127.0.0.1:7300` |
-| `--log-level <LOG_LEVEL>` | Backend log verbosity | `info` |
-| `--log-file <LOG_FILE>` | Optional file log output | none |
-| `--config-dir <CONFIG_DIR>` | Override config directory | platform default |
-| `--data-dir <DATA_DIR>` | Override data directory (includes DB/files) | platform default |
-| `--app-dir <APP_DIR>` | Override app root | platform default (`/opt/log73` on Linux layouts) |
+| Option                      | Meaning                                     | Default                                          |
+| --------------------------- | ------------------------------------------- | ------------------------------------------------ |
+| `--bind <BIND>`             | Bind address/port for browser/API/websocket | `127.0.0.1:7300`                                 |
+| `--log-level <LOG_LEVEL>`   | Backend log verbosity                       | `info`                                           |
+| `--log-file <LOG_FILE>`     | Optional file log output                    | none                                             |
+| `--config-dir <CONFIG_DIR>` | Override config directory                   | platform default                                 |
+| `--data-dir <DATA_DIR>`     | Override data directory (includes DB/files) | platform default                                 |
+| `--app-dir <APP_DIR>`       | Override app root                           | platform default (`/opt/log73` on Linux layouts) |
 
 Startup assumptions:
 
@@ -172,8 +172,7 @@ If a contest uses a sent serial exchange field, serial allocation is managed by 
 
 - Radio type (`/api/radio-kinds`)
 - Name
-- Transport: `tcp` or `serial`
-- Poll frequency / CAT timeout
+- Transport: `none`, `tcp`, or `serial` (`none` is for the dummy driver)
 - CW tuning increment / SSB tuning increment
 - CW keyer type: `none`, `winkeyer`, `cat`, `serial`
 - CW messages set (editable and validated)
@@ -181,9 +180,9 @@ If a contest uses a sent serial exchange field, serial allocation is managed by 
 ### Validation behavior
 
 - Radio name required (max 100 chars)
-- Radio kind must be supported/parseable
-- Transport must be `tcp` or `serial`
-- Poll frequency and CAT timeout must be between `0.01` and `3600` seconds
+- Radio driver must be supported
+- Transport must be `none`, `tcp`, or `serial`
+- Non-dummy radios require TCP or serial transport
 - Tuning increments must be `1..9999` Hz
 
 Transport-specific:
@@ -283,24 +282,24 @@ Practical caution:
 
 ### Global logger shortcuts
 
-| Hotkey | Action |
-|---|---|
-| `Ctrl+O` | Prompt/change operator callsign |
-| `F1`..`F12` | Send CW message in active Run/S&P bank |
-| `Esc` | Stop CW sending / clear queue (or close CW text dialog) |
-| `PageUp` | CW WPM +1 |
-| `PageDown` | CW WPM -1 |
-| `Ctrl+K` | Open CW text dialog (CW/CW-R only) |
-| `Ctrl+PageUp` | Shift band up |
-| `Ctrl+PageDown` | Shift band down |
-| `ArrowUp` | Tune frequency up by configured increment |
-| `ArrowDown` | Tune frequency down by configured increment |
-| `Ctrl+ArrowDown` | Jump to next band-map spot above VFO |
-| `Ctrl+ArrowUp` | Jump to next band-map spot below VFO |
-| `Alt+M` | Mark current frequency |
-| `Alt+O` | Store current spot |
-| `Alt+Q` | Jump to last stored CQ frequency |
-| `Ctrl+P` | Spot It |
+| Hotkey           | Action                                                  |
+| ---------------- | ------------------------------------------------------- |
+| `Ctrl+O`         | Prompt/change operator callsign                         |
+| `F1`..`F12`      | Send CW message in active Run/S&P bank                  |
+| `Esc`            | Stop CW sending / clear queue (or close CW text dialog) |
+| `PageUp`         | CW WPM +1                                               |
+| `PageDown`       | CW WPM -1                                               |
+| `Ctrl+K`         | Open CW text dialog (CW/CW-R only)                      |
+| `Ctrl+PageUp`    | Shift band up                                           |
+| `Ctrl+PageDown`  | Shift band down                                         |
+| `ArrowUp`        | Tune frequency up by configured increment               |
+| `ArrowDown`      | Tune frequency down by configured increment             |
+| `Ctrl+ArrowDown` | Jump to next band-map spot above VFO                    |
+| `Ctrl+ArrowUp`   | Jump to next band-map spot below VFO                    |
+| `Alt+M`          | Mark current frequency                                  |
+| `Alt+O`          | Store current spot                                      |
+| `Alt+Q`          | Jump to last stored CQ frequency                        |
+| `Ctrl+P`         | Spot It                                                 |
 
 Notes:
 
@@ -323,12 +322,12 @@ When cursor is in callsign field:
 
 ### CW text dialog (`Ctrl+K`)
 
-| Key | Action |
-|---|---|
-| `Space` | Send current word with trailing space |
-| `Enter` | Send current word and close dialog |
-| `Esc` | Close dialog |
-| `Backspace` on empty input | Ignored |
+| Key                        | Action                                |
+| -------------------------- | ------------------------------------- |
+| `Space`                    | Send current word with trailing space |
+| `Enter`                    | Send current word and close dialog    |
+| `Esc`                      | Close dialog                          |
+| `Backspace` on empty input | Ignored                               |
 
 ---
 
@@ -338,22 +337,22 @@ When ESM is enabled, Enter chooses message/log actions from state.
 
 ### Run mode
 
-| Condition | Action |
-|---|---|
-| Empty callsign | Send `F1` |
-| Callsign present, exchange incomplete (first attempt) | Send `F5`, then `F2` |
-| Callsign present, exchange incomplete (repeat attempt) | Send `F8` |
-| Callsign + valid exchange + exchange already sent for that callsign | Send `F3`, then log |
-| Callsign corrected after sending exchange (CW only) | Before `F3`, send corrected suffix if only suffix changed; otherwise send full corrected callsign |
+| Condition                                                           | Action                                                                                            |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Empty callsign                                                      | Send `F1`                                                                                         |
+| Callsign present, exchange incomplete (first attempt)               | Send `F5`, then `F2`                                                                              |
+| Callsign present, exchange incomplete (repeat attempt)              | Send `F8`                                                                                         |
+| Callsign + valid exchange + exchange already sent for that callsign | Send `F3`, then log                                                                               |
+| Callsign corrected after sending exchange (CW only)                 | Before `F3`, send corrected suffix if only suffix changed; otherwise send full corrected callsign |
 
 ### S&P mode
 
-| Condition | Action |
-|---|---|
-| Empty callsign | Send `F4` |
-| Callsign present, exchange incomplete | Send `F4` |
+| Condition                                        | Action              |
+| ------------------------------------------------ | ------------------- |
+| Empty callsign                                   | Send `F4`           |
+| Callsign present, exchange incomplete            | Send `F4`           |
 | Callsign + valid exchange, exchange not yet sent | Send `F2`, then log |
-| Callsign + valid exchange, exchange already sent | Log directly |
+| Callsign + valid exchange, exchange already sent | Log directly        |
 
 ### Override
 
@@ -409,148 +408,29 @@ Current runtime contest names:
 
 ---
 
-## 16) Supported radios (full list)
+## 16) Supported radios
 
-Current runtime-exposed radio kinds: **128**
+The backend exposes the current `radio-cat-rs` driver descriptors at `/api/radio-kinds`. Each option includes a stable driver `id`, display name, and description.
 
-- Kenwood TS-140S
-- Kenwood TS-680S
-- Kenwood TS-711
-- Kenwood TS-790
-- Kenwood TS-811
-- Kenwood TS-690S
-- Kenwood TS-50S
-- Kenwood TS-930
-- Kenwood TS-940S
-- Kenwood TS-950S
-- Kenwood TS-950SDX
-- Kenwood TS-440S
-- Kenwood TS-450S
-- Kenwood TS-850
-- Kenwood TS-870S
-- Kenwood TS-570S
-- Kenwood TS-570D
-- Kenwood TS-2000
-- SDRConsole
-- Kenwood TS-480
-- TruSDX
-- QRPLabs QCX
-- QRPLabs QDX
-- QRPLabs QMX
-- Hilberling PT-8000A
-- SDRPlay SDRUno
-- Kenwood TS-590S
-- Kenwood TS-590SG
-- BG2FX FX-4
-- BG2FX FX-4C
-- BG2FX FX-4CR
-- BG2FX FX-4L
-- Kenwood TS-890S
-- Kenwood TS-990S
-- Kenwood TRC-80
-- Elecraft K2
-- Elecraft K3
-- Elecraft K3S
-- Elecraft K4
-- Elecraft KX3
-- Elecraft KX2
-- FlexRadio FLEX-6XXX (KENWOOD COMPAT.)
-- PowerSDR
-- Thetis
-- PiHPSDR
-- HamGeek USDX
-- Lab599 TX-500
-- Icom IC-707
-- Icom IC-725
-- Icom IC-726
-- Icom IC-728
-- Icom IC-729
-- Icom IC-735
-- Icom IC-736
-- Icom IC-737
-- Icom IC-738
-- Icom IC-751
-- Icom IC-761
-- Icom IC-765
-- Icom IC-775
-- Icom IC-781
-- Icom IC-271
-- Icom IC-275
-- Icom IC-375
-- Icom IC-471
-- Icom IC-475
-- Icom IC-575
-- Icom IC-820H
-- Icom IC-821H
-- Icom IC-970
-- Icom IC-1275
-- Icom IC-706
-- Icom IC-706MKII
-- Icom IC-706MKIIG
-- Icom IC-78
-- Icom IC-703
-- Icom IC-718
-- Icom IC-746
-- Icom IC-746PRO
-- Icom IC-756
-- Icom IC-756PRO
-- Icom IC-756PROII
-- Icom IC-756PROIII
-- Icom IC-7000
-- Icom IC-7200
-- Icom IC-7410
-- Icom IC-910
-- Icom IC-9100
-- Icom IC-7100
-- Icom IC-7600
-- Icom IC-7700
-- Icom IC-7800
-- Icom IC-7300
-- Icom IC-7300MK2
-- Icom IC-705
-- Icom IC-7610
-- Icom IC-7760
-- Icom IC-7850
-- Icom IC-7851
-- Icom IC-905
-- Icom IC-9700
-- Xiegu X108G
-- Xiegu X6100
-- Xiegu X6200
-- Xiegu G90
-- Xiegu X5105
-- Yaesu FT-450
-- Yaesu FT-950
-- Yaesu FT-2000
-- Yaesu FTDX-1200
-- Yaesu FTDX-3000
-- Yaesu FTDX-5000
-- Yaesu FTDX-9000
-- Yaesu FT-991
-- Yaesu FT-891
-- Yaesu FT-710
-- Yaesu FTDX-10
-- Yaesu FTDX-101D
-- Yaesu FTDX-101MP
-- FlexRadio SMARTSDR-SLICE-A
-- FlexRadio SMARTSDR-SLICE-B
-- FlexRadio SMARTSDR-SLICE-C
-- FlexRadio SMARTSDR-SLICE-D
-- FlexRadio SMARTSDR-SLICE-E
-- FlexRadio SMARTSDR-SLICE-F
-- FlexRadio SMARTSDR-SLICE-G
-- FlexRadio SMARTSDR-SLICE-H
-- Dummy (test)
+Common driver IDs include:
 
-### Radio option footnotes
+- `dummy`
+- `elecraft-k4`
+- `elecraft-k3`
+- `elecraft-k2`
+- `kenwood-ts590`
+- `kenwood-ts890`
+- `kenwood-ts990`
+- `icom-ic705`
+- `icom-ic7300`
+- `icom-ic7610`
+- `yaesu-ftdx10`
+- `yaesu-ftdx101`
+- `yaesu-ft710`
+- `yaesu-ft891`
+- `yaesu-ft991`
 
-[1] `radio-cat-rs` supports advanced CI-V options (for custom integrations), such as `civ.rig_addr`, `civ.controller_addr`, `civ.retry_max`, and `civ.retry_backoff_ms`.
-
-[2] `radio-cat-rs` supports Yaesu-family options such as `yaesu.retry_max`, `yaesu.retry_backoff_ms`, and `yaesu.stop_cw_cmd`.
-
-[3] `radio-cat-rs` supports Flex native options such as `flex.retry_max`, `flex.retry_backoff_ms`, and `flex.verify_timeout_ms`.
-
-[4] Log73 UI currently does not expose dedicated fields for these protocol-family options; backend defaults are used.
+The create-radio screen defaults to the in-memory `dummy` driver with `none` transport.
 
 ---
 
@@ -561,7 +441,7 @@ Current runtime-exposed radio kinds: **128**
 - Contest-rule-driven log setup and exchange validation
 - Multi-log create/edit/delete
 - Multi-radio create/edit/delete
-- CAT polling and websocket radio-state updates
+- Async CAT and websocket radio-state updates
 - Run/S&P CW message banks
 - ESM Enter workflows
 - Local pending queue durability in browser storage

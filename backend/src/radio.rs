@@ -123,38 +123,28 @@ pub enum RadioCommand {
 
 pub fn normalize_mode(mode: &Mode) -> String {
     match mode {
-        Mode::Lsb
-        | Mode::Usb
-        | Mode::LsbD1
-        | Mode::UsbD1
-        | Mode::LsbD2
-        | Mode::UsbD2
-        | Mode::LsbD3
-        | Mode::UsbD3 => "SSB".to_string(),
+        Mode::Lsb | Mode::Usb => "SSB".to_string(),
         Mode::Cw => "CW".to_string(),
-        Mode::Cwr => "CW-R".to_string(),
-        Mode::Fm | Mode::Fmn | Mode::Wfm => "FM".to_string(),
+        Mode::CwReverse => "CW-R".to_string(),
+        Mode::Fm | Mode::Wfm | Mode::DataFm => "FM".to_string(),
         Mode::Am => "AM".to_string(),
-        Mode::Psk | Mode::Pskr => "PSK".to_string(),
         Mode::Rtty
-        | Mode::Rttyr
-        | Mode::PktLsb
-        | Mode::PktUsb
-        | Mode::PktFm
-        | Mode::PktAm
-        | Mode::PktFmn => "RTTY".to_string(),
-        _ => "RTTY".to_string(),
+        | Mode::RttyReverse
+        | Mode::DataLsb
+        | Mode::DataUsb
+        | Mode::Digital
+        | Mode::DigitalVoice => "RTTY".to_string(),
     }
 }
 
 pub fn mode_candidates_for_request(requested: &str, frequency_hz: u64) -> Vec<Mode> {
     match requested.trim().to_uppercase().as_str() {
         "CW" => vec![Mode::Cw],
-        "CW-R" => vec![Mode::Cwr, Mode::Cw],
+        "CW-R" => vec![Mode::CwReverse, Mode::Cw],
         "FM" => vec![Mode::Fm],
         "SSB" => vec![ssb_mode_for_frequency(frequency_hz)],
-        "FT8" | "JT65" | "JT9" | "MFSK" | "PSK" => vec![Mode::PktUsb, Mode::Rtty],
-        "RTTY" => vec![Mode::Rtty, Mode::PktUsb],
+        "FT8" | "JT65" | "JT9" | "MFSK" | "PSK" => vec![Mode::DataUsb, Mode::Rtty],
+        "RTTY" => vec![Mode::Rtty, Mode::DataUsb],
         _ => Vec::new(),
     }
 }
@@ -370,12 +360,12 @@ mod tests {
     #[test]
     fn normalizes_cat_modes_to_logger_modes() {
         assert_eq!(normalize_mode(&Mode::Usb), "SSB");
-        assert_eq!(normalize_mode(&Mode::Cwr), "CW-R");
-        assert_eq!(normalize_mode(&Mode::Fmn), "FM");
+        assert_eq!(normalize_mode(&Mode::CwReverse), "CW-R");
+        assert_eq!(normalize_mode(&Mode::DataFm), "FM");
         assert_eq!(normalize_mode(&Mode::Am), "AM");
-        assert_eq!(normalize_mode(&Mode::PktUsb), "RTTY");
-        assert_eq!(normalize_mode(&Mode::Psk), "PSK");
-        assert_eq!(normalize_mode(&Mode::DStar), "RTTY");
+        assert_eq!(normalize_mode(&Mode::DataUsb), "RTTY");
+        assert_eq!(normalize_mode(&Mode::Digital), "RTTY");
+        assert_eq!(normalize_mode(&Mode::DigitalVoice), "RTTY");
     }
 
     #[test]
@@ -386,15 +376,15 @@ mod tests {
         );
         assert_eq!(
             mode_candidates_for_request("CW-R", 14_000_000),
-            vec![Mode::Cwr, Mode::Cw]
+            vec![Mode::CwReverse, Mode::Cw]
         );
         assert_eq!(
             mode_candidates_for_request("FT8", 14_000_000),
-            vec![Mode::PktUsb, Mode::Rtty]
+            vec![Mode::DataUsb, Mode::Rtty]
         );
         assert_eq!(
             mode_candidates_for_request("RTTY", 14_000_000),
-            vec![Mode::Rtty, Mode::PktUsb]
+            vec![Mode::Rtty, Mode::DataUsb]
         );
     }
 
