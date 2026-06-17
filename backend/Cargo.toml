@@ -19,7 +19,7 @@ mime_guess = "2.0.5"
 regex = "1"
 rand_core = { version = "0.6", features = ["getrandom"] }
 radif = "0.4.0"
-radio-cat-rs = { git = "https://github.com/elitegreg/radio-cat-rs.git", branch = "redesign" }
+radio-cat-rs = { git = "https://github.com/elitegreg/radio-cat-rs.git", branch = "main" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 rust-embed = "8.11.0"
 serde = { version = "1", features = ["derive"] }
