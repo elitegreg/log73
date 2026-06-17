@@ -1474,7 +1474,8 @@ function MainWindow({
     }
 
     if (!spotCallsign || !frequencyHz) return;
-    const comment = window.prompt('Spot comment', '');
+    const spotLabel = `Spot ${spotCallsign} @ ${formatFrequency(frequencyHz)} kHz`;
+    const comment = window.prompt(spotLabel, '');
     if (comment === null) return;
 
     onSendDxClusterSpot?.({

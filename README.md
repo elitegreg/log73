@@ -509,7 +509,7 @@ ADIF export uses committed QSO data from the database and derives `QSO_DATE` and
 Current contest rule IDs include:
 
 ```text
-ARRL-FD                  ARRL Field Day
+ARRL-FIELD-DAY           ARRL Field Day
 CWT                      CWOps CWT
 K1USNSST                 K1USN SST
 MST                      MST (Medium Speed Test)
@@ -519,7 +519,7 @@ SC-QSO-PARTY (In State)  SC QSO Party in-state
 
 Log creation dynamically requests required rule parameters where needed:
 
-- `ARRL-FD`: `Class`, `Section`
+- `ARRL-FIELD-DAY`: `Class`, `Section`
 - `CWT`: `NAME`, `EXCHANGE`
 - `K1USNSST`: `NAME`, `QTH`
 - `MST`: `SERIAL_BATCH_SIZE`
