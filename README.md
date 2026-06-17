@@ -28,10 +28,8 @@ Log73 is under active development. Contest definitions are loaded from YAML rule
 - Multi-log selection and creation.
 - Multi-radio selection and creation.
 - Per-radio CAT settings:
-  - radio kind
-  - TCP host and port, or serial port and baud rate
-  - poll frequency
-  - CAT communication timeout
+  - radio driver
+  - no transport for dummy radios, TCP host and port, or serial port and baud rate
 - Optional per-radio Winkeyer CW keying settings.
 - Run and S&P CW function-key labels/messages.
 - Selectable UI themes, persisted in browser local storage.
@@ -59,7 +57,7 @@ When login is enabled, authentication protects the frontend, `/api/*`, and `/ws`
 
 The backend does **not** start or supervise external CAT daemons.
 
-Current `radio-cat-rs` support is factory-driven and model-dependent. For Elecraft CAT, use `k4` over either TCP or serial transport.
+Current `radio-cat-rs` support is driver/profile-driven and model-dependent. For Elecraft K4 CAT, use driver `elecraft-k4` over either TCP or serial transport. The default create-radio selection is the in-memory `dummy` driver with no transport.
 
 Example TCP CAT target:
 
@@ -337,7 +335,7 @@ Server radio state message:
 
 ```json
 { "type": "radio_status", "online": true }
-{ "type": "radio_state", "frequency_hz": 14025000, "mode": "CW" }
+{ "type": "radio_state", "frequency_hz": 14025000, "mode": "CW", "rit_offset_hz": 0 }
 ```
 
 `radio_status` reports whether CAT/rig control is currently online. It is sent when the websocket starts and whenever the CAT status changes.
@@ -392,7 +390,7 @@ qsos
 Important schema notes:
 
 - `logs` stores log name, contest id, station callsign, and contest parameter JSON.
-- `radios` stores radio kind, CAT transport settings, poll frequency, CAT timeout, Winkeyer settings, and CW message text.
+- `radios` stores radio driver, CAT transport settings, keyer settings, and CW message text.
 - `qsos.LOG_ID` references `logs.ID`.
 - `log_serial_state` stores durable next-serial counters by log id and sent serial ADIF field.
 - `idx_qsos_log_id` indexes `qsos(LOG_ID)`.
@@ -413,37 +411,43 @@ tcp_host
 tcp_port
 serial_port
 serial_baud_rate
-poll_frequency
-cat_timeout
-winkeyer_enabled
+options
+cw_tuning_increment_hz
+ssb_tuning_increment_hz
+rit_clear_on_log
+cw_keyer_type
 winkeyer_serial_port
+cw_serial_port
+cw_serial_baud_rate
+cw_serial_line
 cw_messages
 ```
 
 Create-radio defaults:
 
 ```text
-radio_kind: first value returned by /api/radio-kinds
-transport_kind: tcp
+radio_kind: dummy
+transport_kind: none
 tcp_host: 127.0.0.1
 tcp_port: 5002
 serial_port: ""
 serial_baud_rate: 115200
-poll_frequency: 0.25
-cat_timeout: 2
-winkeyer_enabled: false
+options: ""
+cw_tuning_increment_hz: 20
+ssb_tuning_increment_hz: 100
+rit_clear_on_log: false
+cw_keyer_type: none
 winkeyer_serial_port: ""
+cw_serial_port: ""
+cw_serial_baud_rate: 9600
+cw_serial_line: dtr
 cw_messages: built-in default Run/S&P function-key messages
 ```
-
-`poll_frequency` controls how often the backend polls frequency/mode.
-
-`cat_timeout` controls the communication timeout for individual CAT transport operations. This should usually be larger than `poll_frequency`; `2` seconds is the default.
 
 Radio connections are lazy. Opening a logger with `radio_id=X` starts or reuses that radio's managed connection. Closing the logger releases it. When the reference count reaches zero, the backend disconnects and removes the managed radio.
 
 Each radio has one async command queue, so CAT commands for that radio are serialized.
-If CAT is offline, reconnect attempts back off exponentially from `1s` to a `10s` maximum instead of retrying at the poll interval.
+If CAT is offline, reconnect attempts back off exponentially from `1s` to a `10s` maximum.
 
 ## Radio behavior
 
@@ -452,6 +456,7 @@ Radio state is represented as:
 ```text
 frequency_hz
 mode
+rit_offset_hz
 ```
 
 `USB` and `LSB` from `radio-cat-rs` are normalized to frontend mode `SSB`.

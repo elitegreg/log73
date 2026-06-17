@@ -528,9 +528,9 @@ function MainWindow({
   function shiftBand(direction) {
     if (!currentBand || bandOptions.length === 0) return;
 
-    const sortedBands = [...new Map(bandOptions.map((band) => [band.meters, band])).values()].sort(
-      (left, right) => left.lowerHz - right.lowerHz,
-    );
+    const sortedBands = [
+      ...new Map(bandOptions.map((band) => [band.meters, band])).values(),
+    ].sort((left, right) => left.lowerHz - right.lowerHz);
     const currentIndex = sortedBands.findIndex(
       (band) => band.meters === currentBand.meters,
     );
@@ -606,9 +606,13 @@ function MainWindow({
     }
   }
 
-  function markMessageKeyActive(requestId, key) {
-    activeMessageRequestsRef.current.set(requestId, key);
-    setActiveMessageKeys((current) => new Set(current).add(key));
+  function markMessageKeyActive(requestId, keys) {
+    activeMessageRequestsRef.current.set(requestId, [...keys]);
+    setActiveMessageKeys((current) => {
+      const next = new Set(current);
+      for (const key of keys) next.add(key);
+      return next;
+    });
     const timeoutMs = cwActiveTimeoutMs(radio?.cw_keyer_type);
     const timeoutId = window.setTimeout(
       () => clearMessageRequest(requestId),
@@ -618,8 +622,8 @@ function MainWindow({
   }
 
   function clearMessageRequest(requestId) {
-    const key = activeMessageRequestsRef.current.get(requestId);
-    if (!key) return;
+    const keys = activeMessageRequestsRef.current.get(requestId);
+    if (!keys) return;
     activeMessageRequestsRef.current.delete(requestId);
     const timeoutId = activeMessageTimeoutsRef.current.get(requestId);
     if (timeoutId !== undefined) {
@@ -627,12 +631,14 @@ function MainWindow({
       activeMessageTimeoutsRef.current.delete(requestId);
     }
     setActiveMessageKeys((current) => {
-      const stillActive = [
-        ...activeMessageRequestsRef.current.values(),
-      ].includes(key);
-      if (stillActive) return current;
+      const remainingKeys = new Set();
+      for (const activeKeys of activeMessageRequestsRef.current.values()) {
+        for (const key of activeKeys) remainingKeys.add(key);
+      }
       const next = new Set(current);
-      next.delete(key);
+      for (const key of keys) {
+        if (!remainingKeys.has(key)) next.delete(key);
+      }
       return next;
     });
   }
@@ -660,32 +666,48 @@ function MainWindow({
     }
   }
 
+  function sendMessageKeys(
+    keys,
+    mode = messageModeKey,
+    values = exchangeValues,
+  ) {
+    const sendableKeys = [];
+
+    for (const key of keys) {
+      const action = cwActionForMessage(radio?.cw_messages, mode, key);
+      if (action && performMessageAction(action)) {
+        continue;
+      }
+
+      const button = (
+        messageLabels?.[mode] ?? DEFAULT_MESSAGE_LABELS[mode]
+      ).find((label) => label.key === key);
+      if (isEmptyMessageButton(button)) continue;
+      if (mode === 'run' && key === 'F1') {
+        storeCurrentCqFrequency();
+      }
+      sendableKeys.push(key);
+    }
+
+    if (sendableKeys.length === 0) return null;
+
+    const requestId = createMessageRequestId();
+    markMessageKeyActive(requestId, sendableKeys);
+    onSendMessage?.({
+      request_id: requestId,
+      mode,
+      keys: sendableKeys,
+      fields: currentMessageFields(values),
+    });
+    return requestId;
+  }
+
   function sendSingleMessageKey(
     key,
     mode = messageModeKey,
     values = exchangeValues,
   ) {
-    const action = cwActionForMessage(radio?.cw_messages, mode, key);
-    if (action && performMessageAction(action)) {
-      return null;
-    }
-
-    const button = (messageLabels?.[mode] ?? DEFAULT_MESSAGE_LABELS[mode]).find(
-      (label) => label.key === key,
-    );
-    if (isEmptyMessageButton(button)) return null;
-    if (mode === 'run' && key === 'F1') {
-      storeCurrentCqFrequency();
-    }
-    const requestId = createMessageRequestId();
-    markMessageKeyActive(requestId, key);
-    onSendMessage?.({
-      request_id: requestId,
-      mode,
-      key,
-      fields: currentMessageFields(values),
-    });
-    return requestId;
+    return sendMessageKeys([key], mode, values);
   }
 
   repeatSendRunF1Ref.current = () => {
@@ -804,12 +826,10 @@ function MainWindow({
 
   function sendEsmKeys(keys, values = exchangeValues) {
     stopRepeat();
-    for (const key of keys) {
-      const requestId = sendSingleMessageKey(key, messageModeKey, values);
-      if (!requestId) continue;
-      if (key === 'F2') {
-        markEsmExchangeSentForCurrentCallsign();
-      }
+    const requestId = sendMessageKeys(keys, messageModeKey, values);
+    if (!requestId) return;
+    if (keys.includes('F2')) {
+      markEsmExchangeSentForCurrentCallsign();
     }
   }
 
@@ -1006,7 +1026,11 @@ function MainWindow({
   }
 
   function exchangeValidation(field, values = exchangeValues) {
-    return validateExchangeField(field, exchangeValue(field, values), radioMode);
+    return validateExchangeField(
+      field,
+      exchangeValue(field, values),
+      radioMode,
+    );
   }
 
   function firstInvalidExchangeField(values = exchangeValues) {
@@ -1039,8 +1063,7 @@ function MainWindow({
     return (
       !serialBlockMessage &&
       allRequiredFieldsFilled(values) &&
-      (force ||
-        (callsignValidation().ok && !firstInvalidExchangeField(values)))
+      (force || (callsignValidation().ok && !firstInvalidExchangeField(values)))
     );
   }
 
@@ -1461,21 +1484,25 @@ function MainWindow({
           {settings?.contest ?? 'Loading...'} | Mode: {radioMode}, Freq:{' '}
           {formatFrequency(radioFrequencyHz)}
         </span>
-        {loadingStatus ? (
-          <span className="logger-loading-status">{loadingStatus}</span>
-        ) : null}
-        <button className="title-button" onClick={onExit}>
-          Exit Logger
-        </button>
-        <button
-          className="title-button title-help-button"
-          type="button"
-          aria-label="Open help"
-          title="Open help"
-          onClick={openHelpWindow}
-        >
-          ?
-        </button>
+        <div className="logger-title-right">
+          {loadingStatus ? (
+            <span className="logger-loading-status">{loadingStatus}</span>
+          ) : null}
+          <div className="logger-title-actions">
+            <button className="title-button" onClick={onExit}>
+              Exit Logger
+            </button>
+            <button
+              className="title-button title-help-button"
+              type="button"
+              aria-label="Open help"
+              title="Open help"
+              onClick={openHelpWindow}
+            >
+              ?
+            </button>
+          </div>
+        </div>
       </div>
       <RadioControls
         operatingMode={operatingMode}

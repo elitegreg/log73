@@ -34,7 +34,7 @@ use dxcluster::{DxClusterEvent, DxClusterManager, format_dxcluster_frequency_khz
 use futures_util::{SinkExt, StreamExt};
 use log_cache::LogCache;
 use radio::{ClientMessage, RadioCommand, ServerMessage};
-use radio_cat_rs::supported_radio_kinds;
+use radio_cat_rs::supported_drivers;
 use radio_manager::RadioManager;
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use std::{
@@ -617,24 +617,28 @@ async fn handle_socket(
             Ok(ClientMessage::SendMessage {
                 request_id,
                 mode,
-                key,
+                keys,
                 fields,
             }) => {
                 debug!(
                     session_id,
-                    radio_id, request_id, mode, key, "websocket send_message command received"
+                    radio_id,
+                    request_id,
+                    mode,
+                    ?keys,
+                    "websocket send_message command received"
                 );
                 if let Err(error) =
-                    validation::validate_message_request(&request_id, &mode, &key, &fields)
+                    validation::validate_message_request(&request_id, &mode, &keys, &fields)
                 {
-                    warn!(session_id, radio_id, request_id, mode, key, %error, "invalid websocket send_message command");
+                    warn!(session_id, radio_id, request_id, mode, ?keys, %error, "invalid websocket send_message command");
                     continue;
                 }
                 let (completed_tx, completed_rx) = oneshot::channel();
                 let command_result = radio_handle
                     .send_command(RadioCommand::SendMessage {
                         mode,
-                        key,
+                        keys,
                         fields,
                         completed: completed_tx,
                     })
@@ -1335,11 +1339,22 @@ async fn radios(State(app_state): State<AppState>) -> Json<Vec<db::RadioConfig>>
     }
 }
 
-async fn radio_kinds() -> Json<Vec<String>> {
+#[derive(Debug, serde::Serialize)]
+struct RadioKindOption {
+    id: &'static str,
+    display_name: &'static str,
+    description: &'static str,
+}
+
+async fn radio_kinds() -> Json<Vec<RadioKindOption>> {
     Json(
-        supported_radio_kinds()
+        supported_drivers()
             .iter()
-            .map(|kind| kind.display_name())
+            .map(|driver| RadioKindOption {
+                id: driver.id,
+                display_name: driver.display_name,
+                description: driver.description,
+            })
             .collect(),
     )
 }

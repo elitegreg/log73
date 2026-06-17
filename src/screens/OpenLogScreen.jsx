@@ -4,13 +4,34 @@ import { apiDownload, apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
 
-function formatRadioSummary(radio) {
-  const connection =
-    radio.transport_kind === 'serial'
-      ? `serial ${radio.serial_port || '(unset)'} @ ${radio.serial_baud_rate}`
-      : `tcp ${radio.tcp_host}:${radio.tcp_port}`;
+function normalizeRadioKinds(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((kind) =>
+      typeof kind === 'string'
+        ? { id: kind, display_name: kind }
+        : {
+            id: String(kind?.id ?? '').trim(),
+            display_name: String(kind?.display_name ?? kind?.id ?? '').trim(),
+          },
+    )
+    .filter((kind) => kind.id);
+}
 
-  return `${radio.name} - ${radio.radio_kind} - ${connection} - poll ${radio.poll_frequency}s timeout ${radio.cat_timeout}s`;
+function radioKindLabel(radio, radioKindsById) {
+  const id = String(radio.radio_kind ?? '').trim();
+  const displayName = radioKindsById.get(id)?.display_name;
+  return displayName && displayName !== id ? `${displayName} (${id})` : id;
+}
+
+function formatRadioSummary(radio, radioKindsById) {
+  const connection =
+    radio.transport_kind === 'none'
+      ? 'none'
+      : radio.transport_kind === 'serial'
+        ? `serial ${radio.serial_port || '(unset)'} @ ${radio.serial_baud_rate}`
+        : `tcp ${radio.tcp_host}:${radio.tcp_port}`;
+
+  return `${radio.name} - ${radioKindLabel(radio, radioKindsById)} - ${connection}`;
 }
 
 function OpenLogScreen() {
@@ -18,6 +39,7 @@ function OpenLogScreen() {
   const { notifyError } = useNotifications();
   const [logs, setLogs] = useState([]);
   const [radios, setRadios] = useState([]);
+  const [radioKindsById, setRadioKindsById] = useState(() => new Map());
   const [selectedLogId, setSelectedLogId] = useState('');
   const [selectedRadioId, setSelectedRadioId] = useState('');
 
@@ -36,12 +58,18 @@ function OpenLogScreen() {
   );
 
   async function load() {
-    const [nextLogs, nextRadios] = await Promise.all([
+    const [nextLogs, nextRadios, nextRadioKinds] = await Promise.all([
       apiJson('/logs'),
       apiJson('/radios'),
+      apiJson('/radio-kinds'),
     ]);
     setLogs(nextLogs);
     setRadios(nextRadios);
+    setRadioKindsById(
+      new Map(
+        normalizeRadioKinds(nextRadioKinds).map((kind) => [kind.id, kind]),
+      ),
+    );
     setSelectedLogId((current) => current || String(nextLogs[0]?.id ?? ''));
     setSelectedRadioId((current) => current || String(nextRadios[0]?.id ?? ''));
   }
@@ -253,7 +281,7 @@ function OpenLogScreen() {
           >
             {radios.map((radio) => (
               <option key={radio.id} value={radio.id}>
-                {formatRadioSummary(radio)}
+                {formatRadioSummary(radio, radioKindsById)}
               </option>
             ))}
           </select>

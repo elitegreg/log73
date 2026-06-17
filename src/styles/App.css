@@ -728,12 +728,25 @@
 
 .logger-title-bar {
   gap: 8px;
+  justify-content: flex-start;
+}
+
+.logger-title-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .logger-loading-status {
-  margin-left: auto;
   white-space: nowrap;
   font-weight: normal;
+}
+
+.logger-title-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .log-title-status {

@@ -9,7 +9,8 @@ use backon::{BackoffBuilder, ExponentialBuilder};
 use cw_serial_keyer::{Config as CwSerialConfig, ControlLine, SerialKeyer as CwSerialDevice};
 use futures_util::future::{BoxFuture, FutureExt};
 use radio_cat_rs::{
-    ConnectionConfig, ControllableRadio, RadioKind, create_radio, create_radio_with_io,
+    AsyncIoTransport, ConnectionState, Frequency, Radio, RadioConfig as CatRadioConfig, RadioError,
+    RadioTask, RitXitOffsetHz, TransportConfig,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -132,23 +133,7 @@ impl RadioManager {
                 }
 
                 if wait_for_shutdown.is_none() {
-                    debug!(
-                        radio_id,
-                        radio_kind = %config.radio_kind,
-                        transport_kind = %config.transport_kind,
-                        tcp_host = %config.tcp_host,
-                        tcp_port = config.tcp_port,
-                        serial_port = %config.serial_port,
-                        serial_baud_rate = config.serial_baud_rate,
-                        poll_frequency = config.poll_frequency,
-                        cat_timeout = config.cat_timeout,
-                        cw_keyer_type = %config.cw_keyer_type,
-                        winkeyer_serial_port = %config.winkeyer_serial_port,
-                        cw_serial_port = %config.cw_serial_port,
-                        cw_serial_baud_rate = config.cw_serial_baud_rate,
-                        cw_serial_line = %config.cw_serial_line,
-                        "starting managed radio"
-                    );
+                    debug_radio_config(&config, "starting managed radio");
                     let current_status = Arc::new(RwLock::new(RadioStatus { online: false }));
                     let current = Arc::new(RwLock::new(None));
                     let (status_updates, _) = broadcast::channel(32);
@@ -281,23 +266,7 @@ impl RadioManager {
             return Ok(());
         };
 
-        debug!(
-            radio_id,
-            radio_kind = %config.radio_kind,
-            transport_kind = %config.transport_kind,
-            tcp_host = %config.tcp_host,
-            tcp_port = config.tcp_port,
-            serial_port = %config.serial_port,
-            serial_baud_rate = config.serial_baud_rate,
-            poll_frequency = config.poll_frequency,
-            cat_timeout = config.cat_timeout,
-            cw_keyer_type = %config.cw_keyer_type,
-            winkeyer_serial_port = %config.winkeyer_serial_port,
-            cw_serial_port = %config.cw_serial_port,
-            cw_serial_baud_rate = config.cw_serial_baud_rate,
-            cw_serial_line = %config.cw_serial_line,
-            "requesting active radio config reload"
-        );
+        debug_radio_config(&config, "requesting active radio config reload");
         command_sender
             .send(RadioCommand::ReloadConfig(Box::new(config)))
             .await
@@ -347,8 +316,6 @@ async fn run_managed_radio(
     let mut reconnect_deadline = None;
 
     loop {
-        let poll_interval = Duration::from_secs_f64(config.poll_frequency);
-
         if let Some(deadline) = reconnect_deadline {
             loop {
                 tokio::select! {
@@ -381,29 +348,7 @@ async fn run_managed_radio(
             }
         }
 
-        let radio_kind = match radio_kind_for_config(&config) {
-            Ok(radio_kind) => radio_kind,
-            Err(error) => {
-                set_radio_status(&current_status, &status_updates, false).await;
-                reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
-                warn!(radio_id = config.id, %error, "radio config has unsupported radio kind");
-                continue;
-            }
-        };
-        debug!(
-            radio_id = config.id,
-            radio_kind = %config.radio_kind,
-            transport_kind = %config.transport_kind,
-            tcp_host = %config.tcp_host,
-            tcp_port = config.tcp_port,
-            serial_port = %config.serial_port,
-            serial_baud_rate = config.serial_baud_rate,
-            poll_frequency = config.poll_frequency,
-            cat_timeout = config.cat_timeout,
-            shared_cw_serial_port = uses_shared_cw_serial_port(&config),
-            "attempting CAT radio connection"
-        );
-
+        debug_radio_config(&config, "attempting CAT radio connection");
         let connect_config = config.clone();
         let connected = tokio::select! {
             _ = &mut shutdown => return,
@@ -422,27 +367,24 @@ async fn run_managed_radio(
                     None => return,
                 }
             }
-            result = connect_cat_radio(connect_config, radio_kind) => {
+            result = connect_cat_radio(connect_config) => {
                 match result {
                     Ok(connected) => connected,
                     Err(error) => {
-                    set_radio_status(&current_status, &status_updates, false).await;
-                    reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
-                    warn!(
-                        radio_id = config.id,
-                        radio_kind = %config.radio_kind,
-                        transport_kind = %config.transport_kind,
-                        %error,
-                        "failed to connect to CAT radio"
-                    );
-                    continue;
+                        set_radio_status(&current_status, &status_updates, false).await;
+                        reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
+                        warn!(
+                            radio_id = config.id,
+                            radio_kind = %config.radio_kind,
+                            transport_kind = %config.transport_kind,
+                            %error,
+                            "failed to connect to CAT radio"
+                        );
+                        continue;
+                    }
                 }
             }
-            }
         };
-
-        let radio: Arc<dyn ControllableRadio> = connected.radio.into();
-        let shared_cw_serial_keyer = connected.shared_cw_serial_keyer;
 
         reconnect_backoff = cat_reconnect_backoff().build();
         info!(
@@ -451,89 +393,110 @@ async fn run_managed_radio(
             transport_kind = %config.transport_kind,
             "connected to CAT radio"
         );
-        set_radio_status(&current_status, &status_updates, true).await;
+
+        let ConnectedCatRadio {
+            radio,
+            task,
+            shared_cw_serial_keyer,
+        } = connected;
+        let mut radio_updates = radio.subscribe_updates();
+        let mut radio_task = tokio::spawn(async move { task.run().await });
+        publish_cat_snapshot(
+            config.id,
+            radio.latest_state().as_ref(),
+            &current_status,
+            &status_updates,
+            &current,
+            &updates,
+        )
+        .await;
+
         let (cw_tx, cw_rx) = mpsc::channel(32);
         let cw_config = config.clone();
         let cw_radio = radio.clone();
         let cw_task = tokio::spawn(async move {
             run_cw_task(cw_config, cw_radio, shared_cw_serial_keyer, cw_rx).await
         });
-        let mut interval = tokio::time::interval(poll_interval);
-        let (mut last_frequency_hz, mut last_rit_offset_hz) = current
+
+        let mut last_rit_offset_hz = current
             .read()
             .await
             .as_ref()
-            .map(|state| (state.frequency_hz, state.rit_offset_hz))
-            .unwrap_or((0, 0));
-        let mut rit_commands_authoritative = false;
+            .map(|state| state.rit_offset_hz)
+            .unwrap_or(0);
 
         loop {
             tokio::select! {
                 _ = &mut shutdown => {
-                    let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
-                    let _ = cw_task.await;
+                    shutdown_cw_task(cw_tx, cw_task).await;
+                    abort_radio_task(radio_task).await;
                     return;
                 }
-                _ = interval.tick() => {
-                    trace!(radio_id = config.id, "polling radio state");
-                    match poll_radio(radio.as_ref()).await {
-                        Ok(state) => {
-                            last_frequency_hz = state.frequency_hz;
-                            if rit_commands_authoritative {
-                                if state.rit_offset_hz != last_rit_offset_hz {
-                                    debug!(
-                                        radio_id = config.id,
-                                        polled_rit_offset_hz = state.rit_offset_hz,
-                                        tracked_rit_offset_hz = last_rit_offset_hz,
-                                        "polled RIT offset differs from tracked RIT; keeping tracked value for incremental RIT commands"
-                                    );
-                                }
-                            } else {
-                                last_rit_offset_hz = state.rit_offset_hz;
-                            }
-                            let mut current_state = current.write().await;
-                            let changed = current_state.as_ref() != Some(&state);
-                            if changed {
-                                *current_state = Some(state.clone());
-                                trace!(
-                                    radio_id = config.id,
-                                    frequency_hz = state.frequency_hz,
-                                    mode = %state.mode,
-                                    rit_offset_hz = state.rit_offset_hz,
-                                    "polled radio state changed"
-                                );
-                                let _ = updates.send(state);
-                            } else {
-                                trace!(
-                                    radio_id = config.id,
-                                    frequency_hz = state.frequency_hz,
-                                    mode = %state.mode,
-                                    rit_offset_hz = state.rit_offset_hz,
-                                    "polled radio state unchanged; not broadcasting"
-                                );
+                result = &mut radio_task => {
+                    match result {
+                        Ok(Ok(())) => warn!(radio_id = config.id, "CAT radio task exited"),
+                        Ok(Err(error)) => warn!(radio_id = config.id, %error, "CAT radio task failed"),
+                        Err(error) => warn!(radio_id = config.id, %error, "CAT radio task join failed"),
+                    }
+                    set_radio_status(&current_status, &status_updates, false).await;
+                    reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
+                    shutdown_cw_task(cw_tx, cw_task).await;
+                    break;
+                }
+                update = radio_updates.recv() => {
+                    match update {
+                        Ok(update) => {
+                            trace!(
+                                radio_id = config.id,
+                                source = ?update.source,
+                                changes = ?update.changes,
+                                fields = ?update.fields,
+                                "received radio-cat state update"
+                            );
+                            publish_cat_snapshot(
+                                config.id,
+                                update.state.as_ref(),
+                                &current_status,
+                                &status_updates,
+                                &current,
+                                &updates,
+                            ).await;
+                            if let Some(offset) = update.state.rit_xit.offset_hz {
+                                last_rit_offset_hz = i32::from(offset.as_hz());
                             }
                         }
-                        Err(error) => {
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            warn!(radio_id = config.id, skipped, "radio-cat update receiver lagged");
+                            publish_cat_snapshot(
+                                config.id,
+                                radio.latest_state().as_ref(),
+                                &current_status,
+                                &status_updates,
+                                &current,
+                                &updates,
+                            ).await;
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            warn!(radio_id = config.id, "radio-cat update channel closed");
                             set_radio_status(&current_status, &status_updates, false).await;
                             reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
-                            warn!(radio_id = config.id, %error, "failed to poll CAT radio");
-                            let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
-                            let _ = cw_task.await;
+                            shutdown_cw_task(cw_tx, cw_task).await;
+                            abort_radio_task(radio_task).await;
                             break;
                         }
                     }
                 }
                 command = commands.recv() => {
                     let Some(command) = command else {
-                        let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
-                        let _ = cw_task.await;
+                        shutdown_cw_task(cw_tx, cw_task).await;
+                        abort_radio_task(radio_task).await;
                         return;
                     };
                     debug!(radio_id = config.id, ?command, "received radio command");
                     match command {
-                        RadioCommand::SendMessage { mode, key, fields, completed } => {
-                            debug!(radio_id = config.id, mode, key, "forwarding message send command");
-                            if let Err(error) = cw_tx.send(CwTaskCommand::SendMessage { mode, key, fields, completed }).await {
+                        RadioCommand::SendMessage { mode, keys, fields, completed } => {
+                            debug!(radio_id = config.id, mode, ?keys, "forwarding message send command");
+                            if let Err(error) = cw_tx.send(CwTaskCommand::SendMessage { mode, keys, fields, completed }).await {
                                 let CwTaskCommand::SendMessage { completed, .. } = error.0 else { unreachable!() };
                                 let _ = completed.send(Err("cw task unavailable".to_string()));
                             }
@@ -554,28 +517,10 @@ async fn run_managed_radio(
                             let _ = cw_tx.send(CwTaskCommand::SetWpm(wpm)).await;
                         }
                         RadioCommand::ReloadConfig(new_config) => {
-                            info!(
-                                radio_id = new_config.id,
-                                radio_kind = %new_config.radio_kind,
-                                transport_kind = %new_config.transport_kind,
-                                tcp_host = %new_config.tcp_host,
-                                tcp_port = new_config.tcp_port,
-                                serial_port = %new_config.serial_port,
-                                serial_baud_rate = new_config.serial_baud_rate,
-                                poll_frequency = new_config.poll_frequency,
-                                cat_timeout = new_config.cat_timeout,
-                                cw_keyer_type = %new_config.cw_keyer_type,
-                                winkeyer_serial_port = %new_config.winkeyer_serial_port,
-                                cw_serial_port = %new_config.cw_serial_port,
-                                cw_serial_baud_rate = new_config.cw_serial_baud_rate,
-                                cw_serial_line = %new_config.cw_serial_line,
-                                "reloading active radio config"
-                            );
+                            debug_radio_config(&new_config, "reloading active radio config");
                             set_radio_status(&current_status, &status_updates, false).await;
-                            debug!(radio_id = config.id, "shutting down cw task for radio config reload");
-                            let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
-                            let _ = cw_task.await;
-                            debug!(radio_id = config.id, "dropping CAT radio for config reload");
+                            shutdown_cw_task(cw_tx, cw_task).await;
+                            abort_radio_task(radio_task).await;
                             config = *new_config;
                             break;
                         }
@@ -589,33 +534,28 @@ async fn run_managed_radio(
                             debug!(
                                 radio_id = config.id,
                                 ?command,
-                                last_frequency_hz,
                                 last_rit_offset_hz,
-                                rit_commands_authoritative,
                                 "applying CAT radio command"
                             );
-                            if let Err(error) = apply_command(
-                                radio.as_ref(),
-                                command,
-                                last_frequency_hz,
-                                &mut last_rit_offset_hz,
-                            )
-                            .await
-                            {
-                                set_radio_status(&current_status, &status_updates, false).await;
-                                reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
-                                error!(radio_id = config.id, %error, "failed to apply radio command");
-                                let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
-                                let _ = cw_task.await;
-                                break;
+                            match apply_command(&radio, &current, command, &mut last_rit_offset_hz).await {
+                                Ok(()) => {}
+                                Err(error) if is_unsupported_capability(&error) => {
+                                    warn!(radio_id = config.id, %error, "CAT radio command unsupported");
+                                }
+                                Err(error) => {
+                                    set_radio_status(&current_status, &status_updates, false).await;
+                                    reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
+                                    error!(radio_id = config.id, %error, "failed to apply radio command");
+                                    shutdown_cw_task(cw_tx, cw_task).await;
+                                    abort_radio_task(radio_task).await;
+                                    break;
+                                }
                             }
                             if is_rit_command {
-                                rit_commands_authoritative = true;
                                 debug!(
                                     radio_id = config.id,
                                     last_rit_offset_hz,
-                                    rit_commands_authoritative,
-                                    "RIT command applied; using tracked RIT for subsequent incremental commands"
+                                    "RIT command applied or ignored; tracked offset updated when supported"
                                 );
                             }
                         }
@@ -624,6 +564,16 @@ async fn run_managed_radio(
             }
         }
     }
+}
+
+async fn shutdown_cw_task(cw_tx: mpsc::Sender<CwTaskCommand>, cw_task: JoinHandle<()>) {
+    let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
+    let _ = cw_task.await;
+}
+
+async fn abort_radio_task(radio_task: JoinHandle<radio_cat_rs::Result<()>>) {
+    radio_task.abort();
+    let _ = radio_task.await;
 }
 
 async fn set_radio_status(
@@ -643,6 +593,80 @@ async fn set_radio_status(
     );
     status.online = online;
     let _ = status_updates.send(status.clone());
+}
+
+async fn publish_cat_snapshot(
+    radio_id: i64,
+    cat_state: &radio_cat_rs::RadioState,
+    current_status: &Arc<RwLock<RadioStatus>>,
+    status_updates: &broadcast::Sender<RadioStatus>,
+    current: &Arc<RwLock<Option<RadioState>>>,
+    updates: &broadcast::Sender<RadioState>,
+) {
+    set_radio_status(
+        current_status,
+        status_updates,
+        matches!(cat_state.connection, ConnectionState::Ready),
+    )
+    .await;
+
+    let previous = current.read().await.clone();
+    let Some(state) = logger_state_from_cat_state(cat_state, previous.as_ref()) else {
+        trace!(
+            radio_id,
+            "radio-cat state does not yet include logger-visible radio state"
+        );
+        return;
+    };
+
+    if previous.as_ref() == Some(&state) {
+        trace!(
+            radio_id,
+            frequency_hz = state.frequency_hz,
+            mode = %state.mode,
+            rit_offset_hz = state.rit_offset_hz,
+            "radio state unchanged; not broadcasting"
+        );
+        return;
+    }
+
+    trace!(
+        radio_id,
+        frequency_hz = state.frequency_hz,
+        mode = %state.mode,
+        rit_offset_hz = state.rit_offset_hz,
+        "broadcasting radio state update"
+    );
+    *current.write().await = Some(state.clone());
+    let _ = updates.send(state);
+}
+
+fn logger_state_from_cat_state(
+    cat_state: &radio_cat_rs::RadioState,
+    previous: Option<&RadioState>,
+) -> Option<RadioState> {
+    let frequency_hz = cat_state
+        .main_rx
+        .frequency
+        .map(|frequency| frequency.hz())
+        .or_else(|| previous.map(|state| state.frequency_hz))?;
+    let mode = cat_state
+        .main_rx
+        .mode
+        .map(|mode| normalize_mode(&mode))
+        .or_else(|| previous.map(|state| state.mode.clone()))?;
+    let rit_offset_hz = cat_state
+        .rit_xit
+        .offset_hz
+        .map(|offset| i32::from(offset.as_hz()))
+        .or_else(|| previous.map(|state| state.rit_offset_hz))
+        .unwrap_or(0);
+
+    Some(RadioState {
+        frequency_hz,
+        mode,
+        rit_offset_hz,
+    })
 }
 
 fn fail_pending_cw_sends(pending: &mut VecDeque<PendingCwSend>, reason: &str) {
@@ -669,14 +693,14 @@ fn fail_unavailable_radio_command(command: RadioCommand, reason: &str) {
 }
 
 struct ConnectedCatRadio {
-    radio: Box<dyn ControllableRadio>,
+    radio: Radio,
+    task: RadioTask,
     shared_cw_serial_keyer: Option<CwSerialDevice>,
 }
 
-async fn connect_cat_radio(
-    config: RadioConfig,
-    radio_kind: RadioKind,
-) -> Result<ConnectedCatRadio, String> {
+async fn connect_cat_radio(config: RadioConfig) -> Result<ConnectedCatRadio, String> {
+    let cat_config = cat_radio_config_for(&config)?;
+
     if uses_shared_cw_serial_port(&config) {
         let mut shared_cw_serial_keyer = open_serial_keyer(
             &config.cw_serial_port,
@@ -687,7 +711,6 @@ async fn connect_cat_radio(
         .map_err(|error| error.to_string())?;
         let radio_id = config.id;
         let serial_port = config.serial_port.clone();
-        let timeout = Duration::from_secs_f64(config.cat_timeout);
         let io = shared_cw_serial_keyer.serial_stream();
         info!(
             radio_id,
@@ -697,8 +720,9 @@ async fn connect_cat_radio(
             "sharing serial port for CAT and CW keying"
         );
 
-        let radio = match create_radio_with_io(radio_kind, io, timeout, &config.options).await {
-            Ok(radio) => radio,
+        let transport = AsyncIoTransport::new(io);
+        let (radio, task) = match Radio::build_with_transport(cat_config, transport).await {
+            Ok(result) => result,
             Err(error) => {
                 if let Err(close_error) = shared_cw_serial_keyer.close().await {
                     warn!(radio_id, %close_error, "failed to close shared serial CW keyer");
@@ -709,17 +733,18 @@ async fn connect_cat_radio(
 
         return Ok(ConnectedCatRadio {
             radio,
+            task,
             shared_cw_serial_keyer: Some(shared_cw_serial_keyer),
         });
     }
 
-    let connection = connection_config_for(&config)?;
-    let radio = create_radio(radio_kind, connection, &config.options)
+    let (radio, task) = Radio::build(cat_config)
         .await
         .map_err(|error| error.to_string())?;
 
     Ok(ConnectedCatRadio {
         radio,
+        task,
         shared_cw_serial_keyer: None,
     })
 }
@@ -731,32 +756,27 @@ fn uses_shared_cw_serial_port(config: &RadioConfig) -> bool {
         && config.serial_port.trim() == config.cw_serial_port.trim()
 }
 
-fn radio_kind_for_config(config: &RadioConfig) -> Result<RadioKind, String> {
-    let parsed = config
-        .radio_kind
-        .trim()
-        .parse::<RadioKind>()
-        .map_err(|error| error.to_string())?;
-    trace!(
-        radio_id = config.id,
-        configured_radio_kind = %config.radio_kind,
-        parsed_radio_kind = parsed.as_str(),
-        "parsed radio kind for CAT factory"
-    );
-    Ok(parsed)
+fn cat_radio_config_for(config: &RadioConfig) -> Result<CatRadioConfig, String> {
+    let mut cat_config = CatRadioConfig::new(config.radio_kind.trim())
+        .with_transport(transport_config_for(config)?)
+        .with_options(config.options.clone());
+
+    if config.radio_kind.trim().eq_ignore_ascii_case("dummy") {
+        cat_config = cat_config.with_transport(TransportConfig::None);
+    }
+
+    Ok(cat_config)
 }
 
-fn connection_config_for(config: &RadioConfig) -> Result<ConnectionConfig, String> {
-    let timeout = Duration::from_secs_f64(config.cat_timeout);
+fn transport_config_for(config: &RadioConfig) -> Result<TransportConfig, String> {
     trace!(
         radio_id = config.id,
         transport_kind = %config.transport_kind,
-        cat_timeout = config.cat_timeout,
-        timeout_ms = timeout.as_millis(),
-        "building CAT connection config"
+        "building CAT transport config"
     );
 
     match config.transport_kind.trim().to_ascii_lowercase().as_str() {
+        "none" => Ok(TransportConfig::None),
         "tcp" => {
             let host = config.tcp_host.trim();
             if host.is_empty() {
@@ -765,14 +785,7 @@ fn connection_config_for(config: &RadioConfig) -> Result<ConnectionConfig, Strin
             if config.tcp_port == 0 {
                 return Err("TCP port must be between 1 and 65535".to_string());
             }
-            trace!(
-                radio_id = config.id,
-                tcp_host = host,
-                tcp_port = config.tcp_port,
-                timeout_ms = timeout.as_millis(),
-                "built TCP CAT connection config"
-            );
-            Ok(ConnectionConfig::tcp(host, config.tcp_port).with_timeout(timeout))
+            Ok(TransportConfig::tcp_socket(host, config.tcp_port))
         }
         "serial" => {
             let serial_port = config.serial_port.trim();
@@ -782,17 +795,10 @@ fn connection_config_for(config: &RadioConfig) -> Result<ConnectionConfig, Strin
             if config.serial_baud_rate == 0 {
                 return Err("serial baud rate must be greater than 0".to_string());
             }
-            trace!(
-                radio_id = config.id,
+            Ok(TransportConfig::serial(
                 serial_port,
-                serial_baud_rate = config.serial_baud_rate,
-                timeout_ms = timeout.as_millis(),
-                "built serial CAT connection config"
-            );
-            Ok(
-                ConnectionConfig::serial(serial_port, config.serial_baud_rate)
-                    .with_timeout(timeout),
-            )
+                config.serial_baud_rate,
+            ))
         }
         other => Err(format!("unsupported transport kind `{other}`")),
     }
@@ -817,10 +823,29 @@ fn next_cat_reconnect_deadline(
     tokio::time::Instant::now() + delay
 }
 
+fn debug_radio_config(config: &RadioConfig, message: &'static str) {
+    debug!(
+        radio_id = config.id,
+        radio_kind = %config.radio_kind,
+        transport_kind = %config.transport_kind,
+        tcp_host = %config.tcp_host,
+        tcp_port = config.tcp_port,
+        serial_port = %config.serial_port,
+        serial_baud_rate = config.serial_baud_rate,
+        cw_keyer_type = %config.cw_keyer_type,
+        winkeyer_serial_port = %config.winkeyer_serial_port,
+        cw_serial_port = %config.cw_serial_port,
+        cw_serial_baud_rate = config.cw_serial_baud_rate,
+        cw_serial_line = %config.cw_serial_line,
+        shared_cw_serial_port = uses_shared_cw_serial_port(config),
+        "{message}"
+    );
+}
+
 enum CwTaskCommand {
     SendMessage {
         mode: String,
-        key: String,
+        keys: Vec<String>,
         fields: serde_json::Map<String, serde_json::Value>,
         completed: oneshot::Sender<Result<(), String>>,
     },
@@ -836,7 +861,7 @@ enum CwTaskCommand {
 enum PendingCwPayload {
     Message {
         mode: String,
-        key: String,
+        keys: Vec<String>,
         fields: serde_json::Map<String, serde_json::Value>,
     },
     Text {
@@ -851,7 +876,7 @@ struct PendingCwSend {
 
 async fn run_cw_task(
     config: RadioConfig,
-    radio: Arc<dyn ControllableRadio>,
+    radio: Radio,
     shared_cw_serial_keyer: Option<CwSerialDevice>,
     mut commands: mpsc::Receiver<CwTaskCommand>,
 ) {
@@ -865,12 +890,12 @@ async fn run_cw_task(
             match commands.recv().await {
                 Some(CwTaskCommand::SendMessage {
                     mode,
-                    key,
+                    keys,
                     fields,
                     completed,
                 }) => (
                     Some(PendingCwSend {
-                        payload: PendingCwPayload::Message { mode, key, fields },
+                        payload: PendingCwPayload::Message { mode, keys, fields },
                         completed,
                     }),
                     false,
@@ -912,11 +937,11 @@ async fn run_cw_task(
             "cw task starting queued send"
         );
         let result = match &send.payload {
-            PendingCwPayload::Message { mode, key, fields } => {
+            PendingCwPayload::Message { mode, keys, fields } => {
                 controller
                     .send_message(
                         mode,
-                        key,
+                        keys,
                         fields,
                         prepend_space,
                         &mut commands,
@@ -944,7 +969,7 @@ async fn run_cw_task(
 
 struct CwController {
     radio_id: i64,
-    radio: Arc<dyn ControllableRadio>,
+    radio: Radio,
     messages: String,
     keyer: Option<Box<dyn CwKeyer>>,
 }
@@ -952,7 +977,7 @@ struct CwController {
 impl CwController {
     async fn new(
         config: &RadioConfig,
-        radio: Arc<dyn ControllableRadio>,
+        radio: Radio,
         shared_cw_serial_keyer: Option<CwSerialDevice>,
     ) -> Self {
         let mut controller = Self {
@@ -976,7 +1001,7 @@ impl CwController {
     async fn send_message(
         &mut self,
         mode: &str,
-        key: &str,
+        keys: &[String],
         fields: &serde_json::Map<String, serde_json::Value>,
         prepend_space: bool,
         commands: &mut mpsc::Receiver<CwTaskCommand>,
@@ -985,24 +1010,51 @@ impl CwController {
         if !self.radio_mode_is_cw().await {
             debug!(
                 radio_id = self.radio_id,
-                mode, key, "ignoring message send; radio mode is not CW/CW-R"
+                mode,
+                ?keys,
+                "ignoring message send; radio mode is not CW/CW-R"
             );
             return Ok(());
         }
 
-        let Some(rendered_text) = cw::render(&self.messages, mode, key, fields) else {
-            warn!(radio_id = self.radio_id, mode, key, "unknown cw message");
-            return Err("unknown cw message".to_string());
-        };
-        if rendered_text.is_empty() {
+        let mut rendered_parts = Vec::new();
+        for key in keys {
+            let Some(rendered_text) = cw::render(&self.messages, mode, key, fields) else {
+                warn!(
+                    radio_id = self.radio_id,
+                    mode,
+                    ?keys,
+                    key,
+                    "unknown cw message"
+                );
+                return Err("unknown cw message".to_string());
+            };
+            if rendered_text.is_empty() {
+                debug!(
+                    radio_id = self.radio_id,
+                    mode, key, "ignoring empty cw message"
+                );
+                continue;
+            }
+            rendered_parts.push(rendered_text);
+        }
+        if rendered_parts.is_empty() {
             debug!(
                 radio_id = self.radio_id,
-                mode, key, "ignoring empty cw message"
+                mode,
+                ?keys,
+                "ignoring empty cw message sequence"
             );
             return Ok(());
         }
-        let text = cw_send_text(rendered_text, prepend_space);
-        debug!(radio_id = self.radio_id, mode, key, text, "sending cw text");
+        let text = cw_send_text(rendered_parts.join(" "), prepend_space);
+        debug!(
+            radio_id = self.radio_id,
+            mode,
+            ?keys,
+            text,
+            "sending cw text"
+        );
         let completion = {
             let Some(keyer) = self.keyer.as_mut() else {
                 debug!(
@@ -1016,7 +1068,7 @@ impl CwController {
             debug!(
                 radio_id = self.radio_id,
                 mode,
-                key,
+                ?keys,
                 keyer = keyer_name,
                 "cw text queued"
             );
@@ -1028,19 +1080,23 @@ impl CwController {
                 if wait_for_busy {
                     debug!(
                         radio_id = self.radio_id,
-                        mode, key, "waiting for cw keyer busy"
+                        mode,
+                        ?keys,
+                        "waiting for cw keyer busy"
                     );
                     self.wait_until_busy_or_stopped(commands, pending).await?;
                 }
                 debug!(
                     radio_id = self.radio_id,
-                    mode, key, "waiting for cw keyer idle"
+                    mode,
+                    ?keys,
+                    "waiting for cw keyer idle"
                 );
                 let result = self.wait_until_idle_or_stopped(commands, pending).await;
                 debug!(
                     radio_id = self.radio_id,
                     mode,
-                    key,
+                    ?keys,
                     ?result,
                     "finished waiting for cw keyer idle"
                 );
@@ -1050,7 +1106,7 @@ impl CwController {
                 debug!(
                     radio_id = self.radio_id,
                     mode,
-                    key,
+                    ?keys,
                     estimated_duration_ms = estimated_duration.as_millis(),
                     "waiting for estimated CW completion"
                 );
@@ -1065,16 +1121,16 @@ impl CwController {
     }
 
     async fn radio_mode_is_cw(&mut self) -> bool {
-        match self.radio.get_mode().await {
-            Ok(mode) => {
+        let mode = self.radio.latest_state().main_rx.mode;
+        match mode {
+            Some(mode) => {
                 let logger_mode = normalize_mode(&mode);
                 logger_mode == "CW" || logger_mode == "CW-R"
             }
-            Err(error) => {
+            None => {
                 warn!(
                     radio_id = self.radio_id,
-                    %error,
-                    "unable to read radio mode before message send"
+                    "radio mode is unknown before message send"
                 );
                 false
             }
@@ -1156,13 +1212,13 @@ impl CwController {
                         }
                         Some(CwTaskCommand::SendMessage {
                             mode,
-                            key,
+                            keys,
                             fields,
                             completed,
                         }) => {
-                            debug!(radio_id = self.radio_id, mode, key, pending_count = pending.len(), "queueing message send command while busy");
+                            debug!(radio_id = self.radio_id, mode, ?keys, pending_count = pending.len(), "queueing message send command while busy");
                             pending.push_back(PendingCwSend {
-                                payload: PendingCwPayload::Message { mode, key, fields },
+                                payload: PendingCwPayload::Message { mode, keys, fields },
                                 completed,
                             });
                         }
@@ -1223,13 +1279,13 @@ impl CwController {
                         }
                         Some(CwTaskCommand::SendMessage {
                             mode,
-                            key,
+                            keys,
                             fields,
                             completed,
                         }) => {
-                            debug!(radio_id = self.radio_id, mode, key, pending_count = pending.len(), "queueing message send command while busy");
+                            debug!(radio_id = self.radio_id, mode, ?keys, pending_count = pending.len(), "queueing message send command while busy");
                             pending.push_back(PendingCwSend {
-                                payload: PendingCwPayload::Message { mode, key, fields },
+                                payload: PendingCwPayload::Message { mode, keys, fields },
                                 completed,
                             });
                         }
@@ -1287,13 +1343,13 @@ impl CwController {
                         }
                         Some(CwTaskCommand::SendMessage {
                             mode,
-                            key,
+                            keys,
                             fields,
                             completed,
                         }) => {
-                            debug!(radio_id = self.radio_id, mode, key, pending_count = pending.len(), "queueing message send command while busy");
+                            debug!(radio_id = self.radio_id, mode, ?keys, pending_count = pending.len(), "queueing message send command while busy");
                             pending.push_back(PendingCwSend {
-                                payload: PendingCwPayload::Message { mode, key, fields },
+                                payload: PendingCwPayload::Message { mode, keys, fields },
                                 completed,
                             });
                         }
@@ -1376,7 +1432,7 @@ impl CwController {
 
 async fn cw_keyer_for_config(
     config: &RadioConfig,
-    radio: Arc<dyn ControllableRadio>,
+    radio: Radio,
     shared_cw_serial_keyer: Option<CwSerialDevice>,
 ) -> Option<Box<dyn CwKeyer>> {
     match config.cw_keyer_type.trim().to_ascii_lowercase().as_str() {
@@ -1821,47 +1877,33 @@ async fn ensure_winkeyer_connected(
     keyer.device.as_mut()
 }
 
-async fn poll_radio(radio: &dyn ControllableRadio) -> Result<RadioState, radio_cat_rs::RadioError> {
-    let frequency_hz = radio.get_frequency().await?.hz();
-    let mode = radio.get_mode().await?;
-    let rit_offset_hz = match radio.get_rit().await {
-        Ok(offset_hz) => offset_hz,
-        Err(radio_cat_rs::RadioError::UnsupportedOperation { .. }) => 0,
-        Err(error) => return Err(error),
-    };
-    trace!(
-        frequency_hz,
-        raw_mode = %mode,
-        rit_offset_hz,
-        "polled raw CAT radio state"
-    );
-
-    Ok(RadioState {
-        frequency_hz,
-        mode: normalize_mode(&mode),
-        rit_offset_hz,
-    })
-}
-
 async fn apply_command(
-    radio: &dyn ControllableRadio,
+    radio: &Radio,
+    current: &Arc<RwLock<Option<RadioState>>>,
     command: RadioCommand,
-    last_frequency_hz: u64,
     last_rit_offset_hz: &mut i32,
-) -> Result<(), radio_cat_rs::RadioError> {
+) -> Result<(), RadioError> {
     match command {
         RadioCommand::SetFrequency(frequency_hz) => {
             debug!(frequency_hz, "setting CAT radio frequency");
             radio
-                .set_frequency(radio_cat_rs::Frequency::from_hz(frequency_hz))
+                .set_main_frequency(Frequency::from_hz(frequency_hz))
                 .await
         }
         RadioCommand::SetMode(mode) => {
-            let frequency_hz = if last_frequency_hz == 0 {
-                radio.get_frequency().await?.hz()
-            } else {
-                last_frequency_hz
-            };
+            let frequency_hz = current
+                .read()
+                .await
+                .as_ref()
+                .map(|state| state.frequency_hz)
+                .or_else(|| {
+                    radio
+                        .latest_state()
+                        .main_rx
+                        .frequency
+                        .map(|frequency| frequency.hz())
+                })
+                .unwrap_or(14_000_000);
             trace!(
                 requested_mode = %mode,
                 resolved_frequency_hz = frequency_hz,
@@ -1876,7 +1918,7 @@ async fn apply_command(
 
             let mut last_error = None;
             for radio_mode in radio_modes {
-                match radio.set_mode(radio_mode).await {
+                match radio.set_main_mode(radio_mode).await {
                     Ok(()) => {
                         debug!(
                             requested_mode = %mode,
@@ -1910,7 +1952,7 @@ async fn apply_command(
                 tracked_rit_offset_hz = *last_rit_offset_hz,
                 "clearing CAT radio RIT"
             );
-            let applied = set_rit_offset_hz(radio, 0).await?;
+            let applied = set_rit_offset_hz(radio, 0, Some(false)).await?;
             if applied {
                 *last_rit_offset_hz = 0;
             }
@@ -1934,7 +1976,7 @@ async fn apply_command(
                 );
                 return Ok(());
             }
-            let applied = set_rit_offset_hz(radio, next_offset_hz).await?;
+            let applied = set_rit_offset_hz(radio, next_offset_hz, Some(true)).await?;
             if applied {
                 *last_rit_offset_hz = next_offset_hz;
             }
@@ -1963,7 +2005,7 @@ async fn apply_command(
                 );
                 return Ok(());
             }
-            let applied = set_rit_offset_hz(radio, next_offset_hz).await?;
+            let applied = set_rit_offset_hz(radio, next_offset_hz, Some(true)).await?;
             if applied {
                 *last_rit_offset_hz = next_offset_hz;
             }
@@ -1993,35 +2035,45 @@ fn next_rit_offset_hz(current_offset_hz: i32, delta_hz: i32) -> i32 {
 }
 
 async fn set_rit_offset_hz(
-    radio: &dyn ControllableRadio,
+    radio: &Radio,
     target_offset_hz: i32,
-) -> Result<bool, radio_cat_rs::RadioError> {
-    debug!(target_offset_hz, "applying CAT RIT offset");
-    if target_offset_hz == 0 {
-        match radio.clear_rit().await {
-            Ok(()) => {
-                debug!(target_offset_hz, "CAT RIT clear applied");
-                Ok(true)
+    enabled: Option<bool>,
+) -> Result<bool, RadioError> {
+    debug!(target_offset_hz, enabled, "applying CAT RIT offset");
+    if let Some(enabled) = enabled {
+        match radio.set_main_rit_enabled(enabled).await {
+            Ok(()) => {}
+            Err(error) if is_unsupported_capability(&error) => {
+                debug!(
+                    target_offset_hz,
+                    enabled, "CAT RIT enable unsupported by radio"
+                );
             }
-            Err(radio_cat_rs::RadioError::UnsupportedOperation { .. }) => {
-                debug!(target_offset_hz, "CAT RIT clear unsupported by radio");
-                Ok(false)
-            }
-            Err(error) => Err(error),
-        }
-    } else {
-        match radio.set_rit(target_offset_hz).await {
-            Ok(()) => {
-                debug!(target_offset_hz, "CAT RIT absolute offset applied");
-                Ok(true)
-            }
-            Err(radio_cat_rs::RadioError::UnsupportedOperation { .. }) => {
-                debug!(target_offset_hz, "CAT RIT set unsupported by radio");
-                Ok(false)
-            }
-            Err(error) => Err(error),
+            Err(error) => return Err(error),
         }
     }
+
+    let offset =
+        RitXitOffsetHz::new(target_offset_hz as i16).map_err(|error| RadioError::InvalidValue {
+            field: "rit_offset_hz",
+            message: error.to_string(),
+        })?;
+
+    match radio.set_main_rit_offset(offset).await {
+        Ok(()) => {
+            debug!(target_offset_hz, "CAT RIT offset applied");
+            Ok(true)
+        }
+        Err(error) if is_unsupported_capability(&error) => {
+            debug!(target_offset_hz, "CAT RIT offset unsupported by radio");
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn is_unsupported_capability(error: &RadioError) -> bool {
+    matches!(error, RadioError::UnsupportedCapability { .. })
 }
 
 #[cfg(test)]
@@ -2033,15 +2085,13 @@ mod tests {
         RadioConfig {
             id: 1,
             name: "Test".to_string(),
-            radio_kind: "k4".to_string(),
-            transport_kind: "tcp".to_string(),
+            radio_kind: "dummy".to_string(),
+            transport_kind: "none".to_string(),
             tcp_host: "127.0.0.1".to_string(),
             tcp_port: 5002,
             serial_port: String::new(),
             serial_baud_rate: 115_200,
             options: String::new(),
-            poll_frequency: 0.25,
-            cat_timeout: 2.0,
             cw_tuning_increment_hz: 20,
             ssb_tuning_increment_hz: 100,
             rit_clear_on_log: false,
@@ -2081,27 +2131,30 @@ mod tests {
     }
 
     #[test]
-    fn builds_tcp_connection_config_with_timeout() {
+    fn builds_none_transport_config_for_dummy() {
         let config = test_config();
-
-        let connection = connection_config_for(&config).expect("connection should build");
-
-        match connection {
-            ConnectionConfig::Tcp {
-                host,
-                port,
-                timeout,
-            } => {
-                assert_eq!(host, "127.0.0.1");
-                assert_eq!(port, 5002);
-                assert_eq!(timeout, Duration::from_secs(2));
-            }
-            ConnectionConfig::Serial { .. } => panic!("expected tcp config"),
-        }
+        let cat_config = cat_radio_config_for(&config).expect("config should build");
+        assert!(matches!(cat_config.transport, TransportConfig::None));
     }
 
     #[test]
-    fn builds_serial_connection_config_with_timeout() {
+    fn builds_tcp_transport_config() {
+        let mut config = test_config();
+        config.radio_kind = "elecraft-k4".to_string();
+        config.transport_kind = "tcp".to_string();
+
+        let transport = transport_config_for(&config).expect("transport should build");
+
+        assert_eq!(
+            transport,
+            TransportConfig::Tcp {
+                address: "127.0.0.1:5002".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn builds_serial_transport_config() {
         let mut config = test_config();
         config.transport_kind = "serial".to_string();
         config.tcp_host = String::new();
@@ -2109,20 +2162,15 @@ mod tests {
         config.serial_port = "/dev/ttyUSB0".to_string();
         config.serial_baud_rate = 57_600;
 
-        let connection = connection_config_for(&config).expect("connection should build");
+        let transport = transport_config_for(&config).expect("transport should build");
 
-        match connection {
-            ConnectionConfig::Serial {
-                path,
-                baud_rate,
-                timeout,
-            } => {
-                assert_eq!(path, std::path::PathBuf::from("/dev/ttyUSB0"));
-                assert_eq!(baud_rate, 57_600);
-                assert_eq!(timeout, Duration::from_secs(2));
+        assert_eq!(
+            transport,
+            TransportConfig::Serial {
+                path: "/dev/ttyUSB0".to_string(),
+                baud_rate: 57_600,
             }
-            ConnectionConfig::Tcp { .. } => panic!("expected serial config"),
-        }
+        );
     }
 
     #[test]
@@ -2155,7 +2203,7 @@ mod tests {
             PendingCwSend {
                 payload: PendingCwPayload::Message {
                     mode: "run".to_string(),
-                    key: "F1".to_string(),
+                    keys: vec!["F1".to_string()],
                     fields: Map::new(),
                 },
                 completed: first_tx,
@@ -2163,7 +2211,7 @@ mod tests {
             PendingCwSend {
                 payload: PendingCwPayload::Message {
                     mode: "run".to_string(),
-                    key: "F2".to_string(),
+                    keys: vec!["F2".to_string()],
                     fields: Map::new(),
                 },
                 completed: second_tx,
@@ -2184,7 +2232,7 @@ mod tests {
         fail_unavailable_radio_command(
             RadioCommand::SendMessage {
                 mode: "run".to_string(),
-                key: "F1".to_string(),
+                keys: vec!["F1".to_string()],
                 fields: Map::new(),
                 completed: completed_tx,
             },
@@ -2194,6 +2242,21 @@ mod tests {
         assert_eq!(
             completed_rx.await.unwrap(),
             Err("radio disconnected".to_string())
+        );
+    }
+
+    #[test]
+    fn logger_state_uses_previous_values_for_unknown_fields() {
+        let previous = RadioState {
+            frequency_hz: 14_000_000,
+            mode: "CW".to_string(),
+            rit_offset_hz: 20,
+        };
+        let cat_state = radio_cat_rs::RadioState::default();
+
+        assert_eq!(
+            logger_state_from_cat_state(&cat_state, Some(&previous)),
+            Some(previous)
         );
     }
 

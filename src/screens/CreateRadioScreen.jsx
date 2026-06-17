@@ -4,12 +4,60 @@ import { apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
 
-const DEFAULT_TRANSPORT_KIND = 'tcp';
+const DEFAULT_RADIO_KIND = 'dummy';
+const DEFAULT_TRANSPORT_KIND = 'none';
+const DEFAULT_REAL_RADIO_TRANSPORT_KIND = 'tcp';
 const DEFAULT_CW_KEYER_TYPE = 'none';
 const DEFAULT_CW_SERIAL_BAUD_RATE = 9600;
 const DEFAULT_CW_SERIAL_LINE = 'dtr';
 const DEFAULT_CW_TUNING_INCREMENT_HZ = 20;
 const DEFAULT_SSB_TUNING_INCREMENT_HZ = 100;
+
+function normalizeRadioKinds(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((kind) =>
+      typeof kind === 'string'
+        ? { id: kind, display_name: kind, description: '' }
+        : {
+            id: String(kind?.id ?? '').trim(),
+            display_name: String(kind?.display_name ?? kind?.id ?? '').trim(),
+            description: String(kind?.description ?? '').trim(),
+          },
+    )
+    .filter((kind) => kind.id);
+}
+
+function defaultRadioKind(radioKinds) {
+  return (
+    radioKinds.find((kind) => kind.id === DEFAULT_RADIO_KIND)?.id ??
+    radioKinds[0]?.id ??
+    DEFAULT_RADIO_KIND
+  );
+}
+
+function radioKindOptions(radioKinds, radioKind) {
+  const options = new Map(radioKinds.map((kind) => [kind.id, kind]));
+  if (radioKind && !options.has(radioKind)) {
+    options.set(radioKind, {
+      id: radioKind,
+      display_name: radioKind,
+      description: '',
+    });
+  }
+  return [...options.values()].sort((left, right) => {
+    if (left.id === DEFAULT_RADIO_KIND) return -1;
+    if (right.id === DEFAULT_RADIO_KIND) return 1;
+    return (left.display_name || left.id).localeCompare(
+      right.display_name || right.id,
+    );
+  });
+}
+
+function radioKindLabel(kind) {
+  return kind.display_name && kind.display_name !== kind.id
+    ? `${kind.display_name} (${kind.id})`
+    : kind.id;
+}
 
 function CreateRadioScreen() {
   const navigate = useNavigate();
@@ -25,8 +73,6 @@ function CreateRadioScreen() {
   const [serialPort, setSerialPort] = useState('');
   const [serialBaudRate, setSerialBaudRate] = useState(115200);
   const [options, setOptions] = useState('');
-  const [pollFrequency, setPollFrequency] = useState(0.25);
-  const [catTimeout, setCatTimeout] = useState(2);
   const [cwTuningIncrementHz, setCwTuningIncrementHz] = useState(
     DEFAULT_CW_TUNING_INCREMENT_HZ,
   );
@@ -47,6 +93,8 @@ function CreateRadioScreen() {
   const [cwMessagesValidationMessage, setCwMessagesValidationMessage] =
     useState('');
 
+  const selectedRadioKind = radioKind || defaultRadioKind(radioKinds);
+
   const notifyOperationalError = useCallback(
     (source, fallback, error, details = {}) => {
       const message = errorMessage(error, fallback);
@@ -62,6 +110,16 @@ function CreateRadioScreen() {
   );
 
   useEffect(() => {
+    if (
+      selectedRadioKind &&
+      selectedRadioKind !== DEFAULT_RADIO_KIND &&
+      transportKind === 'none'
+    ) {
+      setTransportKind(DEFAULT_REAL_RADIO_TRANSPORT_KIND);
+    }
+  }, [selectedRadioKind, transportKind]);
+
+  useEffect(() => {
     let isCancelled = false;
 
     async function loadContext() {
@@ -69,9 +127,7 @@ function CreateRadioScreen() {
 
       try {
         const result = await apiJson('/radio-kinds');
-        if (Array.isArray(result)) {
-          kinds = result;
-        }
+        kinds = normalizeRadioKinds(result);
       } catch (error) {
         notifyOperationalError(
           'CreateRadioScreen.loadRadioKinds',
@@ -82,7 +138,9 @@ function CreateRadioScreen() {
 
       let loadedDefaultCwMessages = '';
       try {
-        const defaultMessagesResult = await apiJson('/radios/cw-messages/default');
+        const defaultMessagesResult = await apiJson(
+          '/radios/cw-messages/default',
+        );
         if (defaultMessagesResult.ok) {
           loadedDefaultCwMessages = defaultMessagesResult.cw_messages ?? '';
         }
@@ -99,6 +157,13 @@ function CreateRadioScreen() {
       setDefaultCwMessages(loadedDefaultCwMessages);
 
       if (!isEditing) {
+        const nextRadioKind = defaultRadioKind(kinds);
+        setRadioKind(nextRadioKind);
+        setTransportKind(
+          nextRadioKind === DEFAULT_RADIO_KIND
+            ? DEFAULT_TRANSPORT_KIND
+            : DEFAULT_REAL_RADIO_TRANSPORT_KIND,
+        );
         setCwMessages(loadedDefaultCwMessages);
         return;
       }
@@ -115,8 +180,6 @@ function CreateRadioScreen() {
       setSerialPort(result.radio.serial_port ?? '');
       setSerialBaudRate(result.radio.serial_baud_rate ?? 115200);
       setOptions(result.radio.options ?? '');
-      setPollFrequency(result.radio.poll_frequency ?? 0.25);
-      setCatTimeout(result.radio.cat_timeout ?? 2);
       setCwTuningIncrementHz(
         result.radio.cw_tuning_increment_hz ?? DEFAULT_CW_TUNING_INCREMENT_HZ,
       );
@@ -156,7 +219,9 @@ function CreateRadioScreen() {
     });
 
     if (!result.ok) {
-      setCwMessagesValidationMessage(result.error ?? 'CW messages are invalid.');
+      setCwMessagesValidationMessage(
+        result.error ?? 'CW messages are invalid.',
+      );
       notifyOperationalError(
         'CreateRadioScreen.validateCwMessages',
         'CW messages are invalid.',
@@ -181,15 +246,13 @@ function CreateRadioScreen() {
       method: isEditing ? 'PUT' : 'POST',
       body: JSON.stringify({
         name,
-        radio_kind: radioKind || radioKinds[0] || '',
+        radio_kind: selectedRadioKind,
         transport_kind: transportKind,
         tcp_host: tcpHost,
         tcp_port: Number(tcpPort),
         serial_port: serialPort,
         serial_baud_rate: Number(serialBaudRate),
         options: options,
-        poll_frequency: Number(pollFrequency),
-        cat_timeout: Number(catTimeout),
         cw_tuning_increment_hz: Number(cwTuningIncrementHz),
         ssb_tuning_increment_hz: Number(ssbTuningIncrementHz),
         rit_clear_on_log: Boolean(ritClearOnLog),
@@ -238,17 +301,15 @@ function CreateRadioScreen() {
       <label>
         Radio Type
         <select
-          value={radioKind || radioKinds[0] || ''}
+          value={selectedRadioKind}
           onChange={(event) => setRadioKind(event.target.value)}
           required
         >
-          {[...new Set([radioKind, ...radioKinds].filter(Boolean))]
-            .sort((a, b) => a.localeCompare(b))
-            .map((kind) => (
-              <option key={kind} value={kind}>
-                {kind}
-              </option>
-            ))}
+          {radioKindOptions(radioKinds, selectedRadioKind).map((kind) => (
+            <option key={kind.id} value={kind.id}>
+              {radioKindLabel(kind)}
+            </option>
+          ))}
         </select>
       </label>
       <label>
@@ -266,6 +327,7 @@ function CreateRadioScreen() {
           onChange={(event) => setTransportKind(event.target.value)}
           required
         >
+          <option value="none">None / Dummy</option>
           <option value="tcp">TCP</option>
           <option value="serial">Serial</option>
         </select>
@@ -292,7 +354,8 @@ function CreateRadioScreen() {
             />
           </label>
         </>
-      ) : (
+      ) : null}
+      {transportKind === 'serial' ? (
         <>
           <label>
             Serial Port
@@ -314,34 +377,12 @@ function CreateRadioScreen() {
             />
           </label>
         </>
-      )}
+      ) : null}
       <label>
         Options
         <input
           value={options}
           onChange={(event) => setOptions(event.target.value)}
-        />
-      </label>
-      <label>
-        Poll Frequency (seconds)
-        <input
-          type="number"
-          min="0.01"
-          step="0.01"
-          value={pollFrequency}
-          onChange={(event) => setPollFrequency(event.target.value)}
-          required
-        />
-      </label>
-      <label>
-        CAT Timeout (seconds)
-        <input
-          type="number"
-          min="0.01"
-          step="0.01"
-          value={catTimeout}
-          onChange={(event) => setCatTimeout(event.target.value)}
-          required
         />
       </label>
       <label>
