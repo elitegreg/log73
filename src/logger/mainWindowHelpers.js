@@ -299,8 +299,13 @@ export function typedModeFromCallsignInput(value, settings) {
   const normalizedValue = normalizeLoggerMode(value);
   if (!normalizedValue) return null;
 
+  const modeAliases = {
+    CWR: 'CW-R',
+  };
+  const candidateValue = modeAliases[normalizedValue] ?? normalizedValue;
+
   return (
-    availableModeOptions(settings).find((mode) => mode === normalizedValue) ??
+    availableModeOptions(settings).find((mode) => mode === candidateValue) ??
     null
   );
 }

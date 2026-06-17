@@ -1127,8 +1127,8 @@ function MainWindow({
     return true;
   }
 
-  function focusNextEmptyField(currentFieldName, values = exchangeValues) {
-    const fields = [
+  function entryFields(values = exchangeValues) {
+    return [
       { name: 'CALL', value: callSign, ref: callSignRef, editable: true },
       ...(settings?.exchange ?? []).map((field) => ({
         name: field.name,
@@ -1137,51 +1137,73 @@ function MainWindow({
         editable: fieldEditable(field),
       })),
     ];
-    const currentIndex = fields.findIndex(
-      (field) => field.name === currentFieldName,
-    );
-    const nextEmptyField = fields
-      .slice(currentIndex + 1)
-      .find((field) => field.editable && String(field.value).trim() === '');
-
-    if (!nextEmptyField) {
-      return false;
-    }
-
-    nextEmptyField.ref.current?.focus();
-    return true;
   }
 
-  function focusNextEditableField(currentFieldName) {
-    const fields = [
-      { name: 'CALL', ref: callSignRef, editable: true },
-      ...(settings?.exchange ?? []).map((field) => ({
-        name: field.name,
-        ref: { current: exchangeInputRefs.current[field.name] },
-        editable: fieldEditable(field),
-      })),
-    ];
-    const currentIndex = fields.findIndex(
-      (field) => field.name === currentFieldName,
-    );
-    const nextEditableField = fields
-      .slice(currentIndex + 1)
-      .find((field) => field.editable);
-
-    if (!nextEditableField) {
+  function focusRelativeEditableField(
+    currentFieldName,
+    values = exchangeValues,
+    { direction = 1, preferEmpty = false } = {},
+  ) {
+    const fields = entryFields(values);
+    const editableFields = fields.filter((field) => field.editable);
+    if (editableFields.length <= 1) {
       return false;
     }
 
-    nextEditableField.ref.current?.focus();
-    return true;
+    const currentIndex = fields.findIndex(
+      (field) => field.name === currentFieldName,
+    );
+    if (currentIndex < 0) return false;
+
+    if (preferEmpty) {
+      for (let step = 1; step <= fields.length; step += 1) {
+        const nextIndex =
+          (currentIndex + direction * step + fields.length) % fields.length;
+        const nextField = fields[nextIndex];
+        if (!nextField?.editable) continue;
+        if (String(nextField.value).trim() !== '') continue;
+
+        nextField.ref.current?.focus();
+        return true;
+      }
+    }
+
+    for (let step = 1; step <= fields.length; step += 1) {
+      const nextIndex =
+        (currentIndex + direction * step + fields.length) % fields.length;
+      const nextField = fields[nextIndex];
+      if (!nextField?.editable) continue;
+
+      nextField.ref.current?.focus();
+      return true;
+    }
+
+    return false;
+  }
+
+  function focusNextEditableField(currentFieldName, values = exchangeValues) {
+    return focusRelativeEditableField(currentFieldName, values, {
+      direction: 1,
+      preferEmpty: false,
+    });
   }
 
   function handleFieldTab(event, currentFieldName, values = exchangeValues) {
-    if (event.key !== 'Tab' || event.shiftKey) {
+    if (event.key !== 'Tab') {
       return;
     }
 
-    if (focusNextEmptyField(currentFieldName, values)) {
+    const focused = event.shiftKey
+      ? focusRelativeEditableField(currentFieldName, values, {
+          direction: -1,
+          preferEmpty: false,
+        })
+      : focusRelativeEditableField(currentFieldName, values, {
+          direction: 1,
+          preferEmpty: true,
+        });
+
+    if (focused) {
       event.preventDefault();
     }
   }

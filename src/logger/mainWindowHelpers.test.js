@@ -40,6 +40,7 @@ test('typedModeFromCallsignInput matches exact mode tokens only', () => {
 
   assert.equal(typedModeFromCallsignInput('cw', settings), 'CW');
   assert.equal(typedModeFromCallsignInput('cw-r', settings), 'CW-R');
+  assert.equal(typedModeFromCallsignInput('cwr', settings), 'CW-R');
   assert.equal(typedModeFromCallsignInput('ft8', settings), 'FT8');
   assert.equal(typedModeFromCallsignInput('RTTY', settings), 'RTTY');
   assert.equal(typedModeFromCallsignInput(' fm ', {}), 'FM');
