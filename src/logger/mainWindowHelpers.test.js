@@ -12,6 +12,8 @@ import {
   esmEnterAction,
   modeIsCw,
   nextCwWpm,
+  isPageUpKey,
+  isPageDownKey,
   previousContactExchangeAutofill,
   normalizedContactFrequencyHz,
   shouldAdvanceFromCallsignAutofill,
@@ -90,6 +92,16 @@ test('nextCwWpm clamps page-up and page-down changes to valid range', () => {
   assert.equal(nextCwWpm(60, 1), 60);
   assert.equal(nextCwWpm(5, -1), 5);
   assert.equal(nextCwWpm(Number.NaN, 1), 21);
+});
+
+test('page key helpers accept standard and legacy browser key values', () => {
+  assert.equal(isPageUpKey({ key: 'PageUp' }), true);
+  assert.equal(isPageUpKey({ key: 'Prior' }), true);
+  assert.equal(isPageUpKey({ key: 'PageDown' }), false);
+
+  assert.equal(isPageDownKey({ key: 'PageDown' }), true);
+  assert.equal(isPageDownKey({ key: 'Next' }), true);
+  assert.equal(isPageDownKey({ key: 'PageUp' }), false);
 });
 
 test('tuningIncrementHzForMode picks mode-specific configured values', () => {

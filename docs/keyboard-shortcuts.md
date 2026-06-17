@@ -12,8 +12,8 @@ This page summarizes keyboard shortcuts and special key behavior in the logger U
 | `PageUp`         | Increase CW WPM by 1                                      |
 | `PageDown`       | Decrease CW WPM by 1                                      |
 | `Ctrl+K`         | Open CW text dialog (CW/CW-R only)                        |
-| `Ctrl+PageUp`    | Shift band up                                             |
-| `Ctrl+PageDown`  | Shift band down                                           |
+| `Alt+PageUp`     | Shift band up                                             |
+| `Alt+PageDown`   | Shift band down                                           |
 | `ArrowUp`        | Tune up by configured increment (Using RIT in Run Mode)   |
 | `ArrowDown`      | Tune down by configured increment (Using RIT in Run Mode) |
 | `Ctrl+ArrowUp`   | Jump to next band-map spot below current VFO              |

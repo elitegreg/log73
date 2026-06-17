@@ -33,6 +33,8 @@ import {
   HZ_PER_KHZ,
   EPOCH_MS_PER_SECOND,
   nextCwWpm,
+  isPageUpKey,
+  isPageDownKey,
   cwActiveTimeoutMs,
   typedModeFromCallsignInput,
   exchangeDefaults,
@@ -926,20 +928,20 @@ function MainWindow({
         return;
       }
       if (
-        event.ctrlKey &&
-        !event.altKey &&
+        !event.ctrlKey &&
+        event.altKey &&
         !event.metaKey &&
-        event.key === 'PageUp'
+        isPageUpKey(event)
       ) {
         event.preventDefault();
         shiftBand(1);
         return;
       }
       if (
-        event.ctrlKey &&
-        !event.altKey &&
+        !event.ctrlKey &&
+        event.altKey &&
         !event.metaKey &&
-        event.key === 'PageDown'
+        isPageDownKey(event)
       ) {
         event.preventDefault();
         shiftBand(-1);
@@ -964,7 +966,7 @@ function MainWindow({
         !event.ctrlKey &&
         !event.altKey &&
         !event.metaKey &&
-        event.key === 'PageUp'
+        isPageUpKey(event)
       ) {
         event.preventDefault();
         setCwWpm((current) => nextCwWpm(current, 1));
@@ -974,7 +976,7 @@ function MainWindow({
         !event.ctrlKey &&
         !event.altKey &&
         !event.metaKey &&
-        event.key === 'PageDown'
+        isPageDownKey(event)
       ) {
         event.preventDefault();
         setCwWpm((current) => nextCwWpm(current, -1));

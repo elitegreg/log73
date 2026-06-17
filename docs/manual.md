@@ -290,8 +290,8 @@ Practical caution:
 | `PageUp`         | CW WPM +1                                               |
 | `PageDown`       | CW WPM -1                                               |
 | `Ctrl+K`         | Open CW text dialog (CW/CW-R only)                      |
-| `Ctrl+PageUp`    | Shift band up                                           |
-| `Ctrl+PageDown`  | Shift band down                                         |
+| `Alt+PageUp`     | Shift band up                                           |
+| `Alt+PageDown`   | Shift band down                                         |
 | `ArrowUp`        | Tune frequency up by configured increment               |
 | `ArrowDown`      | Tune frequency down by configured increment             |
 | `Ctrl+ArrowDown` | Jump to next band-map spot above VFO                    |

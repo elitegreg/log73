@@ -332,6 +332,14 @@ export function nextCwWpm(currentWpm, delta) {
   );
 }
 
+export function isPageUpKey(event) {
+  return event?.key === 'PageUp' || event?.key === 'Prior';
+}
+
+export function isPageDownKey(event) {
+  return event?.key === 'PageDown' || event?.key === 'Next';
+}
+
 function normalizedPositiveHz(value, fallbackHz) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallbackHz;
