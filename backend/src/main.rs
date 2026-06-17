@@ -617,24 +617,28 @@ async fn handle_socket(
             Ok(ClientMessage::SendMessage {
                 request_id,
                 mode,
-                key,
+                keys,
                 fields,
             }) => {
                 debug!(
                     session_id,
-                    radio_id, request_id, mode, key, "websocket send_message command received"
+                    radio_id,
+                    request_id,
+                    mode,
+                    ?keys,
+                    "websocket send_message command received"
                 );
                 if let Err(error) =
-                    validation::validate_message_request(&request_id, &mode, &key, &fields)
+                    validation::validate_message_request(&request_id, &mode, &keys, &fields)
                 {
-                    warn!(session_id, radio_id, request_id, mode, key, %error, "invalid websocket send_message command");
+                    warn!(session_id, radio_id, request_id, mode, ?keys, %error, "invalid websocket send_message command");
                     continue;
                 }
                 let (completed_tx, completed_rx) = oneshot::channel();
                 let command_result = radio_handle
                     .send_command(RadioCommand::SendMessage {
                         mode,
-                        key,
+                        keys,
                         fields,
                         completed: completed_tx,
                     })

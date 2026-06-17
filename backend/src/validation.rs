@@ -422,7 +422,7 @@ pub fn validate_radio_mode(mode: &str) -> Result<(), String> {
 pub fn validate_message_request(
     request_id: &str,
     mode: &str,
-    key: &str,
+    keys: &[String],
     fields: &serde_json::Map<String, Value>,
 ) -> Result<(), String> {
     validate_required_text("Message request id", request_id, MAX_CW_REQUEST_ID_LEN)?;
@@ -432,12 +432,18 @@ pub fn validate_message_request(
         return Err("Message mode must be run or s&p".to_string());
     }
 
-    let normalized_key = key.trim().to_uppercase();
-    if !matches!(
-        normalized_key.as_str(),
-        "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12"
-    ) {
-        return Err("Message key must be F1 through F12".to_string());
+    if keys.is_empty() {
+        return Err("Message keys must contain at least one key".to_string());
+    }
+
+    for key in keys {
+        let normalized_key = key.trim().to_uppercase();
+        if !matches!(
+            normalized_key.as_str(),
+            "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12"
+        ) {
+            return Err("Message keys must contain only F1 through F12".to_string());
+        }
     }
 
     if fields.len() > MAX_WS_FIELDS {

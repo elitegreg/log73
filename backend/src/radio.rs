@@ -76,7 +76,7 @@ pub enum ClientMessage {
     SendMessage {
         request_id: String,
         mode: String,
-        key: String,
+        keys: Vec<String>,
         fields: serde_json::Map<String, serde_json::Value>,
     },
     SendCwText {
@@ -108,7 +108,7 @@ pub enum RadioCommand {
     RitDecrement(i32),
     SendMessage {
         mode: String,
-        key: String,
+        keys: Vec<String>,
         fields: serde_json::Map<String, serde_json::Value>,
         completed: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
@@ -295,7 +295,7 @@ mod tests {
             "type": "send_message",
             "request_id": "msg-123",
             "mode": "run",
-            "key": "F1",
+            "keys": ["F1", "F2"],
             "fields": {
                 "CALL": "K1ABC"
             }
@@ -306,12 +306,12 @@ mod tests {
             ClientMessage::SendMessage {
                 request_id,
                 mode,
-                key,
+                keys,
                 fields,
             } => {
                 assert_eq!(request_id, "msg-123");
                 assert_eq!(mode, "run");
-                assert_eq!(key, "F1");
+                assert_eq!(keys, vec!["F1".to_string(), "F2".to_string()]);
                 assert_eq!(fields.get("CALL"), Some(&serde_json::json!("K1ABC")));
             }
             other => panic!("unexpected client message: {other:?}"),

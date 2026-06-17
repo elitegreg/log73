@@ -494,9 +494,9 @@ async fn run_managed_radio(
                     };
                     debug!(radio_id = config.id, ?command, "received radio command");
                     match command {
-                        RadioCommand::SendMessage { mode, key, fields, completed } => {
-                            debug!(radio_id = config.id, mode, key, "forwarding message send command");
-                            if let Err(error) = cw_tx.send(CwTaskCommand::SendMessage { mode, key, fields, completed }).await {
+                        RadioCommand::SendMessage { mode, keys, fields, completed } => {
+                            debug!(radio_id = config.id, mode, ?keys, "forwarding message send command");
+                            if let Err(error) = cw_tx.send(CwTaskCommand::SendMessage { mode, keys, fields, completed }).await {
                                 let CwTaskCommand::SendMessage { completed, .. } = error.0 else { unreachable!() };
                                 let _ = completed.send(Err("cw task unavailable".to_string()));
                             }
@@ -845,7 +845,7 @@ fn debug_radio_config(config: &RadioConfig, message: &'static str) {
 enum CwTaskCommand {
     SendMessage {
         mode: String,
-        key: String,
+        keys: Vec<String>,
         fields: serde_json::Map<String, serde_json::Value>,
         completed: oneshot::Sender<Result<(), String>>,
     },
@@ -861,7 +861,7 @@ enum CwTaskCommand {
 enum PendingCwPayload {
     Message {
         mode: String,
-        key: String,
+        keys: Vec<String>,
         fields: serde_json::Map<String, serde_json::Value>,
     },
     Text {
@@ -890,12 +890,12 @@ async fn run_cw_task(
             match commands.recv().await {
                 Some(CwTaskCommand::SendMessage {
                     mode,
-                    key,
+                    keys,
                     fields,
                     completed,
                 }) => (
                     Some(PendingCwSend {
-                        payload: PendingCwPayload::Message { mode, key, fields },
+                        payload: PendingCwPayload::Message { mode, keys, fields },
                         completed,
                     }),
                     false,
@@ -937,11 +937,11 @@ async fn run_cw_task(
             "cw task starting queued send"
         );
         let result = match &send.payload {
-            PendingCwPayload::Message { mode, key, fields } => {
+            PendingCwPayload::Message { mode, keys, fields } => {
                 controller
                     .send_message(
                         mode,
-                        key,
+                        keys,
                         fields,
                         prepend_space,
                         &mut commands,
@@ -1001,7 +1001,7 @@ impl CwController {
     async fn send_message(
         &mut self,
         mode: &str,
-        key: &str,
+        keys: &[String],
         fields: &serde_json::Map<String, serde_json::Value>,
         prepend_space: bool,
         commands: &mut mpsc::Receiver<CwTaskCommand>,
@@ -1010,24 +1010,51 @@ impl CwController {
         if !self.radio_mode_is_cw().await {
             debug!(
                 radio_id = self.radio_id,
-                mode, key, "ignoring message send; radio mode is not CW/CW-R"
+                mode,
+                ?keys,
+                "ignoring message send; radio mode is not CW/CW-R"
             );
             return Ok(());
         }
 
-        let Some(rendered_text) = cw::render(&self.messages, mode, key, fields) else {
-            warn!(radio_id = self.radio_id, mode, key, "unknown cw message");
-            return Err("unknown cw message".to_string());
-        };
-        if rendered_text.is_empty() {
+        let mut rendered_parts = Vec::new();
+        for key in keys {
+            let Some(rendered_text) = cw::render(&self.messages, mode, key, fields) else {
+                warn!(
+                    radio_id = self.radio_id,
+                    mode,
+                    ?keys,
+                    key,
+                    "unknown cw message"
+                );
+                return Err("unknown cw message".to_string());
+            };
+            if rendered_text.is_empty() {
+                debug!(
+                    radio_id = self.radio_id,
+                    mode, key, "ignoring empty cw message"
+                );
+                continue;
+            }
+            rendered_parts.push(rendered_text);
+        }
+        if rendered_parts.is_empty() {
             debug!(
                 radio_id = self.radio_id,
-                mode, key, "ignoring empty cw message"
+                mode,
+                ?keys,
+                "ignoring empty cw message sequence"
             );
             return Ok(());
         }
-        let text = cw_send_text(rendered_text, prepend_space);
-        debug!(radio_id = self.radio_id, mode, key, text, "sending cw text");
+        let text = cw_send_text(rendered_parts.join(" "), prepend_space);
+        debug!(
+            radio_id = self.radio_id,
+            mode,
+            ?keys,
+            text,
+            "sending cw text"
+        );
         let completion = {
             let Some(keyer) = self.keyer.as_mut() else {
                 debug!(
@@ -1041,7 +1068,7 @@ impl CwController {
             debug!(
                 radio_id = self.radio_id,
                 mode,
-                key,
+                ?keys,
                 keyer = keyer_name,
                 "cw text queued"
             );
@@ -1053,19 +1080,23 @@ impl CwController {
                 if wait_for_busy {
                     debug!(
                         radio_id = self.radio_id,
-                        mode, key, "waiting for cw keyer busy"
+                        mode,
+                        ?keys,
+                        "waiting for cw keyer busy"
                     );
                     self.wait_until_busy_or_stopped(commands, pending).await?;
                 }
                 debug!(
                     radio_id = self.radio_id,
-                    mode, key, "waiting for cw keyer idle"
+                    mode,
+                    ?keys,
+                    "waiting for cw keyer idle"
                 );
                 let result = self.wait_until_idle_or_stopped(commands, pending).await;
                 debug!(
                     radio_id = self.radio_id,
                     mode,
-                    key,
+                    ?keys,
                     ?result,
                     "finished waiting for cw keyer idle"
                 );
@@ -1075,7 +1106,7 @@ impl CwController {
                 debug!(
                     radio_id = self.radio_id,
                     mode,
-                    key,
+                    ?keys,
                     estimated_duration_ms = estimated_duration.as_millis(),
                     "waiting for estimated CW completion"
                 );
@@ -1181,13 +1212,13 @@ impl CwController {
                         }
                         Some(CwTaskCommand::SendMessage {
                             mode,
-                            key,
+                            keys,
                             fields,
                             completed,
                         }) => {
-                            debug!(radio_id = self.radio_id, mode, key, pending_count = pending.len(), "queueing message send command while busy");
+                            debug!(radio_id = self.radio_id, mode, ?keys, pending_count = pending.len(), "queueing message send command while busy");
                             pending.push_back(PendingCwSend {
-                                payload: PendingCwPayload::Message { mode, key, fields },
+                                payload: PendingCwPayload::Message { mode, keys, fields },
                                 completed,
                             });
                         }
@@ -1248,13 +1279,13 @@ impl CwController {
                         }
                         Some(CwTaskCommand::SendMessage {
                             mode,
-                            key,
+                            keys,
                             fields,
                             completed,
                         }) => {
-                            debug!(radio_id = self.radio_id, mode, key, pending_count = pending.len(), "queueing message send command while busy");
+                            debug!(radio_id = self.radio_id, mode, ?keys, pending_count = pending.len(), "queueing message send command while busy");
                             pending.push_back(PendingCwSend {
-                                payload: PendingCwPayload::Message { mode, key, fields },
+                                payload: PendingCwPayload::Message { mode, keys, fields },
                                 completed,
                             });
                         }
@@ -1312,13 +1343,13 @@ impl CwController {
                         }
                         Some(CwTaskCommand::SendMessage {
                             mode,
-                            key,
+                            keys,
                             fields,
                             completed,
                         }) => {
-                            debug!(radio_id = self.radio_id, mode, key, pending_count = pending.len(), "queueing message send command while busy");
+                            debug!(radio_id = self.radio_id, mode, ?keys, pending_count = pending.len(), "queueing message send command while busy");
                             pending.push_back(PendingCwSend {
-                                payload: PendingCwPayload::Message { mode, key, fields },
+                                payload: PendingCwPayload::Message { mode, keys, fields },
                                 completed,
                             });
                         }
@@ -2172,7 +2203,7 @@ mod tests {
             PendingCwSend {
                 payload: PendingCwPayload::Message {
                     mode: "run".to_string(),
-                    key: "F1".to_string(),
+                    keys: vec!["F1".to_string()],
                     fields: Map::new(),
                 },
                 completed: first_tx,
@@ -2180,7 +2211,7 @@ mod tests {
             PendingCwSend {
                 payload: PendingCwPayload::Message {
                     mode: "run".to_string(),
-                    key: "F2".to_string(),
+                    keys: vec!["F2".to_string()],
                     fields: Map::new(),
                 },
                 completed: second_tx,
@@ -2201,7 +2232,7 @@ mod tests {
         fail_unavailable_radio_command(
             RadioCommand::SendMessage {
                 mode: "run".to_string(),
-                key: "F1".to_string(),
+                keys: vec!["F1".to_string()],
                 fields: Map::new(),
                 completed: completed_tx,
             },
