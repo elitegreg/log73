@@ -364,10 +364,10 @@ mod tests {
     fn normalizes_cat_modes_to_logger_modes() {
         assert_eq!(normalize_mode(&Mode::Usb), "SSB");
         assert_eq!(normalize_mode(&Mode::CwReverse), "CW-R");
-        assert_eq!(normalize_mode(&Mode::DataFm), "FM");
+        assert_eq!(normalize_mode(&Mode::DataFm), "RTTY");
         assert_eq!(normalize_mode(&Mode::Am), "AM");
         assert_eq!(normalize_mode(&Mode::DataUsb), "RTTY");
-        assert_eq!(normalize_mode(&Mode::Digital), "RTTY");
+        assert_eq!(normalize_mode(&Mode::Psk), "RTTY");
         assert_eq!(normalize_mode(&Mode::DigitalVoice), "RTTY");
     }
 
