@@ -126,13 +126,16 @@ pub fn normalize_mode(mode: &Mode) -> String {
         Mode::Lsb | Mode::Usb => "SSB".to_string(),
         Mode::Cw => "CW".to_string(),
         Mode::CwReverse => "CW-R".to_string(),
-        Mode::Fm | Mode::Wfm | Mode::DataFm => "FM".to_string(),
+        Mode::Fm | Mode::Wfm => "FM".to_string(),
         Mode::Am => "AM".to_string(),
         Mode::Rtty
         | Mode::RttyReverse
+        | Mode::Psk
+        | Mode::PskReverse
         | Mode::DataLsb
         | Mode::DataUsb
-        | Mode::Digital
+        | Mode::DataFm
+        | Mode::DataAm
         | Mode::DigitalVoice => "RTTY".to_string(),
     }
 }

@@ -1461,21 +1461,25 @@ function MainWindow({
           {settings?.contest ?? 'Loading...'} | Mode: {radioMode}, Freq:{' '}
           {formatFrequency(radioFrequencyHz)}
         </span>
-        {loadingStatus ? (
-          <span className="logger-loading-status">{loadingStatus}</span>
-        ) : null}
-        <button className="title-button" onClick={onExit}>
-          Exit Logger
-        </button>
-        <button
-          className="title-button title-help-button"
-          type="button"
-          aria-label="Open help"
-          title="Open help"
-          onClick={openHelpWindow}
-        >
-          ?
-        </button>
+        <div className="logger-title-right">
+          {loadingStatus ? (
+            <span className="logger-loading-status">{loadingStatus}</span>
+          ) : null}
+          <div className="logger-title-actions">
+            <button className="title-button" onClick={onExit}>
+              Exit Logger
+            </button>
+            <button
+              className="title-button title-help-button"
+              type="button"
+              aria-label="Open help"
+              title="Open help"
+              onClick={openHelpWindow}
+            >
+              ?
+            </button>
+          </div>
+        </div>
       </div>
       <RadioControls
         operatingMode={operatingMode}
