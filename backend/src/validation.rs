@@ -1100,7 +1100,7 @@ mod tests {
             dupe_key: Vec::new(),
             multipliers: Vec::new(),
             bonus_points: Vec::new(),
-            power_multiplier_param: None,
+            power_multiplier: Vec::new(),
             cabrillo: None,
             metadata: None,
         }

@@ -15,7 +15,7 @@ contests:
         - 'CALL'
         - 'BAND'
         - 'MODE'
-      power_multiplier_param: 'Power Multiplier'
+      power_multiplier: [1, 2, 5]
     cabrillo:
       fixed_fields:
         - name: 'CATEGORY-BAND'
@@ -176,13 +176,6 @@ contests:
         type: 'String:3'
         required: true
         in_sets: ['Sections']
-      - name: 'Power Multiplier'
-        label: 'Power Multiplier'
-        type: 'Numeric:1'
-        required: true
-        default: '1'
-        widget: 'select'
-        valid_values: ['1', '2', '5']
     exchange:
       - name: 'Class(s)'
         type: 'String:3'

@@ -1180,7 +1180,10 @@ impl CwController {
         };
 
         if !wait_for_completion {
-            debug!(radio_id = self.radio_id, text, "cw text queued without waiting for completion");
+            debug!(
+                radio_id = self.radio_id,
+                text, "cw text queued without waiting for completion"
+            );
             return Ok(());
         }
 

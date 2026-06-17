@@ -1158,7 +1158,10 @@ async fn update_log(
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     match app_state.db.update_log(id, payload).await {
-        Ok(Some(log)) => Json(serde_json::json!({ "ok": true, "log": log })),
+        Ok(Some(log)) => {
+            app_state.log_cache.remove_log(id);
+            Json(serde_json::json!({ "ok": true, "log": log }))
+        }
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
