@@ -501,9 +501,9 @@ async fn run_managed_radio(
                                 let _ = completed.send(Err("cw task unavailable".to_string()));
                             }
                         }
-                        RadioCommand::SendCwText { text, completed } => {
-                            debug!(radio_id = config.id, text, "forwarding cw text send command");
-                            if let Err(error) = cw_tx.send(CwTaskCommand::SendText { text, completed }).await {
+                        RadioCommand::SendCwText { text, wait_for_completion, completed } => {
+                            debug!(radio_id = config.id, text, wait_for_completion, "forwarding cw text send command");
+                            if let Err(error) = cw_tx.send(CwTaskCommand::SendText { text, wait_for_completion, completed }).await {
                                 let CwTaskCommand::SendText { completed, .. } = error.0 else { unreachable!() };
                                 let _ = completed.send(Err("cw task unavailable".to_string()));
                             }
@@ -851,6 +851,7 @@ enum CwTaskCommand {
     },
     SendText {
         text: String,
+        wait_for_completion: bool,
         completed: oneshot::Sender<Result<(), String>>,
     },
     Stop,
@@ -866,6 +867,7 @@ enum PendingCwPayload {
     },
     Text {
         text: String,
+        wait_for_completion: bool,
     },
 }
 
@@ -900,9 +902,16 @@ async fn run_cw_task(
                     }),
                     false,
                 ),
-                Some(CwTaskCommand::SendText { text, completed }) => (
+                Some(CwTaskCommand::SendText {
+                    text,
+                    wait_for_completion,
+                    completed,
+                }) => (
                     Some(PendingCwSend {
-                        payload: PendingCwPayload::Text { text },
+                        payload: PendingCwPayload::Text {
+                            text,
+                            wait_for_completion,
+                        },
                         completed,
                     }),
                     false,
@@ -949,9 +958,12 @@ async fn run_cw_task(
                     )
                     .await
             }
-            PendingCwPayload::Text { text } => {
+            PendingCwPayload::Text {
+                text,
+                wait_for_completion,
+            } => {
                 controller
-                    .send_text(text, &mut commands, &mut pending)
+                    .send_text(text, *wait_for_completion, &mut commands, &mut pending)
                     .await
             }
         };
@@ -1140,6 +1152,7 @@ impl CwController {
     async fn send_text(
         &mut self,
         text: &str,
+        wait_for_completion: bool,
         commands: &mut mpsc::Receiver<CwTaskCommand>,
         pending: &mut VecDeque<PendingCwSend>,
     ) -> Result<(), String> {
@@ -1165,6 +1178,11 @@ impl CwController {
             );
             completion
         };
+
+        if !wait_for_completion {
+            debug!(radio_id = self.radio_id, text, "cw text queued without waiting for completion");
+            return Ok(());
+        }
 
         match completion {
             CwSendCompletion::PollStatus { wait_for_busy } => {
@@ -1222,10 +1240,17 @@ impl CwController {
                                 completed,
                             });
                         }
-                        Some(CwTaskCommand::SendText { text, completed }) => {
-                            debug!(radio_id = self.radio_id, text, pending_count = pending.len(), "queueing cw text send command while busy");
+                        Some(CwTaskCommand::SendText {
+                            text,
+                            wait_for_completion,
+                            completed,
+                        }) => {
+                            debug!(radio_id = self.radio_id, text, wait_for_completion, pending_count = pending.len(), "queueing cw text send command while busy");
                             pending.push_back(PendingCwSend {
-                                payload: PendingCwPayload::Text { text },
+                                payload: PendingCwPayload::Text {
+                                    text,
+                                    wait_for_completion,
+                                },
                                 completed,
                             });
                         }
@@ -1289,10 +1314,17 @@ impl CwController {
                                 completed,
                             });
                         }
-                        Some(CwTaskCommand::SendText { text, completed }) => {
-                            debug!(radio_id = self.radio_id, text, pending_count = pending.len(), "queueing cw text send command while busy");
+                        Some(CwTaskCommand::SendText {
+                            text,
+                            wait_for_completion,
+                            completed,
+                        }) => {
+                            debug!(radio_id = self.radio_id, text, wait_for_completion, pending_count = pending.len(), "queueing cw text send command while busy");
                             pending.push_back(PendingCwSend {
-                                payload: PendingCwPayload::Text { text },
+                                payload: PendingCwPayload::Text {
+                                    text,
+                                    wait_for_completion,
+                                },
                                 completed,
                             });
                         }
@@ -1353,10 +1385,17 @@ impl CwController {
                                 completed,
                             });
                         }
-                        Some(CwTaskCommand::SendText { text, completed }) => {
-                            debug!(radio_id = self.radio_id, text, pending_count = pending.len(), "queueing cw text send command while busy");
+                        Some(CwTaskCommand::SendText {
+                            text,
+                            wait_for_completion,
+                            completed,
+                        }) => {
+                            debug!(radio_id = self.radio_id, text, wait_for_completion, pending_count = pending.len(), "queueing cw text send command while busy");
                             pending.push_back(PendingCwSend {
-                                payload: PendingCwPayload::Text { text },
+                                payload: PendingCwPayload::Text {
+                                    text,
+                                    wait_for_completion,
+                                },
                                 completed,
                             });
                         }

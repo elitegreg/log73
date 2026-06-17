@@ -695,7 +695,11 @@ async fn handle_socket(
                     );
                 }
             }
-            Ok(ClientMessage::SendCwText { request_id, text }) => {
+            Ok(ClientMessage::SendCwText {
+                request_id,
+                text,
+                wait_for_completion,
+            }) => {
                 debug!(
                     session_id,
                     radio_id, request_id, "websocket send_cw_text command received"
@@ -708,6 +712,7 @@ async fn handle_socket(
                 let command_result = radio_handle
                     .send_command(RadioCommand::SendCwText {
                         text,
+                        wait_for_completion,
                         completed: completed_tx,
                     })
                     .await;

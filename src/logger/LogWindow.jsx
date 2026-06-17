@@ -255,8 +255,8 @@ function sanitizeUpdateInput(settings, column, value, radioMode) {
   if (exchangeField)
     return sanitizeExchangeValue(exchangeField, value, radioMode);
   if (column === 'Call') return sanitizeCallsign(value);
-  if (column === 'Mode') return value.toUpperCase();
-  return value;
+  if (column === 'Mode') return String(value).toUpperCase();
+  return String(value).toUpperCase();
 }
 
 function parseUpdateValue(settings, column, value, radioMode, entry = null) {

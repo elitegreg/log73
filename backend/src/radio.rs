@@ -82,6 +82,8 @@ pub enum ClientMessage {
     SendCwText {
         request_id: String,
         text: String,
+        #[serde(default = "default_wait_for_completion")]
+        wait_for_completion: bool,
     },
     #[serde(rename = "send_dxcluster_spot")]
     SendDxClusterSpot {
@@ -114,11 +116,16 @@ pub enum RadioCommand {
     },
     SendCwText {
         text: String,
+        wait_for_completion: bool,
         completed: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
     StopCw,
     SetWpm(u8),
     ReloadConfig(Box<RadioConfig>),
+}
+
+fn default_wait_for_completion() -> bool {
+    true
 }
 
 pub fn normalize_mode(mode: &Mode) -> String {
@@ -323,14 +330,20 @@ mod tests {
         let message: ClientMessage = serde_json::from_value(serde_json::json!({
             "type": "send_cw_text",
             "request_id": "cw-123",
-            "text": "CQ "
+            "text": "CQ ",
+            "wait_for_completion": false
         }))
         .expect("send_cw_text should deserialize");
 
         match message {
-            ClientMessage::SendCwText { request_id, text } => {
+            ClientMessage::SendCwText {
+                request_id,
+                text,
+                wait_for_completion,
+            } => {
                 assert_eq!(request_id, "cw-123");
                 assert_eq!(text, "CQ ");
+                assert!(!wait_for_completion);
             }
             other => panic!("unexpected client message: {other:?}"),
         }

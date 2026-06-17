@@ -784,12 +784,13 @@ function MainWindow({
   }
 
   function sendCwTextWord(sendTrailingSpace) {
-    const word = cwTextCurrentWord.trim();
+    const word = cwTextCurrentWord.trim().toUpperCase();
     if (!word) return;
 
     onSendCwText?.({
       request_id: createMessageRequestId(),
       text: sendTrailingSpace ? `${word} ` : word,
+      wait_for_completion: false,
     });
     setCwTextCommittedWords((current) => [...current, word]);
     setCwTextCurrentWord('');
@@ -825,11 +826,18 @@ function MainWindow({
   }
 
   function sendEsmKeys(keys, values = exchangeValues) {
+    const shouldRepeatF1 =
+      messageModeKey === 'run' && keys.length === 1 && keys[0] === 'F1' && repeatRunF1;
+
     stopRepeat();
     const requestId = sendMessageKeys(keys, messageModeKey, values);
     if (!requestId) return;
     if (keys.includes('F2')) {
       markEsmExchangeSentForCurrentCallsign();
+    }
+    if (shouldRepeatF1) {
+      repeatActiveRef.current = true;
+      repeatRequestIdRef.current = requestId;
     }
   }
 
