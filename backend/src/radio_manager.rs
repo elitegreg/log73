@@ -9,8 +9,9 @@ use backon::{BackoffBuilder, ExponentialBuilder};
 use cw_serial_keyer::{Config as CwSerialConfig, ControlLine, SerialKeyer as CwSerialDevice};
 use futures_util::future::{BoxFuture, FutureExt};
 use radio_cat_rs::{
-    AsyncIoTransport, ConnectionState, Frequency, Radio, RadioConfig as CatRadioConfig, RadioError,
-    RadioTask, RitXitOffsetHz, TransportConfig,
+    AsyncIoTransport, ChangeFlags, ConnectionState, Frequency, Radio,
+    RadioConfig as CatRadioConfig, RadioError, RadioTask, RitXitOffsetHz, StateField, StateUpdate,
+    TransportConfig,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -1114,20 +1115,15 @@ impl CwController {
                 );
                 result
             }
-            CwSendCompletion::Estimated(estimated_duration) => {
+            CwSendCompletion::RadioCatUpdates(updates) => {
                 debug!(
                     radio_id = self.radio_id,
                     mode,
                     ?keys,
-                    estimated_duration_ms = estimated_duration.as_millis(),
-                    "waiting for estimated CW completion"
+                    "waiting for radio-cat cw completion updates"
                 );
-                self.wait_until_deadline_or_stopped(
-                    tokio::time::Instant::now() + estimated_duration,
-                    commands,
-                    pending,
-                )
-                .await
+                self.wait_until_radio_cat_cw_complete_or_stopped(updates, commands, pending)
+                    .await
             }
         }
     }
@@ -1194,13 +1190,9 @@ impl CwController {
                 }
                 self.wait_until_idle_or_stopped(commands, pending).await
             }
-            CwSendCompletion::Estimated(estimated_duration) => {
-                self.wait_until_deadline_or_stopped(
-                    tokio::time::Instant::now() + estimated_duration,
-                    commands,
-                    pending,
-                )
-                .await
+            CwSendCompletion::RadioCatUpdates(updates) => {
+                self.wait_until_radio_cat_cw_complete_or_stopped(updates, commands, pending)
+                    .await
             }
         }
     }
@@ -1350,28 +1342,42 @@ impl CwController {
         }
     }
 
-    async fn wait_until_deadline_or_stopped(
+    async fn wait_until_radio_cat_cw_complete_or_stopped(
         &mut self,
-        deadline: tokio::time::Instant,
+        mut updates: broadcast::Receiver<StateUpdate>,
         commands: &mut mpsc::Receiver<CwTaskCommand>,
         pending: &mut VecDeque<PendingCwSend>,
     ) -> Result<(), String> {
+        let mut saw_busy = self
+            .radio
+            .latest_state()
+            .keyer
+            .as_ref()
+            .and_then(|keyer| keyer.sending)
+            == Some(true);
+        if saw_busy {
+            debug!(
+                radio_id = self.radio_id,
+                "radio-cat keyer already reports sending"
+            );
+        }
+
         loop {
             tokio::select! {
                 command = commands.recv() => {
                     match command {
                         Some(CwTaskCommand::Stop) => {
-                            debug!(radio_id = self.radio_id, "stop command interrupting estimated cw wait");
+                            debug!(radio_id = self.radio_id, "stop command interrupting radio-cat cw wait");
                             fail_pending_cw_sends(pending, "cw stopped");
                             self.stop().await;
                             return Err("cw stopped".to_string());
                         }
                         Some(CwTaskCommand::SetWpm(wpm)) => {
-                            debug!(radio_id = self.radio_id, wpm, "set_wpm command received during estimated cw wait");
+                            debug!(radio_id = self.radio_id, wpm, "set_wpm command received during radio-cat cw wait");
                             self.set_wpm(wpm).await;
                         }
                         Some(CwTaskCommand::Shutdown) | None => {
-                            debug!(radio_id = self.radio_id, "shutdown interrupting estimated cw wait");
+                            debug!(radio_id = self.radio_id, "shutdown interrupting radio-cat cw wait");
                             fail_pending_cw_sends(pending, "cw shutdown");
                             self.stop().await;
                             return Err("cw shutdown".to_string());
@@ -1404,9 +1410,46 @@ impl CwController {
                         }
                     }
                 }
-                _ = tokio::time::sleep_until(deadline) => {
-                    debug!(radio_id = self.radio_id, "estimated CW send duration elapsed");
-                    return Ok(());
+                update = updates.recv() => {
+                    match update {
+                        Ok(update) => {
+                            if !update.changes.contains(ChangeFlags::KEYER)
+                                || !update.fields.contains(&StateField::KeyerSending) {
+                                continue;
+                            }
+                            match update.state.keyer.as_ref().and_then(|keyer| keyer.sending) {
+                                Some(true) => {
+                                    saw_busy = true;
+                                    debug!(radio_id = self.radio_id, source = ?update.source, "radio-cat keyer reports sending");
+                                }
+                                Some(false) => {
+                                    debug!(radio_id = self.radio_id, source = ?update.source, saw_busy, "radio-cat keyer reports idle");
+                                    return Ok(());
+                                }
+                                None => {
+                                    debug!(radio_id = self.radio_id, source = ?update.source, "radio-cat keyer sending state unavailable");
+                                }
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                            warn!(radio_id = self.radio_id, skipped, "lagged while waiting for radio-cat cw completion updates");
+                            match self.radio.latest_state().keyer.as_ref().and_then(|keyer| keyer.sending) {
+                                Some(true) => {
+                                    saw_busy = true;
+                                    debug!(radio_id = self.radio_id, "radio-cat keyer still reports sending after lag");
+                                }
+                                Some(false) => {
+                                    debug!(radio_id = self.radio_id, saw_busy, "radio-cat keyer reports idle after lag");
+                                    return Ok(());
+                                }
+                                None => {}
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            warn!(radio_id = self.radio_id, "radio-cat cw completion update channel closed");
+                            return Err("radio-cat cw completion updates unavailable".to_string());
+                        }
+                    }
                 }
             }
         }
@@ -1499,7 +1542,7 @@ struct CwKeyerStatus {
 
 enum CwSendCompletion {
     PollStatus { wait_for_busy: bool },
-    Estimated(Duration),
+    RadioCatUpdates(broadcast::Receiver<StateUpdate>),
 }
 
 trait CwKeyer: Send {
@@ -1537,10 +1580,9 @@ impl CwKeyer for CatKeyer {
         text: &'a str,
     ) -> BoxFuture<'a, Result<CwSendCompletion, String>> {
         async move {
+            let updates = self.subscribe_updates();
             CatKeyer::send_text(self, text).await?;
-            Ok(CwSendCompletion::Estimated(
-                self.estimated_send_duration(text),
-            ))
+            Ok(CwSendCompletion::RadioCatUpdates(updates))
         }
         .boxed()
     }
