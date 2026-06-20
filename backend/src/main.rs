@@ -34,7 +34,7 @@ use dxcluster::{DxClusterEvent, DxClusterManager, format_dxcluster_frequency_khz
 use futures_util::{SinkExt, StreamExt};
 use log_cache::LogCache;
 use radio::{ClientMessage, RadioCommand, ServerMessage};
-use radio_cat_rs::supported_drivers;
+use radio_cat_rs::{list_serial_ports, supported_drivers};
 use radio_manager::RadioManager;
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use std::{
@@ -328,6 +328,7 @@ async fn main() {
         )
         .route("/contacts/{id}", delete(delete_contact))
         .route("/radio-kinds", get(radio_kinds))
+        .route("/serial-ports", get(serial_ports))
         .route("/radios", get(radios).post(create_radio))
         .route("/radios/cw-messages/default", get(default_cw_messages))
         .route("/radios/cw-messages/validate", post(validate_cw_messages))
@@ -1365,6 +1366,31 @@ async fn radio_kinds() -> Json<Vec<RadioKindOption>> {
             })
             .collect(),
     )
+}
+
+#[derive(Debug, serde::Serialize)]
+struct SerialPortOption {
+    name: String,
+    display_name: String,
+}
+
+async fn serial_ports() -> Json<serde_json::Value> {
+    match list_serial_ports() {
+        Ok(entries) => Json(serde_json::json!({
+            "ok": true,
+            "serial_ports": entries
+                .into_iter()
+                .map(|entry| SerialPortOption {
+                    display_name: entry.to_string(),
+                    name: entry.name,
+                })
+                .collect::<Vec<_>>()
+        })),
+        Err(error) => Json(serde_json::json!({
+            "ok": false,
+            "error": error.to_string()
+        })),
+    }
 }
 
 async fn radio(State(app_state): State<AppState>, Path(id): Path<i64>) -> Json<serde_json::Value> {

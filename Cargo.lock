@@ -3417,7 +3417,7 @@ dependencies = [
 [[package]]
 name = "radio-cat-rs"
 version = "0.1.0"
-source = "git+https://github.com/elitegreg/radio-cat-rs.git?branch=main#24d972301c1a00bcbcde1065944a80ade25d5d9b"
+source = "git+https://github.com/elitegreg/radio-cat-rs.git?branch=main#d4608b0c884e9884fe32e13803eb7cbf2da3b97e"
 dependencies = [
  "async-trait",
  "bitflags 2.13.0",

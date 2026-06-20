@@ -27,6 +27,21 @@ function normalizeRadioKinds(value) {
     .filter((kind) => kind.id);
 }
 
+function normalizeSerialPorts(value) {
+  return (Array.isArray(value) ? value : [])
+    .map((port) =>
+      typeof port === 'string'
+        ? { name: port, display_name: port }
+        : {
+            name: String(port?.name ?? '').trim(),
+            display_name: String(
+              port?.display_name ?? port?.description ?? port?.name ?? '',
+            ).trim(),
+          },
+    )
+    .filter((port) => port.name);
+}
+
 function defaultRadioKind(radioKinds) {
   return (
     radioKinds.find((kind) => kind.id === DEFAULT_RADIO_KIND)?.id ??
@@ -59,12 +74,25 @@ function radioKindLabel(kind) {
     : kind.id;
 }
 
+function serialPortOptions(serialPorts, serialPort) {
+  const options = new Map(serialPorts.map((port) => [port.name, port]));
+  if (serialPort && !options.has(serialPort)) {
+    options.set(serialPort, { name: serialPort, display_name: serialPort });
+  }
+  return [...options.values()];
+}
+
+function serialPortLabel(port) {
+  return port.display_name || port.name;
+}
+
 function CreateRadioScreen() {
   const navigate = useNavigate();
   const { radioId } = useParams();
   const { notifyError } = useNotifications();
   const isEditing = Boolean(radioId);
   const [radioKinds, setRadioKinds] = useState([]);
+  const [serialPorts, setSerialPorts] = useState([]);
   const [name, setName] = useState('');
   const [radioKind, setRadioKind] = useState('');
   const [transportKind, setTransportKind] = useState(DEFAULT_TRANSPORT_KIND);
@@ -136,6 +164,24 @@ function CreateRadioScreen() {
         );
       }
 
+      let serialPorts = [];
+      try {
+        const serialPortsResult = await apiJson('/serial-ports');
+        if (serialPortsResult.ok) {
+          serialPorts = normalizeSerialPorts(serialPortsResult.serial_ports);
+        } else {
+          throw new Error(
+            serialPortsResult.error ?? 'Unable to load available serial ports.',
+          );
+        }
+      } catch (error) {
+        notifyOperationalError(
+          'CreateRadioScreen.loadSerialPorts',
+          'Unable to load available serial ports.',
+          error,
+        );
+      }
+
       let loadedDefaultCwMessages = '';
       try {
         const defaultMessagesResult = await apiJson(
@@ -154,6 +200,7 @@ function CreateRadioScreen() {
 
       if (isCancelled) return;
       setRadioKinds(kinds);
+      setSerialPorts(serialPorts);
       setDefaultCwMessages(loadedDefaultCwMessages);
 
       if (!isEditing) {
@@ -359,12 +406,22 @@ function CreateRadioScreen() {
         <>
           <label>
             Serial Port
-            <input
+            <select
               value={serialPort}
               onChange={(event) => setSerialPort(event.target.value)}
               required
-              placeholder="/dev/ttyUSB0"
-            />
+            >
+              <option value="" disabled>
+                {serialPorts.length > 0
+                  ? 'Select a serial port'
+                  : 'No serial ports available'}
+              </option>
+              {serialPortOptions(serialPorts, serialPort).map((port) => (
+                <option key={port.name} value={port.name}>
+                  {serialPortLabel(port)}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             Serial Baud Rate
@@ -441,12 +498,22 @@ function CreateRadioScreen() {
         <>
           <label>
             CW Serial Port
-            <input
+            <select
               value={cwSerialPort}
               onChange={(event) => setCwSerialPort(event.target.value)}
               required
-              placeholder="/dev/ttyUSB0"
-            />
+            >
+              <option value="" disabled>
+                {serialPorts.length > 0
+                  ? 'Select a serial port'
+                  : 'No serial ports available'}
+              </option>
+              {serialPortOptions(serialPorts, cwSerialPort).map((port) => (
+                <option key={port.name} value={port.name}>
+                  {serialPortLabel(port)}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
             CW Serial Baud Rate
