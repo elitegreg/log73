@@ -1023,7 +1023,81 @@ struct CwController {
     messages: String,
     voice_messages: String,
     voice_playback: Option<VoicePlaybackThread>,
+    voice_data_ptt_supported: bool,
     keyer: Option<Box<dyn CwKeyer>>,
+}
+
+struct VoiceDataPttGuard {
+    radio_id: i64,
+    radio: Radio,
+    active: bool,
+}
+
+impl VoiceDataPttGuard {
+    async fn acquire(radio_id: i64, radio: Radio, supported: bool) -> Self {
+        let mut guard = Self {
+            radio_id,
+            radio,
+            active: false,
+        };
+
+        if !supported {
+            return guard;
+        }
+
+        match guard.radio.set_data_ptt(true).await {
+            Ok(()) => {
+                guard.active = true;
+                debug!(radio_id = guard.radio_id, "enabled data ptt for voice playback");
+            }
+            Err(error) => {
+                warn!(radio_id = guard.radio_id, %error, "failed to enable data ptt for voice playback");
+            }
+        }
+
+        guard
+    }
+
+    async fn release(&mut self) {
+        if !self.active {
+            return;
+        }
+
+        match self.radio.set_data_ptt(false).await {
+            Ok(()) => {
+                self.active = false;
+                debug!(radio_id = self.radio_id, "disabled data ptt after voice playback");
+            }
+            Err(error) => {
+                warn!(radio_id = self.radio_id, %error, "failed to disable data ptt after voice playback");
+            }
+        }
+    }
+}
+
+impl Drop for VoiceDataPttGuard {
+    fn drop(&mut self) {
+        if !self.active {
+            return;
+        }
+
+        let radio = self.radio.clone();
+        let radio_id = self.radio_id;
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => {
+                handle.spawn(async move {
+                    if let Err(error) = radio.set_data_ptt(false).await {
+                        warn!(radio_id, %error, "failed to disable data ptt after voice playback");
+                    } else {
+                        debug!(radio_id, "disabled data ptt after voice playback");
+                    }
+                });
+            }
+            Err(_) => {
+                warn!(radio_id, "voice data ptt guard dropped without a tokio runtime; unable to schedule cleanup");
+            }
+        }
+    }
 }
 
 impl CwController {
@@ -1036,6 +1110,11 @@ impl CwController {
         if let Err(error) = voice_keyer.sync_radio_messages(config) {
             warn!(radio_id = config.id, %error, "failed to sync voice keyer registrations for radio");
         }
+        let voice_data_ptt_supported = radio
+            .capabilities()
+            .tx
+            .map(|tx| tx.ptt.can_write())
+            .unwrap_or(false);
         let mut controller = Self {
             radio_id: config.id,
             radio: radio.clone(),
@@ -1052,6 +1131,7 @@ impl CwController {
                     None
                 }
             },
+            voice_data_ptt_supported,
             keyer: cw_keyer_for_config(config, radio, shared_cw_serial_keyer).await,
         };
         controller.connect().await;
@@ -1213,11 +1293,22 @@ impl CwController {
                 );
                 continue;
             }
-            let completed = {
-                let Some(voice_playback) = self.voice_playback.as_ref() else {
-                    return Err("voice keyer thread unavailable".to_string());
-                };
-                voice_playback.play_message(mode, key)?
+            if self.voice_playback.is_none() {
+                return Err("voice keyer thread unavailable".to_string());
+            }
+
+            let mut data_ptt = VoiceDataPttGuard::acquire(
+                self.radio_id,
+                self.radio.clone(),
+                self.voice_data_ptt_supported,
+            )
+            .await;
+            let completed = match self.voice_playback.as_ref().unwrap().play_message(mode, key) {
+                Ok(completed) => completed,
+                Err(error) => {
+                    data_ptt.release().await;
+                    return Err(error);
+                }
             };
             debug!(
                 radio_id = self.radio_id,
@@ -1225,8 +1316,11 @@ impl CwController {
                 key,
                 "queued voice keyer playback"
             );
-            self.wait_until_voice_playback_done_or_stopped(key, completed, commands, pending)
-                .await?;
+            let result = self
+                .wait_until_voice_playback_done_or_stopped(key, completed, commands, pending)
+                .await;
+            data_ptt.release().await;
+            result?;
         }
 
         Ok(())
