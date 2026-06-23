@@ -8,7 +8,7 @@ cargo-dist-version = "0.32.0"
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
-installers = ["msi", "pkg"]
+installers = ["msi"]
 # Target platforms to build apps for (Rust target-triple syntax)
 targets = ["aarch64-apple-darwin", "aarch64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-pc-windows-msvc"]
 # Build frontend assets before Rust binaries so log73-backend embeds the latest dist/ output
@@ -17,6 +17,7 @@ github-build-setup = "../dist-build-setup.yml"
 [dist.dependencies.apt]
 pkg-config = "*"
 libudev-dev = "*"
+libasound2-dev = "*"
 
 [dist.mac-pkg-config]
 identifier = "com.log73.log73"

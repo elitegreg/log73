@@ -1,8 +1,15 @@
 [package]
 name = "log73-backend"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 repository = "https://github.com/elitegreg/log73"
+authors = ["Greg Mitchell <greg@ng4m.dev>"]
+
+[package.metadata.wix]
+upgrade-guid = "58437DFA-E6E3-401F-955C-BA071684EC5E"
+path-guid = "26A2BC13-7738-4795-8E3A-E59CF393721E"
+license = false
+eula = false
 
 [dependencies]
 axum = { version = "0.8", features = ["ws"] }

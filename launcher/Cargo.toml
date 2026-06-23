@@ -1,8 +1,15 @@
 [package]
 name = "launcher"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 repository = "https://github.com/elitegreg/log73"
+authors = ["Greg Mitchell <greg@ng4m.dev>"]
+
+[package.metadata.wix]
+upgrade-guid = "DD4A9B3C-6467-46CD-B571-A7C4E1423FE0"
+path-guid = "DDA1F85F-F333-489A-ABC9-F69F51E70873"
+license = false
+eula = false
 
 [[bin]]
 name = "log73-launcher"
