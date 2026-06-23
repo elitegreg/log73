@@ -175,9 +175,7 @@ export function shouldAdvanceFromCallsignAutofill({
   hasEditableExchangeField,
 } = {}) {
   return Boolean(
-    esmEnabled &&
-      autofillResult?.matchedContact &&
-      hasEditableExchangeField,
+    esmEnabled && autofillResult?.matchedContact && hasEditableExchangeField,
   );
 }
 

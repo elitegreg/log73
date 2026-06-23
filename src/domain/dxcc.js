@@ -1,5 +1,7 @@
 function normalizeCallsign(callsign) {
-  return String(callsign ?? '').trim().toUpperCase();
+  return String(callsign ?? '')
+    .trim()
+    .toUpperCase();
 }
 
 export function splitCallsign(callsign) {
@@ -65,7 +67,9 @@ export function lookupDxcc(database, callsign) {
 
 export function dxccLabel(dxccInfo) {
   const countryName = String(dxccInfo?.country_name ?? '').trim();
-  const continent = String(dxccInfo?.continent ?? '').trim().toUpperCase();
+  const continent = String(dxccInfo?.continent ?? '')
+    .trim()
+    .toUpperCase();
   if (!countryName || !continent) return '';
   return `${countryName} ${continent}`;
 }

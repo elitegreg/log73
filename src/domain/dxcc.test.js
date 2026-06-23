@@ -110,6 +110,9 @@ test('lookupDxcc prefers exact matches and then longest prefixes', () => {
 });
 
 test('dxccLabel formats country and continent', () => {
-  assert.equal(dxccLabel({ country_name: 'Montenegro', continent: 'eu' }), 'Montenegro EU');
+  assert.equal(
+    dxccLabel({ country_name: 'Montenegro', continent: 'eu' }),
+    'Montenegro EU',
+  );
   assert.equal(dxccLabel(null), '');
 });

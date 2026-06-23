@@ -1048,7 +1048,10 @@ impl VoiceDataPttGuard {
         match guard.radio.set_data_ptt(true).await {
             Ok(()) => {
                 guard.active = true;
-                debug!(radio_id = guard.radio_id, "enabled data ptt for voice playback");
+                debug!(
+                    radio_id = guard.radio_id,
+                    "enabled data ptt for voice playback"
+                );
             }
             Err(error) => {
                 warn!(radio_id = guard.radio_id, %error, "failed to enable data ptt for voice playback");
@@ -1066,7 +1069,10 @@ impl VoiceDataPttGuard {
         match self.radio.set_data_ptt(false).await {
             Ok(()) => {
                 self.active = false;
-                debug!(radio_id = self.radio_id, "disabled data ptt after voice playback");
+                debug!(
+                    radio_id = self.radio_id,
+                    "disabled data ptt after voice playback"
+                );
             }
             Err(error) => {
                 warn!(radio_id = self.radio_id, %error, "failed to disable data ptt after voice playback");
@@ -1094,7 +1100,10 @@ impl Drop for VoiceDataPttGuard {
                 });
             }
             Err(_) => {
-                warn!(radio_id, "voice data ptt guard dropped without a tokio runtime; unable to schedule cleanup");
+                warn!(
+                    radio_id,
+                    "voice data ptt guard dropped without a tokio runtime; unable to schedule cleanup"
+                );
             }
         }
     }
@@ -1291,9 +1300,7 @@ impl CwController {
             else {
                 debug!(
                     radio_id = self.radio_id,
-                    mode,
-                    key,
-                    "ignoring voice message without a file"
+                    mode, key, "ignoring voice message without a file"
                 );
                 continue;
             };
@@ -1356,9 +1363,7 @@ impl CwController {
             };
             debug!(
                 radio_id = self.radio_id,
-                mode,
-                key,
-                "queued voice keyer playback"
+                mode, key, "queued voice keyer playback"
             );
             let result = self
                 .wait_until_voice_playback_done_or_stopped(key, completed, commands, pending)

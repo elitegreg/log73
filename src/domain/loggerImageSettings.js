@@ -1,6 +1,5 @@
 export const LOGGER_IMAGE_URL_STORAGE_KEY = 'log73.logger_image_url';
-export const DEFAULT_LOGGER_IMAGE_URL =
-  'https://www.hamqsl.com/solarn0nbh.php';
+export const DEFAULT_LOGGER_IMAGE_URL = 'https://www.hamqsl.com/solarn0nbh.php';
 export const LOGGER_IMAGE_REFRESH_QUERY_PARAM = 'log73_refresh_hour';
 
 export function normalizeLoggerImageUrl(url) {

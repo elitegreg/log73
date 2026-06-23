@@ -1600,9 +1600,7 @@ async fn delete_radio(
 
     match app_state.db.delete_radio(id).await {
         Ok(deleted) => {
-            if deleted
-                && let Err(error) = app_state.voice_keyer.clear_radio_messages(id)
-            {
+            if deleted && let Err(error) = app_state.voice_keyer.clear_radio_messages(id) {
                 warn!(id, %error, "failed to clear voice keyer registrations after radio delete");
             }
             Json(serde_json::json!({ "ok": true, "deleted": deleted }))

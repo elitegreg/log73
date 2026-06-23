@@ -10,10 +10,7 @@ function fieldFallbackValue(fieldName, contestParams) {
   }
 
   return (
-    contestParams.Location ??
-    contestParams.State ??
-    contestParams.County ??
-    ''
+    contestParams.Location ?? contestParams.State ?? contestParams.County ?? ''
   );
 }
 

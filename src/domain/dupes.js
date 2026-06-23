@@ -56,12 +56,20 @@ export function dupeAlertText(settings, currentContact, historicContacts) {
   const currentCallsign = contactFieldValue(settings, currentContact, 'CALL');
   if (!currentCallsign) return '';
 
-  const currentPossibleKey = keyForFields(settings, currentContact, possibleFields);
+  const currentPossibleKey = keyForFields(
+    settings,
+    currentContact,
+    possibleFields,
+  );
   const currentDupeKey = keyForFields(settings, currentContact, dupeFields);
   let alertText = '';
 
   for (const historicContact of historicContacts ?? []) {
-    const historicCallsign = contactFieldValue(settings, historicContact, 'CALL');
+    const historicCallsign = contactFieldValue(
+      settings,
+      historicContact,
+      'CALL',
+    );
     if (historicCallsign !== currentCallsign) break;
 
     if (
@@ -71,7 +79,9 @@ export function dupeAlertText(settings, currentContact, historicContacts) {
       continue;
     }
 
-    if (keyForFields(settings, historicContact, dupeFields) === currentDupeKey) {
+    if (
+      keyForFields(settings, historicContact, dupeFields) === currentDupeKey
+    ) {
       return 'Dupe';
     }
 

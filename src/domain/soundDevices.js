@@ -6,8 +6,9 @@ export function normalizeSoundDeviceId(value) {
 }
 
 export function soundDeviceOptionLabel(device) {
-  const name = String(device?.name ?? device?.description ?? device?.id ?? '')
-    .trim();
+  const name = String(
+    device?.name ?? device?.description ?? device?.id ?? '',
+  ).trim();
   const host = String(device?.host ?? '').trim();
   const defaultText = device?.is_default ? ' (default)' : '';
   const hostText = host ? ` [${host}]` : '';

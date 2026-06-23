@@ -844,7 +844,10 @@ function MainWindow({
 
   function sendEsmKeys(keys, values = exchangeValues) {
     const shouldRepeatF1 =
-      messageModeKey === 'run' && keys.length === 1 && keys[0] === 'F1' && repeatRunF1;
+      messageModeKey === 'run' &&
+      keys.length === 1 &&
+      keys[0] === 'F1' &&
+      repeatRunF1;
 
     stopRepeat();
     const requestId = sendMessageKeys(keys, messageModeKey, values);
