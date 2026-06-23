@@ -352,7 +352,7 @@ impl Default for ContestScoringModule {
                 dupe_key: Vec::new(),
                 multipliers: Vec::new(),
                 bonus_points: Vec::new(),
-                power_multiplier_param: None,
+                power_multiplier: Vec::new(),
                 cabrillo: None,
                 metadata: None,
             },
@@ -492,25 +492,46 @@ pub fn score_contacts(
 }
 
 fn power_multiplier_for(rules: &ContestRules, contest_params: &Value) -> i64 {
-    let Some(param_name) = rules.power_multiplier_param.as_deref() else {
+    if rules.power_multiplier.is_empty() {
         return 1;
-    };
-    let Some(params) = contest_params.as_object() else {
-        return 1;
-    };
-    let Some(value) = params.get(param_name) else {
+    }
+
+    let Some(category_power_values) = rules
+        .cabrillo
+        .as_ref()
+        .and_then(|cabrillo| {
+            cabrillo
+                .log_fields
+                .iter()
+                .find(|field| field.name.eq_ignore_ascii_case("CATEGORY-POWER"))
+        })
+        .map(|field| &field.valid_values)
+    else {
         return 1;
     };
 
-    match value {
-        Value::Number(number) => number
-            .as_i64()
-            .or_else(|| number.as_u64().and_then(|value| i64::try_from(value).ok())),
-        Value::String(string) => string.trim().parse::<i64>().ok(),
-        _ => None,
-    }
-    .filter(|value| *value > 0)
-    .unwrap_or(1)
+    let Some(selected_power) = contest_params
+        .as_object()
+        .and_then(|params| params.get("CATEGORY-POWER"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+    else {
+        return 1;
+    };
+
+    let Some(index) = category_power_values
+        .iter()
+        .position(|value| value.eq_ignore_ascii_case(selected_power))
+    else {
+        return 1;
+    };
+
+    rules
+        .power_multiplier
+        .get(index)
+        .copied()
+        .filter(|value| *value > 0)
+        .unwrap_or(1)
 }
 
 fn scoring_key(contact: &Contact, rules: &ContestRules, fields: &[String]) -> String {
@@ -1100,7 +1121,9 @@ fn collect_changed_contacts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contest_rules::{BonusPointRule, ContestRules, QsoPointRule, QsoPoints};
+    use crate::contest_rules::{
+        BonusPointRule, CabrilloRules, ContestParam, ContestRules, QsoPointRule, QsoPoints,
+    };
     use serde_json::json;
     use std::collections::BTreeMap;
 
@@ -1109,7 +1132,8 @@ mod tests {
         dupe_key: Vec<&str>,
         multipliers: Vec<MultiplierRule>,
         bonus_points: Vec<BonusPointRule>,
-        power_multiplier_param: Option<&str>,
+        power_multiplier: Vec<i64>,
+        category_power_values: Vec<&str>,
     ) -> ContestRules {
         ContestRules {
             contest: "TEST".to_string(),
@@ -1125,8 +1149,28 @@ mod tests {
             dupe_key: dupe_key.into_iter().map(str::to_string).collect(),
             multipliers,
             bonus_points,
-            power_multiplier_param: power_multiplier_param.map(str::to_string),
-            cabrillo: None,
+            power_multiplier,
+            cabrillo: (!category_power_values.is_empty()).then_some(CabrilloRules {
+                fixed_fields: Vec::new(),
+                log_fields: vec![ContestParam {
+                    name: "CATEGORY-POWER".to_string(),
+                    label: "Category Power".to_string(),
+                    field_type: "String:16".to_string(),
+                    required: None,
+                    regex: None,
+                    default: None,
+                    in_sets: Vec::new(),
+                    valid_values: category_power_values
+                        .into_iter()
+                        .map(str::to_string)
+                        .collect(),
+                    widget: None,
+                    help_text: None,
+                    max_lines: None,
+                    preserve_case: None,
+                }],
+                export_fields: Vec::new(),
+            }),
             metadata: None,
         }
     }
@@ -1193,7 +1237,8 @@ mod tests {
             vec!["CALL", "BAND", "MODE"],
             Vec::new(),
             Vec::new(),
-            None,
+            Vec::new(),
+            Vec::new(),
         );
         let mut contacts = vec![
             contact(vec![
@@ -1225,7 +1270,8 @@ mod tests {
             Vec::new(),
             vec![state_multiplier()],
             Vec::new(),
-            None,
+            Vec::new(),
+            Vec::new(),
         );
         let mut contacts = vec![
             contact(vec![("STATE", json!("SC"))]),
@@ -1250,7 +1296,8 @@ mod tests {
             Vec::new(),
             vec![state_multiplier()],
             Vec::new(),
-            Some("Power Multiplier"),
+            vec![1, 2, 5],
+            vec!["HIGH", "LOW", "QRP"],
         );
         let mut contacts = vec![
             contact(vec![("STATE", json!("SC"))]),
@@ -1260,7 +1307,7 @@ mod tests {
         let totals = score_contacts(
             &rules,
             json!({
-                "Power Multiplier": "2"
+                "CATEGORY-POWER": "LOW"
             }),
             &mut contacts,
         );
@@ -1272,13 +1319,20 @@ mod tests {
 
     #[test]
     fn power_multiplier_defaults_to_one_when_not_configured() {
-        let rules = test_rules(fixed_points(2), Vec::new(), Vec::new(), Vec::new(), None);
+        let rules = test_rules(
+            fixed_points(2),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
         let mut contacts = vec![contact(vec![("CALL", json!("K1ABC"))])];
 
         let totals = score_contacts(
             &rules,
             json!({
-                "Power Multiplier": "5"
+                "CATEGORY-POWER": "QRP"
             }),
             &mut contacts,
         );
@@ -1294,14 +1348,15 @@ mod tests {
             Vec::new(),
             Vec::new(),
             Vec::new(),
-            Some("Power Multiplier"),
+            vec![1, 2],
+            vec!["HIGH", "LOW", "QRP"],
         );
         let mut contacts = vec![contact(vec![("CALL", json!("K1ABC"))])];
 
         let totals = score_contacts(
             &rules,
             json!({
-                "Power Multiplier": "oops"
+                "CATEGORY-POWER": "QRP"
             }),
             &mut contacts,
         );
@@ -1317,7 +1372,8 @@ mod tests {
             vec!["CALL", "BAND", "MODE"],
             Vec::new(),
             Vec::new(),
-            None,
+            Vec::new(),
+            Vec::new(),
         );
         let mut contacts = vec![
             contact(vec![
@@ -1349,7 +1405,8 @@ mod tests {
             Vec::new(),
             vec![state_multiplier()],
             vec![bonus_station(350)],
-            None,
+            Vec::new(),
+            Vec::new(),
         );
         let mut contacts = vec![
             contact(vec![
@@ -1381,7 +1438,8 @@ mod tests {
             vec!["CALL", "BAND", "MODE"],
             Vec::new(),
             Vec::new(),
-            None,
+            Vec::new(),
+            Vec::new(),
         );
         let module = Arc::new(ContestScoringModule::new(rules, Value::Null));
         let tracker = IncrementalScoreTracker::new();
@@ -1425,7 +1483,8 @@ mod tests {
             vec!["CALL", "BAND", "MODE"],
             vec![state_multiplier()],
             Vec::new(),
-            None,
+            Vec::new(),
+            Vec::new(),
         );
         let module = Arc::new(ContestScoringModule::new(rules, Value::Null));
         let tracker = IncrementalScoreTracker::new();

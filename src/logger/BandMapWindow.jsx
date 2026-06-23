@@ -145,9 +145,9 @@ function BandMapWindow({
                     }
                     tabIndex={isClickableSpot ? 0 : undefined}
                   >
-                  <td className="band-map-vfo-marker">{row.marker}</td>
-                  <td className="band-map-frequency">{row.khz}</td>
-                  <td className="band-map-callsign">{row.callsign}</td>
+                    <td className="band-map-vfo-marker">{row.marker}</td>
+                    <td className="band-map-frequency">{row.khz}</td>
+                    <td className="band-map-callsign">{row.callsign}</td>
                   </tr>
                 );
               })

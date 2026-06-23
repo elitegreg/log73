@@ -15,6 +15,8 @@ mod scoring;
 mod static_assets;
 mod supercheckpartial;
 mod validation;
+mod voice_keyer;
+mod voice_messages;
 
 use axum::{
     Json, Router,
@@ -34,7 +36,7 @@ use dxcluster::{DxClusterEvent, DxClusterManager, format_dxcluster_frequency_khz
 use futures_util::{SinkExt, StreamExt};
 use log_cache::LogCache;
 use radio::{ClientMessage, RadioCommand, ServerMessage};
-use radio_cat_rs::supported_drivers;
+use radio_cat_rs::{list_serial_ports, supported_drivers};
 use radio_manager::RadioManager;
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use std::{
@@ -49,6 +51,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing::{Span, debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use voice_keyer::VoiceKeyer;
 
 #[derive(Clone)]
 struct AppState {
@@ -61,6 +64,7 @@ struct AppState {
     supercheckpartial: SuperCheckPartial,
     dxcc: std::sync::Arc<dxcc::DxccDatabase>,
     dxcluster: DxClusterManager,
+    voice_keyer: VoiceKeyer,
 }
 
 const MAX_CLIENT_ERROR_TEXT_LENGTH: usize = 4096;
@@ -185,6 +189,8 @@ fn data_file_path(user_data_dir: &FsPath, installed_data_dir: &FsPath, file_name
 fn ensure_startup_dirs(paths: &AppPaths, log_file: Option<&PathBuf>) -> std::io::Result<()> {
     fs::create_dir_all(&paths.config_dir)?;
     fs::create_dir_all(&paths.data_dir)?;
+    let voicekeyer_dir = paths.data_dir.join("voicekeyer");
+    fs::create_dir_all(&voicekeyer_dir)?;
 
     if let Some(parent) = log_file
         .and_then(|path| path.parent())
@@ -253,11 +259,13 @@ async fn main() {
     );
     let db = Database::open(&paths.database_path).expect("failed to open log73 database");
     let dxcluster = DxClusterManager::new();
+    let voicekeyer_dir = paths.data_dir.join("voicekeyer");
+    let voice_keyer = VoiceKeyer::with_voicekeyer_dir(voicekeyer_dir);
     match db.dxcluster_config().await {
         Ok(config) => dxcluster.apply_config(config).await,
         Err(error) => warn!(%error, "failed to load dxcluster config; listener task not started"),
     }
-    let radio_manager = RadioManager::new(db.clone());
+    let radio_manager = RadioManager::new(db.clone(), voice_keyer.clone());
     let scoring_modules = ScoringModules::new();
     let incremental_scoring = IncrementalScoreTracker::new();
     let log_cache = LogCache::new(db.clone(), contest_rules.clone(), scoring_modules.clone());
@@ -273,6 +281,7 @@ async fn main() {
         supercheckpartial,
         dxcc: std::sync::Arc::new(dxcc),
         dxcluster,
+        voice_keyer,
     };
 
     let request_trace_layer = TraceLayer::new_for_http()
@@ -327,15 +336,27 @@ async fn main() {
             get(contacts).post(commit_contact),
         )
         .route("/contacts/{id}", delete(delete_contact))
+        .route("/audio-devices/input", get(input_audio_devices))
+        .route("/audio-devices/output", get(output_audio_devices))
         .route("/radio-kinds", get(radio_kinds))
+        .route("/serial-ports", get(serial_ports))
         .route("/radios", get(radios).post(create_radio))
         .route("/radios/cw-messages/default", get(default_cw_messages))
         .route("/radios/cw-messages/validate", post(validate_cw_messages))
         .route(
+            "/radios/voice-messages/default",
+            get(default_voice_messages),
+        )
+        .route(
+            "/radios/voice-messages/validate",
+            post(validate_voice_messages),
+        )
+        .route(
             "/radios/{id}",
             get(radio).put(update_radio).delete(delete_radio),
         )
-        .route("/radios/{id}/cw-labels", get(cw_labels));
+        .route("/radios/{id}/cw-labels", get(cw_labels))
+        .route("/radios/{id}/message-labels", get(message_labels));
 
     let app = Router::new()
         .nest("/api", api)
@@ -695,7 +716,11 @@ async fn handle_socket(
                     );
                 }
             }
-            Ok(ClientMessage::SendCwText { request_id, text }) => {
+            Ok(ClientMessage::SendCwText {
+                request_id,
+                text,
+                wait_for_completion,
+            }) => {
                 debug!(
                     session_id,
                     radio_id, request_id, "websocket send_cw_text command received"
@@ -708,6 +733,7 @@ async fn handle_socket(
                 let command_result = radio_handle
                     .send_command(RadioCommand::SendCwText {
                         text,
+                        wait_for_completion,
                         completed: completed_tx,
                     })
                     .await;
@@ -790,9 +816,12 @@ async fn handle_socket(
                     warn!(session_id, radio_id, frequency_hz, call = %normalized_call, %error, "failed to send DX cluster spot");
                 }
             }
-            Ok(ClientMessage::StopCw) => {
-                debug!(session_id, radio_id, "websocket stop_cw command received");
-                let _ = radio_handle.send_command(RadioCommand::StopCw).await;
+            Ok(ClientMessage::StopKeying) => {
+                debug!(
+                    session_id,
+                    radio_id, "websocket stop_keying command received"
+                );
+                let _ = radio_handle.send_command(RadioCommand::StopKeying).await;
             }
             Ok(ClientMessage::SetWpm { wpm }) => {
                 debug!(
@@ -1153,7 +1182,10 @@ async fn update_log(
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     match app_state.db.update_log(id, payload).await {
-        Ok(Some(log)) => Json(serde_json::json!({ "ok": true, "log": log })),
+        Ok(Some(log)) => {
+            app_state.log_cache.remove_log(id);
+            Json(serde_json::json!({ "ok": true, "log": log }))
+        }
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -1329,9 +1361,28 @@ async fn log_qso_count(
     }
 }
 
+async fn input_audio_devices(State(app_state): State<AppState>) -> Json<serde_json::Value> {
+    match app_state.voice_keyer.input_devices() {
+        Ok(devices) => Json(serde_json::json!({ "ok": true, "devices": devices })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
+    }
+}
+
+async fn output_audio_devices(State(app_state): State<AppState>) -> Json<serde_json::Value> {
+    match app_state.voice_keyer.output_devices() {
+        Ok(devices) => Json(serde_json::json!({ "ok": true, "devices": devices })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
+    }
+}
+
 async fn radios(State(app_state): State<AppState>) -> Json<Vec<db::RadioConfig>> {
     match app_state.db.radios().await {
-        Ok(radios) => Json(radios),
+        Ok(mut radios) => {
+            for radio in &mut radios {
+                app_state.voice_keyer.sanitize_radio_config(radio);
+            }
+            Json(radios)
+        }
         Err(error) => {
             error!(%error, "failed to load radios");
             Json(Vec::new())
@@ -1359,9 +1410,37 @@ async fn radio_kinds() -> Json<Vec<RadioKindOption>> {
     )
 }
 
+#[derive(Debug, serde::Serialize)]
+struct SerialPortOption {
+    name: String,
+    display_name: String,
+}
+
+async fn serial_ports() -> Json<serde_json::Value> {
+    match list_serial_ports() {
+        Ok(entries) => Json(serde_json::json!({
+            "ok": true,
+            "serial_ports": entries
+                .into_iter()
+                .map(|entry| SerialPortOption {
+                    display_name: entry.to_string(),
+                    name: entry.name,
+                })
+                .collect::<Vec<_>>()
+        })),
+        Err(error) => Json(serde_json::json!({
+            "ok": false,
+            "error": error.to_string()
+        })),
+    }
+}
+
 async fn radio(State(app_state): State<AppState>, Path(id): Path<i64>) -> Json<serde_json::Value> {
     match app_state.db.radio(id).await {
-        Ok(Some(radio)) => Json(serde_json::json!({ "ok": true, "radio": radio })),
+        Ok(Some(mut radio)) => {
+            app_state.voice_keyer.sanitize_radio_config(&mut radio);
+            Json(serde_json::json!({ "ok": true, "radio": radio }))
+        }
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -1380,9 +1459,31 @@ async fn cw_labels(
     }
 }
 
+async fn message_labels(
+    State(app_state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<serde_json::Value> {
+    match app_state.db.radio(id).await {
+        Ok(Some(radio)) => Json(serde_json::json!({
+            "ok": true,
+            "labels": {
+                "cw": cw::labels(&radio.cw_messages),
+                "voice": voice_messages::labels(&radio.voice_messages)
+            }
+        })),
+        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
 #[derive(Debug, serde::Deserialize)]
 struct CwMessagesPayload {
     cw_messages: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct VoiceMessagesPayload {
+    voice_messages: String,
 }
 
 async fn default_cw_messages() -> Json<serde_json::Value> {
@@ -1399,6 +1500,26 @@ async fn validate_cw_messages(Json(payload): Json<CwMessagesPayload>) -> Json<se
     }
 }
 
+async fn default_voice_messages() -> Json<serde_json::Value> {
+    Json(serde_json::json!({
+        "ok": true,
+        "voice_messages": voice_messages::DEFAULT_VOICE_MESSAGES
+    }))
+}
+
+async fn validate_voice_messages(
+    State(app_state): State<AppState>,
+    Json(payload): Json<VoiceMessagesPayload>,
+) -> Json<serde_json::Value> {
+    match app_state
+        .voice_keyer
+        .validate_voice_messages(&payload.voice_messages)
+    {
+        Ok(labels) => Json(serde_json::json!({ "ok": true, "labels": labels })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
+    }
+}
+
 async fn create_radio(
     State(app_state): State<AppState>,
     Json(payload): Json<NewRadio>,
@@ -1407,8 +1528,20 @@ async fn create_radio(
     if let Err(error) = validation::validate_radio(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
+    if let Err(error) = app_state
+        .voice_keyer
+        .validate_voice_messages(&payload.voice_messages)
+    {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
     match app_state.db.create_radio(payload).await {
-        Ok(radio) => Json(serde_json::json!({ "ok": true, "radio": radio })),
+        Ok(mut radio) => {
+            if let Err(error) = app_state.voice_keyer.sync_radio_messages(&radio) {
+                warn!(radio_id = radio.id, %error, "failed to sync voice keyer registrations after radio create");
+            }
+            app_state.voice_keyer.sanitize_radio_config(&mut radio);
+            Json(serde_json::json!({ "ok": true, "radio": radio }))
+        }
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
 }
@@ -1422,8 +1555,18 @@ async fn update_radio(
     if let Err(error) = validation::validate_radio(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
+    if let Err(error) = app_state
+        .voice_keyer
+        .validate_voice_messages(&payload.voice_messages)
+    {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
     match app_state.db.update_radio(id, payload).await {
-        Ok(Some(radio)) => {
+        Ok(Some(mut radio)) => {
+            if let Err(error) = app_state.voice_keyer.sync_radio_messages(&radio) {
+                warn!(radio_id = radio.id, %error, "failed to sync voice keyer registrations after radio update");
+            }
+            app_state.voice_keyer.sanitize_radio_config(&mut radio);
             let active = app_state.radio_manager.is_active(id).await;
             debug!(
                 id,
@@ -1456,7 +1599,12 @@ async fn delete_radio(
     }
 
     match app_state.db.delete_radio(id).await {
-        Ok(deleted) => Json(serde_json::json!({ "ok": true, "deleted": deleted })),
+        Ok(deleted) => {
+            if deleted && let Err(error) = app_state.voice_keyer.clear_radio_messages(id) {
+                warn!(id, %error, "failed to clear voice keyer registrations after radio delete");
+            }
+            Json(serde_json::json!({ "ok": true, "deleted": deleted }))
+        }
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
 }

@@ -2,6 +2,7 @@ use crate::bands::{USA_AMATEUR_BANDS, band_for_frequency};
 use crate::contest_rules::{ContestParam, ContestRules, ContestRulesStore, ExchangeField};
 use crate::cw;
 use crate::db::{self, Contact, Database, NewLog, NewRadio, UpdateLog};
+use crate::voice_messages;
 use radio_cat_rs::{Frequency, supported_drivers};
 use regex::Regex;
 use serde_json::Value;
@@ -13,6 +14,7 @@ const MAX_CALLSIGN_LEN: usize = 12;
 const MAX_RADIO_NAME_LEN: usize = 100;
 const MAX_RADIO_HOST_LEN: usize = 255;
 const MAX_SERIAL_PORT_LEN: usize = 255;
+const MAX_SOUND_DEVICE_ID_LEN: usize = 1024;
 const MAX_LOGIN_USER_LEN: usize = 64;
 const MAX_LOGIN_PASSWORD_LEN: usize = 256;
 const MAX_DXCLUSTER_HOST_LEN: usize = 255;
@@ -36,10 +38,11 @@ const MAX_CW_WPM: u8 = 60;
 const MAX_CW_REQUEST_ID_LEN: usize = 64;
 const MAX_CW_TEXT_LEN: usize = 256;
 const MAX_CW_MESSAGES_LEN: usize = 16_384;
+const MAX_VOICE_MESSAGES_LEN: usize = 16_384;
 const MAX_WS_FIELDS: usize = 100;
 const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat", "serial"];
 const LOGGER_MODE_OPTIONS: &[&str] = &[
-    "CW", "CW-R", "SSB", "FM", "FT8", "JT65", "JT9", "MFSK", "PSK", "RTTY",
+    "CW", "CW-R", "SSB", "FM", "AM", "FT8", "JT65", "JT9", "MFSK", "PSK", "RTTY",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,6 +105,16 @@ pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
 
     validate_tuning_increment_hz("CW tuning increment", payload.cw_tuning_increment_hz)?;
     validate_tuning_increment_hz("SSB tuning increment", payload.ssb_tuning_increment_hz)?;
+    validate_optional_plain_text(
+        "voice input sound device",
+        payload.voice_input_device_id.as_deref().unwrap_or(""),
+        MAX_SOUND_DEVICE_ID_LEN,
+    )?;
+    validate_optional_plain_text(
+        "voice output sound device",
+        payload.voice_output_device_id.as_deref().unwrap_or(""),
+        MAX_SOUND_DEVICE_ID_LEN,
+    )?;
     let cw_keyer_type = payload.cw_keyer_type.trim().to_ascii_lowercase();
     if !ALLOWED_CW_KEYER_TYPES.contains(&cw_keyer_type.as_str()) {
         return Err("CW keyer type must be one of: none, winkeyer, cat, serial".to_string());
@@ -194,6 +207,7 @@ pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
     }
 
     validate_cw_messages(&payload.cw_messages)?;
+    validate_voice_messages(&payload.voice_messages)?;
 
     Ok(())
 }
@@ -215,6 +229,25 @@ pub fn validate_cw_messages(value: &str) -> Result<(), String> {
     }
 
     cw::validate(value).map(|_| ())
+}
+
+pub fn validate_voice_messages(value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err("Voice messages are required".to_string());
+    }
+    if value.chars().count() > MAX_VOICE_MESSAGES_LEN {
+        return Err(format!(
+            "Voice messages must be at most {MAX_VOICE_MESSAGES_LEN} characters"
+        ));
+    }
+    if value
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err("Voice messages cannot contain control characters".to_string());
+    }
+
+    voice_messages::validate(value).map(|_| ())
 }
 
 pub fn validate_auth_config(
@@ -1100,7 +1133,7 @@ mod tests {
             dupe_key: Vec::new(),
             multipliers: Vec::new(),
             bonus_points: Vec::new(),
-            power_multiplier_param: None,
+            power_multiplier: Vec::new(),
             cabrillo: None,
             metadata: None,
         }
@@ -1133,12 +1166,15 @@ mod tests {
             cw_tuning_increment_hz: db::DEFAULT_CW_TUNING_INCREMENT_HZ,
             ssb_tuning_increment_hz: db::DEFAULT_SSB_TUNING_INCREMENT_HZ,
             rit_clear_on_log: false,
+            voice_input_device_id: None,
+            voice_output_device_id: None,
             cw_keyer_type: "none".to_string(),
             winkeyer_serial_port: String::new(),
             cw_serial_port: String::new(),
             cw_serial_baud_rate: 9_600,
             cw_serial_line: "dtr".to_string(),
             cw_messages: cw::DEFAULT_CW_MESSAGES.to_string(),
+            voice_messages: voice_messages::DEFAULT_VOICE_MESSAGES.to_string(),
         }
     }
 
@@ -1166,7 +1202,8 @@ mod tests {
         for mode in LOGGER_MODE_OPTIONS {
             assert!(validate_radio_mode(mode).is_ok());
         }
-        assert!(validate_radio_mode("AM").is_err());
+        assert!(validate_radio_mode("AM").is_ok());
+        assert!(validate_radio_mode("USB").is_err());
     }
 
     #[test]
@@ -1257,6 +1294,27 @@ mod tests {
 
         let error = validate_radio(&radio).expect_err("missing host should fail");
         assert!(error.contains("TCP host"));
+    }
+
+    #[test]
+    fn validates_optional_voice_sound_device_ids() {
+        let mut radio = test_radio();
+        radio.voice_input_device_id = Some("alsa:hw:1,0".to_string());
+        radio.voice_output_device_id = Some("wasapi:{0.0.0.00000000}".to_string());
+
+        assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn rejects_voice_sound_device_ids_with_control_characters_or_excessive_length() {
+        let mut radio = test_radio();
+        radio.voice_output_device_id = Some("alsa:bad\u{0007}".to_string());
+        let error = validate_radio(&radio).expect_err("control character should fail");
+        assert!(error.contains("voice output sound device"));
+
+        radio.voice_output_device_id = Some("x".repeat(MAX_SOUND_DEVICE_ID_LEN + 1));
+        let error = validate_radio(&radio).expect_err("long device id should fail");
+        assert!(error.contains("voice output sound device"));
     }
 
     #[test]

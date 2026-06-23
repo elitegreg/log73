@@ -1,177 +1,210 @@
-<!DOCTYPE html>
+<!doctype html>
 <html xmlns="http://www.w3.org/1999/xhtml" lang="" xml:lang="">
-<head>
-  <meta charset="utf-8" />
-  <meta name="generator" content="pandoc" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
-  <title>keyboard-shortcuts</title>
-  <style>
-    code{white-space: pre-wrap;}
-    span.smallcaps{font-variant: small-caps;}
-    div.columns{display: flex; gap: min(4vw, 1.5em);}
-    div.column{flex: auto; overflow-x: auto;}
-    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
-    /* The extra [class] is a hack that increases specificity enough to
+  <head>
+    <meta charset="utf-8" />
+    <meta name="generator" content="pandoc" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=yes"
+    />
+    <title>keyboard-shortcuts</title>
+    <style>
+      code {
+        white-space: pre-wrap;
+      }
+      span.smallcaps {
+        font-variant: small-caps;
+      }
+      div.columns {
+        display: flex;
+        gap: min(4vw, 1.5em);
+      }
+      div.column {
+        flex: auto;
+        overflow-x: auto;
+      }
+      div.hanging-indent {
+        margin-left: 1.5em;
+        text-indent: -1.5em;
+      }
+      /* The extra [class] is a hack that increases specificity enough to
        override a similar rule in reveal.js */
-    ul.task-list[class]{list-style: none;}
-    ul.task-list li input[type="checkbox"] {
-      font-size: inherit;
-      width: 0.8em;
-      margin: 0 0.8em 0.2em -1.6em;
-      vertical-align: middle;
-    }
-    .display.math{display: block; text-align: center; margin: 0.5rem auto;}
-  </style>
-  <link rel="stylesheet" href="docs/help.css" />
-</head>
-<body>
-<h1 id="log73-keyboard-shortcuts">Log73 Keyboard Shortcuts</h1>
-<p>This page summarizes keyboard shortcuts and special key behavior in
-the logger UI.</p>
-<h2 id="global-logger-shortcuts">Global logger shortcuts</h2>
-<table>
-<colgroup>
-<col style="width: 21%" />
-<col style="width: 78%" />
-</colgroup>
-<thead>
-<tr class="header">
-<th>Shortcut</th>
-<th>Action</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>Ctrl+O</code></td>
-<td>Prompt/change operator callsign</td>
-</tr>
-<tr class="even">
-<td><code>F1</code>..<code>F12</code></td>
-<td>Send message for active Run/S&amp;P bank</td>
-</tr>
-<tr class="odd">
-<td><code>Esc</code></td>
-<td>Stop sending / clear queue (or close CW text dialog)</td>
-</tr>
-<tr class="even">
-<td><code>PageUp</code></td>
-<td>Increase CW WPM by 1</td>
-</tr>
-<tr class="odd">
-<td><code>PageDown</code></td>
-<td>Decrease CW WPM by 1</td>
-</tr>
-<tr class="even">
-<td><code>Ctrl+K</code></td>
-<td>Open CW text dialog (CW/CW-R only)</td>
-</tr>
-<tr class="odd">
-<td><code>Ctrl+PageUp</code></td>
-<td>Shift band up</td>
-</tr>
-<tr class="even">
-<td><code>Ctrl+PageDown</code></td>
-<td>Shift band down</td>
-</tr>
-<tr class="odd">
-<td><code>ArrowUp</code></td>
-<td>Tune up by configured increment (Using RIT in Run Mode)</td>
-</tr>
-<tr class="even">
-<td><code>ArrowDown</code></td>
-<td>Tune down by configured increment (Using RIT in Run Mode)</td>
-</tr>
-<tr class="odd">
-<td><code>Ctrl+ArrowUp</code></td>
-<td>Jump to next band-map spot below current VFO</td>
-</tr>
-<tr class="even">
-<td><code>Ctrl+ArrowDown</code></td>
-<td>Jump to next band-map spot above current VFO</td>
-</tr>
-<tr class="odd">
-<td><code>Alt+M</code></td>
-<td>Mark current frequency</td>
-</tr>
-<tr class="even">
-<td><code>Alt+O</code></td>
-<td>Store current spot</td>
-</tr>
-<tr class="odd">
-<td><code>Alt+Q</code></td>
-<td>Jump to last stored CQ frequency</td>
-</tr>
-<tr class="even">
-<td><code>Ctrl+P</code></td>
-<td>Spot It</td>
-</tr>
-</tbody>
-</table>
-<blockquote>
-<p>Note: function keys and related global logger hotkeys are ignored
-while focus is inside the log table area.</p>
-</blockquote>
-<h2 id="callsign-and-exchange-field-behavior">Callsign and exchange
-field behavior</h2>
-<ul>
-<li><code>Enter</code> in callsign with a numeric value (for example
-<code>14074</code>) sets radio frequency in kHz.</li>
-<li><code>Enter</code> in callsign with a mode token (for example
-<code>CW</code>, <code>SSB</code>, <code>RTTY</code>, <code>FT8</code>)
-sets radio mode.</li>
-<li><code>Enter</code> participates in ESM behavior when ESM is
-enabled.</li>
-<li><code>Alt+Enter</code> in callsign/exchange fields logs immediately
-(normal validation still applies).</li>
-<li><code>Tab</code> moves to the next empty editable field.</li>
-<li><code>Shift+Tab</code> uses normal browser reverse-tab
-behavior.</li>
-</ul>
-<h2 id="cw-text-dialog-ctrlk">CW text dialog (<code>Ctrl+K</code>)</h2>
-<table>
-<thead>
-<tr class="header">
-<th>Key</th>
-<th>Action</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>Space</code></td>
-<td>Send current word with trailing space</td>
-</tr>
-<tr class="even">
-<td><code>Enter</code></td>
-<td>Send current word and close dialog</td>
-</tr>
-<tr class="odd">
-<td><code>Esc</code></td>
-<td>Close dialog</td>
-</tr>
-<tr class="even">
-<td><code>Backspace</code> (empty input)</td>
-<td>Ignored</td>
-</tr>
-</tbody>
-</table>
-<h2 id="log-window-inline-edit">Log window inline edit</h2>
-<table>
-<thead>
-<tr class="header">
-<th>Key</th>
-<th>Action</th>
-</tr>
-</thead>
-<tbody>
-<tr class="odd">
-<td><code>Enter</code></td>
-<td>Apply edit</td>
-</tr>
-<tr class="even">
-<td><code>Esc</code></td>
-<td>Cancel edit</td>
-</tr>
-</tbody>
-</table>
-</body>
+      ul.task-list[class] {
+        list-style: none;
+      }
+      ul.task-list li input[type='checkbox'] {
+        font-size: inherit;
+        width: 0.8em;
+        margin: 0 0.8em 0.2em -1.6em;
+        vertical-align: middle;
+      }
+      .display.math {
+        display: block;
+        text-align: center;
+        margin: 0.5rem auto;
+      }
+    </style>
+    <link rel="stylesheet" href="docs/help.css" />
+  </head>
+  <body>
+    <h1 id="log73-keyboard-shortcuts">Log73 Keyboard Shortcuts</h1>
+    <p>
+      This page summarizes keyboard shortcuts and special key behavior in the
+      logger UI.
+    </p>
+    <h2 id="global-logger-shortcuts">Global logger shortcuts</h2>
+    <table>
+      <colgroup>
+        <col style="width: 21%" />
+        <col style="width: 78%" />
+      </colgroup>
+      <thead>
+        <tr class="header">
+          <th>Shortcut</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="odd">
+          <td><code>Ctrl+O</code></td>
+          <td>Prompt/change operator callsign</td>
+        </tr>
+        <tr class="even">
+          <td><code>F1</code>..<code>F12</code></td>
+          <td>Send message for active Run/S&amp;P bank</td>
+        </tr>
+        <tr class="odd">
+          <td><code>Esc</code></td>
+          <td>Stop sending / clear queue (or close CW text dialog)</td>
+        </tr>
+        <tr class="even">
+          <td><code>PageUp</code></td>
+          <td>Increase CW WPM by 1</td>
+        </tr>
+        <tr class="odd">
+          <td><code>PageDown</code></td>
+          <td>Decrease CW WPM by 1</td>
+        </tr>
+        <tr class="even">
+          <td><code>Ctrl+K</code></td>
+          <td>Open CW text dialog (CW/CW-R only)</td>
+        </tr>
+        <tr class="odd">
+          <td><code>Alt+PageUp</code></td>
+          <td>Shift band up</td>
+        </tr>
+        <tr class="even">
+          <td><code>Alt+PageDown</code></td>
+          <td>Shift band down</td>
+        </tr>
+        <tr class="odd">
+          <td><code>ArrowUp</code></td>
+          <td>Tune up by configured increment (Using RIT in Run Mode)</td>
+        </tr>
+        <tr class="even">
+          <td><code>ArrowDown</code></td>
+          <td>Tune down by configured increment (Using RIT in Run Mode)</td>
+        </tr>
+        <tr class="odd">
+          <td><code>Ctrl+ArrowUp</code></td>
+          <td>Jump to next band-map spot below current VFO</td>
+        </tr>
+        <tr class="even">
+          <td><code>Ctrl+ArrowDown</code></td>
+          <td>Jump to next band-map spot above current VFO</td>
+        </tr>
+        <tr class="odd">
+          <td><code>Alt+M</code></td>
+          <td>Mark current frequency</td>
+        </tr>
+        <tr class="even">
+          <td><code>Alt+O</code></td>
+          <td>Store current spot</td>
+        </tr>
+        <tr class="odd">
+          <td><code>Alt+Q</code></td>
+          <td>Jump to last stored CQ frequency</td>
+        </tr>
+        <tr class="even">
+          <td><code>Ctrl+P</code></td>
+          <td>Spot It</td>
+        </tr>
+      </tbody>
+    </table>
+    <blockquote>
+      <p>
+        Note: function keys and related global logger hotkeys are ignored while
+        focus is inside the log table area.
+      </p>
+    </blockquote>
+    <h2 id="callsign-and-exchange-field-behavior">
+      Callsign and exchange field behavior
+    </h2>
+    <ul>
+      <li>
+        <code>Enter</code> in callsign with a numeric value (for example
+        <code>14074</code>) sets radio frequency in kHz.
+      </li>
+      <li>
+        <code>Enter</code> in callsign with a mode token (for example
+        <code>CW</code>, <code>SSB</code>, <code>RTTY</code>, <code>FT8</code>)
+        sets radio mode.
+      </li>
+      <li>
+        <code>Enter</code> participates in ESM behavior when ESM is enabled.
+      </li>
+      <li>
+        <code>Alt+Enter</code> in callsign/exchange fields logs immediately
+        (normal validation still applies).
+      </li>
+      <li><code>Tab</code> moves to the next empty editable field.</li>
+      <li><code>Shift+Tab</code> uses normal browser reverse-tab behavior.</li>
+    </ul>
+    <h2 id="cw-text-dialog-ctrlk">CW text dialog (<code>Ctrl+K</code>)</h2>
+    <table>
+      <thead>
+        <tr class="header">
+          <th>Key</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="odd">
+          <td><code>Space</code></td>
+          <td>Send current word with trailing space</td>
+        </tr>
+        <tr class="even">
+          <td><code>Enter</code></td>
+          <td>Send current word and close dialog</td>
+        </tr>
+        <tr class="odd">
+          <td><code>Esc</code></td>
+          <td>Close dialog</td>
+        </tr>
+        <tr class="even">
+          <td><code>Backspace</code> (empty input)</td>
+          <td>Ignored</td>
+        </tr>
+      </tbody>
+    </table>
+    <h2 id="log-window-inline-edit">Log window inline edit</h2>
+    <table>
+      <thead>
+        <tr class="header">
+          <th>Key</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="odd">
+          <td><code>Enter</code></td>
+          <td>Apply edit</td>
+        </tr>
+        <tr class="even">
+          <td><code>Esc</code></td>
+          <td>Cancel edit</td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
 </html>

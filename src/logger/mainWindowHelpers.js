@@ -9,10 +9,11 @@ import {
   adifModeForLoggerMode,
   isSelectableMode,
   modeIsCw,
+  modeIsPhone,
   normalizeLoggerMode,
 } from '../domain/modes.js';
 
-export { adifModeForLoggerMode, isSelectableMode, modeIsCw };
+export { adifModeForLoggerMode, isSelectableMode, modeIsCw, modeIsPhone };
 
 export const MODE_OPTIONS = LOGGER_MODE_OPTIONS;
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
@@ -174,9 +175,7 @@ export function shouldAdvanceFromCallsignAutofill({
   hasEditableExchangeField,
 } = {}) {
   return Boolean(
-    esmEnabled &&
-      autofillResult?.matchedContact &&
-      hasEditableExchangeField,
+    esmEnabled && autofillResult?.matchedContact && hasEditableExchangeField,
   );
 }
 
@@ -242,11 +241,26 @@ export function isEmptyMessageButton(button) {
   return String(button?.label ?? '').trim() === '-';
 }
 
+export function messageButtonIsSendable(button) {
+  return !isEmptyMessageButton(button);
+}
+
 export function cwActionFromTemplate(template) {
   const match = String(template ?? '')
     .trim()
     .match(/^\{\s*action\s*:\s*([^}]+?)\s*\}$/i);
   return match ? match[1].trim() : null;
+}
+
+export function messageActionForRadioMode(
+  cwConfig,
+  voiceConfig,
+  mode,
+  key,
+  radioMode,
+) {
+  const config = modeIsPhone(radioMode) ? voiceConfig : cwConfig;
+  return cwActionForMessage(config, mode, key);
 }
 
 export function cwActionForMessage(config, mode, key) {
@@ -299,8 +313,13 @@ export function typedModeFromCallsignInput(value, settings) {
   const normalizedValue = normalizeLoggerMode(value);
   if (!normalizedValue) return null;
 
+  const modeAliases = {
+    CWR: 'CW-R',
+  };
+  const candidateValue = modeAliases[normalizedValue] ?? normalizedValue;
+
   return (
-    availableModeOptions(settings).find((mode) => mode === normalizedValue) ??
+    availableModeOptions(settings).find((mode) => mode === candidateValue) ??
     null
   );
 }
@@ -325,6 +344,14 @@ export function nextCwWpm(currentWpm, delta) {
     CW_WPM_MAX,
     Math.max(CW_WPM_MIN, normalizedCurrentWpm + delta),
   );
+}
+
+export function isPageUpKey(event) {
+  return event?.key === 'PageUp' || event?.key === 'Prior';
+}
+
+export function isPageDownKey(event) {
+  return event?.key === 'PageDown' || event?.key === 'Next';
 }
 
 function normalizedPositiveHz(value, fallbackHz) {

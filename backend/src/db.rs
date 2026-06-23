@@ -1,4 +1,5 @@
 use crate::cw::DEFAULT_CW_MESSAGES;
+use crate::voice_messages::DEFAULT_VOICE_MESSAGES;
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -50,12 +51,15 @@ pub struct RadioConfig {
     pub cw_tuning_increment_hz: u32,
     pub ssb_tuning_increment_hz: u32,
     pub rit_clear_on_log: bool,
+    pub voice_input_device_id: Option<String>,
+    pub voice_output_device_id: Option<String>,
     pub cw_keyer_type: String,
     pub winkeyer_serial_port: String,
     pub cw_serial_port: String,
     pub cw_serial_baud_rate: u32,
     pub cw_serial_line: String,
     pub cw_messages: String,
+    pub voice_messages: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -137,6 +141,10 @@ pub struct NewRadio {
     pub ssb_tuning_increment_hz: u32,
     #[serde(default)]
     pub rit_clear_on_log: bool,
+    #[serde(default)]
+    pub voice_input_device_id: Option<String>,
+    #[serde(default)]
+    pub voice_output_device_id: Option<String>,
     pub cw_keyer_type: String,
     pub winkeyer_serial_port: String,
     #[serde(default)]
@@ -147,6 +155,8 @@ pub struct NewRadio {
     pub cw_serial_line: String,
     #[serde(default = "default_cw_messages")]
     pub cw_messages: String,
+    #[serde(default = "default_voice_messages")]
+    pub voice_messages: String,
 }
 
 pub const DEFAULT_CW_TUNING_INCREMENT_HZ: u32 = 20;
@@ -170,6 +180,10 @@ fn default_cw_serial_line() -> String {
 
 fn default_cw_messages() -> String {
     DEFAULT_CW_MESSAGES.to_string()
+}
+
+fn default_voice_messages() -> String {
+    DEFAULT_VOICE_MESSAGES.to_string()
 }
 
 const QSO_COLUMNS: &[&str] = &[
@@ -802,7 +816,7 @@ fn db_log_qso_count(connection: &Connection, id: i64) -> rusqlite::Result<usize>
 
 fn db_radios(connection: &Connection) -> rusqlite::Result<Vec<RadioConfig>> {
     let mut statement = connection.prepare(
-        "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES FROM radios ORDER BY ID",
+        "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES FROM radios ORDER BY ID",
     )?;
     let rows = statement.query_map([], row_to_radio)?;
     rows.collect()
@@ -895,9 +909,16 @@ fn db_update_config(connection: &Connection, config: UpdateConfig) -> rusqlite::
     Ok(())
 }
 
+fn normalized_optional_device_id(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
 fn db_create_radio(connection: &Connection, radio: NewRadio) -> rusqlite::Result<RadioConfig> {
     connection.execute(
-        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
         params![
             radio.name.trim(),
             radio.radio_kind.trim(),
@@ -910,12 +931,15 @@ fn db_create_radio(connection: &Connection, radio: NewRadio) -> rusqlite::Result
             radio.cw_tuning_increment_hz,
             radio.ssb_tuning_increment_hz,
             radio.rit_clear_on_log,
+            normalized_optional_device_id(radio.voice_input_device_id.as_deref()),
+            normalized_optional_device_id(radio.voice_output_device_id.as_deref()),
             radio.cw_keyer_type.trim(),
             radio.winkeyer_serial_port.trim(),
             radio.cw_serial_port.trim(),
             radio.cw_serial_baud_rate,
             radio.cw_serial_line.trim(),
-            radio.cw_messages
+            radio.cw_messages,
+            radio.voice_messages
         ],
     )?;
     select_radio(connection, connection.last_insert_rowid())?
@@ -928,7 +952,7 @@ fn db_update_radio(
     radio: NewRadio,
 ) -> rusqlite::Result<Option<RadioConfig>> {
     let updated = connection.execute(
-        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, OPTIONS = ?8, CW_TUNING_INCREMENT_HZ = ?9, SSB_TUNING_INCREMENT_HZ = ?10, RIT_CLEAR_ON_LOG = ?11, CW_KEYER_TYPE = ?12, WINKEYER_SERIAL_PORT = ?13, CW_SERIAL_PORT = ?14, CW_SERIAL_BAUD_RATE = ?15, CW_SERIAL_LINE = ?16, CW_MESSAGES = ?17 WHERE ID = ?18",
+        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, OPTIONS = ?8, CW_TUNING_INCREMENT_HZ = ?9, SSB_TUNING_INCREMENT_HZ = ?10, RIT_CLEAR_ON_LOG = ?11, VOICE_INPUT_DEVICE_ID = ?12, VOICE_OUTPUT_DEVICE_ID = ?13, CW_KEYER_TYPE = ?14, WINKEYER_SERIAL_PORT = ?15, CW_SERIAL_PORT = ?16, CW_SERIAL_BAUD_RATE = ?17, CW_SERIAL_LINE = ?18, CW_MESSAGES = ?19, VOICE_MESSAGES = ?20 WHERE ID = ?21",
         params![
             radio.name.trim(),
             radio.radio_kind.trim(),
@@ -941,12 +965,15 @@ fn db_update_radio(
             radio.cw_tuning_increment_hz,
             radio.ssb_tuning_increment_hz,
             radio.rit_clear_on_log,
+            normalized_optional_device_id(radio.voice_input_device_id.as_deref()),
+            normalized_optional_device_id(radio.voice_output_device_id.as_deref()),
             radio.cw_keyer_type.trim(),
             radio.winkeyer_serial_port.trim(),
             radio.cw_serial_port.trim(),
             radio.cw_serial_baud_rate,
             radio.cw_serial_line.trim(),
             radio.cw_messages,
+            radio.voice_messages,
             id
         ],
     )?;
@@ -1032,12 +1059,15 @@ fn initialize_schema(connection: &Connection) -> rusqlite::Result<()> {
             CW_TUNING_INCREMENT_HZ INTEGER NOT NULL DEFAULT 20 CHECK (CW_TUNING_INCREMENT_HZ > 0),
             SSB_TUNING_INCREMENT_HZ INTEGER NOT NULL DEFAULT 100 CHECK (SSB_TUNING_INCREMENT_HZ > 0),
             RIT_CLEAR_ON_LOG INTEGER NOT NULL DEFAULT 0 CHECK (RIT_CLEAR_ON_LOG IN (0, 1)),
+            VOICE_INPUT_DEVICE_ID TEXT,
+            VOICE_OUTPUT_DEVICE_ID TEXT,
             CW_KEYER_TYPE TEXT NOT NULL DEFAULT 'none',
             WINKEYER_SERIAL_PORT TEXT NOT NULL DEFAULT '',
             CW_SERIAL_PORT TEXT NOT NULL DEFAULT '',
             CW_SERIAL_BAUD_RATE INTEGER NOT NULL DEFAULT 9600 CHECK (CW_SERIAL_BAUD_RATE > 0),
             CW_SERIAL_LINE TEXT NOT NULL DEFAULT 'dtr',
-            CW_MESSAGES TEXT NOT NULL
+            CW_MESSAGES TEXT NOT NULL,
+            VOICE_MESSAGES TEXT NOT NULL
         ) STRICT;
 
         CREATE TABLE IF NOT EXISTS qsos (
@@ -1124,7 +1154,7 @@ fn row_to_log(row: &rusqlite::Row<'_>) -> rusqlite::Result<Log> {
 fn select_radio(connection: &Connection, id: i64) -> rusqlite::Result<Option<RadioConfig>> {
     connection
         .query_row(
-            "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES FROM radios WHERE ID = ?1",
+            "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES FROM radios WHERE ID = ?1",
             params![id],
             row_to_radio,
         )
@@ -1137,6 +1167,8 @@ fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioConfig> {
     let cw_tuning_increment_hz: i64 = row.get("CW_TUNING_INCREMENT_HZ")?;
     let ssb_tuning_increment_hz: i64 = row.get("SSB_TUNING_INCREMENT_HZ")?;
     let cw_serial_baud_rate: i64 = row.get("CW_SERIAL_BAUD_RATE")?;
+    let voice_input_device_id: Option<String> = row.get("VOICE_INPUT_DEVICE_ID")?;
+    let voice_output_device_id: Option<String> = row.get("VOICE_OUTPUT_DEVICE_ID")?;
     Ok(RadioConfig {
         id: row.get("ID")?,
         name: row.get("NAME")?,
@@ -1150,12 +1182,15 @@ fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioConfig> {
         cw_tuning_increment_hz: cw_tuning_increment_hz as u32,
         ssb_tuning_increment_hz: ssb_tuning_increment_hz as u32,
         rit_clear_on_log: row.get("RIT_CLEAR_ON_LOG")?,
+        voice_input_device_id: normalized_optional_device_id(voice_input_device_id.as_deref()),
+        voice_output_device_id: normalized_optional_device_id(voice_output_device_id.as_deref()),
         cw_keyer_type: row.get("CW_KEYER_TYPE")?,
         winkeyer_serial_port: row.get("WINKEYER_SERIAL_PORT")?,
         cw_serial_port: row.get("CW_SERIAL_PORT")?,
         cw_serial_baud_rate: cw_serial_baud_rate as u32,
         cw_serial_line: row.get("CW_SERIAL_LINE")?,
         cw_messages: row.get("CW_MESSAGES")?,
+        voice_messages: row.get("VOICE_MESSAGES")?,
     })
 }
 
@@ -1575,12 +1610,15 @@ mod tests {
             cw_tuning_increment_hz: DEFAULT_CW_TUNING_INCREMENT_HZ,
             ssb_tuning_increment_hz: DEFAULT_SSB_TUNING_INCREMENT_HZ,
             rit_clear_on_log: false,
+            voice_input_device_id: None,
+            voice_output_device_id: None,
             cw_keyer_type: "none".to_string(),
             winkeyer_serial_port: String::new(),
             cw_serial_port: String::new(),
             cw_serial_baud_rate: 9_600,
             cw_serial_line: "dtr".to_string(),
             cw_messages: DEFAULT_CW_MESSAGES.to_string(),
+            voice_messages: DEFAULT_VOICE_MESSAGES.to_string(),
         }
     }
 
@@ -1910,9 +1948,71 @@ mod tests {
             DEFAULT_SSB_TUNING_INCREMENT_HZ
         );
         assert!(!radio.rit_clear_on_log);
+        assert_eq!(radio.voice_input_device_id, None);
+        assert_eq!(radio.voice_output_device_id, None);
         assert_eq!(radio.cw_keyer_type, "none");
         assert_eq!(radio.cw_serial_port, "");
         assert_eq!(radio.cw_serial_baud_rate, 9_600);
         assert_eq!(radio.cw_serial_line, "dtr");
+        assert_eq!(radio.voice_messages, DEFAULT_VOICE_MESSAGES);
+    }
+
+    #[tokio::test]
+    async fn create_radio_persists_optional_voice_device_ids() {
+        let database = test_database();
+        let mut new_radio = tcp_radio();
+        new_radio.voice_input_device_id = Some("alsa:hw:1,0".to_string());
+        new_radio.voice_output_device_id = Some("wasapi:{output-device}".to_string());
+
+        let radio = database
+            .create_radio(new_radio)
+            .await
+            .expect("radio is created");
+        let listed = database.radios().await.expect("radios list");
+        let selected = database
+            .radio(radio.id)
+            .await
+            .expect("radio loads")
+            .expect("radio exists");
+
+        assert_eq!(radio.voice_input_device_id.as_deref(), Some("alsa:hw:1,0"));
+        assert_eq!(
+            radio.voice_output_device_id.as_deref(),
+            Some("wasapi:{output-device}")
+        );
+        assert_eq!(listed[0].voice_input_device_id, radio.voice_input_device_id);
+        assert_eq!(
+            selected.voice_output_device_id,
+            radio.voice_output_device_id
+        );
+    }
+
+    #[tokio::test]
+    async fn update_radio_can_change_and_clear_voice_device_ids() {
+        let database = test_database();
+        let mut new_radio = tcp_radio();
+        new_radio.voice_input_device_id = Some("alsa:mic-1".to_string());
+        new_radio.voice_output_device_id = Some("alsa:out-1".to_string());
+        let radio = database
+            .create_radio(new_radio)
+            .await
+            .expect("radio is created");
+
+        let mut update = tcp_radio();
+        update.name = "Updated".to_string();
+        update.voice_input_device_id = Some("   ".to_string());
+        update.voice_output_device_id = Some("alsa:out-2".to_string());
+        let updated = database
+            .update_radio(radio.id, update)
+            .await
+            .expect("radio updates")
+            .expect("radio exists");
+
+        assert_eq!(updated.name, "Updated");
+        assert_eq!(updated.voice_input_device_id, None);
+        assert_eq!(
+            updated.voice_output_device_id.as_deref(),
+            Some("alsa:out-2")
+        );
     }
 }

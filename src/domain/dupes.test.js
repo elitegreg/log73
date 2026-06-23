@@ -26,7 +26,10 @@ test('dupeAlertText detects exact dupes', () => {
     { CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' },
   ];
 
-  assert.equal(dupeAlertText(settings, currentContact, historicContacts), 'Dupe');
+  assert.equal(
+    dupeAlertText(settings, currentContact, historicContacts),
+    'Dupe',
+  );
 });
 
 test('dupeAlertText detects possible dupes before exact exchange is known', () => {

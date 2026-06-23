@@ -28,8 +28,7 @@ function normalizedSpotType(spot) {
     .trim()
     .toLowerCase();
   if (type === BAND_MAP_SPOT_TYPES.CQ) return BAND_MAP_SPOT_TYPES.CQ;
-  if (type === BAND_MAP_SPOT_TYPES.IN_USE)
-    return BAND_MAP_SPOT_TYPES.IN_USE;
+  if (type === BAND_MAP_SPOT_TYPES.IN_USE) return BAND_MAP_SPOT_TYPES.IN_USE;
   if (type === BAND_MAP_SPOT_TYPES.RBN) return BAND_MAP_SPOT_TYPES.RBN;
   return spot?.source === BAND_MAP_SPOT_TYPES.RBN
     ? BAND_MAP_SPOT_TYPES.RBN
@@ -119,7 +118,10 @@ export function addBandMapSpot(store, rawSpot) {
   const spotsById = new Map(baseStore.spotsById);
   const cqFrequencyHzByBand = new Map(baseStore.cqFrequencyHzByBand ?? []);
   const previousSpot = spotsById.get(spot.id);
-  if (previousSpot?.spot_type === BAND_MAP_SPOT_TYPES.CQ && previousSpot.band_meters) {
+  if (
+    previousSpot?.spot_type === BAND_MAP_SPOT_TYPES.CQ &&
+    previousSpot.band_meters
+  ) {
     cqFrequencyHzByBand.delete(String(previousSpot.band_meters));
   }
   const sortedSpots = baseStore.sortedSpots.filter(
@@ -144,7 +146,10 @@ export function removeBandMapSpot(store, id) {
   const spotsById = new Map(baseStore.spotsById);
   const cqFrequencyHzByBand = new Map(baseStore.cqFrequencyHzByBand ?? []);
   spotsById.delete(key);
-  if (removedSpot?.spot_type === BAND_MAP_SPOT_TYPES.CQ && removedSpot.band_meters) {
+  if (
+    removedSpot?.spot_type === BAND_MAP_SPOT_TYPES.CQ &&
+    removedSpot.band_meters
+  ) {
     cqFrequencyHzByBand.delete(String(removedSpot.band_meters));
   }
   return {
@@ -156,7 +161,8 @@ export function removeBandMapSpot(store, id) {
 
 export function addCqBandMapSpot(store, frequencyHz, bandMeters) {
   const normalizedFrequency = normalizedFrequencyHz(frequencyHz);
-  if (!normalizedFrequency || !bandMeters) return store ?? createBandMapSpotStore();
+  if (!normalizedFrequency || !bandMeters)
+    return store ?? createBandMapSpotStore();
   return addBandMapSpot(store, {
     id: `cq:${bandMeters}`,
     spot_type: BAND_MAP_SPOT_TYPES.CQ,

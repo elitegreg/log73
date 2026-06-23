@@ -37,6 +37,7 @@ pub struct DxClusterSpot {
     pub rbn: Option<DxClusterRbnSpot>,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum DxClusterEvent {
     SpotAdded(Box<DxClusterSpot>),

@@ -620,7 +620,7 @@ function LoggerScreen() {
       const [logResult, radioResult, messageLabelsResult] = await Promise.all([
         apiJson(`/logs/${numericLogId}`),
         apiJson(`/radios/${numericRadioId}`),
-        apiJson(`/radios/${numericRadioId}/cw-labels`),
+        apiJson(`/radios/${numericRadioId}/message-labels`),
       ]);
       if (!logResult.ok) throw new Error(logResult.error ?? 'Log not found');
       if (!radioResult.ok)
@@ -1705,7 +1705,7 @@ function LoggerScreen() {
             onSendDxClusterSpot={(payload) =>
               sendRadioMessage({ type: 'send_dxcluster_spot', ...payload })
             }
-            onStopCw={() => sendRadioMessage({ type: 'stop_cw' })}
+            onStopKeying={() => sendRadioMessage({ type: 'stop_keying' })}
             onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}
             onDebouncedCallsignChange={handleDebouncedCallsignChange}
             onLogContact={(contact) => {

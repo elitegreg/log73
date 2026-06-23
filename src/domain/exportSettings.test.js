@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaultExportValues, exportSettingsStorageKey } from './exportSettings.js';
+import {
+  defaultExportValues,
+  exportSettingsStorageKey,
+} from './exportSettings.js';
 
 test('defaultExportValues prefers stored values over log params and YAML defaults', () => {
   const settings = {

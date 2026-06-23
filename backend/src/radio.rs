@@ -4,6 +4,7 @@ use crate::dxcluster::DxClusterSpot;
 use radio_cat_rs::{Frequency, Mode};
 use serde::{Deserialize, Serialize};
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
@@ -82,6 +83,8 @@ pub enum ClientMessage {
     SendCwText {
         request_id: String,
         text: String,
+        #[serde(default = "default_wait_for_completion")]
+        wait_for_completion: bool,
     },
     #[serde(rename = "send_dxcluster_spot")]
     SendDxClusterSpot {
@@ -89,7 +92,8 @@ pub enum ClientMessage {
         call: String,
         comment: String,
     },
-    StopCw,
+    #[serde(rename = "stop_keying")]
+    StopKeying,
     SetWpm {
         wpm: u8,
     },
@@ -99,6 +103,7 @@ pub enum ClientMessage {
     },
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub enum RadioCommand {
     SetFrequency(u64),
@@ -114,11 +119,16 @@ pub enum RadioCommand {
     },
     SendCwText {
         text: String,
+        wait_for_completion: bool,
         completed: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
-    StopCw,
+    StopKeying,
     SetWpm(u8),
     ReloadConfig(Box<RadioConfig>),
+}
+
+fn default_wait_for_completion() -> bool {
+    true
 }
 
 pub fn normalize_mode(mode: &Mode) -> String {
@@ -145,11 +155,16 @@ pub fn mode_candidates_for_request(requested: &str, frequency_hz: u64) -> Vec<Mo
         "CW" => vec![Mode::Cw],
         "CW-R" => vec![Mode::CwReverse, Mode::Cw],
         "FM" => vec![Mode::Fm],
+        "AM" => vec![Mode::Am],
         "SSB" => vec![ssb_mode_for_frequency(frequency_hz)],
         "FT8" | "JT65" | "JT9" | "MFSK" | "PSK" => vec![Mode::DataUsb, Mode::Rtty],
         "RTTY" => vec![Mode::Rtty, Mode::DataUsb],
         _ => Vec::new(),
     }
+}
+
+pub fn mode_is_phone(mode: &str) -> bool {
+    matches!(mode.trim().to_uppercase().as_str(), "SSB" | "FM" | "AM")
 }
 
 fn ssb_mode_for_frequency(frequency_hz: u64) -> Mode {
@@ -323,17 +338,39 @@ mod tests {
         let message: ClientMessage = serde_json::from_value(serde_json::json!({
             "type": "send_cw_text",
             "request_id": "cw-123",
-            "text": "CQ "
+            "text": "CQ ",
+            "wait_for_completion": false
         }))
         .expect("send_cw_text should deserialize");
 
         match message {
-            ClientMessage::SendCwText { request_id, text } => {
+            ClientMessage::SendCwText {
+                request_id,
+                text,
+                wait_for_completion,
+            } => {
                 assert_eq!(request_id, "cw-123");
                 assert_eq!(text, "CQ ");
+                assert!(!wait_for_completion);
             }
             other => panic!("unexpected client message: {other:?}"),
         }
+    }
+
+    #[test]
+    fn deserializes_stop_keying_client_message() {
+        let message: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "stop_keying"
+        }))
+        .expect("stop_keying should deserialize");
+
+        assert!(matches!(message, ClientMessage::StopKeying));
+        assert!(
+            serde_json::from_value::<ClientMessage>(serde_json::json!({
+                "type": "stop_cw"
+            }))
+            .is_err()
+        );
     }
 
     #[test]
@@ -389,6 +426,19 @@ mod tests {
             mode_candidates_for_request("RTTY", 14_000_000),
             vec![Mode::Rtty, Mode::DataUsb]
         );
+        assert_eq!(
+            mode_candidates_for_request("AM", 14_000_000),
+            vec![Mode::Am]
+        );
+    }
+
+    #[test]
+    fn classifies_phone_modes() {
+        assert!(mode_is_phone("SSB"));
+        assert!(mode_is_phone("fm"));
+        assert!(mode_is_phone(" am "));
+        assert!(!mode_is_phone("CW"));
+        assert!(!mode_is_phone("RTTY"));
     }
 
     #[test]

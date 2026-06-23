@@ -1,5 +1,5 @@
 contests:
-  - id: 'ARRL-FD'
+  - id: 'ARRL-FIELD-DAY'
     display_name: 'ARRL Field Day'
     allowed_bands: [160, 80, 40, 20, 15, 10, 6, 2]
     allowed_modes: ['SSB', 'FM', 'CW']
@@ -15,7 +15,65 @@ contests:
         - 'CALL'
         - 'BAND'
         - 'MODE'
-      power_multiplier_param: 'Power Multiplier'
+      power_multiplier: [1, 2, 5]
+    cabrillo:
+      fixed_fields:
+        - name: 'CATEGORY-BAND'
+          value: 'ALL'
+        - name: 'CATEGORY-MODE'
+          value: 'ALL'
+      log_fields:
+        - name: 'CATEGORY-OPERATOR'
+          label: 'Category Operator'
+          type: 'String:16'
+          widget: 'select'
+          valid_values: ['SINGLE-OP', 'MULTI-OP']
+        - name: 'CATEGORY-POWER'
+          label: 'Category Power'
+          type: 'String:16'
+          widget: 'select'
+          valid_values: ['HIGH', 'LOW', 'QRP']
+        - name: 'CATEGORY-STATION'
+          label: 'Category Station'
+          type: 'String:16'
+          widget: 'select'
+          valid_values: ['FIXED', 'MOBILE', 'PORTABLE']
+        - name: 'CATEGORY-TRANSMITTER'
+          label: 'Category Transmitter'
+          type: 'String:16'
+          widget: 'select'
+          valid_values: ['ONE', 'UNLIMITED']
+      export_fields:
+        - name: 'CLUB'
+          label: 'Club'
+          type: 'String:75'
+          required: false
+          preserve_case: true
+        - name: 'EMAIL'
+          label: 'Email'
+          type: 'String:75'
+          regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
+          preserve_case: true
+        - name: 'LOCATION'
+          label: 'Location'
+          type: 'String:32'
+          help_text: 'State, province, or DX'
+        - name: 'NAME'
+          label: 'Name'
+          type: 'String:75'
+          preserve_case: true
+        - name: 'ADDRESS'
+          label: 'Address'
+          type: 'String:45'
+          widget: 'textarea'
+          max_lines: 6
+          preserve_case: true
+        - name: 'SOAPBOX'
+          label: 'Soapbox'
+          type: 'String:75'
+          widget: 'textarea'
+          required: false
+          preserve_case: true
     define:
       - name: 'DX'
         values:
@@ -118,13 +176,6 @@ contests:
         type: 'String:3'
         required: true
         in_sets: ['Sections']
-      - name: 'Power Multiplier'
-        label: 'Power Multiplier'
-        type: 'Numeric:1'
-        required: true
-        default: '1'
-        widget: 'select'
-        valid_values: ['1', '2', '5']
     exchange:
       - name: 'Class(s)'
         type: 'String:3'

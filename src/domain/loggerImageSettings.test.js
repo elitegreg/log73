@@ -55,7 +55,10 @@ test('load and save logger image url use localStorage with normalization', () =>
     assert.equal(loadLoggerImageUrl(), 'https://example.com/current.png');
 
     saveLoggerImageUrl('   ');
-    assert.equal(values.get(LOGGER_IMAGE_URL_STORAGE_KEY), DEFAULT_LOGGER_IMAGE_URL);
+    assert.equal(
+      values.get(LOGGER_IMAGE_URL_STORAGE_KEY),
+      DEFAULT_LOGGER_IMAGE_URL,
+    );
     assert.equal(loadLoggerImageUrl(), DEFAULT_LOGGER_IMAGE_URL);
   });
 });

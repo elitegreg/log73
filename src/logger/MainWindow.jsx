@@ -33,6 +33,8 @@ import {
   HZ_PER_KHZ,
   EPOCH_MS_PER_SECOND,
   nextCwWpm,
+  isPageUpKey,
+  isPageDownKey,
   cwActiveTimeoutMs,
   typedModeFromCallsignInput,
   exchangeDefaults,
@@ -42,13 +44,14 @@ import {
   adifModeForLoggerMode,
   isSelectableMode,
   modeIsCw,
+  modeIsPhone,
   esmEnterAction,
   bandForFrequency,
   bandByMeters,
   createContactId,
   createMessageRequestId,
-  isEmptyMessageButton,
-  cwActionForMessage,
+  messageButtonIsSendable,
+  messageActionForRadioMode,
   callsignHasQuery,
   shouldBlockEsmCallEnter,
   callsignClearThresholdHz,
@@ -96,7 +99,7 @@ function MainWindow({
   onSendMessage,
   onSendCwText,
   onSendDxClusterSpot,
-  onStopCw,
+  onStopKeying,
   onSetCwWpm,
   onLogContact,
   onDebouncedCallsignChange,
@@ -361,8 +364,12 @@ function MainWindow({
   ]);
 
   const messageModeKey = operatingMode === 'Run' ? 'run' : 's&p';
+  const modeMessageLabels = modeIsPhone(radioMode)
+    ? (messageLabels?.voice ?? null)
+    : (messageLabels?.cw ?? messageLabels);
   const activeMessageLabels =
-    messageLabels?.[messageModeKey] ?? DEFAULT_MESSAGE_LABELS[messageModeKey];
+    modeMessageLabels?.[messageModeKey] ??
+    DEFAULT_MESSAGE_LABELS[messageModeKey];
   const activeExchangeCompletionField = (settings?.exchange ?? []).find(
     (field) => field.name === activeCompletionField && field.fixed !== true,
   );
@@ -384,6 +391,7 @@ function MainWindow({
   function currentMessageFields(values = exchangeValues) {
     const fields = {
       STATION_CALLSIGN: stationCallsign,
+      OPERATOR: operatorCallsign,
       CALL: callSign.trim().toUpperCase(),
     };
 
@@ -672,17 +680,26 @@ function MainWindow({
     values = exchangeValues,
   ) {
     const sendableKeys = [];
+    const labels = modeIsPhone(radioMode)
+      ? (messageLabels?.voice ?? null)
+      : (messageLabels?.cw ?? messageLabels);
 
     for (const key of keys) {
-      const action = cwActionForMessage(radio?.cw_messages, mode, key);
+      const action = messageActionForRadioMode(
+        radio?.cw_messages,
+        radio?.voice_messages,
+        mode,
+        key,
+        radioMode,
+      );
       if (action && performMessageAction(action)) {
         continue;
       }
 
-      const button = (
-        messageLabels?.[mode] ?? DEFAULT_MESSAGE_LABELS[mode]
-      ).find((label) => label.key === key);
-      if (isEmptyMessageButton(button)) continue;
+      const button = (labels?.[mode] ?? DEFAULT_MESSAGE_LABELS[mode]).find(
+        (label) => label.key === key,
+      );
+      if (!messageButtonIsSendable(button)) continue;
       if (mode === 'run' && key === 'F1') {
         storeCurrentCqFrequency();
       }
@@ -739,7 +756,7 @@ function MainWindow({
   function stopMessageSending() {
     stopRepeat();
     clearAllMessageRequests();
-    onStopCw?.();
+    onStopKeying?.();
   }
 
   useEffect(
@@ -784,12 +801,13 @@ function MainWindow({
   }
 
   function sendCwTextWord(sendTrailingSpace) {
-    const word = cwTextCurrentWord.trim();
+    const word = cwTextCurrentWord.trim().toUpperCase();
     if (!word) return;
 
     onSendCwText?.({
       request_id: createMessageRequestId(),
       text: sendTrailingSpace ? `${word} ` : word,
+      wait_for_completion: false,
     });
     setCwTextCommittedWords((current) => [...current, word]);
     setCwTextCurrentWord('');
@@ -825,11 +843,21 @@ function MainWindow({
   }
 
   function sendEsmKeys(keys, values = exchangeValues) {
+    const shouldRepeatF1 =
+      messageModeKey === 'run' &&
+      keys.length === 1 &&
+      keys[0] === 'F1' &&
+      repeatRunF1;
+
     stopRepeat();
     const requestId = sendMessageKeys(keys, messageModeKey, values);
     if (!requestId) return;
     if (keys.includes('F2')) {
       markEsmExchangeSentForCurrentCallsign();
+    }
+    if (shouldRepeatF1) {
+      repeatActiveRef.current = true;
+      repeatRequestIdRef.current = requestId;
     }
   }
 
@@ -918,20 +946,20 @@ function MainWindow({
         return;
       }
       if (
-        event.ctrlKey &&
-        !event.altKey &&
+        !event.ctrlKey &&
+        event.altKey &&
         !event.metaKey &&
-        event.key === 'PageUp'
+        isPageUpKey(event)
       ) {
         event.preventDefault();
         shiftBand(1);
         return;
       }
       if (
-        event.ctrlKey &&
-        !event.altKey &&
+        !event.ctrlKey &&
+        event.altKey &&
         !event.metaKey &&
-        event.key === 'PageDown'
+        isPageDownKey(event)
       ) {
         event.preventDefault();
         shiftBand(-1);
@@ -956,7 +984,7 @@ function MainWindow({
         !event.ctrlKey &&
         !event.altKey &&
         !event.metaKey &&
-        event.key === 'PageUp'
+        isPageUpKey(event)
       ) {
         event.preventDefault();
         setCwWpm((current) => nextCwWpm(current, 1));
@@ -966,7 +994,7 @@ function MainWindow({
         !event.ctrlKey &&
         !event.altKey &&
         !event.metaKey &&
-        event.key === 'PageDown'
+        isPageDownKey(event)
       ) {
         event.preventDefault();
         setCwWpm((current) => nextCwWpm(current, -1));
@@ -1127,8 +1155,8 @@ function MainWindow({
     return true;
   }
 
-  function focusNextEmptyField(currentFieldName, values = exchangeValues) {
-    const fields = [
+  function entryFields(values = exchangeValues) {
+    return [
       { name: 'CALL', value: callSign, ref: callSignRef, editable: true },
       ...(settings?.exchange ?? []).map((field) => ({
         name: field.name,
@@ -1137,51 +1165,73 @@ function MainWindow({
         editable: fieldEditable(field),
       })),
     ];
-    const currentIndex = fields.findIndex(
-      (field) => field.name === currentFieldName,
-    );
-    const nextEmptyField = fields
-      .slice(currentIndex + 1)
-      .find((field) => field.editable && String(field.value).trim() === '');
-
-    if (!nextEmptyField) {
-      return false;
-    }
-
-    nextEmptyField.ref.current?.focus();
-    return true;
   }
 
-  function focusNextEditableField(currentFieldName) {
-    const fields = [
-      { name: 'CALL', ref: callSignRef, editable: true },
-      ...(settings?.exchange ?? []).map((field) => ({
-        name: field.name,
-        ref: { current: exchangeInputRefs.current[field.name] },
-        editable: fieldEditable(field),
-      })),
-    ];
-    const currentIndex = fields.findIndex(
-      (field) => field.name === currentFieldName,
-    );
-    const nextEditableField = fields
-      .slice(currentIndex + 1)
-      .find((field) => field.editable);
-
-    if (!nextEditableField) {
+  function focusRelativeEditableField(
+    currentFieldName,
+    values = exchangeValues,
+    { direction = 1, preferEmpty = false } = {},
+  ) {
+    const fields = entryFields(values);
+    const editableFields = fields.filter((field) => field.editable);
+    if (editableFields.length <= 1) {
       return false;
     }
 
-    nextEditableField.ref.current?.focus();
-    return true;
+    const currentIndex = fields.findIndex(
+      (field) => field.name === currentFieldName,
+    );
+    if (currentIndex < 0) return false;
+
+    if (preferEmpty) {
+      for (let step = 1; step <= fields.length; step += 1) {
+        const nextIndex =
+          (currentIndex + direction * step + fields.length) % fields.length;
+        const nextField = fields[nextIndex];
+        if (!nextField?.editable) continue;
+        if (String(nextField.value).trim() !== '') continue;
+
+        nextField.ref.current?.focus();
+        return true;
+      }
+    }
+
+    for (let step = 1; step <= fields.length; step += 1) {
+      const nextIndex =
+        (currentIndex + direction * step + fields.length) % fields.length;
+      const nextField = fields[nextIndex];
+      if (!nextField?.editable) continue;
+
+      nextField.ref.current?.focus();
+      return true;
+    }
+
+    return false;
+  }
+
+  function focusNextEditableField(currentFieldName, values = exchangeValues) {
+    return focusRelativeEditableField(currentFieldName, values, {
+      direction: 1,
+      preferEmpty: false,
+    });
   }
 
   function handleFieldTab(event, currentFieldName, values = exchangeValues) {
-    if (event.key !== 'Tab' || event.shiftKey) {
+    if (event.key !== 'Tab') {
       return;
     }
 
-    if (focusNextEmptyField(currentFieldName, values)) {
+    const focused = event.shiftKey
+      ? focusRelativeEditableField(currentFieldName, values, {
+          direction: -1,
+          preferEmpty: false,
+        })
+      : focusRelativeEditableField(currentFieldName, values, {
+          direction: 1,
+          preferEmpty: true,
+        });
+
+    if (focused) {
       event.preventDefault();
     }
   }
@@ -1444,7 +1494,8 @@ function MainWindow({
     }
 
     if (!spotCallsign || !frequencyHz) return;
-    const comment = window.prompt('Spot comment', '');
+    const spotLabel = `Spot ${spotCallsign} @ ${formatFrequency(frequencyHz)} kHz`;
+    const comment = window.prompt(spotLabel, '');
     if (comment === null) return;
 
     onSendDxClusterSpot?.({

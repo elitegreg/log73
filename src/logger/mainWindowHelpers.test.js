@@ -5,6 +5,8 @@ import {
   callsignClearThresholdHz,
   callsignHasQuery,
   cwActionForMessage,
+  messageActionForRadioMode,
+  messageButtonIsSendable,
   shouldBlockEsmCallEnter,
   cwActionFromTemplate,
   cwActiveTimeoutMs,
@@ -12,6 +14,8 @@ import {
   esmEnterAction,
   modeIsCw,
   nextCwWpm,
+  isPageUpKey,
+  isPageDownKey,
   previousContactExchangeAutofill,
   normalizedContactFrequencyHz,
   shouldAdvanceFromCallsignAutofill,
@@ -26,6 +30,7 @@ test('availableModeOptions includes concrete selectable modes', () => {
     'CW-R',
     'SSB',
     'FM',
+    'AM',
     'FT8',
     'JT65',
     'JT9',
@@ -40,10 +45,11 @@ test('typedModeFromCallsignInput matches exact mode tokens only', () => {
 
   assert.equal(typedModeFromCallsignInput('cw', settings), 'CW');
   assert.equal(typedModeFromCallsignInput('cw-r', settings), 'CW-R');
+  assert.equal(typedModeFromCallsignInput('cwr', settings), 'CW-R');
   assert.equal(typedModeFromCallsignInput('ft8', settings), 'FT8');
   assert.equal(typedModeFromCallsignInput('RTTY', settings), 'RTTY');
   assert.equal(typedModeFromCallsignInput(' fm ', {}), 'FM');
-  assert.equal(typedModeFromCallsignInput('AM', settings), null);
+  assert.equal(typedModeFromCallsignInput('AM', settings), 'AM');
   assert.equal(typedModeFromCallsignInput('K1CW', settings), null);
   assert.equal(typedModeFromCallsignInput('ss', settings), null);
   assert.equal(typedModeFromCallsignInput('', settings), null);
@@ -89,6 +95,16 @@ test('nextCwWpm clamps page-up and page-down changes to valid range', () => {
   assert.equal(nextCwWpm(60, 1), 60);
   assert.equal(nextCwWpm(5, -1), 5);
   assert.equal(nextCwWpm(Number.NaN, 1), 21);
+});
+
+test('page key helpers accept standard and legacy browser key values', () => {
+  assert.equal(isPageUpKey({ key: 'PageUp' }), true);
+  assert.equal(isPageUpKey({ key: 'Prior' }), true);
+  assert.equal(isPageUpKey({ key: 'PageDown' }), false);
+
+  assert.equal(isPageDownKey({ key: 'PageDown' }), true);
+  assert.equal(isPageDownKey({ key: 'Next' }), true);
+  assert.equal(isPageDownKey({ key: 'PageUp' }), false);
 });
 
 test('tuningIncrementHzForMode picks mode-specific configured values', () => {
@@ -163,6 +179,40 @@ test('cwActionFromTemplate parses {Action:...} tokens only', () => {
   assert.equal(cwActionFromTemplate('CQ TEST'), null);
   assert.equal(cwActionFromTemplate('{CALL}'), null);
   assert.equal(cwActionFromTemplate('{Action:Clear} TU'), null);
+});
+
+test('messageButtonIsSendable requires a non-empty message label', () => {
+  assert.equal(messageButtonIsSendable({ key: 'F11', label: '-' }), false);
+  assert.equal(messageButtonIsSendable({ key: 'F12', label: '-' }), false);
+  assert.equal(messageButtonIsSendable({ key: 'F1', label: 'Cq' }), true);
+});
+
+test('messageActionForRadioMode uses CW config in CW modes and voice config in phone modes', () => {
+  const cwConfig = `
+# RUN Messages
+F12 Clear,{Action:Clear}
+# S&P Messages
+F12 Clear,{Action:Clear}
+`;
+  const voiceConfig = `
+# RUN Messages
+F12 Voice Clear,{Action:Clear}
+# S&P Messages
+F12 Voice Clear,{Action:Clear}
+`;
+
+  assert.equal(
+    messageActionForRadioMode(cwConfig, voiceConfig, 'run', 'F12', 'CW'),
+    'Clear',
+  );
+  assert.equal(
+    messageActionForRadioMode(cwConfig, voiceConfig, 'run', 'F12', 'SSB'),
+    'Clear',
+  );
+  assert.equal(
+    messageActionForRadioMode(cwConfig, voiceConfig, 's&p', 'F12', 'FM'),
+    'Clear',
+  );
 });
 
 test('cwActionForMessage returns action by mode and key', () => {
