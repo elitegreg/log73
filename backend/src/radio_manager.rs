@@ -1165,7 +1165,9 @@ impl CwController {
             return Ok(());
         };
         if mode_is_phone(&logger_mode) {
-            return self.send_voice_messages(mode, keys, commands, pending).await;
+            return self
+                .send_voice_messages(mode, keys, fields, commands, pending)
+                .await;
         }
         if logger_mode != "CW" && logger_mode != "CW-R" {
             debug!(
@@ -1280,11 +1282,13 @@ impl CwController {
         &mut self,
         mode: &str,
         keys: &[String],
+        fields: &serde_json::Map<String, serde_json::Value>,
         commands: &mut mpsc::Receiver<CwTaskCommand>,
         pending: &mut VecDeque<PendingCwSend>,
     ) -> Result<(), String> {
         for key in keys {
-            if voice_messages::file_path_for(&self.voice_messages, mode, key).is_none() {
+            let Some(file_path) = voice_messages::file_path_for(&self.voice_messages, mode, key)
+            else {
                 debug!(
                     radio_id = self.radio_id,
                     mode,
@@ -1292,10 +1296,10 @@ impl CwController {
                     "ignoring voice message without a file"
                 );
                 continue;
-            }
-            if self.voice_playback.is_none() {
+            };
+            let Some(voice_playback) = self.voice_playback.as_ref() else {
                 return Err("voice keyer thread unavailable".to_string());
-            }
+            };
 
             let mut data_ptt = VoiceDataPttGuard::acquire(
                 self.radio_id,
@@ -1303,11 +1307,51 @@ impl CwController {
                 self.voice_data_ptt_supported,
             )
             .await;
-            let completed = match self.voice_playback.as_ref().unwrap().play_message(mode, key) {
-                Ok(completed) => completed,
-                Err(error) => {
-                    data_ptt.release().await;
-                    return Err(error);
+            let completed = if voice_messages::file_path_has_template(&file_path) {
+                let resolved = voice_messages::resolved_file_path_for(
+                    &self.voice_messages,
+                    mode,
+                    key,
+                    fields,
+                )?
+                .ok_or_else(|| "voice message without a file".to_string())?;
+                debug!(
+                    radio_id = self.radio_id,
+                    mode,
+                    key,
+                    configured_voice_file = %file_path,
+                    resolved_voice_file = %resolved,
+                    operator = ?fields.get("OPERATOR"),
+                    station_callsign = ?fields.get("STATION_CALLSIGN"),
+                    ?fields,
+                    "resolved templated voice message file path"
+                );
+                match voice_playback.play_file_path(&resolved) {
+                    Ok(completed) => completed,
+                    Err(error) => {
+                        warn!(
+                            radio_id = self.radio_id,
+                            mode,
+                            key,
+                            configured_voice_file = %file_path,
+                            resolved_voice_file = %resolved,
+                            operator = ?fields.get("OPERATOR"),
+                            station_callsign = ?fields.get("STATION_CALLSIGN"),
+                            ?fields,
+                            %error,
+                            "failed to play templated voice message file"
+                        );
+                        data_ptt.release().await;
+                        return Err(error);
+                    }
+                }
+            } else {
+                match voice_playback.play_message(mode, key) {
+                    Ok(completed) => completed,
+                    Err(error) => {
+                        data_ptt.release().await;
+                        return Err(error);
+                    }
                 }
             };
             debug!(

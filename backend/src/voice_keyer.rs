@@ -127,8 +127,13 @@ pub struct VoicePlaybackThread {
     handle: Option<thread::JoinHandle<()>>,
 }
 
+enum VoicePlayTarget {
+    RegisteredKey(String),
+    RelativePath(String),
+}
+
 struct VoicePlayCommand {
-    key: String,
+    target: VoicePlayTarget,
     completed: tokio::sync::oneshot::Sender<Result<Duration, String>>,
 }
 
@@ -176,6 +181,20 @@ impl VoicePlaybackThread {
         self.play_registered_key(voice_message_registry_key(self.radio_id, mode, key)?)
     }
 
+    pub fn play_file_path(
+        &self,
+        relative_path: &str,
+    ) -> Result<tokio::sync::oneshot::Receiver<Result<Duration, String>>, String> {
+        let (completed, completion_rx) = tokio::sync::oneshot::channel();
+        self.commands
+            .send(VoicePlaybackThreadCommand::Play(VoicePlayCommand {
+                target: VoicePlayTarget::RelativePath(relative_path.trim().to_string()),
+                completed,
+            }))
+            .map_err(|_| "voice keyer thread unavailable".to_string())?;
+        Ok(completion_rx)
+    }
+
     fn play_registered_key(
         &self,
         key: String,
@@ -183,7 +202,7 @@ impl VoicePlaybackThread {
         let (completed, completion_rx) = tokio::sync::oneshot::channel();
         self.commands
             .send(VoicePlaybackThreadCommand::Play(VoicePlayCommand {
-                key,
+                target: VoicePlayTarget::RegisteredKey(key),
                 completed,
             }))
             .map_err(|_| "voice keyer thread unavailable".to_string())?;
@@ -217,9 +236,12 @@ fn run_voice_playback_thread(
     while let Ok(command) = commands.recv() {
         match command {
             VoicePlaybackThreadCommand::Play(command) => {
-                let playback = match voice_keyer
-                    .play_registered_key(&command.key, configured_output_device_id.as_deref())
-                {
+                let playback = match match command.target {
+                    VoicePlayTarget::RegisteredKey(key) => voice_keyer
+                        .play_registered_key(&key, configured_output_device_id.as_deref()),
+                    VoicePlayTarget::RelativePath(relative_path) => voice_keyer
+                        .play_relative_path(&relative_path, configured_output_device_id.as_deref()),
+                } {
                     Ok(playback) => playback,
                     Err(error) => {
                         let _ = command.completed.send(Err(error));
@@ -339,8 +361,12 @@ impl VoiceKeyer {
     #[allow(dead_code)]
     pub fn register_file(&self, file_name: impl AsRef<Path>, key: &str) -> Result<(), String> {
         let file_name_ref = file_name.as_ref();
-        let bytes = fs::read(file_name_ref)
-            .map_err(|error| format!("failed to read voice keyer file: {error}"))?;
+        let bytes = fs::read(file_name_ref).map_err(|error| {
+            format!(
+                "failed to read voice keyer file '{}' : {error}",
+                file_name_ref.display()
+            )
+        })?;
         self.register_bytes(file_name_ref.to_string_lossy(), key, bytes)
     }
 
@@ -361,8 +387,12 @@ impl VoiceKeyer {
         registry_key: impl Into<String>,
     ) -> Result<(), String> {
         let file_name_ref = file_name.as_ref();
-        let bytes = fs::read(file_name_ref)
-            .map_err(|error| format!("failed to read voice keyer file: {error}"))?;
+        let bytes = fs::read(file_name_ref).map_err(|error| {
+            format!(
+                "failed to read voice keyer file '{}' : {error}",
+                file_name_ref.display()
+            )
+        })?;
         self.register_registry_bytes(file_name_ref.to_string_lossy(), registry_key, bytes)
     }
 
@@ -425,6 +455,9 @@ impl VoiceKeyer {
             let Some(file_path) = entry.file_path.as_deref() else {
                 continue;
             };
+            if voice_messages::file_path_has_template(file_path) {
+                continue;
+            }
             let registry_key = voice_message_registry_key(config.id, &entry.mode, &entry.key)?;
             let path = voice_messages::voicekeyer_file_path(&self.voicekeyer_dir, file_path)?;
             if let Err(error) = self.register_registry_file(path, registry_key) {
@@ -504,6 +537,25 @@ impl VoiceKeyer {
         };
         self.audio
             .play_output(normalized_optional_id(output_device_id), data)
+    }
+
+    pub fn play_relative_path(
+        &self,
+        relative_path: &str,
+        output_device_id: Option<&str>,
+    ) -> Result<VoicePlayback, String> {
+        let path = voice_messages::voicekeyer_file_path(&self.voicekeyer_dir, relative_path)?;
+        let bytes = fs::read(&path).map_err(|error| {
+            format!(
+                "failed to read voice keyer file relative_path='{}' absolute_path='{}': {error}",
+                relative_path.trim(),
+                path.display()
+            )
+        })?;
+        self.audio.play_output(
+            normalized_optional_id(output_device_id),
+            Arc::<[u8]>::from(bytes),
+        )
     }
 
     pub fn input_devices(&self) -> Result<Vec<AudioDeviceInfo>, String> {
@@ -1177,6 +1229,49 @@ F1 QRL,operator1/sp.wav
             .collect::<Vec<_>>();
         assert!(!registered_keys.contains(&run_key));
         assert!(registered_keys.contains(&sp_key));
+
+        let _ = fs::remove_dir_all(&voicekeyer_dir);
+    }
+
+    #[test]
+    fn sync_radio_messages_skips_template_paths_until_playback() {
+        let voicekeyer_dir =
+            std::env::temp_dir().join(format!("log73-voicekeyer-{}-template", std::process::id()));
+        let _ = fs::remove_dir_all(&voicekeyer_dir);
+        fs::create_dir_all(voicekeyer_dir.join("operator1")).expect("voicekeyer dir creates");
+        fs::write(voicekeyer_dir.join("operator1/run.wav"), b"run-audio").expect("run file writes");
+        let backend = Arc::new(FakeAudioBackend::default());
+        let keyer =
+            VoiceKeyer::with_backend_and_voicekeyer_dir(backend.clone(), voicekeyer_dir.clone());
+        let mut config = test_radio_config();
+        config.id = 74;
+        config.voice_messages = r#"
+# RUN Messages
+F1 CQ,{OPERATOR}/run.wav
+# S&P Messages
+F1 QRL,operator1/run.wav
+"#
+        .to_string();
+
+        keyer
+            .sync_radio_messages(&config)
+            .expect("voice messages sync");
+
+        let run_key = voice_message_registry_key(74, "run", "F1").expect("run key builds");
+        let sp_key = voice_message_registry_key(74, "s&p", "F1").expect("s&p key builds");
+        let registered_keys = keyer
+            .registered_files()
+            .expect("registry lists")
+            .into_iter()
+            .map(|file| file.key)
+            .collect::<Vec<_>>();
+        assert!(!registered_keys.contains(&run_key));
+        assert!(registered_keys.contains(&sp_key));
+
+        keyer
+            .play_relative_path("operator1/run.wav", None)
+            .expect("template-backed file plays");
+        assert_eq!(backend.plays.lock().unwrap()[0].data, b"run-audio");
 
         let _ = fs::remove_dir_all(&voicekeyer_dir);
     }

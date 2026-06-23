@@ -391,6 +391,7 @@ function MainWindow({
   function currentMessageFields(values = exchangeValues) {
     const fields = {
       STATION_CALLSIGN: stationCallsign,
+      OPERATOR: operatorCallsign,
       CALL: callSign.trim().toUpperCase(),
     };
 

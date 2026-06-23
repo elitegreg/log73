@@ -455,7 +455,7 @@ cw_messages: built-in default Run/S&P CW function-key messages
 voice_messages: built-in default Run/S&P voice function-key messages
 ```
 
-Voice messages use the same Run/S&P F-key text format as CW messages. The value after the comma is a WAV path relative to `<data-dir>/voicekeyer/` (for example `operator1/CQ.wav`), or an action token such as `{Action:Clear}`. Empty voice-message file values unregister that radio/mode F-key.
+Voice messages use the same Run/S&P F-key text format as CW messages. The value after the comma is a WAV path relative to `<data-dir>/voicekeyer/` (for example `operator1/CQ.wav`), or an action token such as `{Action:Clear}`. Voice file paths may include message-field placeholders such as `{OPERATOR}` and `{STATION_CALLSIGN}`; those are resolved when the message is sent. Empty voice-message file values unregister that radio/mode F-key.
 
 Radio connections are lazy. Opening a logger with `radio_id=X` starts or reuses that radio's managed connection. Closing the logger releases it. When the reference count reaches zero, the backend disconnects and removes the managed radio.
 
