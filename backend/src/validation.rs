@@ -1,7 +1,10 @@
 use crate::bands::{USA_AMATEUR_BANDS, band_for_frequency};
 use crate::contest_rules::{ContestParam, ContestRules, ContestRulesStore, ExchangeField};
 use crate::cw;
-use crate::db::{self, Contact, Database, NewLog, NewRadio, UpdateLog};
+use crate::db::{
+    self, Contact, Database, NewLog, NewRadio, UpdateLog, contact_adif_value, contact_id,
+    contact_log_id, contact_meta_value,
+};
 use crate::voice_messages;
 use radio_cat_rs::{Frequency, supported_drivers};
 use regex::Regex;
@@ -380,8 +383,7 @@ pub async fn validate_contacts(
 }
 
 pub fn force_commit_requested(contact: &Contact) -> bool {
-    contact
-        .get("_force")
+    contact_meta_value(contact, "force")
         .and_then(Value::as_bool)
         .unwrap_or(false)
 }
@@ -412,8 +414,8 @@ async fn validate_immutable_sent_serial_fields(
     };
 
     for field in sent_serial_fields {
-        let previous = serial_field_value(existing.get(&field.adif));
-        let next = serial_field_value(contact.get(&field.adif));
+        let previous = serial_field_value(contact_adif_value(&existing, &field.adif));
+        let next = serial_field_value(contact_adif_value(contact, &field.adif));
         if previous != next {
             return Err(format!("{} cannot be changed after logging", field.name));
         }
@@ -648,35 +650,36 @@ fn validate_contact(rules: &ContestRules, log_id: i64, contact: &Contact) -> Res
         return Err("contact id must be positive".to_string());
     }
 
-    if let Some(contact_log_id) = json_i64(contact.get("_log_id"))
+    if let Some(contact_log_id) = contact_log_id(contact)
         && contact_log_id != log_id
     {
         return Err("contact log id does not match request log id".to_string());
     }
 
-    if let Some(contest_id) = json_trimmed_string(contact.get("CONTEST_ID"))
+    if let Some(contest_id) = json_trimmed_string(contact_adif_value(contact, "CONTEST_ID"))
         && !contest_id.eq_ignore_ascii_case(&rules.contest)
     {
         return Err("contact contest id does not match log contest".to_string());
     }
 
     validate_qso_epoch(contact)?;
-    let station_callsign = json_trimmed_string(contact.get("STATION_CALLSIGN")).unwrap_or_default();
+    let station_callsign =
+        json_trimmed_string(contact_adif_value(contact, "STATION_CALLSIGN")).unwrap_or_default();
     validate_required_text("station callsign", &station_callsign, MAX_CALLSIGN_LEN)?;
-    if let Some(operator) = json_trimmed_string(contact.get("OPERATOR"))
+    if let Some(operator) = json_trimmed_string(contact_adif_value(contact, "OPERATOR"))
         && !operator.is_empty()
     {
         validate_required_text("operator callsign", &operator, MAX_CALLSIGN_LEN)?;
     }
-    let callsign = json_trimmed_string(contact.get("CALL")).unwrap_or_default();
+    let callsign = json_trimmed_string(contact_adif_value(contact, "CALL")).unwrap_or_default();
     validate_required_text("callsign", &callsign, MAX_CALLSIGN_LEN)?;
     validate_contact_band_and_frequency(rules, contact)?;
     let mode = validate_contact_mode(rules, contact)?;
 
-    if let Some(client_id) = json_trimmed_string(contact.get("_client_id")) {
+    if let Some(client_id) = json_trimmed_string(contact_meta_value(contact, "clientId")) {
         validate_required_text("client id", &client_id, MAX_CW_REQUEST_ID_LEN)?;
     }
-    if let Some(session_id) = json_trimmed_string(contact.get("_session_id")) {
+    if let Some(session_id) = json_trimmed_string(contact_meta_value(contact, "sessionId")) {
         validate_required_text("session id", &session_id, MAX_CONTACT_STRING_LEN)?;
     }
 
@@ -688,6 +691,29 @@ fn validate_contact(rules: &ContestRules, log_id: i64, contact: &Contact) -> Res
 }
 
 fn validate_contact_shape(contact: &Contact) -> Result<(), String> {
+    if contact.contains_key("meta") || contact.contains_key("adif") {
+        for (key, value) in contact {
+            match key.as_str() {
+                "meta" | "adif" => {
+                    if !value.is_object() {
+                        return Err(format!("{key} must be an object"));
+                    }
+                    validate_json_value_size(value, 0)
+                        .map_err(|error| format!("{key}: {error}"))?;
+                }
+                _ => {
+                    return Err(
+                        "contact must contain only meta and adif at the top level".to_string()
+                    );
+                }
+            }
+        }
+        if !contact.contains_key("adif") {
+            return Err("contact adif is required".to_string());
+        }
+        return Ok(());
+    }
+
     if contact.len() > MAX_CONTACT_FIELDS {
         return Err(format!(
             "contact cannot contain more than {MAX_CONTACT_FIELDS} fields"
@@ -764,7 +790,8 @@ fn validate_json_value_size(value: &Value, depth: usize) -> Result<(), String> {
 }
 
 fn validate_qso_epoch(contact: &Contact) -> Result<(), String> {
-    let epoch = json_i64(contact.get("QSO_DATE_TIME_ON")).or_else(|| legacy_epoch(contact));
+    let epoch =
+        json_i64(contact_adif_value(contact, "QSO_DATE_TIME_ON")).or_else(|| legacy_epoch(contact));
     let Some(epoch) = epoch else {
         return Err("QSO date/time is required".to_string());
     };
@@ -780,7 +807,7 @@ fn validate_contact_band_and_frequency(
     rules: &ContestRules,
     contact: &Contact,
 ) -> Result<(), String> {
-    let band_text = json_trimmed_string(contact.get("BAND")).unwrap_or_default();
+    let band_text = json_trimmed_string(contact_adif_value(contact, "BAND")).unwrap_or_default();
     if band_text.is_empty() {
         return Err("band is required".to_string());
     }
@@ -789,7 +816,7 @@ fn validate_contact_band_and_frequency(
         return Err(format!("band must be one of: {}", allowed_bands(rules)));
     }
 
-    let frequency_hz = contact_frequency_hz(contact.get("FREQ"))
+    let frequency_hz = contact_frequency_hz(contact_adif_value(contact, "FREQ"))
         .ok_or_else(|| "frequency is required".to_string())?;
     validate_radio_frequency_hz(frequency_hz)?;
     let frequency_band = band_for_frequency(Frequency::from_hz(frequency_hz))
@@ -802,7 +829,7 @@ fn validate_contact_band_and_frequency(
 }
 
 fn validate_contact_mode(rules: &ContestRules, contact: &Contact) -> Result<String, String> {
-    let mode = json_trimmed_string(contact.get("MODE")).unwrap_or_default();
+    let mode = json_trimmed_string(contact_adif_value(contact, "MODE")).unwrap_or_default();
     if mode.is_empty() {
         return Err("mode is required".to_string());
     }
@@ -826,7 +853,7 @@ fn validate_exchange_field(
     contact: &Contact,
     radio_mode: &str,
 ) -> Result<(), String> {
-    let value = json_trimmed_string(contact.get(&field.adif)).unwrap_or_default();
+    let value = json_trimmed_string(contact_adif_value(contact, &field.adif)).unwrap_or_default();
     if value.is_empty() {
         return Err(format!("{} is required", field.name));
     }
@@ -1042,13 +1069,6 @@ fn decimal_frequency_to_hz(value: f64) -> Option<u64> {
     }
 }
 
-fn contact_id(contact: &Contact) -> Option<i64> {
-    contact
-        .get("_id")
-        .or_else(|| contact.get("ID"))
-        .and_then(json_i64_value)
-}
-
 fn json_i64(value: Option<&Value>) -> Option<i64> {
     value.and_then(json_i64_value)
 }
@@ -1073,8 +1093,8 @@ fn json_trimmed_string(value: Option<&Value>) -> Option<String> {
 }
 
 fn legacy_epoch(contact: &Contact) -> Option<i64> {
-    let date = contact.get("QSO_DATE")?.as_str()?;
-    let time = contact.get("TIME_ON")?.as_str()?;
+    let date = contact_adif_value(contact, "QSO_DATE")?.as_str()?;
+    let time = contact_adif_value(contact, "TIME_ON")?.as_str()?;
     if date.len() != 8 || time.len() != 6 {
         return None;
     }

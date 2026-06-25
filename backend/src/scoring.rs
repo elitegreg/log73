@@ -1,5 +1,5 @@
 use crate::contest_rules::{ContestRules, MultiplierRule, QsoPoints, ScoringCondition};
-use crate::db::Contact;
+use crate::db::{Contact, contact_adif_value, contact_id, contact_meta_value, set_contact_meta};
 use crate::log_cache::LogCacheProcessor;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -147,8 +147,7 @@ impl ContestScoreTracker {
     }
 
     pub fn removing_contact_affects_dupes(&self, log_id: i64, contact: &Contact) -> bool {
-        if contact
-            .get("_dupe")
+        if contact_meta_value(contact, "dupe")
             .and_then(Value::as_bool)
             .unwrap_or(false)
         {
@@ -389,10 +388,10 @@ impl ContestScorer {
         self.totals.bonus_points += bonus;
         self.recalculate_score();
 
-        contact.insert("_pts".to_string(), Value::Number(points.into()));
-        contact.insert("_mult".to_string(), Value::Number(mults.into()));
-        contact.insert("_bonus".to_string(), Value::Number(bonus.into()));
-        contact.insert("_dupe".to_string(), Value::Bool(is_dupe));
+        set_contact_meta(contact, "pts", Value::Number(points.into()));
+        set_contact_meta(contact, "mult", Value::Number(mults.into()));
+        set_contact_meta(contact, "bonus", Value::Number(bonus.into()));
+        set_contact_meta(contact, "dupe", Value::Bool(is_dupe));
 
         self.totals.clone()
     }
@@ -400,9 +399,9 @@ impl ContestScorer {
     #[allow(dead_code)]
     pub fn remove_scored_qso(&mut self, contact: &Contact) -> ScoreTotals {
         self.totals.qso_count = self.totals.qso_count.saturating_sub(1);
-        self.totals.qso_points -= scored_i64(contact, "_pts");
-        self.totals.multipliers -= scored_i64(contact, "_mult");
-        self.totals.bonus_points -= scored_i64(contact, "_bonus");
+        self.totals.qso_points -= scored_i64(contact, "pts");
+        self.totals.multipliers -= scored_i64(contact, "mult");
+        self.totals.bonus_points -= scored_i64(contact, "bonus");
         self.remove_dupe_key(contact);
         self.recalculate_score();
         self.totals.clone()
@@ -601,12 +600,12 @@ fn multiplier_matches(
 }
 
 fn field_value(contact: &Map<String, Value>, rules: &ContestRules, field: &str) -> Option<String> {
-    json_string(contact.get(field))
+    json_string(contact_adif_value(contact, field))
         .or_else(|| {
             rules
                 .qso_column_fields
                 .get(field)
-                .and_then(|adif| json_string(contact.get(adif)))
+                .and_then(|adif| json_string(contact_adif_value(contact, adif)))
         })
         .map(|value| normalized_field_value(field, &value))
         .filter(|value| !value.is_empty())
@@ -628,21 +627,19 @@ fn normalized_callsign(callsign: &str) -> String {
 }
 
 fn scored_i64(contact: &Contact, field: &str) -> i64 {
-    contact.get(field).and_then(Value::as_i64).unwrap_or(0)
+    contact_meta_value(contact, field)
+        .and_then(Value::as_i64)
+        .unwrap_or(0)
 }
 
 fn contact_id_for(contact: &Contact) -> Option<i64> {
-    contact
-        .get("_id")
-        .or_else(|| contact.get("ID"))
-        .and_then(Value::as_i64)
+    contact_id(contact)
 }
 
 #[allow(dead_code)]
 fn contact_score_order(contact: &Contact) -> (i64, i64) {
     (
-        contact
-            .get("QSO_DATE_TIME_ON")
+        contact_adif_value(contact, "QSO_DATE_TIME_ON")
             .and_then(Value::as_i64)
             .unwrap_or(0),
         contact_id_for(contact).unwrap_or(0),
@@ -850,9 +847,9 @@ impl IncrementalLogState {
         skip_candidate_id: Option<i64>,
     ) {
         self.totals.qso_count = self.totals.qso_count.saturating_sub(1);
-        self.totals.qso_points -= scored_i64(deleted_contact, "_pts");
-        self.totals.multipliers -= scored_i64(deleted_contact, "_mult");
-        self.totals.bonus_points -= scored_i64(deleted_contact, "_bonus");
+        self.totals.qso_points -= scored_i64(deleted_contact, "pts");
+        self.totals.multipliers -= scored_i64(deleted_contact, "mult");
+        self.totals.bonus_points -= scored_i64(deleted_contact, "bonus");
 
         let deleted_contact_id = contact_id_for(deleted_contact);
         let deleted_dupe_key = self.module.dupe_key_for(deleted_contact);
@@ -913,7 +910,7 @@ impl IncrementalLogState {
             };
 
             self.multiplier_owners.insert(multiplier_key, contact_id);
-            increment_contact_score_field(&mut contacts[index], "_mult", 1);
+            increment_contact_score_field(&mut contacts[index], "mult", 1);
             self.totals.multipliers += 1;
             changed_contact_ids.insert(contact_id);
         }
@@ -932,7 +929,7 @@ impl IncrementalLogState {
             };
 
             self.bonus_owners.insert(bonus_key, contact_id);
-            increment_contact_score_field(&mut contacts[index], "_bonus", points);
+            increment_contact_score_field(&mut contacts[index], "bonus", points);
             self.totals.bonus_points += points;
             changed_contact_ids.insert(contact_id);
         }
@@ -1081,20 +1078,19 @@ fn set_contact_score_fields(
     bonus: i64,
     is_dupe: bool,
 ) {
-    contact.insert("_pts".to_string(), Value::Number(points.into()));
-    contact.insert("_mult".to_string(), Value::Number(mults.into()));
-    contact.insert("_bonus".to_string(), Value::Number(bonus.into()));
-    contact.insert("_dupe".to_string(), Value::Bool(is_dupe));
+    set_contact_meta(contact, "pts", Value::Number(points.into()));
+    set_contact_meta(contact, "mult", Value::Number(mults.into()));
+    set_contact_meta(contact, "bonus", Value::Number(bonus.into()));
+    set_contact_meta(contact, "dupe", Value::Bool(is_dupe));
 }
 
 fn increment_contact_score_field(contact: &mut Contact, field: &str, delta: i64) {
     let value = scored_i64(contact, field) + delta;
-    contact.insert(field.to_string(), Value::Number(value.into()));
+    set_contact_meta(contact, field, Value::Number(value.into()));
 }
 
 fn is_dupe_contact(contact: &Contact) -> bool {
-    contact
-        .get("_dupe")
+    contact_meta_value(contact, "dupe")
         .and_then(Value::as_bool)
         .unwrap_or(false)
 }
@@ -1224,10 +1220,22 @@ mod tests {
     }
 
     fn contact(fields: Vec<(&str, Value)>) -> Contact {
-        fields
-            .into_iter()
-            .map(|(key, value)| (key.to_string(), value))
-            .collect()
+        let mut meta = Map::new();
+        let mut adif = Map::new();
+        for (key, value) in fields {
+            match key {
+                "_id" => {
+                    meta.insert("id".to_string(), value);
+                }
+                _ if key.starts_with('_') => {
+                    meta.insert(key.trim_start_matches('_').to_string(), value);
+                }
+                _ => {
+                    adif.insert(key.to_string(), value);
+                }
+            }
+        }
+        crate::db::build_contact(meta, adif)
     }
 
     #[test]
@@ -1259,8 +1267,8 @@ mod tests {
         assert_eq!(totals.qso_points, 3);
         assert_eq!(totals.multipliers, 0);
         assert_eq!(totals.score, 3);
-        assert_eq!(contacts[0].get("_pts"), Some(&json!(1)));
-        assert_eq!(contacts[1].get("_pts"), Some(&json!(2)));
+        assert_eq!(contact_meta_value(&contacts[0], "pts"), Some(&json!(1)));
+        assert_eq!(contact_meta_value(&contacts[1], "pts"), Some(&json!(2)));
     }
 
     #[test]
@@ -1284,9 +1292,9 @@ mod tests {
         assert_eq!(totals.qso_points, 6);
         assert_eq!(totals.multipliers, 2);
         assert_eq!(totals.score, 12);
-        assert_eq!(contacts[0].get("_mult"), Some(&json!(1)));
-        assert_eq!(contacts[1].get("_mult"), Some(&json!(1)));
-        assert_eq!(contacts[2].get("_mult"), Some(&json!(0)));
+        assert_eq!(contact_meta_value(&contacts[0], "mult"), Some(&json!(1)));
+        assert_eq!(contact_meta_value(&contacts[1], "mult"), Some(&json!(1)));
+        assert_eq!(contact_meta_value(&contacts[2], "mult"), Some(&json!(0)));
     }
 
     #[test]
@@ -1393,9 +1401,12 @@ mod tests {
         assert_eq!(totals.qso_count, 2);
         assert_eq!(totals.qso_points, 2);
         assert_eq!(totals.score, 2);
-        assert_eq!(contacts[0].get("_dupe"), Some(&json!(false)));
-        assert_eq!(contacts[1].get("_dupe"), Some(&json!(true)));
-        assert_eq!(contacts[1].get("_pts"), Some(&json!(0)));
+        assert_eq!(
+            contact_meta_value(&contacts[0], "dupe"),
+            Some(&json!(false))
+        );
+        assert_eq!(contact_meta_value(&contacts[1], "dupe"), Some(&json!(true)));
+        assert_eq!(contact_meta_value(&contacts[1], "pts"), Some(&json!(0)));
     }
 
     #[test]
@@ -1427,8 +1438,8 @@ mod tests {
         assert_eq!(totals.multipliers, 2);
         assert_eq!(totals.bonus_points, 350);
         assert_eq!(totals.score, 358);
-        assert_eq!(contacts[0].get("_bonus"), Some(&json!(350)));
-        assert_eq!(contacts[1].get("_bonus"), Some(&json!(0)));
+        assert_eq!(contact_meta_value(&contacts[0], "bonus"), Some(&json!(350)));
+        assert_eq!(contact_meta_value(&contacts[1], "bonus"), Some(&json!(0)));
     }
 
     #[test]
@@ -1459,16 +1470,22 @@ mod tests {
         ];
 
         tracker.on_log_loaded(1, Arc::clone(&module), &mut contacts);
-        assert_eq!(contacts[0].get("_dupe"), Some(&json!(false)));
-        assert_eq!(contacts[1].get("_dupe"), Some(&json!(true)));
+        assert_eq!(
+            contact_meta_value(&contacts[0], "dupe"),
+            Some(&json!(false))
+        );
+        assert_eq!(contact_meta_value(&contacts[1], "dupe"), Some(&json!(true)));
 
         let deleted = contacts.remove(0);
         let changed = tracker.on_contact_deleted(1, module, &mut contacts, &deleted);
 
-        assert_eq!(contacts[0].get("_dupe"), Some(&json!(false)));
-        assert_eq!(contacts[0].get("_pts"), Some(&json!(2)));
+        assert_eq!(
+            contact_meta_value(&contacts[0], "dupe"),
+            Some(&json!(false))
+        );
+        assert_eq!(contact_meta_value(&contacts[0], "pts"), Some(&json!(2)));
         assert_eq!(changed.len(), 1);
-        assert_eq!(changed[0].get("_id").and_then(Value::as_i64), Some(2));
+        assert_eq!(contact_id_for(&changed[0]), Some(2));
 
         let totals = tracker.totals(1).expect("totals should exist");
         assert_eq!(totals.qso_count, 1);
@@ -1513,16 +1530,28 @@ mod tests {
         ];
 
         tracker.on_log_loaded(7, Arc::clone(&module), &mut contacts);
-        assert_eq!(contact_by_id(&contacts, 1).get("_mult"), Some(&json!(1)));
-        assert_eq!(contact_by_id(&contacts, 2).get("_mult"), Some(&json!(1)));
-        assert_eq!(contact_by_id(&contacts, 3).get("_mult"), Some(&json!(0)));
+        assert_eq!(
+            contact_meta_value(&contact_by_id(&contacts, 1), "mult"),
+            Some(&json!(1))
+        );
+        assert_eq!(
+            contact_meta_value(&contact_by_id(&contacts, 2), "mult"),
+            Some(&json!(1))
+        );
+        assert_eq!(
+            contact_meta_value(&contact_by_id(&contacts, 3), "mult"),
+            Some(&json!(0))
+        );
 
         let deleted = contacts.remove(0);
         let changed = tracker.on_contact_deleted(7, module, &mut contacts, &deleted);
 
-        assert_eq!(contact_by_id(&contacts, 3).get("_mult"), Some(&json!(1)));
+        assert_eq!(
+            contact_meta_value(&contact_by_id(&contacts, 3), "mult"),
+            Some(&json!(1))
+        );
         assert_eq!(changed.len(), 1);
-        assert_eq!(changed[0].get("_id").and_then(Value::as_i64), Some(3));
+        assert_eq!(contact_id_for(&changed[0]), Some(3));
 
         let totals = tracker.totals(7).expect("totals should exist");
         assert_eq!(totals.qso_count, 2);
@@ -1534,7 +1563,7 @@ mod tests {
     fn contact_by_id(contacts: &[Contact], id: i64) -> Contact {
         contacts
             .iter()
-            .find(|contact| contact.get("_id").and_then(Value::as_i64) == Some(id))
+            .find(|contact| contact_id_for(contact) == Some(id))
             .cloned()
             .expect("contact id should exist")
     }

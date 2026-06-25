@@ -24,9 +24,18 @@ const VIRTUAL_ROW_HEIGHT_PX = 22;
 const VIRTUAL_OVERSCAN_ROWS = 8;
 const LOAD_MORE_THRESHOLD_PX = 120;
 
+function entryMeta(entry) {
+  return entry?.meta ?? {};
+}
+
+function entryAdif(entry) {
+  return entry?.adif ?? entry ?? {};
+}
+
 function epochFromLegacyQsoDateTime(entry) {
-  const date = String(entry.QSO_DATE ?? '');
-  const time = String(entry.TIME_ON ?? '');
+  const adif = entryAdif(entry);
+  const date = String(adif.QSO_DATE ?? '');
+  const time = String(adif.TIME_ON ?? '');
 
   if (!/^\d{8}$/.test(date) || !/^\d{6}$/.test(time)) {
     return null;
@@ -45,16 +54,18 @@ function epochFromLegacyQsoDateTime(entry) {
 }
 
 function qsoEpoch(entry) {
-  if (typeof entry.QSO_DATE_TIME_ON === 'number') {
-    return entry.QSO_DATE_TIME_ON;
+  const adif = entryAdif(entry);
+  const meta = entryMeta(entry);
+  if (typeof adif.QSO_DATE_TIME_ON === 'number') {
+    return adif.QSO_DATE_TIME_ON;
   }
 
-  if (typeof entry._time_on_epoch === 'number') {
-    return entry._time_on_epoch;
+  if (typeof meta.timeOnEpoch === 'number') {
+    return meta.timeOnEpoch;
   }
 
-  if (typeof entry.Time === 'number') {
-    return entry.Time;
+  if (typeof adif.Time === 'number') {
+    return adif.Time;
   }
 
   return epochFromLegacyQsoDateTime(entry);
@@ -79,7 +90,8 @@ function formatDateTime(entry) {
 }
 
 function formatFrequency(entry, field = 'FREQ') {
-  const frequency = entry[field] ?? entry.FREQ ?? entry.Freq;
+  const adif = entryAdif(entry);
+  const frequency = adif[field] ?? adif.FREQ ?? adif.Freq;
   const parsedFrequency =
     typeof frequency === 'number'
       ? frequency
@@ -144,7 +156,8 @@ function exchangeValueForColumn(settings, column, entry, columnFieldMap) {
 }
 
 function contactMode(entry, fallbackMode = 'CW') {
-  return String(entry.MODE ?? entry.Mode ?? fallbackMode).toUpperCase();
+  const adif = entryAdif(entry);
+  return String(adif.MODE ?? adif.Mode ?? fallbackMode).toUpperCase();
 }
 
 function cellValidation(settings, column, entry, columnFieldMap, radioMode) {
@@ -167,36 +180,41 @@ function formatCell(column, entry, columnFieldMap) {
   }
 
   if (column === 'Mult') {
-    return entry._mult ?? entry[column] ?? '';
+    return entryMeta(entry).mult ?? entry[column] ?? '';
   }
 
   if (column === 'Pts') {
-    return entry._pts ?? entry[column] ?? '';
+    return entryMeta(entry).pts ?? entry[column] ?? '';
   }
 
   const adifField = columnFieldMap[column];
-  return entry[adifField] ?? entry[column] ?? '';
+  const adif = entryAdif(entry);
+  return adif[adifField] ?? adif[column] ?? '';
 }
 
 function contactKey(entry, index) {
-  if (entry?._client_id) return `client:${entry._client_id}`;
-  if (entry?._id !== undefined && entry?._id !== null) return `id:${entry._id}`;
+  const meta = entryMeta(entry);
+  const adif = entryAdif(entry);
+  if (meta.clientId) return `client:${meta.clientId}`;
+  if (meta.id !== undefined && meta.id !== null) return `id:${meta.id}`;
 
-  return `row:${entry.QSO_DATE_TIME_ON ?? entry.TIME_ON ?? entry.Time ?? 'row'}-${entry.CALL ?? entry.Call ?? index}`;
+  return `row:${adif.QSO_DATE_TIME_ON ?? adif.TIME_ON ?? adif.Time ?? 'row'}-${adif.CALL ?? adif.Call ?? index}`;
 }
 
 function contactRowClassName(entry, isSelected) {
   const classes = [];
-  if (entry._status === 'Failed') classes.push('failed-contact');
-  else if (entry._status !== 'Committed') classes.push('uncommitted-contact');
+  if (entryMeta(entry).status === 'Failed') classes.push('failed-contact');
+  else if (entryMeta(entry).status !== 'Committed')
+    classes.push('uncommitted-contact');
   if (isSelected) classes.push('selected-contact');
   return classes.join(' ') || undefined;
 }
 
 function contactRowTitle(entry) {
-  if (entry._status !== 'Failed') return undefined;
-  return entry._error
-    ? `Contact upload failed: ${entry._error}`
+  const meta = entryMeta(entry);
+  if (meta.status !== 'Failed') return undefined;
+  return meta.error
+    ? `Contact upload failed: ${meta.error}`
     : 'Contact upload failed.';
 }
 

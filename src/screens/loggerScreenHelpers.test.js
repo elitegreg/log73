@@ -85,35 +85,42 @@ test('serial allocation helpers reserve ranges and calculate threshold', () => {
   assert.equal(serialRefillRemainingThreshold(100), 10);
 });
 
-test('committedBackendContact assigns _client_id from _id', () => {
+test('committedBackendContact assigns meta.clientId from meta.id', () => {
   const committed = committedBackendContact({
-    _id: 42,
-    CALL: 'K1ABC',
-    QSO_DATE_TIME_ON: 100,
+    meta: { id: 42 },
+    adif: { CALL: 'K1ABC', QSO_DATE_TIME_ON: 100 },
   });
 
-  assert.equal(committed._status, 'Committed');
-  assert.equal(committed._client_id, '42');
+  assert.equal(committed.meta.status, 'Committed');
+  assert.equal(committed.meta.clientId, '42');
 });
 
-test('mergeContact updates pending contact and rekeys committed _client_id to _id', () => {
+test('mergeContact updates pending contact and rekeys committed meta.clientId to meta.id', () => {
   const pending = {
-    _client_id: 'local-123',
-    _status: 'Pending',
-    CALL: 'K1ABC',
-    QSO_DATE_TIME_ON: 100,
+    meta: {
+      clientId: 'local-123',
+      status: 'Pending',
+    },
+    adif: {
+      CALL: 'K1ABC',
+      QSO_DATE_TIME_ON: 100,
+    },
   };
 
   const merged = mergeContact([pending], {
-    _id: 77,
-    _client_id: 'local-123',
-    _status: 'Committed',
-    CALL: 'K1ABC',
-    QSO_DATE_TIME_ON: 100,
+    meta: {
+      id: 77,
+      clientId: 'local-123',
+      status: 'Committed',
+    },
+    adif: {
+      CALL: 'K1ABC',
+      QSO_DATE_TIME_ON: 100,
+    },
   });
 
   assert.equal(merged.length, 1);
-  assert.equal(merged[0]._id, 77);
-  assert.equal(merged[0]._status, 'Committed');
-  assert.equal(merged[0]._client_id, '77');
+  assert.equal(merged[0].meta.id, 77);
+  assert.equal(merged[0].meta.status, 'Committed');
+  assert.equal(merged[0].meta.clientId, '77');
 });

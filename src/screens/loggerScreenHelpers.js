@@ -28,12 +28,51 @@ export const EMPTY_SCORE_SUMMARY = {
   score: 0,
 };
 
+function isObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+export function contactMeta(contact) {
+  return isObject(contact?.meta) ? contact.meta : {};
+}
+
+export function contactAdif(contact) {
+  return isObject(contact?.adif) ? contact.adif : {};
+}
+
+export function metaValue(contact, key) {
+  const meta = contactMeta(contact);
+  if (Object.prototype.hasOwnProperty.call(meta, key)) return meta[key];
+  const legacyKey = {
+    id: '_id',
+    logId: '_log_id',
+    status: '_status',
+    sessionId: '_session_id',
+    clientId: '_client_id',
+    force: '_force',
+    error: '_error',
+    pts: '_pts',
+    mult: '_mult',
+    bonus: '_bonus',
+    dupe: '_dupe',
+    timeOnEpoch: '_time_on_epoch',
+  }[key];
+  return legacyKey ? contact?.[legacyKey] : undefined;
+}
+
+export function adifValue(contact, key) {
+  const adif = contactAdif(contact);
+  if (Object.prototype.hasOwnProperty.call(adif, key)) return adif[key];
+  return contact?.[key];
+}
+
 export function contactSortValue(contact) {
-  if (typeof contact.QSO_DATE_TIME_ON === 'number')
-    return contact.QSO_DATE_TIME_ON;
-  if (typeof contact._time_on_epoch === 'number') return contact._time_on_epoch;
-  const date = String(contact.QSO_DATE ?? '');
-  const time = String(contact.TIME_ON ?? '');
+  const qsoDateTimeOn = adifValue(contact, 'QSO_DATE_TIME_ON');
+  if (typeof qsoDateTimeOn === 'number') return qsoDateTimeOn;
+  const timeOnEpoch = metaValue(contact, 'timeOnEpoch');
+  if (typeof timeOnEpoch === 'number') return timeOnEpoch;
+  const date = String(adifValue(contact, 'QSO_DATE') ?? '');
+  const time = String(adifValue(contact, 'TIME_ON') ?? '');
   const parsed = Date.UTC(
     Number.parseInt(date.slice(0, 4), 10),
     Number.parseInt(date.slice(4, 6), 10) - 1,
@@ -52,7 +91,7 @@ export function sortContacts(contacts) {
 }
 
 function contactCallsign(contact) {
-  return String(contact?.CALL ?? contact?.Call ?? '')
+  return String(adifValue(contact, 'CALL') ?? contact?.Call ?? '')
     .trim()
     .toUpperCase();
 }
@@ -64,12 +103,17 @@ function compareText(left, right) {
 }
 
 function compareContactIds(left, right) {
-  if (left?._id !== undefined && right?._id !== undefined) {
-    return Number(left._id) - Number(right._id);
+  const leftId = metaValue(left, 'id');
+  const rightId = metaValue(right, 'id');
+  if (leftId !== undefined && rightId !== undefined) {
+    return Number(leftId) - Number(rightId);
   }
-  if (left?._id !== undefined) return -1;
-  if (right?._id !== undefined) return 1;
-  return compareText(left?._client_id ?? '', right?._client_id ?? '');
+  if (leftId !== undefined) return -1;
+  if (rightId !== undefined) return 1;
+  return compareText(
+    String(metaValue(left, 'clientId') ?? ''),
+    String(metaValue(right, 'clientId') ?? ''),
+  );
 }
 
 export function sortContactsByCallsignThenTime(contacts) {
@@ -88,37 +132,67 @@ export function sortContactsByCallsignThenTime(contacts) {
 }
 
 export function normalizeContact(contact) {
-  const nextContact = { ...contact };
+  const legacyMeta = {
+    id: contact?._id,
+    logId: contact?._log_id,
+    status: contact?._status,
+    sessionId: contact?._session_id,
+    clientId: contact?._client_id,
+    force: contact?._force,
+    error: contact?._error,
+    pts: contact?._pts,
+    mult: contact?._mult,
+    bonus: contact?._bonus,
+    dupe: contact?._dupe,
+    timeOnEpoch: contact?._time_on_epoch,
+  };
+  const meta = {
+    ...(isObject(contact?.meta) ? contact.meta : {}),
+    ...Object.fromEntries(
+      Object.entries(legacyMeta).filter(([, value]) => value !== undefined),
+    ),
+  };
+  const adif = isObject(contact?.adif)
+    ? { ...contact.adif }
+    : Object.fromEntries(
+        Object.entries(contact ?? {}).filter(
+          ([key, value]) =>
+            key !== 'meta' &&
+            key !== 'adif' &&
+            !key.startsWith('_') &&
+            value !== undefined,
+        ),
+      );
+
   if (
-    nextContact._status === 'Committed' &&
-    nextContact._id !== undefined &&
-    nextContact._id !== null
+    meta.status === 'Committed' &&
+    meta.id !== undefined &&
+    meta.id !== null
   ) {
-    nextContact._client_id = String(nextContact._id);
+    meta.clientId = String(meta.id);
   }
-  if (typeof nextContact.QSO_DATE_TIME_ON !== 'number') {
-    const epoch = contactSortValue(nextContact);
-    if (epoch > 0) nextContact.QSO_DATE_TIME_ON = epoch;
+  if (typeof adif.QSO_DATE_TIME_ON !== 'number') {
+    const epoch = contactSortValue({ meta, adif });
+    if (epoch > 0) adif.QSO_DATE_TIME_ON = epoch;
   }
-  if (nextContact.FREQ !== undefined) {
-    const frequency = Number.parseFloat(String(nextContact.FREQ));
-    if (Number.isFinite(frequency))
-      nextContact.FREQ = Math.round(
+  if (adif.FREQ !== undefined) {
+    const frequency = Number.parseFloat(String(adif.FREQ));
+    if (Number.isFinite(frequency)) {
+      adif.FREQ = Math.round(
         Math.abs(frequency) < 1000000 ? frequency * 1000000 : frequency,
       );
+    }
   }
-  delete nextContact.QSO_DATE;
-  delete nextContact.TIME_ON;
-  delete nextContact._time_on_epoch;
-  return nextContact;
+  delete adif.QSO_DATE;
+  delete adif.TIME_ON;
+  delete meta.timeOnEpoch;
+
+  return { meta, adif };
 }
 
 export function shouldPersistLocally(contact) {
-  return (
-    contact._status === 'Pending' ||
-    contact._status === 'Updating' ||
-    contact._status === 'Failed'
-  );
+  const status = metaValue(contact, 'status');
+  return status === 'Pending' || status === 'Updating' || status === 'Failed';
 }
 export function contactStorageKey(logId) {
   return `${CONTACTS_STORAGE_KEY}.${logId}`;
@@ -273,10 +347,16 @@ export function reserveNextSerial(allocation) {
 }
 
 export function committedBackendContact(contact) {
-  return normalizeContact({
-    ...contact,
-    _status: contact._status ?? 'Committed',
-  });
+  const normalized = normalizeContact(contact);
+  if (!normalized.meta.status) normalized.meta.status = 'Committed';
+  if (
+    normalized.meta.status === 'Committed' &&
+    normalized.meta.id !== undefined &&
+    normalized.meta.id !== null
+  ) {
+    normalized.meta.clientId = String(normalized.meta.id);
+  }
+  return normalized;
 }
 export function createSessionId() {
   return window.crypto?.randomUUID
@@ -292,16 +372,21 @@ export function getSessionId() {
 }
 
 export function contactMatches(left, right) {
-  if (left._id !== undefined && right._id !== undefined)
-    return String(left._id) === String(right._id);
-  if (left._client_id && right._client_id)
-    return left._client_id === right._client_id;
+  const leftId = metaValue(left, 'id');
+  const rightId = metaValue(right, 'id');
+  if (leftId !== undefined && rightId !== undefined)
+    return String(leftId) === String(rightId);
+  const leftClientId = metaValue(left, 'clientId');
+  const rightClientId = metaValue(right, 'clientId');
+  if (leftClientId && rightClientId) return leftClientId === rightClientId;
   return false;
 }
 
 export function contactIdentifier(contact) {
-  if (contact._id !== undefined) return `id:${contact._id}`;
-  if (contact._client_id) return `client:${contact._client_id}`;
+  const id = metaValue(contact, 'id');
+  if (id !== undefined) return `id:${id}`;
+  const clientId = metaValue(contact, 'clientId');
+  if (clientId) return `client:${clientId}`;
   return null;
 }
 
@@ -312,14 +397,19 @@ export function mergeContact(contacts, contact) {
   );
   if (index === -1) return sortContacts([...contacts, committedContact]);
   const nextContacts = [...contacts];
-  nextContacts[index] = {
-    ...nextContacts[index],
-    ...committedContact,
-    _error: undefined,
+  const mergedMeta = {
+    ...contactMeta(nextContacts[index]),
+    ...contactMeta(committedContact),
+    error: undefined,
   };
-  if (nextContacts[index]._status === 'Committed') {
-    delete nextContacts[index]._force;
+  const mergedAdif = {
+    ...contactAdif(nextContacts[index]),
+    ...contactAdif(committedContact),
+  };
+  if (mergedMeta.status === 'Committed') {
+    delete mergedMeta.force;
   }
+  nextContacts[index] = { meta: mergedMeta, adif: mergedAdif };
   return sortContacts(nextContacts);
 }
 
@@ -327,7 +417,14 @@ export function markContactFailed(contacts, failedContact, error) {
   return sortContacts(
     contacts.map((contact) =>
       contactMatches(contact, failedContact)
-        ? { ...contact, _status: 'Failed', _error: error }
+        ? {
+            meta: {
+              ...contactMeta(contact),
+              status: 'Failed',
+              error,
+            },
+            adif: { ...contactAdif(contact) },
+          }
         : contact,
     ),
   );
