@@ -13,6 +13,7 @@ mod radio;
 mod radio_manager;
 mod scoring;
 mod static_assets;
+mod stats;
 mod supercheckpartial;
 mod validation;
 mod voice_keyer;
@@ -42,6 +43,7 @@ use radio::{ClientMessage, RadioCommand, ServerMessage};
 use radio_cat_rs::{list_serial_ports, supported_drivers};
 use radio_manager::RadioManager;
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
+use stats::StatsTracker;
 use std::{
     collections::HashMap,
     fs,
@@ -64,6 +66,7 @@ struct AppState {
     contest_rules: ContestRulesStore,
     log_cache: LogCache,
     incremental_scoring: IncrementalScoreTracker,
+    stats: StatsTracker,
     supercheckpartial: SuperCheckPartial,
     dxcc: std::sync::Arc<dxcc::DxccDatabase>,
     dxcluster: DxClusterManager,
@@ -271,8 +274,10 @@ async fn main() {
     let radio_manager = RadioManager::new(db.clone(), voice_keyer.clone());
     let scoring_modules = ScoringModules::new();
     let incremental_scoring = IncrementalScoreTracker::new();
+    let stats = StatsTracker::new();
     let log_cache = LogCache::new(db.clone(), contest_rules.clone(), scoring_modules.clone());
     log_cache.register_processor(std::sync::Arc::new(incremental_scoring.clone()));
+    log_cache.register_processor(std::sync::Arc::new(stats.clone()));
 
     let app_state = AppState {
         radio_manager,
@@ -281,6 +286,7 @@ async fn main() {
         contest_rules,
         log_cache,
         incremental_scoring,
+        stats,
         supercheckpartial,
         dxcc: std::sync::Arc::new(dxcc),
         dxcluster,
@@ -331,6 +337,7 @@ async fn main() {
         .route("/logs", get(logs).post(create_log))
         .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
         .route("/logs/{id}/qso-count", get(log_qso_count))
+        .route("/logs/{id}/stats", get(log_stats))
         .route("/logs/{id}/adif", post(export_adif))
         .route(
             "/logs/{id}/adif/import",
@@ -1449,6 +1456,20 @@ async fn log_qso_count(
     match app_state.db.log_qso_count(id).await {
         Ok(qso_count) => Json(serde_json::json!({ "ok": true, "qso_count": qso_count })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
+}
+
+async fn log_stats(
+    State(app_state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Json<serde_json::Value> {
+    if let Err(error) = app_state.log_cache.ensure_loaded(id).await {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
+
+    match app_state.stats.snapshot(id) {
+        Some(stats) => Json(serde_json::json!({ "ok": true, "stats": stats })),
+        None => Json(serde_json::json!({ "ok": false, "error": "not found" })),
     }
 }
 
