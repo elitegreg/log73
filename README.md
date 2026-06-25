@@ -300,6 +300,7 @@ GET    /api/logs/:id
 PUT    /api/logs/:id
 DELETE /api/logs/:id
 GET    /api/logs/:id/qso-count
+GET    /api/logs/:id/stats
 POST   /api/logs/:id/adif
 POST   /api/logs/:id/cabrillo
 POST   /api/logs/:id/serial-allocation
