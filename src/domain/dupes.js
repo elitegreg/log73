@@ -19,7 +19,8 @@ function normalizedFieldValue(field, value) {
 }
 
 function contactFieldValue(settings, contact, field) {
-  const directValue = jsonString(contact?.[field]);
+  const adif = contact?.adif ?? {};
+  const directValue = jsonString(adif?.[field] ?? contact?.[field]);
   if (directValue !== null) return normalizedFieldValue(field, directValue);
 
   if (field.toUpperCase() === 'CALL') {
@@ -30,7 +31,9 @@ function contactFieldValue(settings, contact, field) {
   }
 
   const mappedField = settings?.qso_column_fields?.[field];
-  const mappedValue = mappedField ? jsonString(contact?.[mappedField]) : null;
+  const mappedValue = mappedField
+    ? jsonString(adif?.[mappedField] ?? contact?.[mappedField])
+    : null;
   if (mappedValue !== null) return normalizedFieldValue(field, mappedValue);
 
   return '';

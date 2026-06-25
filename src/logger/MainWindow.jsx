@@ -1126,23 +1126,27 @@ function MainWindow({
     const timeOn = callSignEditedAtRef.current;
     const normalizedCallSign = callSign.trim().toUpperCase();
     const contact = {
-      QSO_DATE_TIME_ON: Math.floor(timeOn.getTime() / EPOCH_MS_PER_SECOND),
-      STATION_CALLSIGN: stationCallsign,
-      OPERATOR: operatorCallsign,
-      CONTEST_ID: settings.contest,
-      CALL: normalizedCallSign,
-      BAND: currentBand?.name ?? '',
-      FREQ: radioFrequencyHz,
-      MODE: adifModeForLoggerMode(radioMode),
-      _status: 'Pending',
-      _session_id: sessionId,
-      _log_id: logId,
-      _client_id: createContactId(timeOn, normalizedCallSign),
-      ...(force ? { _force: true } : {}),
+      meta: {
+        status: 'Pending',
+        sessionId,
+        logId,
+        clientId: createContactId(timeOn, normalizedCallSign),
+        ...(force ? { force: true } : {}),
+      },
+      adif: {
+        QSO_DATE_TIME_ON: Math.floor(timeOn.getTime() / EPOCH_MS_PER_SECOND),
+        STATION_CALLSIGN: stationCallsign,
+        OPERATOR: operatorCallsign,
+        CONTEST_ID: settings.contest,
+        CALL: normalizedCallSign,
+        BAND: currentBand?.name ?? '',
+        FREQ: radioFrequencyHz,
+        MODE: adifModeForLoggerMode(radioMode),
+      },
     };
 
     for (const field of settings.exchange) {
-      contact[field.adif] = String(exchangeValue(field, values))
+      contact.adif[field.adif] = String(exchangeValue(field, values))
         .trim()
         .toUpperCase();
     }
@@ -1485,11 +1489,13 @@ function MainWindow({
     let frequencyHz = radioFrequencyHz;
 
     if (!spotCallsign) {
-      spotCallsign = String(lastContact?.CALL ?? lastContact?.Call ?? '')
+      spotCallsign = String(
+        lastContact?.adif?.CALL ?? lastContact?.CALL ?? lastContact?.Call ?? '',
+      )
         .trim()
         .toUpperCase();
       frequencyHz = normalizedContactFrequencyHz(
-        lastContact?.FREQ ?? lastContact?.Freq,
+        lastContact?.adif?.FREQ ?? lastContact?.FREQ ?? lastContact?.Freq,
       );
     }
 

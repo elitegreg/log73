@@ -1,5 +1,5 @@
 use crate::contest_rules::{ContestParam, ContestRules, ExchangeField};
-use crate::db::{Contact, Log};
+use crate::db::{Contact, Log, contact_adif_value};
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 
@@ -133,7 +133,7 @@ fn append_operators_lines(
 ) -> Result<(), String> {
     let mut operators = contacts
         .iter()
-        .filter_map(|contact| token_string(contact.get("OPERATOR")))
+        .filter_map(|contact| token_string(contact_adif_value(contact, "OPERATOR")))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect::<Vec<_>>();
@@ -167,13 +167,13 @@ fn render_qso_line(rules: &ContestRules, log: &Log, contact: &Contact) -> Result
     let frequency = qso_frequency_token(contact)
         .ok_or_else(|| "contact is missing frequency for Cabrillo export".to_string())?;
     let mode = qso_mode_token(contact).ok_or_else(|| "contact is missing mode".to_string())?;
-    let epoch = contact_i64(contact.get("QSO_DATE_TIME_ON"))
+    let epoch = contact_i64(contact_adif_value(contact, "QSO_DATE_TIME_ON"))
         .ok_or_else(|| "contact is missing QSO date/time".to_string())?;
     let (date, time) = qso_datetime(epoch)?;
-    let station_callsign = contact_string(contact.get("STATION_CALLSIGN"))
+    let station_callsign = contact_string(contact_adif_value(contact, "STATION_CALLSIGN"))
         .map(|value| value.to_uppercase())
         .unwrap_or_else(|| log.station_callsign.trim().to_uppercase());
-    let their_callsign = token_string(contact.get("CALL"))
+    let their_callsign = token_string(contact_adif_value(contact, "CALL"))
         .ok_or_else(|| "contact is missing callsign".to_string())?;
 
     let sent_fields = rules
@@ -205,7 +205,7 @@ fn render_qso_line(rules: &ContestRules, log: &Log, contact: &Contact) -> Result
 }
 
 fn exchange_token(field: &ExchangeField, log: &Log, contact: &Contact) -> Result<String, String> {
-    if let Some(value) = token_string(contact.get(&field.adif)) {
+    if let Some(value) = token_string(contact_adif_value(contact, &field.adif)) {
         return Ok(value);
     }
     if let Some(source_param) = &field.source_param
@@ -228,11 +228,12 @@ fn exchange_token(field: &ExchangeField, log: &Log, contact: &Contact) -> Result
 }
 
 fn qso_frequency_token(contact: &Contact) -> Option<String> {
-    contact_i64(contact.get("FREQ")).map(|frequency_hz| (frequency_hz / 1000).to_string())
+    contact_i64(contact_adif_value(contact, "FREQ"))
+        .map(|frequency_hz| (frequency_hz / 1000).to_string())
 }
 
 fn qso_mode_token(contact: &Contact) -> Option<String> {
-    let mode = token_string(contact.get("MODE"))?;
+    let mode = token_string(contact_adif_value(contact, "MODE"))?;
     Some(cabrillo_mode_token(&mode).to_string())
 }
 

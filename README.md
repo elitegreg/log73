@@ -334,7 +334,7 @@ Logger websocket:
 /ws?session_id=<uuid>&radio_id=<radio_id>
 ```
 
-The frontend stores `session_id` in browser local storage and includes it on locally logged contacts as `_session_id`. The backend uses it to avoid echoing the same committed contact back to the originating websocket.
+The frontend stores `session_id` in browser local storage and includes it on locally logged contacts as `contact.meta.sessionId`. The backend uses it to avoid echoing the same committed contact back to the originating websocket.
 
 Server radio state message:
 
@@ -348,7 +348,7 @@ Server radio state message:
 Server log/contact messages:
 
 ```json
-{ "type": "log_entry", "contact": { "_status": "Committed" } }
+{ "type": "log_entry", "contact": { "meta": { "status": "Committed" }, "adif": {} } }
 { "type": "contact_deleted", "id": 123, "log_id": 1 }
 ```
 
@@ -488,9 +488,14 @@ This is intentional because many radios restore a per-band last-used mode when c
 
 ## Contact data
 
-Contacts use ADIF-like JSON fields.
+Contacts now have two maps:
 
-Important fields:
+```text
+meta  transient/state/identity fields
+adif  logged QSO fields
+```
+
+Important `adif` fields:
 
 ```text
 QSO_DATE_TIME_ON  seconds since UTC epoch
@@ -501,14 +506,24 @@ CALL              worked station
 BAND              band name
 FREQ              frequency in Hz
 MODE              normalized mode
-_log_id           database log id
-_id               database QSO id
-_status           Pending, Updating, or Committed
-_session_id       frontend websocket session id
-_client_id        temporary frontend id for pending rows
 ```
 
-Fields mapped to database columns are stored directly in `qsos`. Extra non-private fields are serialized into the `JSON` column. Fields beginning with `_` are private/transient and are not stored in `JSON`.
+Important `meta` fields:
+
+```text
+logId      database log id
+id         database QSO id
+status     Pending, Updating, Failed, or Committed
+sessionId  frontend websocket session id
+clientId   temporary frontend id for pending rows
+force      validation override flag
+pts        scored QSO points
+mult       scored multipliers credited by this QSO
+bonus      scored bonus points credited by this QSO
+dupe       whether the QSO is currently a dupe
+```
+
+Fields mapped to database columns are stored directly from `contact.adif` into `qsos`. Extra ADIF fields are serialized into the `JSON` column. `contact.meta` is transient and is not stored in the QSO JSON payload.
 
 Committed contacts are loaded from the backend. Pending/updating contacts are cached in browser local storage as an offline/outbox cache.
 

@@ -1,5 +1,5 @@
 use crate::contest_rules::ContestRulesStore;
-use crate::db::{Contact, Database};
+use crate::db::{Contact, Database, contact_adif_value, contact_id};
 use crate::scoring::{ContestScoringModule, ScoringModules};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -422,8 +422,7 @@ fn normalized_callsign_prefix(callsign_prefix: Option<&str>) -> Option<String> {
 }
 
 fn contact_callsign(contact: &Contact) -> Option<String> {
-    let callsign = contact
-        .get("CALL")
+    let callsign = contact_adif_value(contact, "CALL")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default()
         .trim()
@@ -437,17 +436,9 @@ fn sort_contacts_desc(contacts: &mut [Contact]) {
 
 fn contact_order_key(contact: &Contact) -> (i64, i64) {
     (
-        contact
-            .get("QSO_DATE_TIME_ON")
+        contact_adif_value(contact, "QSO_DATE_TIME_ON")
             .and_then(serde_json::Value::as_i64)
             .unwrap_or(0),
         contact_id(contact).unwrap_or(0),
     )
-}
-
-fn contact_id(contact: &Contact) -> Option<i64> {
-    contact
-        .get("_id")
-        .or_else(|| contact.get("ID"))
-        .and_then(serde_json::Value::as_i64)
 }

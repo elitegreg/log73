@@ -39,6 +39,10 @@ import {
   sortContacts,
   markContactFailed,
   contactIdentifier,
+  contactMeta,
+  contactAdif,
+  metaValue,
+  adifValue,
   sentSerialField,
   serialBatchSize,
   serialRefillRemainingThreshold,
@@ -105,7 +109,7 @@ function formatSocketDebugDetails(details) {
 
 function callsignPrefixMatches(contact, callsignPrefix) {
   if (!callsignPrefix) return true;
-  const callsign = String(contact?.CALL ?? contact?.Call ?? '')
+  const callsign = String(adifValue(contact, 'CALL') ?? contact?.Call ?? '')
     .trim()
     .toUpperCase();
   return callsign.startsWith(callsignPrefix);
@@ -390,7 +394,7 @@ function LoggerScreen() {
     if (!callsignPrefix) return allContacts;
 
     return allContacts.filter((contact) => {
-      if (contact._status !== 'Committed') {
+      if (metaValue(contact, 'status') !== 'Committed') {
         return callsignPrefixMatches(contact, callsignPrefix);
       }
       return true;
@@ -1163,8 +1167,8 @@ function LoggerScreen() {
             });
           } else if (
             message.type === 'log_entry' &&
-            message.contact?._session_id !== sessionId &&
-            Number(message.contact?._log_id) === numericLogId
+            metaValue(message.contact, 'sessionId') !== sessionId &&
+            Number(metaValue(message.contact, 'logId')) === numericLogId
           ) {
             const callsignPrefix = activeCallsignPrefixRef.current;
             if (
@@ -1181,7 +1185,7 @@ function LoggerScreen() {
           ) {
             setAllContacts((currentContacts) =>
               currentContacts.filter(
-                (contact) => String(contact._id) !== String(message.id),
+                (contact) => String(metaValue(contact, 'id')) !== String(message.id),
               ),
             );
           } else if (
@@ -1296,26 +1300,38 @@ function LoggerScreen() {
       const localUncommitted = [];
 
       for (const contact of currentContacts) {
-        if (
-          contact._status === 'Committed' &&
-          contact._id !== undefined &&
-          contact._id !== null
-        ) {
-          committedById.set(String(contact._id), contact);
+        const id = metaValue(contact, 'id');
+        if (metaValue(contact, 'status') === 'Committed' && id !== undefined) {
+          committedById.set(String(id), contact);
         } else {
           localUncommitted.push(contact);
         }
       }
 
       for (const contact of committedPage) {
-        if (contact._id === undefined || contact._id === null) continue;
-        const key = String(contact._id);
-        const existing = committedById.get(key) ?? {};
-        committedById.set(key, {
-          ...existing,
-          ...contact,
-          _status: 'Committed',
-        });
+        const id = metaValue(contact, 'id');
+        if (id === undefined || id === null) continue;
+        const key = String(id);
+        const existing = committedById.get(key);
+        committedById.set(
+          key,
+          existing
+            ? {
+                meta: {
+                  ...contactMeta(existing),
+                  ...contactMeta(contact),
+                  status: 'Committed',
+                },
+                adif: {
+                  ...contactAdif(existing),
+                  ...contactAdif(contact),
+                },
+              }
+            : {
+                ...contact,
+                meta: { ...contactMeta(contact), status: 'Committed' },
+              },
+        );
       }
 
       return sortContacts([...committedById.values(), ...localUncommitted]);
@@ -1352,7 +1368,7 @@ function LoggerScreen() {
           if (reset) {
             setAllContacts((currentContacts) => {
               const localUncommitted = currentContacts.filter(
-                (contact) => contact._status !== 'Committed',
+                (contact) => metaValue(contact, 'status') !== 'Committed',
               );
               return sortContacts([...committedPage, ...localUncommitted]);
             });
@@ -1429,13 +1445,14 @@ function LoggerScreen() {
 
   useEffect(() => {
     const pendingContact = allContacts.find((contact) => {
-      if (contact._status === 'Pending')
-        return (
-          contact._client_id &&
-          !committingContactIdsRef.current.has(contact._client_id)
-        );
-      if (contact._status === 'Updating') {
-        const updateKey = contact._id ?? contact._client_id;
+      const status = metaValue(contact, 'status');
+      const clientId = metaValue(contact, 'clientId');
+      const id = metaValue(contact, 'id');
+      if (status === 'Pending') {
+        return clientId && !committingContactIdsRef.current.has(clientId);
+      }
+      if (status === 'Updating') {
+        const updateKey = id ?? clientId;
         return updateKey && !committingContactIdsRef.current.has(updateKey);
       }
       return false;
@@ -1443,16 +1460,20 @@ function LoggerScreen() {
     if (!pendingContact) return;
 
     const commitKey =
-      pendingContact._status === 'Pending'
-        ? pendingContact._client_id
-        : (pendingContact._id ?? pendingContact._client_id);
+      metaValue(pendingContact, 'status') === 'Pending'
+        ? metaValue(pendingContact, 'clientId')
+        : (metaValue(pendingContact, 'id') ??
+          metaValue(pendingContact, 'clientId'));
     committingContactIdsRef.current.add(commitKey);
 
     async function commitContact(contact) {
       try {
         const responseBody = await apiJson(`/logs/${numericLogId}/contacts`, {
           method: 'POST',
-          body: JSON.stringify({ ...contact, _log_id: numericLogId }),
+          body: JSON.stringify({
+            meta: { ...contactMeta(contact), logId: numericLogId },
+            adif: { ...contactAdif(contact) },
+          }),
         });
         if (!responseBody.ok) {
           notifyOperationalError(
@@ -1461,7 +1482,8 @@ function LoggerScreen() {
             responseBody.error,
             {
               logId: numericLogId,
-              contactId: contact._id ?? contact._client_id ?? null,
+              contactId:
+                metaValue(contact, 'id') ?? metaValue(contact, 'clientId') ?? null,
             },
           );
           setAllContacts((currentContacts) =>
@@ -1483,14 +1505,18 @@ function LoggerScreen() {
             setAllContacts((currentContacts) =>
               mergeContact(currentContacts, {
                 ...responseBody.contact,
-                _client_id: contact._client_id,
+                meta: {
+                  ...contactMeta(responseBody.contact),
+                  clientId: metaValue(contact, 'clientId'),
+                },
               }),
             );
           } else {
             setAllContacts((currentContacts) =>
               currentContacts.filter(
                 (currentContact) =>
-                  currentContact._client_id !== contact._client_id,
+                  metaValue(currentContact, 'clientId') !==
+                  metaValue(contact, 'clientId'),
               ),
             );
           }
@@ -1501,7 +1527,8 @@ function LoggerScreen() {
             null,
             {
               logId: numericLogId,
-              contactId: contact._id ?? contact._client_id ?? null,
+              contactId:
+                metaValue(contact, 'id') ?? metaValue(contact, 'clientId') ?? null,
             },
           );
           setAllContacts((currentContacts) =>
@@ -1521,7 +1548,8 @@ function LoggerScreen() {
             error,
             {
               logId: numericLogId,
-              contactId: contact._id ?? contact._client_id ?? null,
+              contactId:
+                metaValue(contact, 'id') ?? metaValue(contact, 'clientId') ?? null,
             },
           );
         }
@@ -1564,21 +1592,22 @@ function LoggerScreen() {
     if (!window.confirm(`Are you sure you want to delete ${qsoLabel}?`)) return;
 
     const committedContacts = contactsToDelete.filter(
-      (contact) => contact._id !== undefined,
+      (contact) => metaValue(contact, 'id') !== undefined,
     );
     const localContactIdentifiers = contactsToDelete
-      .filter((contact) => contact._id === undefined)
+      .filter((contact) => metaValue(contact, 'id') === undefined)
       .map(contactIdentifier)
       .filter(Boolean);
     const successfullyDeletedIds = [];
     const results = await Promise.allSettled(
       committedContacts.map(async (contact) => {
-        const result = await apiJson(`/contacts/${contact._id}`, {
+        const contactId = metaValue(contact, 'id');
+        const result = await apiJson(`/contacts/${contactId}`, {
           method: 'DELETE',
         });
         if (!result.ok)
           throw new Error(result.error ?? 'Unable to delete contact');
-        if (result.deleted) successfullyDeletedIds.push(String(contact._id));
+        if (result.deleted) successfullyDeletedIds.push(String(contactId));
       }),
     );
     const failureCount = results.filter(
@@ -1588,7 +1617,7 @@ function LoggerScreen() {
       .map((result, index) => {
         if (result.status !== 'rejected') return null;
         return {
-          id: committedContacts[index]?._id ?? null,
+          id: metaValue(committedContacts[index], 'id') ?? null,
           error: errorMessage(result.reason, 'Unable to delete contact'),
         };
       })
@@ -1632,10 +1661,15 @@ function LoggerScreen() {
           const identifier = contactIdentifier(contact);
           if (!identifier || !identifiers.has(identifier)) return contact;
           return {
-            ...contact,
-            [field]: value,
-            _status: contact._id === undefined ? 'Pending' : 'Updating',
-            _error: undefined,
+            meta: {
+              ...contactMeta(contact),
+              status: metaValue(contact, 'id') === undefined ? 'Pending' : 'Updating',
+              error: undefined,
+            },
+            adif: {
+              ...contactAdif(contact),
+              [field]: value,
+            },
           };
         }),
       ),

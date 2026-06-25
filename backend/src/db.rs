@@ -10,6 +10,82 @@ use std::thread;
 use tokio::sync::{mpsc, oneshot};
 
 pub type Contact = Map<String, Value>;
+pub type ContactFields = Map<String, Value>;
+
+const META_KEY: &str = "meta";
+const ADIF_KEY: &str = "adif";
+
+pub fn build_contact(meta: ContactFields, adif: ContactFields) -> Contact {
+    let mut contact = Map::new();
+    contact.insert(META_KEY.to_string(), Value::Object(meta));
+    contact.insert(ADIF_KEY.to_string(), Value::Object(adif));
+    contact
+}
+
+pub fn contact_meta(contact: &Contact) -> Option<&ContactFields> {
+    contact.get(META_KEY).and_then(Value::as_object)
+}
+
+pub fn contact_adif(contact: &Contact) -> Option<&ContactFields> {
+    contact.get(ADIF_KEY).and_then(Value::as_object)
+}
+
+pub fn contact_meta_value<'a>(contact: &'a Contact, key: &str) -> Option<&'a Value> {
+    contact_meta(contact)
+        .and_then(|meta| meta.get(key))
+        .or_else(|| {
+            let legacy_key = match key {
+                "id" => Some("_id"),
+                "logId" => Some("_log_id"),
+                "status" => Some("_status"),
+                "sessionId" => Some("_session_id"),
+                "clientId" => Some("_client_id"),
+                "force" => Some("_force"),
+                "error" => Some("_error"),
+                "pts" => Some("_pts"),
+                "mult" => Some("_mult"),
+                "bonus" => Some("_bonus"),
+                "dupe" => Some("_dupe"),
+                _ => None,
+            };
+            legacy_key.and_then(|legacy| contact.get(legacy))
+        })
+}
+
+pub fn contact_adif_value<'a>(contact: &'a Contact, key: &str) -> Option<&'a Value> {
+    contact_adif(contact)
+        .and_then(|adif| adif.get(key))
+        .or_else(|| contact.get(key))
+}
+
+pub fn set_contact_meta(contact: &mut Contact, key: &str, value: Value) {
+    if !matches!(contact.get(META_KEY), Some(Value::Object(_))) {
+        contact.insert(META_KEY.to_string(), Value::Object(Map::new()));
+    }
+    if let Some(meta) = contact.get_mut(META_KEY).and_then(Value::as_object_mut) {
+        meta.insert(key.to_string(), value);
+    }
+}
+
+#[cfg(test)]
+pub fn set_contact_adif(contact: &mut Contact, key: &str, value: Value) {
+    if !matches!(contact.get(ADIF_KEY), Some(Value::Object(_))) {
+        contact.insert(ADIF_KEY.to_string(), Value::Object(Map::new()));
+    }
+    if let Some(adif) = contact.get_mut(ADIF_KEY).and_then(Value::as_object_mut) {
+        adif.insert(key.to_string(), value);
+    }
+}
+
+pub fn contact_id(contact: &Contact) -> Option<i64> {
+    contact_meta_value(contact, "id")
+        .or_else(|| contact.get("ID"))
+        .and_then(json_i64_value)
+}
+
+pub fn contact_log_id(contact: &Contact) -> Option<i64> {
+    contact_meta_value(contact, "logId").and_then(json_i64_value)
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Log {
@@ -1003,7 +1079,7 @@ fn db_upsert_contacts(
     let mut committed = Vec::with_capacity(contacts.len());
 
     for mut contact in contacts {
-        contact.insert("_log_id".to_string(), Value::Number(log_id.into()));
+        set_contact_meta(&mut contact, "logId", Value::Number(log_id.into()));
         let id = upsert_contact(&transaction, contact)?;
         if let Some(saved) = select_contact(&transaction, id)? {
             committed.push(saved);
@@ -1344,8 +1420,8 @@ fn json_serial_value(value: &Value) -> Option<i64> {
 }
 
 fn upsert_contact(connection: &Connection, contact: Contact) -> rusqlite::Result<i64> {
-    let id = json_i64(contact.get("_id")).or_else(|| json_i64(contact.get("ID")));
-    let requested_log_id = json_i64(contact.get("_log_id")).unwrap_or(1);
+    let id = contact_id(&contact).or_else(|| json_i64(contact.get("ID")));
+    let requested_log_id = contact_log_id(&contact).unwrap_or(1);
 
     if let Some(id) = id
         && let Some(existing_log_id) = select_contact_log_id(connection, id)?
@@ -1380,21 +1456,21 @@ fn contact_to_sql_values(contact: &Contact) -> Vec<SqlValue> {
                 return SqlValue::Text(extra_json(contact));
             }
             if *column == "LOG_ID" {
-                return SqlValue::Integer(json_i64(contact.get("_log_id")).unwrap_or(1));
+                return SqlValue::Integer(contact_log_id(contact).unwrap_or(1));
             }
             if *column == "QSO_DATE_TIME_ON" {
-                return json_i64(contact.get("QSO_DATE_TIME_ON"))
+                return json_i64(contact_adif_value(contact, "QSO_DATE_TIME_ON"))
                     .or_else(|| legacy_epoch(contact))
                     .map(SqlValue::Integer)
                     .unwrap_or(SqlValue::Null);
             }
             if *column == "FREQ" {
-                return frequency_hz(contact.get("FREQ"))
+                return frequency_hz(contact_adif_value(contact, "FREQ"))
                     .map(SqlValue::Integer)
                     .unwrap_or(SqlValue::Null);
             }
 
-            let value = contact.get(*column);
+            let value = contact_adif_value(contact, column);
             if INTEGER_COLUMNS.contains(column) {
                 json_i64(value)
                     .map(SqlValue::Integer)
@@ -1410,16 +1486,23 @@ fn contact_to_sql_values(contact: &Contact) -> Vec<SqlValue> {
 
 fn extra_json(contact: &Contact) -> String {
     let mapped_keys = mapped_json_keys();
-    let extra = contact
-        .iter()
-        .filter(|(key, _)| !key.starts_with('_') && !mapped_keys.contains(key.as_str()))
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect::<Map<_, _>>();
+    let extra = if let Some(adif) = contact_adif(contact) {
+        adif.iter()
+            .filter(|(key, _)| !mapped_keys.contains(key.as_str()))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<Map<_, _>>()
+    } else {
+        contact
+            .iter()
+            .filter(|(key, _)| !key.starts_with('_') && !mapped_keys.contains(key.as_str()))
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect::<Map<_, _>>()
+    };
     Value::Object(extra).to_string()
 }
 
 fn mapped_json_keys() -> HashSet<&'static str> {
-    let mut keys = HashSet::from(["_id", "ID", "_log_id", "_status"]);
+    let mut keys = HashSet::from(["ID"]);
     for column in QSO_COLUMNS {
         if *column != "JSON" && *column != "LOG_ID" {
             keys.insert(column);
@@ -1429,23 +1512,21 @@ fn mapped_json_keys() -> HashSet<&'static str> {
 }
 
 fn row_to_contact(row: &rusqlite::Row<'_>) -> rusqlite::Result<Contact> {
-    let mut contact = Map::new();
+    let mut meta = Map::new();
+    let mut adif = Map::new();
 
     let extra_json: Option<String> = row.get("JSON")?;
     if let Some(extra_json) = extra_json
         && let Ok(Value::Object(extra)) = serde_json::from_str::<Value>(&extra_json)
     {
-        contact.extend(extra);
+        adif.extend(extra);
     }
 
     let id: i64 = row.get("ID")?;
     let log_id: i64 = row.get("LOG_ID")?;
-    contact.insert("_id".to_string(), Value::Number(id.into()));
-    contact.insert("_log_id".to_string(), Value::Number(log_id.into()));
-    contact.insert(
-        "_status".to_string(),
-        Value::String("Committed".to_string()),
-    );
+    meta.insert("id".to_string(), Value::Number(id.into()));
+    meta.insert("logId".to_string(), Value::Number(log_id.into()));
+    meta.insert("status".to_string(), Value::String("Committed".to_string()));
 
     for column in QSO_COLUMNS {
         if *column == "JSON" || *column == "LOG_ID" {
@@ -1454,21 +1535,25 @@ fn row_to_contact(row: &rusqlite::Row<'_>) -> rusqlite::Result<Contact> {
         if INTEGER_COLUMNS.contains(column) {
             let value: Option<i64> = row.get(*column)?;
             if let Some(value) = value {
-                contact.insert(column.to_string(), Value::Number(value.into()));
+                adif.insert(column.to_string(), Value::Number(value.into()));
             }
         } else {
             let value: Option<String> = row.get(*column)?;
             if let Some(value) = value {
-                contact.insert(column.to_string(), Value::String(value));
+                adif.insert(column.to_string(), Value::String(value));
             }
         }
     }
 
-    Ok(contact)
+    Ok(build_contact(meta, adif))
 }
 
 fn json_i64(value: Option<&Value>) -> Option<i64> {
-    match value? {
+    value.and_then(json_i64_value)
+}
+
+fn json_i64_value(value: &Value) -> Option<i64> {
+    match value {
         Value::Number(number) => number
             .as_i64()
             .or_else(|| number.as_u64().map(|value| value as i64)),
@@ -1478,8 +1563,8 @@ fn json_i64(value: Option<&Value>) -> Option<i64> {
 }
 
 fn legacy_epoch(contact: &Contact) -> Option<i64> {
-    let date = contact.get("QSO_DATE")?.as_str()?;
-    let time = contact.get("TIME_ON")?.as_str()?;
+    let date = contact_adif_value(contact, "QSO_DATE")?.as_str()?;
+    let time = contact_adif_value(contact, "TIME_ON")?.as_str()?;
     if date.len() != 8 || time.len() != 6 {
         return None;
     }
@@ -1623,14 +1708,17 @@ mod tests {
     }
 
     fn base_contact() -> Contact {
-        Map::from_iter([
-            ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
-            ("STATION_CALLSIGN".to_string(), json!("N0CALL")),
-            ("CALL".to_string(), json!("K1ABC")),
-            ("BAND".to_string(), json!("20m")),
-            ("FREQ".to_string(), json!(14_074_000_i64)),
-            ("MODE".to_string(), json!("FT8")),
-        ])
+        build_contact(
+            Map::new(),
+            Map::from_iter([
+                ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
+                ("STATION_CALLSIGN".to_string(), json!("N0CALL")),
+                ("CALL".to_string(), json!("K1ABC")),
+                ("BAND".to_string(), json!("20m")),
+                ("FREQ".to_string(), json!(14_074_000_i64)),
+                ("MODE".to_string(), json!("FT8")),
+            ]),
+        )
     }
 
     #[tokio::test]
@@ -1644,12 +1732,12 @@ mod tests {
             .expect("contact is inserted");
 
         assert_eq!(saved.len(), 1);
-        assert!(saved[0].get("_id").and_then(Value::as_i64).is_some());
+        assert!(contact_id(&saved[0]).is_some());
+        assert_eq!(contact_log_id(&saved[0]), Some(log.id));
         assert_eq!(
-            saved[0].get("_log_id").and_then(Value::as_i64),
-            Some(log.id)
+            contact_adif_value(&saved[0], "CALL").and_then(Value::as_str),
+            Some("K1ABC")
         );
-        assert_eq!(saved[0].get("CALL").and_then(Value::as_str), Some("K1ABC"));
 
         let contacts = database
             .contacts(log.id)
@@ -1700,10 +1788,10 @@ mod tests {
         let database = test_database();
         let log = create_test_log(&database).await;
         let mut stx_contact = base_contact();
-        stx_contact.insert("STX".to_string(), json!(42));
+        set_contact_adif(&mut stx_contact, "STX", json!(42));
         let mut json_contact = base_contact();
-        json_contact.insert("CALL".to_string(), json!("K1ABD"));
-        json_contact.insert("CUSTOM_SERIAL".to_string(), json!(77));
+        set_contact_adif(&mut json_contact, "CALL", json!("K1ABD"));
+        set_contact_adif(&mut json_contact, "CUSTOM_SERIAL", json!(77));
         database
             .upsert_contacts(log.id, vec![stx_contact, json_contact])
             .await
@@ -1730,15 +1818,12 @@ mod tests {
             .upsert_contacts(log.id, vec![base_contact()])
             .await
             .expect("contact is inserted");
-        let contact_id = inserted[0]
-            .get("_id")
-            .and_then(Value::as_i64)
-            .expect("inserted contact has an id");
+        let saved_contact_id = contact_id(&inserted[0]).expect("inserted contact has an id");
 
         let mut updated_contact = base_contact();
-        updated_contact.insert("_id".to_string(), json!(contact_id));
-        updated_contact.insert("CALL".to_string(), json!("W9XYZ"));
-        updated_contact.insert("COMMENT".to_string(), json!("updated"));
+        set_contact_meta(&mut updated_contact, "id", json!(saved_contact_id));
+        set_contact_adif(&mut updated_contact, "CALL", json!("W9XYZ"));
+        set_contact_adif(&mut updated_contact, "COMMENT", json!("updated"));
 
         let updated = database
             .upsert_contacts(log.id, vec![updated_contact])
@@ -1746,16 +1831,13 @@ mod tests {
             .expect("contact is updated");
 
         assert_eq!(updated.len(), 1);
+        assert_eq!(contact_id(&updated[0]), Some(saved_contact_id));
         assert_eq!(
-            updated[0].get("_id").and_then(Value::as_i64),
-            Some(contact_id)
-        );
-        assert_eq!(
-            updated[0].get("CALL").and_then(Value::as_str),
+            contact_adif_value(&updated[0], "CALL").and_then(Value::as_str),
             Some("W9XYZ")
         );
         assert_eq!(
-            updated[0].get("COMMENT").and_then(Value::as_str),
+            contact_adif_value(&updated[0], "COMMENT").and_then(Value::as_str),
             Some("updated")
         );
 
@@ -1765,7 +1847,7 @@ mod tests {
             .expect("contacts are listed");
         assert_eq!(contacts.len(), 1);
         assert_eq!(
-            contacts[0].get("CALL").and_then(Value::as_str),
+            contact_adif_value(&contacts[0], "CALL").and_then(Value::as_str),
             Some("W9XYZ")
         );
     }
@@ -1776,7 +1858,7 @@ mod tests {
         let log = create_test_log(&database).await;
         let mut contact = base_contact();
         let sql_like_call = "K1ABC'); DROP TABLE logs; --";
-        contact.insert("CALL".to_string(), json!(sql_like_call));
+        set_contact_adif(&mut contact, "CALL", json!(sql_like_call));
 
         let saved = database
             .upsert_contacts(log.id, vec![contact])
@@ -1784,7 +1866,7 @@ mod tests {
             .expect("contact with sql-like value is inserted");
 
         assert_eq!(
-            saved[0].get("CALL").and_then(Value::as_str),
+            contact_adif_value(&saved[0], "CALL").and_then(Value::as_str),
             Some(sql_like_call)
         );
         assert_eq!(
@@ -1814,14 +1896,11 @@ mod tests {
             .upsert_contacts(first_log.id, vec![base_contact()])
             .await
             .expect("contact is inserted");
-        let contact_id = inserted[0]
-            .get("_id")
-            .and_then(Value::as_i64)
-            .expect("inserted contact has an id");
+        let contact_id = contact_id(&inserted[0]).expect("inserted contact has an id");
 
         let mut attempted_update = base_contact();
-        attempted_update.insert("_id".to_string(), json!(contact_id));
-        attempted_update.insert("CALL".to_string(), json!("W9XYZ"));
+        set_contact_meta(&mut attempted_update, "id", json!(contact_id));
+        set_contact_adif(&mut attempted_update, "CALL", json!("W9XYZ"));
 
         let error = database
             .upsert_contacts(second_log.id, vec![attempted_update])
@@ -1835,7 +1914,7 @@ mod tests {
             .expect("first-log contacts are listed");
         assert_eq!(first_log_contacts.len(), 1);
         assert_eq!(
-            first_log_contacts[0].get("CALL").and_then(Value::as_str),
+            contact_adif_value(&first_log_contacts[0], "CALL").and_then(Value::as_str),
             Some("K1ABC")
         );
 

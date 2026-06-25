@@ -1,5 +1,5 @@
 use crate::contest_rules::{ContestRules, ExchangeField};
-use crate::db::{Contact, Log};
+use crate::db::{Contact, Log, contact_adif, contact_adif_value};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -418,9 +418,9 @@ fn contact_fields(
     station_callsign: &str,
 ) -> Result<BTreeMap<String, String>, String> {
     let mut fields = BTreeMap::new();
-    let has_epoch = contact.get("QSO_DATE_TIME_ON").is_some();
+    let has_epoch = contact_adif_value(contact, "QSO_DATE_TIME_ON").is_some();
 
-    if let Some(epoch) = contact_i64(contact.get("QSO_DATE_TIME_ON")) {
+    if let Some(epoch) = contact_i64(contact_adif_value(contact, "QSO_DATE_TIME_ON")) {
         let (date, time) = qso_datetime(epoch)?;
         fields.insert("QSO_DATE".to_string(), date);
         fields.insert("TIME_ON".to_string(), time);
@@ -430,7 +430,10 @@ fn contact_fields(
         return Err("contact is missing QSO_DATE_TIME_ON".to_string());
     }
 
-    for (key, value) in contact {
+    let fields_source = contact_adif(contact)
+        .cloned()
+        .unwrap_or_else(|| contact.clone());
+    for (key, value) in &fields_source {
         if should_skip_field(key) || (has_epoch && matches!(key.as_str(), "QSO_DATE" | "TIME_ON")) {
             continue;
         }
@@ -464,10 +467,7 @@ fn contact_fields(
 }
 
 fn should_skip_field(name: &str) -> bool {
-    matches!(
-        name,
-        "_id" | "_log_id" | "_status" | "ID" | "LOG_ID" | "JSON" | "QSO_DATE_TIME_ON"
-    )
+    name.starts_with('_') || matches!(name, "ID" | "LOG_ID" | "JSON" | "QSO_DATE_TIME_ON")
 }
 
 fn ordered_fields(fields: BTreeMap<String, String>) -> Vec<(String, String)> {

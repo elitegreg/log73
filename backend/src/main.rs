@@ -31,7 +31,10 @@ use axum::{
 };
 use clap::Parser;
 use contest_rules::{ContestRules, ContestRulesStore};
-use db::{Contact, Database, NewLog, NewRadio, UpdateLog};
+use db::{
+    Contact, Database, NewLog, NewRadio, UpdateLog, contact_adif_value, contact_id,
+    contact_meta_value, set_contact_meta,
+};
 use dxcluster::{DxClusterEvent, DxClusterManager, format_dxcluster_frequency_khz};
 use futures_util::{SinkExt, StreamExt};
 use log_cache::LogCache;
@@ -519,7 +522,7 @@ async fn handle_socket(
                 },
                 event = log_events.recv() => match event {
                     Ok(ServerMessage::LogEntry { contact }) => {
-                        let contact_session_id = contact.get("_session_id").and_then(serde_json::Value::as_str);
+                        let contact_session_id = contact_meta_value(&contact, "sessionId").and_then(serde_json::Value::as_str);
                         if contact_session_id == Some(outbound_session_id.as_str()) { continue; }
                         serde_json::to_string(&ServerMessage::LogEntry { contact }).expect("log entry should serialize")
                     }
@@ -1856,10 +1859,7 @@ async fn commit_contact(
         Ok(mut result) => {
             for (contact, session_id) in result.contacts.iter_mut().zip(session_ids) {
                 if let Some(session_id) = session_id {
-                    contact.insert(
-                        "_session_id".to_string(),
-                        serde_json::Value::String(session_id),
-                    );
+                    set_contact_meta(contact, "sessionId", serde_json::Value::String(session_id));
                 }
                 let _ = app_state.log_events.send(ServerMessage::LogEntry {
                     contact: contact.clone(),
@@ -1921,8 +1921,7 @@ async fn delete_contact(
 }
 
 fn contact_session_id(contact: &Contact) -> Option<String> {
-    contact
-        .get("_session_id")
+    contact_meta_value(contact, "sessionId")
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
 }
@@ -1948,17 +1947,9 @@ fn contact_score_order(contact: &Contact) -> (i64, i64) {
 }
 
 fn contact_epoch(contact: &Contact) -> i64 {
-    contact
-        .get("QSO_DATE_TIME_ON")
+    contact_adif_value(contact, "QSO_DATE_TIME_ON")
         .and_then(serde_json::Value::as_i64)
         .unwrap_or(0)
-}
-
-fn contact_id(contact: &Contact) -> Option<i64> {
-    contact
-        .get("_id")
-        .or_else(|| contact.get("ID"))
-        .and_then(serde_json::Value::as_i64)
 }
 
 fn contacts_from_payload(payload: serde_json::Value) -> Result<Vec<Contact>, String> {

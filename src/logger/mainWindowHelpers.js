@@ -83,11 +83,17 @@ function normalizedAutofillCallsign(value) {
 }
 
 function contactAutofillCallsign(contact) {
-  return normalizedAutofillCallsign(contact?.CALL ?? contact?.Call ?? '');
+  return normalizedAutofillCallsign(
+    contact?.adif?.CALL ?? contact?.CALL ?? contact?.Call ?? '',
+  );
 }
 
 function contactExchangeRawValue(contact, field) {
+  const adif = contact?.adif ?? {};
   for (const key of [field?.adif, field?.name].filter(Boolean)) {
+    if (Object.prototype.hasOwnProperty.call(adif, key)) {
+      return adif[key];
+    }
     if (Object.prototype.hasOwnProperty.call(contact ?? {}, key)) {
       return contact[key];
     }
