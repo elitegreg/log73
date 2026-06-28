@@ -1332,7 +1332,7 @@ function MainWindow({
     ) {
       onSendCwText?.({
         request_id: createMessageRequestId(),
-        text: esmAction.correctionText,
+        text: `${esmAction.correctionText} `,
       });
     }
     sendEsmKeys(esmAction.keys, activeExchangeValues);
