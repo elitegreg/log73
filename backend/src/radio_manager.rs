@@ -2349,7 +2349,7 @@ async fn apply_command(
                 tracked_rit_offset_hz = *last_rit_offset_hz,
                 "clearing CAT radio RIT"
             );
-            let applied = set_rit_offset_hz(radio, 0, Some(false)).await?;
+            let applied = set_rit_offset_hz(radio, 0, false).await?;
             if applied {
                 *last_rit_offset_hz = 0;
             }
@@ -2373,7 +2373,7 @@ async fn apply_command(
                 );
                 return Ok(());
             }
-            let applied = set_rit_offset_hz(radio, next_offset_hz, Some(true)).await?;
+            let applied = set_rit_offset_hz(radio, next_offset_hz, true).await?;
             if applied {
                 *last_rit_offset_hz = next_offset_hz;
             }
@@ -2402,7 +2402,7 @@ async fn apply_command(
                 );
                 return Ok(());
             }
-            let applied = set_rit_offset_hz(radio, next_offset_hz, Some(true)).await?;
+            let applied = set_rit_offset_hz(radio, next_offset_hz, true).await?;
             if applied {
                 *last_rit_offset_hz = next_offset_hz;
             }
@@ -2434,17 +2434,14 @@ fn next_rit_offset_hz(current_offset_hz: i32, delta_hz: i32) -> i32 {
 async fn set_rit_offset_hz(
     radio: &Radio,
     target_offset_hz: i32,
-    enabled: Option<bool>,
+    enable_rit: bool,
 ) -> Result<bool, RadioError> {
-    debug!(target_offset_hz, enabled, "applying CAT RIT offset");
-    if let Some(enabled) = enabled {
-        match radio.set_main_rit_enabled(enabled).await {
+    debug!(target_offset_hz, enable_rit, "applying CAT RIT offset");
+    if enable_rit {
+        match radio.set_main_rit_enabled(true).await {
             Ok(()) => {}
             Err(error) if is_unsupported_capability(&error) => {
-                debug!(
-                    target_offset_hz,
-                    enabled, "CAT RIT enable unsupported by radio"
-                );
+                debug!(target_offset_hz, "CAT RIT enable unsupported by radio");
             }
             Err(error) => return Err(error),
         }
@@ -2671,6 +2668,42 @@ mod tests {
     fn next_rit_offset_hz_clamps_to_supported_range() {
         assert_eq!(next_rit_offset_hz(MAX_RIT_OFFSET_HZ, 1), MAX_RIT_OFFSET_HZ);
         assert_eq!(next_rit_offset_hz(MIN_RIT_OFFSET_HZ, -1), MIN_RIT_OFFSET_HZ);
+    }
+
+    #[tokio::test]
+    async fn set_rit_offset_hz_false_preserves_enabled_state() {
+        let radio = Radio::connect(CatRadioConfig::dummy())
+            .await
+            .expect("dummy radio connects");
+        radio
+            .set_main_rit_enabled(true)
+            .await
+            .expect("rit enables on dummy radio");
+
+        let applied = set_rit_offset_hz(&radio, 125, false)
+            .await
+            .expect("rit offset applies");
+
+        assert!(applied);
+        let state = radio.latest_state();
+        assert_eq!(state.rit_xit.main_rit_enabled, Some(true));
+        assert_eq!(state.rit_xit.offset_hz, RitXitOffsetHz::new(125).ok());
+    }
+
+    #[tokio::test]
+    async fn set_rit_offset_hz_true_enables_rit() {
+        let radio = Radio::connect(CatRadioConfig::dummy())
+            .await
+            .expect("dummy radio connects");
+
+        let applied = set_rit_offset_hz(&radio, 250, true)
+            .await
+            .expect("rit offset applies");
+
+        assert!(applied);
+        let state = radio.latest_state();
+        assert_eq!(state.rit_xit.main_rit_enabled, Some(true));
+        assert_eq!(state.rit_xit.offset_hz, RitXitOffsetHz::new(250).ok());
     }
 
     #[test]
