@@ -379,6 +379,52 @@ pub async fn validate_contacts(
     Ok(())
 }
 
+pub async fn validate_import_contacts(
+    database: &Database,
+    contest_rules: &ContestRulesStore,
+    log_id: i64,
+    contacts: &[Contact],
+) -> Result<(), (usize, String)> {
+    if log_id <= 0 {
+        return Err((0, "log id must be positive".to_string()));
+    }
+    if contacts.is_empty() {
+        return Err((0, "ADIF file does not contain any QSO records".to_string()));
+    }
+
+    let log = database
+        .log(log_id)
+        .await
+        .map_err(|error| (0, error.to_string()))?
+        .ok_or_else(|| (0, format!("log {log_id} not found")))?;
+    let rules = contest_rules
+        .get(&log.contest_id)
+        .ok_or_else(|| (0, format!("unknown contest: {}", log.contest_id)))?;
+
+    for (index, contact) in contacts.iter().enumerate() {
+        validate_contact(rules, log_id, contact).map_err(|error| (index, error))?;
+
+        if let Some(contact_id) = contact_id(contact)
+            && let Some(existing_log_id) = database
+                .contact_log_id(contact_id)
+                .await
+                .map_err(|error| (index, error.to_string()))?
+            && existing_log_id != log_id
+        {
+            return Err((
+                index,
+                format!("contact id {contact_id} belongs to log {existing_log_id}"),
+            ));
+        }
+
+        validate_immutable_sent_serial_fields(database, rules, contact)
+            .await
+            .map_err(|error| (index, error))?;
+    }
+
+    Ok(())
+}
+
 pub fn force_commit_requested(contact: &Contact) -> bool {
     contact
         .get("_force")

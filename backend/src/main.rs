@@ -21,7 +21,7 @@ mod voice_messages;
 use axum::{
     Json, Router,
     extract::{
-        Path, Query, State,
+        DefaultBodyLimit, Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, HeaderValue, Request, StatusCode, header},
@@ -329,6 +329,10 @@ async fn main() {
         .route("/logs/{id}", get(log).put(update_log).delete(delete_log))
         .route("/logs/{id}/qso-count", get(log_qso_count))
         .route("/logs/{id}/adif", post(export_adif))
+        .route(
+            "/logs/{id}/adif/import",
+            post(import_adif).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
+        )
         .route("/logs/{id}/cabrillo", post(export_cabrillo))
         .route("/logs/{id}/serial-allocation", post(allocate_serials))
         .route(
@@ -1007,6 +1011,14 @@ struct CabrilloExportPayload {
     export_params: serde_json::Value,
 }
 
+#[derive(Debug, Default, serde::Deserialize)]
+struct AdifImportPayload {
+    #[serde(default)]
+    adif: String,
+    #[serde(default)]
+    mappings: adif::ImportMappings,
+}
+
 fn truncate_text(value: &str, max_len: usize) -> String {
     if value.chars().count() <= max_len {
         return value.to_string();
@@ -1312,6 +1324,82 @@ async fn export_adif(State(app_state): State<AppState>, Path(id): Path<i64>) -> 
         "text/plain; charset=utf-8",
         &adif::export_filename(&log),
     )
+}
+
+async fn import_adif(
+    State(app_state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(payload): Json<AdifImportPayload>,
+) -> Json<serde_json::Value> {
+    let log = match app_state.db.log(id).await {
+        Ok(Some(log)) => log,
+        Ok(None) => return Json(serde_json::json!({ "ok": false, "error": "not found" })),
+        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    };
+    let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
+        return Json(
+            serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id) }),
+        );
+    };
+
+    let imported = match adif::import_contacts(&log, rules, &payload.adif, &payload.mappings) {
+        Ok(imported) => imported,
+        Err(error) => {
+            return Json(serde_json::json!({
+                "ok": false,
+                "error": error.error,
+                "line": error.line,
+                "errors": [error],
+            }));
+        }
+    };
+    let contacts = imported
+        .iter()
+        .map(|imported| imported.contact.clone())
+        .collect::<Vec<_>>();
+
+    if let Err((index, error)) =
+        validation::validate_import_contacts(&app_state.db, &app_state.contest_rules, id, &contacts)
+            .await
+    {
+        let line = imported
+            .get(index)
+            .map(|imported| imported.line)
+            .unwrap_or(1);
+        let import_error = adif::ImportError { line, error };
+        return Json(serde_json::json!({
+            "ok": false,
+            "error": import_error.error,
+            "line": import_error.line,
+            "errors": [import_error],
+        }));
+    }
+
+    match app_state.log_cache.upsert_contacts(id, contacts).await {
+        Ok(result) => {
+            for contact in &result.contacts {
+                let _ = app_state.log_events.send(ServerMessage::LogEntry {
+                    contact: contact.clone(),
+                });
+            }
+            for contact in result.changed_contacts {
+                let _ = app_state
+                    .log_events
+                    .send(ServerMessage::LogEntry { contact });
+            }
+
+            let totals = app_state.incremental_scoring.totals(id).unwrap_or_default();
+            send_score_update(&app_state, id, &totals);
+
+            let imported = result.contacts.len();
+            Json(serde_json::json!({
+                "ok": true,
+                "imported": imported,
+                "contacts": result.contacts,
+            }))
+        }
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    }
 }
 
 fn download_response(body: String, content_type: &str, filename: &str) -> axum::response::Response {

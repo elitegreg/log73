@@ -269,6 +269,15 @@ function OpenLogScreen() {
             >
               Export ADIF
             </button>
+            <Link
+              className={`cmd-btn${selectedLogId ? '' : ' disabled'}`}
+              to={selectedLogId ? `/ui/import_adif/${selectedLogId}` : '#'}
+              onClick={(event) => {
+                if (!selectedLogId) event.preventDefault();
+              }}
+            >
+              Import ADIF
+            </Link>
           </div>
         </section>
         <section>
