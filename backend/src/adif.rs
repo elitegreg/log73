@@ -1,7 +1,7 @@
 use crate::contest_rules::{ContestRules, ExchangeField};
-use crate::db::{Contact, Log, contact_adif, contact_adif_value};
+use crate::db::{Contact, ContactFields, Log, build_contact, contact_adif, contact_adif_value};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 const ADIF_VERSION: &str = "3.1.0";
@@ -221,22 +221,22 @@ fn import_record(
     mappings: &ImportMappings,
 ) -> Result<Contact, ImportError> {
     let line = record.line;
-    let mut contact = record
+    let mut adif = record
         .fields
         .iter()
         .filter(|(key, _)| !matches!(key.as_str(), "ID" | "_ID" | "_LOG_ID" | "_STATUS"))
         .map(|(key, value)| (key.clone(), Value::String(value.clone())))
-        .collect::<Contact>();
+        .collect::<ContactFields>();
 
     let epoch = import_qso_epoch(record).map_err(|error| ImportError { line, error })?;
-    contact.insert("QSO_DATE_TIME_ON".to_string(), Value::Number(epoch.into()));
+    adif.insert("QSO_DATE_TIME_ON".to_string(), Value::Number(epoch.into()));
 
     let frequency =
         import_frequency_hz(required_field(record, "FREQ")?).ok_or_else(|| ImportError {
             line,
             error: "FREQ is invalid".to_string(),
         })?;
-    contact.insert("FREQ".to_string(), Value::Number(frequency.into()));
+    adif.insert("FREQ".to_string(), Value::Number(frequency.into()));
 
     for name in ["STATION_CALLSIGN", "CALL", "BAND", "MODE"] {
         required_field(record, name)?;
@@ -250,10 +250,10 @@ fn import_record(
             });
         };
         let value = mapping_value(log, field, record, mapping)?;
-        contact.insert(field.adif.clone(), Value::String(value));
+        adif.insert(field.adif.clone(), Value::String(value));
     }
 
-    Ok(contact)
+    Ok(build_contact(Map::new(), adif))
 }
 
 fn mapping_value(
@@ -811,14 +811,28 @@ mod tests {
         .expect("contact should import");
         let contact = &imported[0].contact;
 
+        assert_eq!(contact.get("meta"), Some(&json!({})));
+        assert!(contact.get("CALL").is_none());
         assert_eq!(
-            contact.get("QSO_DATE_TIME_ON"),
+            contact_adif_value(contact, "QSO_DATE_TIME_ON"),
             Some(&json!(1_700_000_123_i64))
         );
-        assert_eq!(contact.get("FREQ"), Some(&json!(14_250_000_i64)));
-        assert_eq!(contact.get("STX_STRING"), Some(&json!("ABBE")));
-        assert_eq!(contact.get("SRX_STRING"), Some(&json!("NC")));
-        assert_eq!(contact.get("N1MM_SECTION"), Some(&json!("NC")));
+        assert_eq!(
+            contact_adif_value(contact, "FREQ"),
+            Some(&json!(14_250_000_i64))
+        );
+        assert_eq!(
+            contact_adif_value(contact, "STX_STRING"),
+            Some(&json!("ABBE"))
+        );
+        assert_eq!(
+            contact_adif_value(contact, "SRX_STRING"),
+            Some(&json!("NC"))
+        );
+        assert_eq!(
+            contact_adif_value(contact, "N1MM_SECTION"),
+            Some(&json!("NC"))
+        );
     }
 
     #[test]
