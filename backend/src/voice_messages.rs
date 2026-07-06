@@ -630,8 +630,8 @@ F1 QRL,operator1/QRL.wav
             .expect("template paths can defer existence");
 
         fs::remove_file(root.join("operator1/QRL.wav")).expect("qrl removed");
-        let error = validate_with_voicekeyer_dir(mixed_messages, &root)
-            .expect_err("missing file fails");
+        let error =
+            validate_with_voicekeyer_dir(mixed_messages, &root).expect_err("missing file fails");
         assert!(error.contains("QRL.wav"));
 
         let _ = fs::remove_dir_all(&root);
@@ -669,8 +669,10 @@ F1 QRL,operator1/QRL.wav
 
     #[test]
     fn validate_with_voicekeyer_dir_rejects_unsafe_template_paths() {
-        let root = std::env::temp_dir()
-            .join(format!("log73-voice-messages-template-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "log73-voice-messages-template-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("voicekeyer dir creates");
 

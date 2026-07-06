@@ -1608,7 +1608,9 @@ fn download_response(body: String, content_type: &str, filename: &str) -> axum::
 fn sanitize_download_filename(filename: &str) -> String {
     let trimmed = filename.trim();
     let (stem, extension) = match trimmed.rsplit_once('.') {
-        Some((stem, extension)) if !stem.is_empty() && !extension.is_empty() => (stem, Some(extension)),
+        Some((stem, extension)) if !stem.is_empty() && !extension.is_empty() => {
+            (stem, Some(extension))
+        }
         _ => (trimmed, None),
     };
 

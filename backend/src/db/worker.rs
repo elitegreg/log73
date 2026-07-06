@@ -7,8 +7,8 @@ use super::logs::{
     db_create_log, db_delete_log, db_log_qso_count, db_logs, db_update_log, select_log,
 };
 use super::models::{
-    AuthConfig, ConfigView, DxClusterConfig, Log, NewLog, RadioPayload, RadioConfig, SerialAllocation,
-    UpdateConfig, UpdateLog,
+    AuthConfig, ConfigView, DxClusterConfig, Log, NewLog, RadioConfig, RadioPayload,
+    SerialAllocation, UpdateConfig, UpdateLog,
 };
 use super::radios::{db_create_radio, db_delete_radio, db_radios, db_update_radio, select_radio};
 use super::schema::initialize_schema;

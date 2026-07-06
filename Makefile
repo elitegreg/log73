@@ -11,6 +11,8 @@ NFPM ?= $(shell command -v nfpm 2>/dev/null || { command -v go >/dev/null 2>&1 &
 
 all: backend-build launcher-build frontend-build
 
+ci: backend-lint frontend-lint backend-test frontend-test frontend-build
+
 release: backend-release launcher-build frontend-release
 
 deb:
@@ -47,6 +49,7 @@ backend-fmt:
 	cargo fmt -p log73-backend
 
 backend-lint:
+	cargo fmt --all -- --check
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 launcher-build:

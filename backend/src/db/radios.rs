@@ -1,4 +1,4 @@
-use super::models::{RadioPayload, RadioConfig};
+use super::models::{RadioConfig, RadioPayload};
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub(super) fn normalized_optional_device_id(value: Option<&str>) -> Option<String> {

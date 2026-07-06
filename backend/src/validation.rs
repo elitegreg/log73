@@ -1087,14 +1087,18 @@ fn validate_callsign(label: &str, value: &str, allow_query: bool) -> Result<(), 
         return Err(format!("{label} can contain at most one slash"));
     }
     if value.starts_with('/') || value.ends_with('/') {
-        return Err(format!("{label} slash must be in the middle, not at the ends"));
+        return Err(format!(
+            "{label} slash must be in the middle, not at the ends"
+        ));
     }
 
     let characters = value.chars().collect::<Vec<_>>();
     let second_character = characters.get(1).copied().unwrap_or_default();
     let third_character = characters.get(2).copied().unwrap_or_default();
     if !second_character.is_ascii_digit() && !third_character.is_ascii_digit() {
-        return Err(format!("{label} must have a digit in the 2nd or 3rd character"));
+        return Err(format!(
+            "{label} must have a digit in the 2nd or 3rd character"
+        ));
     }
 
     Ok(())
