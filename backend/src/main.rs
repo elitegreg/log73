@@ -21,19 +21,20 @@ mod voice_messages;
 
 use axum::{
     Json, Router,
+    body::Body,
     extract::{
         DefaultBodyLimit, Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, HeaderValue, Request, StatusCode, header},
     middleware,
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
 use clap::Parser;
 use contest_rules::{ContestRules, ContestRulesStore};
 use db::{
-    Contact, Database, NewLog, NewRadio, UpdateLog, contact_adif_value, contact_id,
+    Contact, Database, NewLog, NewRadio, UpdateLog, contact_adif_value, contact_id, contact_log_id,
     contact_meta_value, set_contact_meta,
 };
 use dxcluster::{DxClusterEvent, DxClusterManager, format_dxcluster_frequency_khz};
@@ -45,9 +46,10 @@ use radio_manager::RadioManager;
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use stats::StatsTracker;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, hash_map::DefaultHasher},
     fs,
     fs::OpenOptions,
+    hash::Hasher,
     path::{Path as FsPath, PathBuf},
     time::Duration,
 };
@@ -514,6 +516,7 @@ async fn handle_socket(
     let mut dxcluster_enabled = false;
     let mut dxcluster_subscription: Option<tokio::task::JoinHandle<()>> = None;
     let outbound_session_id = session_id.clone();
+    let outbound_log_id = log_id;
     let outbound = tokio::spawn(async move {
         loop {
             let message = tokio::select! {
@@ -528,12 +531,10 @@ async fn handle_socket(
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
                 event = log_events.recv() => match event {
-                    Ok(ServerMessage::LogEntry { contact }) => {
-                        let contact_session_id = contact_meta_value(&contact, "sessionId").and_then(serde_json::Value::as_str);
-                        if contact_session_id == Some(outbound_session_id.as_str()) { continue; }
-                        serde_json::to_string(&ServerMessage::LogEntry { contact }).expect("log entry should serialize")
-                    }
-                    Ok(event) => serde_json::to_string(&event).expect("log event should serialize"),
+                    Ok(event) => match websocket_log_event_for_client(event, outbound_session_id.as_str(), outbound_log_id) {
+                        Some(event) => serde_json::to_string(&event).expect("log event should serialize"),
+                        None => continue,
+                    },
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
@@ -914,12 +915,21 @@ async fn contest_settings(
     Json(rules)
 }
 
-async fn supercheckpartial_matches(State(app_state): State<AppState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "ok": true, "callsigns": app_state.supercheckpartial.callsigns() }))
+async fn supercheckpartial_matches(
+    State(app_state): State<AppState>,
+    headers: HeaderMap,
+) -> Response {
+    cached_json_response(
+        &headers,
+        &serde_json::json!({ "ok": true, "callsigns": app_state.supercheckpartial.callsigns() }),
+    )
 }
 
-async fn dxcc_data(State(app_state): State<AppState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "ok": true, "dxcc": app_state.dxcc.as_ref() }))
+async fn dxcc_data(State(app_state): State<AppState>, headers: HeaderMap) -> Response {
+    cached_json_response(
+        &headers,
+        &serde_json::json!({ "ok": true, "dxcc": app_state.dxcc.as_ref() }),
+    )
 }
 
 async fn dxcluster_spots(State(app_state): State<AppState>) -> Json<serde_json::Value> {
@@ -1956,6 +1966,86 @@ fn contact_session_id(contact: &Contact) -> Option<String> {
         .map(str::to_string)
 }
 
+fn websocket_log_event_for_client(
+    event: ServerMessage,
+    outbound_session_id: &str,
+    outbound_log_id: Option<i64>,
+) -> Option<ServerMessage> {
+    let outbound_log_id = outbound_log_id?;
+    match event {
+        ServerMessage::LogEntry { contact } => {
+            if contact_log_id(&contact) != Some(outbound_log_id) {
+                return None;
+            }
+            let contact_session_id =
+                contact_meta_value(&contact, "sessionId").and_then(serde_json::Value::as_str);
+            if contact_session_id == Some(outbound_session_id) {
+                return None;
+            }
+            Some(ServerMessage::LogEntry { contact })
+        }
+        ServerMessage::ContactDeleted { id, log_id } if log_id == outbound_log_id => {
+            Some(ServerMessage::ContactDeleted { id, log_id })
+        }
+        ServerMessage::ScoreUpdate {
+            log_id,
+            qso_count,
+            multipliers,
+            bonus_points,
+            total_score,
+        } if log_id == outbound_log_id => Some(ServerMessage::ScoreUpdate {
+            log_id,
+            qso_count,
+            multipliers,
+            bonus_points,
+            total_score,
+        }),
+        _ => None,
+    }
+}
+
+const REFERENCE_DATA_CACHE_CONTROL: &str = "private, max-age=86400";
+
+fn cached_json_response<T: serde::Serialize>(request_headers: &HeaderMap, value: &T) -> Response {
+    let body = serde_json::to_vec(value).expect("reference data should serialize");
+    let etag = reference_data_etag(&body);
+    let response = Response::builder()
+        .header(header::CACHE_CONTROL, REFERENCE_DATA_CACHE_CONTROL)
+        .header(header::ETAG, &etag);
+
+    if if_none_match_matches(request_headers, &etag) {
+        return response
+            .status(StatusCode::NOT_MODIFIED)
+            .body(Body::empty())
+            .expect("not modified response should build");
+    }
+
+    response
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(body))
+        .expect("json response should build")
+}
+
+fn if_none_match_matches(request_headers: &HeaderMap, etag: &str) -> bool {
+    request_headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .any(|candidate| candidate == "*" || candidate == etag)
+        })
+        .unwrap_or(false)
+}
+
+fn reference_data_etag(body: &[u8]) -> String {
+    let mut hasher = DefaultHasher::new();
+    hasher.write(body);
+    format!("W/\"{:x}-{}\"", hasher.finish(), body.len())
+}
+
 fn send_score_update(app_state: &AppState, log_id: i64, totals: &ScoreTotals) {
     let _ = app_state
         .log_events
@@ -1993,5 +2083,98 @@ fn contacts_from_payload(payload: serde_json::Value) -> Result<Vec<Contact>, Str
             .collect(),
         serde_json::Value::Object(contact) => Ok(vec![contact]),
         _ => Err("contacts payload must be an object or list of objects".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::build_contact;
+    use axum::http::HeaderValue;
+    use serde_json::{Map, json};
+
+    fn committed_contact(log_id: i64, session_id: &str) -> Contact {
+        build_contact(
+            Map::from_iter([
+                ("id".to_string(), json!(73)),
+                ("logId".to_string(), json!(log_id)),
+                ("status".to_string(), json!("Committed")),
+                ("sessionId".to_string(), json!(session_id)),
+            ]),
+            Map::from_iter([
+                ("CALL".to_string(), json!("K1ABC")),
+                ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
+            ]),
+        )
+    }
+
+    #[test]
+    fn websocket_log_entry_is_only_sent_to_matching_log() {
+        let event = ServerMessage::LogEntry {
+            contact: committed_contact(1, "origin-session"),
+        };
+
+        assert!(websocket_log_event_for_client(event.clone(), "other-session", Some(1)).is_some());
+        assert!(websocket_log_event_for_client(event, "other-session", Some(2)).is_none());
+    }
+
+    #[test]
+    fn websocket_log_entry_skips_same_session_echoes() {
+        let event = ServerMessage::LogEntry {
+            contact: committed_contact(1, "origin-session"),
+        };
+
+        assert!(websocket_log_event_for_client(event, "origin-session", Some(1)).is_none());
+    }
+
+    #[test]
+    fn websocket_contact_deleted_and_score_updates_are_log_scoped() {
+        let deleted = ServerMessage::ContactDeleted { id: 55, log_id: 7 };
+        assert!(websocket_log_event_for_client(deleted.clone(), "session", Some(7)).is_some());
+        assert!(websocket_log_event_for_client(deleted, "session", Some(8)).is_none());
+
+        let score = ServerMessage::ScoreUpdate {
+            log_id: 7,
+            qso_count: 10,
+            multipliers: 3,
+            bonus_points: 5,
+            total_score: 35,
+        };
+        assert!(websocket_log_event_for_client(score.clone(), "session", Some(7)).is_some());
+        assert!(websocket_log_event_for_client(score, "session", Some(8)).is_none());
+    }
+
+    #[test]
+    fn cached_json_response_sets_private_cache_headers_and_etag() {
+        let headers = HeaderMap::new();
+        let response = cached_json_response(&headers, &json!({ "ok": true }));
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static(REFERENCE_DATA_CACHE_CONTROL))
+        );
+        assert!(response.headers().contains_key(header::ETAG));
+    }
+
+    #[test]
+    fn cached_json_response_returns_not_modified_for_matching_etag() {
+        let body = serde_json::to_vec(&json!({ "ok": true, "callsigns": ["K1ABC"] }))
+            .expect("json should serialize");
+        let etag = reference_data_etag(&body);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::IF_NONE_MATCH,
+            HeaderValue::from_str(&etag).expect("etag header should parse"),
+        );
+
+        let response =
+            cached_json_response(&headers, &json!({ "ok": true, "callsigns": ["K1ABC"] }));
+
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+        assert_eq!(
+            response.headers().get(header::ETAG),
+            Some(&HeaderValue::from_str(&etag).expect("etag header should parse"))
+        );
     }
 }

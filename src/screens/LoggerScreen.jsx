@@ -1167,8 +1167,7 @@ function LoggerScreen() {
             });
           } else if (
             message.type === 'log_entry' &&
-            metaValue(message.contact, 'sessionId') !== sessionId &&
-            Number(metaValue(message.contact, 'logId')) === numericLogId
+            metaValue(message.contact, 'sessionId') !== sessionId
           ) {
             const callsignPrefix = activeCallsignPrefixRef.current;
             if (
@@ -1179,19 +1178,14 @@ function LoggerScreen() {
                 mergeContact(currentContacts, message.contact),
               );
             }
-          } else if (
-            message.type === 'contact_deleted' &&
-            Number(message.log_id) === numericLogId
-          ) {
+          } else if (message.type === 'contact_deleted') {
             setAllContacts((currentContacts) =>
               currentContacts.filter(
-                (contact) => String(metaValue(contact, 'id')) !== String(message.id),
+                (contact) =>
+                  String(metaValue(contact, 'id')) !== String(message.id),
               ),
             );
-          } else if (
-            message.type === 'score_update' &&
-            Number(message.log_id) === numericLogId
-          ) {
+          } else if (message.type === 'score_update') {
             setScoreSummary({
               qsoCount: Number(message.qso_count ?? 0),
               multipliers: Number(message.multipliers ?? 0),
