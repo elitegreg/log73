@@ -459,7 +459,8 @@ impl VoiceKeyer {
                 continue;
             }
             let registry_key = voice_message_registry_key(config.id, &entry.mode, &entry.key)?;
-            let path = voice_messages::existing_voicekeyer_file_path(&self.voicekeyer_dir, file_path)?;
+            let path =
+                voice_messages::existing_voicekeyer_file_path(&self.voicekeyer_dir, file_path)?;
             if let Err(error) = self.register_registry_file(path, registry_key) {
                 errors.push(format!("{} {}: {error}", entry.mode, entry.key));
             }
@@ -544,7 +545,8 @@ impl VoiceKeyer {
         relative_path: &str,
         output_device_id: Option<&str>,
     ) -> Result<VoicePlayback, String> {
-        let path = voice_messages::existing_voicekeyer_file_path(&self.voicekeyer_dir, relative_path)?;
+        let path =
+            voice_messages::existing_voicekeyer_file_path(&self.voicekeyer_dir, relative_path)?;
         let bytes = fs::read(&path).map_err(|error| {
             format!(
                 "failed to read voice keyer file relative_path='{}' absolute_path='{}': {error}",

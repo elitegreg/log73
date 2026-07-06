@@ -1301,7 +1301,7 @@ mod tests {
             validate_typed_field("Section", "String:3", "NC", &[], Some(pattern), "CW").is_ok()
         );
 
-        assert!(compiled_regex_cache_size() >= baseline + 1);
+        assert!(compiled_regex_cache_size() > baseline);
     }
 
     #[test]

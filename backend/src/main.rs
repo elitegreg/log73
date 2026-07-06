@@ -179,20 +179,14 @@ fn sanitize_debug_payload_value(key: Option<&str>, value: &mut serde_json::Value
                 *text = format!("<string length={}>", text.chars().count());
             }
         }
-        serde_json::Value::Null
-        | serde_json::Value::Bool(_)
-        | serde_json::Value::Number(_) => {}
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
     }
 }
 
 fn should_fully_redact_debug_field(key: &str) -> bool {
     matches!(
         key.to_ascii_lowercase().as_str(),
-        "adif"
-            | "contest_params"
-            | "cw_messages"
-            | "voice_messages"
-            | "dxcluster_commands"
+        "adif" | "contest_params" | "cw_messages" | "voice_messages" | "dxcluster_commands"
     )
 }
 
@@ -214,7 +208,9 @@ fn should_redact_debug_string_field(key: &str) -> bool {
 
 fn redacted_debug_value_summary(value: &serde_json::Value) -> String {
     match value {
-        serde_json::Value::String(text) => format!("<redacted string length={}>", text.chars().count()),
+        serde_json::Value::String(text) => {
+            format!("<redacted string length={}>", text.chars().count())
+        }
         serde_json::Value::Array(items) => format!("<redacted array length={}>", items.len()),
         serde_json::Value::Object(map) => format!("<redacted object keys={}>", map.len()),
         serde_json::Value::Null => "<redacted null>".to_string(),

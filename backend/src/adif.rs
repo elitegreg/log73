@@ -380,10 +380,10 @@ fn import_frequency_hz(value: &str) -> Option<i64> {
     if value.is_empty() {
         return None;
     }
-    if let Ok(integer) = value.parse::<i64>() {
-        if integer > 1000 {
-            return Some(integer);
-        }
+    if let Ok(integer) = value.parse::<i64>()
+        && integer > 1000
+    {
+        return Some(integer);
     }
     let mhz = value.parse::<f64>().ok()?;
     if !mhz.is_finite() || mhz <= 0.0 {

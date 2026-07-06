@@ -47,7 +47,7 @@ backend-fmt:
 	cargo fmt -p log73-backend
 
 backend-lint:
-	cargo clippy -p log73-backend --all-targets --all-features -- -D dead_code
+	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 launcher-build:
 	cargo build -p launcher
