@@ -1,48 +1,21 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  callsignCompletionMatches,
-  exchangeCompletionMatches,
-} from '../domain/completions';
-import {
-  buildSentExchange,
-  fieldDefault,
-  sanitizeCallsign,
-  sanitizeExchangeValue,
-} from '../domain/contactFields';
-import {
-  lastCqFrequencyForBand,
-  nextBandMapSpotAbove,
-  nextBandMapSpotBelow,
-} from '../domain/bandMap';
-import { dxccLabel, lookupDxcc } from '../domain/dxcc';
-import { dupeAlertText } from '../domain/dupes';
+import React, { useEffect, useRef, useState } from 'react';
+import { buildSentExchange, fieldDefault } from '../domain/contactFields';
 import { validateCallsign, validateExchangeField } from '../domain/validation';
-import { dxcc, supercheckpartial } from '../lib/api';
 import {
   CW_WPM_STORAGE_KEY,
-  ESM_ENABLED_STORAGE_KEY,
   DEFAULT_MESSAGE_LABELS,
   DEFAULT_CW_WPM,
   CW_WPM_MIN,
   CW_WPM_MAX,
   DEFAULT_RADIO_FREQUENCY_HZ,
-  SUPERCHECKPARTIAL_MIN_QUERY_LENGTH,
-  CALLSIGN_LOOKUP_DEBOUNCE_MS,
-  CW_REPEAT_DELAY_MS,
-  FUNCTION_KEY_PATTERN,
   HZ_PER_KHZ,
   EPOCH_MS_PER_SECOND,
-  nextCwWpm,
-  isPageUpKey,
-  isPageDownKey,
-  cwActiveTimeoutMs,
   typedModeFromCallsignInput,
   exchangeDefaults,
   previousContactExchangeAutofill,
   formatFrequency,
   isFrequencyInput,
   adifModeForLoggerMode,
-  isSelectableMode,
   modeIsCw,
   modeIsPhone,
   esmEnterAction,
@@ -50,21 +23,23 @@ import {
   bandByMeters,
   createContactId,
   createMessageRequestId,
-  messageButtonIsSendable,
-  messageActionForRadioMode,
   callsignHasQuery,
   shouldBlockEsmCallEnter,
-  callsignClearThresholdHz,
   normalizedContactFrequencyHz,
   shouldAdvanceFromCallsignAutofill,
-  tuningIncrementHzForMode,
-  steppedFrequencyHz,
 } from './mainWindowHelpers';
 import RadioControls from './components/RadioControls';
 import EntryFields from './components/EntryFields';
 import FunctionKeys from './components/FunctionKeys';
 import CommandButtons from './components/CommandButtons';
 import StatusBar from './components/StatusBar';
+import { useBandControls } from './hooks/useBandControls';
+import { useCompletions } from './hooks/useCompletions';
+import { useCwTextDialog } from './hooks/useCwTextDialog';
+import { useEntryFields } from './hooks/useEntryFields';
+import { useEsm } from './hooks/useEsm';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useMessageSending } from './hooks/useMessageSending';
 
 function MainWindow({
   settings,
@@ -110,23 +85,43 @@ function MainWindow({
   onSerialContactLogged,
   onExit,
 }) {
-  const [callSign, setCallSign] = useState('');
-  const [debouncedCallSign, setDebouncedCallSign] = useState('');
-  const [exchangeValues, setExchangeValues] = useState({});
-  const [operatingMode, setOperatingMode] = useState('S&P');
-  const [repeatRunF1, setRepeatRunF1] = useState(false);
-  const [esmEnabled, setEsmEnabled] = useState(() => {
-    return localStorage.getItem(ESM_ENABLED_STORAGE_KEY) === '1';
+  const {
+    callSign,
+    setCallSign,
+    debouncedCallSign,
+    exchangeValues,
+    setExchangeValues,
+    operatingMode,
+    setOperatingMode,
+    callSignRef,
+    exchangeInputRefs,
+    callSignEditedAtRef,
+    callsignFrequencyBaselineRef,
+    pendingBandMapTuneFrequencyRef,
+    pendingPreviousContactAutofillRef,
+    handleCallsignChange: handleEntryCallsignChange,
+    updateExchangeField,
+    exchangeValue,
+    currentCallsign: entryCurrentCallsign,
+    requestPreviousContactAutofill: entryRequestPreviousContactAutofill,
+  } = useEntryFields({
+    settings,
+    radioMode,
+    log,
+    serialAllocation,
+    bandMapSelection,
+    radioFrequencyHz,
+    contacts,
   });
-  const [esmRunCallsignAttempt, setEsmRunCallsignAttempt] = useState('');
-  const [esmExchangeSentCallsign, setEsmExchangeSentCallsign] = useState('');
-  const [activeMessageKeys, setActiveMessageKeys] = useState(() => new Set());
+  const {
+    esmEnabled,
+    setEsmEnabled,
+    esmRunCallsignAttempt,
+    setEsmRunCallsignAttempt,
+    esmExchangeSentCallsign,
+    setEsmExchangeSentCallsign,
+  } = useEsm();
   const [activeCompletionField, setActiveCompletionField] = useState(null);
-  const [supercheckpartialCallsigns, setSupercheckpartialCallsigns] = useState(
-    [],
-  );
-  const [supercheckpartialMatches, setSupercheckpartialMatches] = useState([]);
-  const [dxccData, setDxccData] = useState(null);
   const [cwWpm, setCwWpm] = useState(() => {
     const storedWpm = Number.parseInt(
       localStorage.getItem(CW_WPM_STORAGE_KEY) ?? '',
@@ -134,26 +129,7 @@ function MainWindow({
     );
     return Number.isFinite(storedWpm) ? storedWpm : DEFAULT_CW_WPM;
   });
-  const [isCwTextDialogOpen, setIsCwTextDialogOpen] = useState(false);
-  const [cwTextCommittedWords, setCwTextCommittedWords] = useState([]);
-  const [cwTextCurrentWord, setCwTextCurrentWord] = useState('');
-  const callSignRef = useRef(null);
   const setCwWpmRef = useRef(onSetCwWpm);
-  const repeatActiveRef = useRef(false);
-  const repeatRequestIdRef = useRef(null);
-  const repeatTimeoutRef = useRef(null);
-  const callSignValueRef = useRef('');
-  const repeatSendRunF1Ref = useRef(() => {});
-  const callsignSelectionRef = useRef(null);
-  const activeMessageRequestsRef = useRef(new Map());
-  const activeMessageTimeoutsRef = useRef(new Map());
-  const exchangeInputRefs = useRef({});
-  const cwTextInputRef = useRef(null);
-  const callSignEditedAtRef = useRef(new Date());
-  const callsignFrequencyBaselineRef = useRef(null);
-  const pendingBandMapTuneFrequencyRef = useRef(null);
-  const pendingPreviousContactAutofillRef = useRef('');
-  const bandMapSelectionSequenceRef = useRef(null);
   const radioMode = radioState?.mode ?? 'CW';
   const radioFrequencyHz =
     radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
@@ -182,28 +158,6 @@ function MainWindow({
   }
 
   useEffect(() => {
-    setExchangeValues(
-      exchangeDefaults(settings, radioMode, log?.contest_params ?? {}),
-    );
-  }, [settings, radioMode, log]);
-
-  useEffect(() => {
-    if (!serialAllocation?.required || !serialAllocation.fieldAdif) return;
-    const serialField = (settings?.exchange ?? []).find(
-      (field) => field.is_sent && field.adif === serialAllocation.fieldAdif,
-    );
-    if (!serialField) return;
-    setExchangeValues((currentValues) => ({
-      ...currentValues,
-      [serialField.name]:
-        serialAllocation.current === null ||
-        serialAllocation.current === undefined
-          ? ''
-          : String(serialAllocation.current),
-    }));
-  }, [settings, serialAllocation]);
-
-  useEffect(() => {
     setCwWpmRef.current = onSetCwWpm;
   });
 
@@ -213,158 +167,14 @@ function MainWindow({
   }, [cwWpm]);
 
   useEffect(() => {
-    localStorage.setItem(ESM_ENABLED_STORAGE_KEY, esmEnabled ? '1' : '0');
-  }, [esmEnabled]);
-
-  useEffect(() => {
     if (backendSocketStatus === 'connected') {
       setCwWpmRef.current?.(cwWpm);
     }
   }, [backendSocketStatus, cwWpm]);
 
   useEffect(() => {
-    const selection = callsignSelectionRef.current;
-    const input = callSignRef.current;
-    if (!selection || !input || document.activeElement !== input) return;
-
-    const start = Math.min(selection.start, input.value.length);
-    const end = Math.min(selection.end, input.value.length);
-    input.setSelectionRange(start, end);
-    callsignSelectionRef.current = null;
-  }, [callSign]);
-
-  useEffect(() => {
-    if (isCwTextDialogOpen) {
-      cwTextInputRef.current?.focus();
-    }
-  }, [isCwTextDialogOpen]);
-
-  useEffect(() => {
-    if (callSign.trim() === '') {
-      setDebouncedCallSign('');
-      return;
-    }
-
-    const timeoutId = window.setTimeout(() => {
-      setDebouncedCallSign(callSign);
-    }, CALLSIGN_LOOKUP_DEBOUNCE_MS);
-
-    return () => {
-      window.clearTimeout(timeoutId);
-    };
-  }, [callSign]);
-
-  useEffect(() => {
     onDebouncedCallsignChange?.(debouncedCallSign.trim().toUpperCase());
   }, [debouncedCallSign, onDebouncedCallsignChange]);
-
-  useEffect(() => {
-    const pendingCallsign = pendingPreviousContactAutofillRef.current;
-    if (!pendingCallsign || !settings?.exchange) return;
-
-    const normalizedCallsign = callSign.trim().toUpperCase();
-    if (pendingCallsign !== normalizedCallsign) {
-      pendingPreviousContactAutofillRef.current = '';
-      return;
-    }
-
-    const autofillResult = previousContactExchangeAutofill({
-      settings,
-      contacts,
-      callsign: normalizedCallsign,
-      exchangeValues,
-      radioMode,
-      contestParams: log?.contest_params ?? {},
-    });
-
-    if (!autofillResult.matchedContact) return;
-
-    pendingPreviousContactAutofillRef.current = '';
-    if (autofillResult.changed) {
-      setExchangeValues(autofillResult.values);
-    }
-  }, [callSign, contacts, exchangeValues, log, radioMode, settings]);
-
-  useEffect(() => {
-    let cancelled = false;
-    supercheckpartial()
-      .then((result) => {
-        if (!cancelled) {
-          const callsigns = Array.isArray(result?.callsigns)
-            ? result.callsigns
-            : Array.isArray(result)
-              ? result
-              : [];
-          setSupercheckpartialCallsigns(callsigns);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSupercheckpartialCallsigns([]);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    dxcc()
-      .then((result) => {
-        if (!cancelled) {
-          setDxccData(result?.dxcc ?? result ?? null);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setDxccData(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const combinedSupercheckpartialCallsigns = useMemo(() => {
-    const callsigns = new Set(
-      supercheckpartialCallsigns.map((callsign) =>
-        String(callsign ?? '')
-          .trim()
-          .toUpperCase(),
-      ),
-    );
-    for (const spot of bandMapSpotStore?.sortedSpots ?? []) {
-      const callsign = String(spot?.call_dx ?? '')
-        .trim()
-        .toUpperCase();
-      if (callsign) callsigns.add(callsign);
-    }
-    return [...callsigns].filter(Boolean);
-  }, [supercheckpartialCallsigns, bandMapSpotStore]);
-
-  useEffect(() => {
-    if (activeCompletionField !== 'CALL') {
-      setSupercheckpartialMatches([]);
-      return;
-    }
-
-    const query = debouncedCallSign.trim().toUpperCase();
-    if (query.length < SUPERCHECKPARTIAL_MIN_QUERY_LENGTH) {
-      setSupercheckpartialMatches([]);
-      return;
-    }
-
-    setSupercheckpartialMatches(
-      callsignCompletionMatches(combinedSupercheckpartialCallsigns, query),
-    );
-  }, [
-    activeCompletionField,
-    debouncedCallSign,
-    combinedSupercheckpartialCallsigns,
-  ]);
 
   const messageModeKey = operatingMode === 'Run' ? 'run' : 's&p';
   const modeMessageLabels = modeIsPhone(radioMode)
@@ -373,23 +183,6 @@ function MainWindow({
   const activeMessageLabels =
     modeMessageLabels?.[messageModeKey] ??
     DEFAULT_MESSAGE_LABELS[messageModeKey];
-  const activeExchangeCompletionField = (settings?.exchange ?? []).find(
-    (field) => field.name === activeCompletionField && field.fixed !== true,
-  );
-  const completionMatches =
-    activeCompletionField === 'CALL'
-      ? supercheckpartialMatches
-      : exchangeCompletionMatches(
-          activeExchangeCompletionField,
-          exchangeValues[activeExchangeCompletionField?.name],
-        );
-  const currentDxccInfo = lookupDxcc(dxccData, debouncedCallSign);
-  const currentDxccLabel = dxccLabel(currentDxccInfo);
-  const currentDupeAlertText =
-    callSign.trim() !== '' &&
-    debouncedCallSign.trim().toUpperCase() === callSign.trim().toUpperCase()
-      ? dupeAlertText(settings, currentContactFields(), contacts)
-      : '';
 
   function currentMessageFields(values = exchangeValues) {
     const fields = {
@@ -435,172 +228,77 @@ function MainWindow({
   }
 
   function currentCallsign() {
-    return callSign.trim().toUpperCase();
+    return entryCurrentCallsign();
   }
 
   function requestPreviousContactAutofill(values = exchangeValues) {
-    const normalizedCallsign = currentCallsign();
-    if (!normalizedCallsign) {
-      return {
-        matchedContact: null,
-        changed: false,
-        copiedFields: [],
-        values,
-      };
-    }
-
-    pendingPreviousContactAutofillRef.current = normalizedCallsign;
-    setDebouncedCallSign(normalizedCallsign);
-
-    if (!settings?.exchange) {
-      return {
-        matchedContact: null,
-        changed: false,
-        copiedFields: [],
-        values,
-      };
-    }
-
-    const autofillResult = previousContactExchangeAutofill({
-      settings,
-      contacts,
-      callsign: normalizedCallsign,
-      exchangeValues: values,
-      radioMode,
-      contestParams: log?.contest_params ?? {},
-    });
-
-    if (autofillResult.matchedContact) {
-      pendingPreviousContactAutofillRef.current = '';
-      if (autofillResult.changed) {
-        setExchangeValues(autofillResult.values);
-      }
-    }
-
-    return autofillResult;
+    return entryRequestPreviousContactAutofill(values);
   }
 
-  function storeCurrentCqFrequency() {
-    if (!currentBand) return;
-    onStoreCqFrequency?.(radioFrequencyHz, currentBand.meters);
-  }
-
-  function jumpToLastCqFrequency() {
-    const frequencyHz = lastCqFrequencyForBand(
+  const { completionMatches, currentDxccLabel, currentDupeAlertText } =
+    useCompletions({
       bandMapSpotStore,
-      currentBand?.meters,
-    );
-    if (frequencyHz) onSetRadioFrequency?.(frequencyHz);
-  }
-
-  function markCurrentFrequency() {
-    onMarkFrequency?.(radioFrequencyHz);
-  }
-
-  function storeCurrentBandMapSpot() {
-    const callsign = currentCallsign();
-    if (!callsign) return;
-    onStoreBandMapSpot?.({
-      frequency_hz: radioFrequencyHz,
-      call: callsign,
-      comment: '',
+      contacts,
+      settings,
+      activeCompletionField,
+      setActiveCompletionField,
+      debouncedCallSign,
+      callSign,
+      exchangeValues,
+      radioMode,
+      log,
+      currentContactFields,
     });
-  }
 
-  function activateBandMapSpot(spot) {
-    if (!spot) return;
-    onActivateBandMapSpot?.(spot);
-  }
+  const {
+    isCwTextDialogOpen,
+    cwTextCommittedWords,
+    cwTextCurrentWord,
+    cwTextInputRef,
+    openCwTextDialog,
+    closeCwTextDialog,
+    handleCwTextInputChange,
+    handleCwTextInputKeyDown,
+  } = useCwTextDialog({
+    radioMode,
+    onSendCwText,
+    callSignRef,
+  });
 
-  function clearRitIfEnabled() {
-    if (!radio?.rit_clear_on_log) return;
-    onClearRit?.();
-  }
-
-  function tuningIncrementHz() {
-    return tuningIncrementHzForMode(radio, radioMode);
-  }
-
-  function tuneByIncrement(direction) {
-    const incrementHz = tuningIncrementHz();
-    if (incrementHz <= 0) return;
-
-    const isRunMode = operatingMode === 'Run';
-    if (isRunMode && onIncrementRit && onDecrementRit) {
-      if (direction > 0) onIncrementRit(incrementHz);
-      else onDecrementRit(incrementHz);
-      return;
-    }
-
-    const deltaHz = direction > 0 ? incrementHz : -incrementHz;
-    onSetRadioFrequency?.(steppedFrequencyHz(radioFrequencyHz, deltaHz));
-  }
-
-  function shiftBand(direction) {
-    if (!currentBand || bandOptions.length === 0) return;
-
-    const sortedBands = [
-      ...new Map(bandOptions.map((band) => [band.meters, band])).values(),
-    ].sort((left, right) => left.lowerHz - right.lowerHz);
-    const currentIndex = sortedBands.findIndex(
-      (band) => band.meters === currentBand.meters,
-    );
-    if (currentIndex === -1) return;
-
-    const nextIndex = currentIndex + direction;
-    if (nextIndex < 0 || nextIndex >= sortedBands.length) return;
-
-    const nextBand = sortedBands[nextIndex];
-    onSetRadioFrequency?.(nextBand.lowerHz);
-    if (isSelectableMode(radioMode)) {
-      onSetRadioMode?.(radioMode);
-    }
-  }
+  const {
+    storeCurrentCqFrequency,
+    jumpToLastCqFrequency,
+    markCurrentFrequency,
+    storeCurrentBandMapSpot,
+    activateBandMapSpot,
+    clearRitIfEnabled,
+    tuneByIncrement,
+    shiftBand,
+    handleBandChange,
+  } = useBandControls({
+    operatingMode,
+    radio,
+    radioMode,
+    radioFrequencyHz,
+    currentBand,
+    bandOptions,
+    bandMapSpotStore,
+    currentCallsign,
+    onStoreCqFrequency,
+    onMarkFrequency,
+    onStoreBandMapSpot,
+    onActivateBandMapSpot,
+    onSetRadioFrequency,
+    onSetRadioMode,
+    onClearRit,
+    onIncrementRit,
+    onDecrementRit,
+  });
 
   function clearEsmState() {
     setEsmRunCallsignAttempt('');
     setEsmExchangeSentCallsign('');
   }
-
-  useEffect(() => {
-    if (!bandMapSelection?.spot) return;
-    if (bandMapSelectionSequenceRef.current === bandMapSelection.sequence)
-      return;
-    bandMapSelectionSequenceRef.current = bandMapSelection.sequence;
-    const callsign = sanitizeCallsign(bandMapSelection.spot?.call_dx ?? '');
-    setCallSign(callsign);
-    pendingPreviousContactAutofillRef.current = '';
-    callsignFrequencyBaselineRef.current =
-      Number(bandMapSelection.spot?.frequency_hz) || null;
-    pendingBandMapTuneFrequencyRef.current =
-      callsignFrequencyBaselineRef.current;
-    setEsmRunCallsignAttempt('');
-    setEsmExchangeSentCallsign('');
-    callSignEditedAtRef.current = new Date();
-    window.requestAnimationFrame(() => callSignRef.current?.focus());
-  }, [bandMapSelection]);
-
-  useEffect(() => {
-    const baseline = callsignFrequencyBaselineRef.current;
-    if (!callSign.trim() || !baseline) return;
-    const thresholdHz = callsignClearThresholdHz(radioMode);
-    const pendingBandMapTuneFrequency = pendingBandMapTuneFrequencyRef.current;
-    if (pendingBandMapTuneFrequency) {
-      if (
-        Math.abs(radioFrequencyHz - pendingBandMapTuneFrequency) < thresholdHz
-      ) {
-        pendingBandMapTuneFrequencyRef.current = null;
-      }
-      return;
-    }
-    if (Math.abs(radioFrequencyHz - baseline) < thresholdHz) return;
-    setCallSign('');
-    pendingPreviousContactAutofillRef.current = '';
-    callsignFrequencyBaselineRef.current = null;
-    setEsmRunCallsignAttempt('');
-    setEsmExchangeSentCallsign('');
-    callSignEditedAtRef.current = new Date();
-  }, [callSign, radioFrequencyHz, radioMode]);
 
   function markEsmExchangeSentForCurrentCallsign() {
     const normalizedCallsign = currentCallsign();
@@ -608,444 +306,55 @@ function MainWindow({
     setEsmExchangeSentCallsign(normalizedCallsign);
   }
 
-  function stopRepeat() {
-    repeatActiveRef.current = false;
-    repeatRequestIdRef.current = null;
-    if (repeatTimeoutRef.current !== null) {
-      window.clearTimeout(repeatTimeoutRef.current);
-      repeatTimeoutRef.current = null;
-    }
-  }
-
-  function markMessageKeyActive(requestId, keys) {
-    activeMessageRequestsRef.current.set(requestId, [...keys]);
-    setActiveMessageKeys((current) => {
-      const next = new Set(current);
-      for (const key of keys) next.add(key);
-      return next;
-    });
-    const timeoutMs = cwActiveTimeoutMs(radio?.cw_keyer_type);
-    const timeoutId = window.setTimeout(
-      () => clearMessageRequest(requestId),
-      timeoutMs,
-    );
-    activeMessageTimeoutsRef.current.set(requestId, timeoutId);
-  }
-
-  function clearMessageRequest(requestId) {
-    const keys = activeMessageRequestsRef.current.get(requestId);
-    if (!keys) return;
-    activeMessageRequestsRef.current.delete(requestId);
-    const timeoutId = activeMessageTimeoutsRef.current.get(requestId);
-    if (timeoutId !== undefined) {
-      window.clearTimeout(timeoutId);
-      activeMessageTimeoutsRef.current.delete(requestId);
-    }
-    setActiveMessageKeys((current) => {
-      const remainingKeys = new Set();
-      for (const activeKeys of activeMessageRequestsRef.current.values()) {
-        for (const key of activeKeys) remainingKeys.add(key);
-      }
-      const next = new Set(current);
-      for (const key of keys) {
-        if (!remainingKeys.has(key)) next.delete(key);
-      }
-      return next;
-    });
-  }
-
-  function clearAllMessageRequests() {
-    for (const timeoutId of activeMessageTimeoutsRef.current.values()) {
-      window.clearTimeout(timeoutId);
-    }
-    activeMessageTimeoutsRef.current.clear();
-    activeMessageRequestsRef.current.clear();
-    setActiveMessageKeys(new Set());
-  }
-
-  function performMessageAction(action) {
-    switch (
-      String(action ?? '')
-        .trim()
-        .toLowerCase()
-    ) {
-      case 'clear':
-        clearEntryFields();
-        return true;
-      default:
-        return false;
-    }
-  }
-
-  function sendMessageKeys(
-    keys,
-    mode = messageModeKey,
-    values = exchangeValues,
-  ) {
-    const sendableKeys = [];
-    const labels = modeIsPhone(radioMode)
-      ? (messageLabels?.voice ?? null)
-      : (messageLabels?.cw ?? messageLabels);
-
-    for (const key of keys) {
-      const action = messageActionForRadioMode(
-        radio?.cw_messages,
-        radio?.voice_messages,
-        mode,
-        key,
-        radioMode,
-      );
-      if (action && performMessageAction(action)) {
-        continue;
-      }
-
-      const button = (labels?.[mode] ?? DEFAULT_MESSAGE_LABELS[mode]).find(
-        (label) => label.key === key,
-      );
-      if (!messageButtonIsSendable(button)) continue;
-      if (mode === 'run' && key === 'F1') {
-        storeCurrentCqFrequency();
-      }
-      sendableKeys.push(key);
-    }
-
-    if (sendableKeys.length === 0) return null;
-
-    const requestId = createMessageRequestId();
-    markMessageKeyActive(requestId, sendableKeys);
-    onSendMessage?.({
-      request_id: requestId,
-      mode,
-      keys: sendableKeys,
-      fields: currentMessageFields(values),
-    });
-    return requestId;
-  }
-
-  function sendSingleMessageKey(
-    key,
-    mode = messageModeKey,
-    values = exchangeValues,
-  ) {
-    return sendMessageKeys([key], mode, values);
-  }
-
-  repeatSendRunF1Ref.current = () => {
-    repeatRequestIdRef.current = sendSingleMessageKey('F1', 'run');
-  };
-  callSignValueRef.current = callSign;
-
-  function sendMessageKey(key) {
-    const shouldRepeat =
-      messageModeKey === 'run' && key === 'F1' && repeatRunF1;
-    stopRepeat();
-    const requestId = sendSingleMessageKey(key);
-    if (!requestId) return;
-
-    if (key === 'F2') {
-      markEsmExchangeSentForCurrentCallsign();
-    }
-
-    if (shouldRepeat) {
-      repeatActiveRef.current = true;
-      repeatRequestIdRef.current = requestId;
-    }
-
-    if (messageModeKey === 's&p' && key === 'F1') {
-      setOperatingMode('Run');
-    }
-  }
-
-  function stopMessageSending() {
-    stopRepeat();
-    clearAllMessageRequests();
-    onStopKeying?.();
-  }
-
-  useEffect(
-    () => () => {
-      stopRepeat();
-      clearAllMessageRequests();
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (messageSentEvent?.requestId)
-      clearMessageRequest(messageSentEvent.requestId);
-    if (
-      !repeatActiveRef.current ||
-      !messageSentEvent?.requestId ||
-      messageSentEvent.requestId !== repeatRequestIdRef.current
-    )
-      return;
-    repeatTimeoutRef.current = window.setTimeout(() => {
-      repeatTimeoutRef.current = null;
-      if (!repeatActiveRef.current || callSignValueRef.current.trim() !== '') {
-        stopRepeat();
-        return;
-      }
-      repeatSendRunF1Ref.current();
-    }, CW_REPEAT_DELAY_MS);
-  }, [messageSentEvent]);
-
-  function openCwTextDialog() {
-    if (!modeIsCw(radioMode)) return;
-    setCwTextCommittedWords([]);
-    setCwTextCurrentWord('');
-    setIsCwTextDialogOpen(true);
-  }
-
-  function closeCwTextDialog() {
-    setIsCwTextDialogOpen(false);
-    setCwTextCommittedWords([]);
-    setCwTextCurrentWord('');
-    callSignRef.current?.focus();
-  }
-
-  function sendCwTextWord(sendTrailingSpace) {
-    const word = cwTextCurrentWord.trim().toUpperCase();
-    if (!word) return;
-
-    onSendCwText?.({
-      request_id: createMessageRequestId(),
-      text: sendTrailingSpace ? `${word} ` : word,
-      wait_for_completion: false,
-    });
-    setCwTextCommittedWords((current) => [...current, word]);
-    setCwTextCurrentWord('');
-  }
-
-  function handleCwTextInputChange(event) {
-    setCwTextCurrentWord(String(event.target.value ?? '').replace(/\s+/g, ''));
-  }
-
-  function handleCwTextInputKeyDown(event) {
-    if (event.key === ' ') {
-      event.preventDefault();
-      sendCwTextWord(true);
-      return;
-    }
-
-    if (event.key === 'Enter') {
-      event.preventDefault();
-      sendCwTextWord(false);
-      closeCwTextDialog();
-      return;
-    }
-
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closeCwTextDialog();
-      return;
-    }
-
-    if (event.key === 'Backspace' && cwTextCurrentWord.length === 0) {
-      event.preventDefault();
-    }
-  }
-
-  function sendEsmKeys(keys, values = exchangeValues) {
-    const shouldRepeatF1 =
-      messageModeKey === 'run' &&
-      keys.length === 1 &&
-      keys[0] === 'F1' &&
-      repeatRunF1;
-
-    stopRepeat();
-    const requestId = sendMessageKeys(keys, messageModeKey, values);
-    if (!requestId) return;
-    if (keys.includes('F2')) {
-      markEsmExchangeSentForCurrentCallsign();
-    }
-    if (shouldRepeatF1) {
-      repeatActiveRef.current = true;
-      repeatRequestIdRef.current = requestId;
-    }
-  }
-
-  useEffect(() => {
-    if (!modeIsCw(radioMode) && isCwTextDialogOpen) {
-      setIsCwTextDialogOpen(false);
-      setCwTextCommittedWords([]);
-      setCwTextCurrentWord('');
-      callSignRef.current?.focus();
-    }
-  }, [radioMode, isCwTextDialogOpen]);
-
-  useEffect(() => {
-    function handleFunctionKey(event) {
-      if (
-        event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        event.key.toLowerCase() === 'm'
-      ) {
-        event.preventDefault();
-        markCurrentFrequency();
-        return;
-      }
-      if (
-        event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        event.key.toLowerCase() === 'o'
-      ) {
-        event.preventDefault();
-        storeCurrentBandMapSpot();
-        return;
-      }
-      if (
-        event.altKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        event.key.toLowerCase() === 'q'
-      ) {
-        event.preventDefault();
-        jumpToLastCqFrequency();
-        return;
-      }
-      if (
-        event.ctrlKey &&
-        !event.altKey &&
-        !event.metaKey &&
-        event.key.toLowerCase() === 'p'
-      ) {
-        event.preventDefault();
-        handleSpotIt();
-        return;
-      }
-      if (
-        event.ctrlKey &&
-        !event.altKey &&
-        !event.metaKey &&
-        (event.key === 'ArrowDown' || event.key === 'ArrowUp')
-      ) {
-        event.preventDefault();
-        const spot =
-          event.key === 'ArrowDown'
-            ? nextBandMapSpotAbove(bandMapSpotStore, radioFrequencyHz)
-            : nextBandMapSpotBelow(bandMapSpotStore, radioFrequencyHz);
-        if (spot) activateBandMapSpot(spot);
-        return;
-      }
-      if (event.target?.closest?.('.log-window')) return;
-      if (
-        event.ctrlKey &&
-        !event.altKey &&
-        !event.metaKey &&
-        event.key.toLowerCase() === 'k' &&
-        modeIsCw(radioMode)
-      ) {
-        event.preventDefault();
-        openCwTextDialog();
-        return;
-      }
-      if (isCwTextDialogOpen) {
-        if (event.key === 'Escape') {
-          event.preventDefault();
-          closeCwTextDialog();
-        }
-        return;
-      }
-      if (
-        !event.ctrlKey &&
-        event.altKey &&
-        !event.metaKey &&
-        isPageUpKey(event)
-      ) {
-        event.preventDefault();
-        shiftBand(1);
-        return;
-      }
-      if (
-        !event.ctrlKey &&
-        event.altKey &&
-        !event.metaKey &&
-        isPageDownKey(event)
-      ) {
-        event.preventDefault();
-        shiftBand(-1);
-        return;
-      }
-      if (
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.metaKey &&
-        (event.key === 'ArrowUp' || event.key === 'ArrowDown')
-      ) {
-        event.preventDefault();
-        tuneByIncrement(event.key === 'ArrowUp' ? 1 : -1);
-        return;
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        stopMessageSending();
-        return;
-      }
-      if (
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.metaKey &&
-        isPageUpKey(event)
-      ) {
-        event.preventDefault();
-        setCwWpm((current) => nextCwWpm(current, 1));
-        return;
-      }
-      if (
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.metaKey &&
-        isPageDownKey(event)
-      ) {
-        event.preventDefault();
-        setCwWpm((current) => nextCwWpm(current, -1));
-        return;
-      }
-      if (FUNCTION_KEY_PATTERN.test(event.key)) {
-        event.preventDefault();
-        sendMessageKey(event.key);
-      }
-    }
-
-    window.addEventListener('keydown', handleFunctionKey);
-    return () => window.removeEventListener('keydown', handleFunctionKey);
+  const {
+    repeatRunF1,
+    setRepeatRunF1,
+    activeMessageKeys,
+    sendMessageKey,
+    sendEsmKeys,
+    stopMessageSending,
+    stopRepeat,
+  } = useMessageSending({
+    radio,
+    radioMode,
+    messageLabels,
+    messageModeKey,
+    messageSentEvent,
+    currentMessageFields: (values = exchangeValues) =>
+      currentMessageFields(values),
+    currentCallsign: () => callSign,
+    storeCurrentCqFrequency,
+    markEsmExchangeSentForCurrentCallsign,
+    clearEntryFields,
+    onSendMessage,
+    onStopKeying,
   });
 
-  function updateExchangeField(field, value) {
-    setExchangeValues((current) => ({
-      ...current,
-      [field.name]: sanitizeExchangeValue(field, value, radioMode),
-    }));
-  }
+  useKeyboardShortcuts({
+    radioMode,
+    bandMapSpotStore,
+    radioFrequencyHz,
+    isCwTextDialogOpen,
+    openCwTextDialog,
+    closeCwTextDialog,
+    jumpToLastCqFrequency,
+    markCurrentFrequency,
+    storeCurrentBandMapSpot,
+    handleSpotIt,
+    activateBandMapSpot,
+    shiftBand,
+    tuneByIncrement,
+    setCwWpm,
+    sendMessageKey,
+    stopMessageSending,
+  });
 
   function handleCallsignChange(event) {
-    stopRepeat();
-    const { selectionStart, selectionEnd } = event.target;
-    callsignSelectionRef.current = {
-      start: selectionStart ?? event.target.value.length,
-      end: selectionEnd ?? event.target.value.length,
-    };
-    const sanitizedCallsign = sanitizeCallsign(event.target.value);
-    const normalizedCallsign = sanitizedCallsign.trim().toUpperCase();
-    if (normalizedCallsign !== esmRunCallsignAttempt) {
-      setEsmRunCallsignAttempt('');
-    }
-    setCallSign(sanitizedCallsign);
-    pendingPreviousContactAutofillRef.current = '';
-    callsignFrequencyBaselineRef.current = normalizedCallsign
-      ? radioFrequencyHz
-      : null;
-    pendingBandMapTuneFrequencyRef.current = null;
-    callSignEditedAtRef.current = new Date();
-  }
-
-  function exchangeValue(field, values = exchangeValues) {
-    return (
-      values?.[field.name] ??
-      fieldDefault(field, radioMode, log?.contest_params ?? {})
-    );
+    handleEntryCallsignChange(event, {
+      stopRepeat,
+      clearEsmState,
+      esmRunCallsignAttempt,
+    });
   }
 
   function fieldEditable(field) {
@@ -1427,17 +736,6 @@ function MainWindow({
     }
   }
 
-  function handleBandChange(event) {
-    const selectedBand = bandByMeters(Number.parseInt(event.target.value, 10));
-
-    if (selectedBand) {
-      onSetRadioFrequency?.(selectedBand.lowerHz);
-      if (isSelectableMode(radioMode)) {
-        onSetRadioMode?.(radioMode);
-      }
-    }
-  }
-
   function handleExchangeKeyDown(event, index) {
     const currentField = settings.exchange[index];
     const currentFieldName = currentField?.name;
@@ -1492,9 +790,7 @@ function MainWindow({
     let frequencyHz = radioFrequencyHz;
 
     if (!spotCallsign) {
-      spotCallsign = String(
-        lastContact?.adif?.CALL ?? '',
-      )
+      spotCallsign = String(lastContact?.adif?.CALL ?? '')
         .trim()
         .toUpperCase();
       frequencyHz = normalizedContactFrequencyHz(

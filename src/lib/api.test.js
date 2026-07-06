@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { apiJson } from './api.js';
 
 test('apiJson unwraps legacy ok payloads', async () => {
-  global.fetch = async () => ({
+  globalThis.fetch = async () => ({
     ok: true,
     status: 200,
     headers: new Headers({ 'content-type': 'application/json' }),
@@ -16,7 +16,7 @@ test('apiJson unwraps legacy ok payloads', async () => {
 });
 
 test('apiJson throws backend json error messages for non-2xx responses', async () => {
-  global.fetch = async () => ({
+  globalThis.fetch = async () => ({
     ok: false,
     status: 400,
     headers: new Headers({ 'content-type': 'application/json' }),
@@ -28,7 +28,7 @@ test('apiJson throws backend json error messages for non-2xx responses', async (
 });
 
 test('apiJson throws legacy ok false errors during transition', async () => {
-  global.fetch = async () => ({
+  globalThis.fetch = async () => ({
     ok: true,
     status: 200,
     headers: new Headers({ 'content-type': 'application/json' }),
@@ -39,7 +39,7 @@ test('apiJson throws legacy ok false errors during transition', async () => {
 });
 
 test('apiJson returns null for 204 responses', async () => {
-  global.fetch = async () => ({
+  globalThis.fetch = async () => ({
     ok: true,
     status: 204,
     headers: new Headers(),
