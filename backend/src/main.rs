@@ -1819,7 +1819,7 @@ async fn create_radio(
     }
     if let Err(error) = app_state
         .voice_keyer
-        .validate_voice_messages(&payload.voice_messages)
+        .validate_radio_voice_messages(&payload.voice_messages)
     {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
@@ -1846,7 +1846,7 @@ async fn update_radio(
     }
     if let Err(error) = app_state
         .voice_keyer
-        .validate_voice_messages(&payload.voice_messages)
+        .validate_radio_voice_messages(&payload.voice_messages)
     {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }

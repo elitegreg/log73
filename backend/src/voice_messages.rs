@@ -150,7 +150,12 @@ pub fn validate_with_voicekeyer_dir(
         let Some(file_path) = entry.file_path.as_deref() else {
             continue;
         };
-        if let Err(error) = existing_voicekeyer_file_path(voicekeyer_dir, file_path) {
+        let result = if file_path_has_template(file_path) {
+            validate_voice_file_path_template(file_path)
+        } else {
+            existing_voicekeyer_file_path(voicekeyer_dir, file_path).map(|_| ())
+        };
+        if let Err(error) = result {
             return Err(format!("{} {} {error}", mode_label(&entry.mode), entry.key));
         }
     }
@@ -262,6 +267,45 @@ pub fn file_path_has_template(path: &str) -> bool {
         }
     }
     false
+}
+
+fn validate_voice_file_path_template(template: &str) -> Result<(), String> {
+    validate_voice_file_path(&template_path_example(template))
+}
+
+fn template_path_example(template: &str) -> String {
+    let mut rendered = String::with_capacity(template.len());
+    let mut chars = template.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch != '{' {
+            rendered.push(ch);
+            continue;
+        }
+
+        let mut name = String::new();
+        let mut closed = false;
+        while let Some(&next) = chars.peek() {
+            chars.next();
+            if next == '}' {
+                closed = true;
+                break;
+            }
+            name.push(next);
+        }
+
+        if closed && is_field_placeholder(&name) {
+            rendered.push('X');
+        } else {
+            rendered.push('{');
+            rendered.push_str(&name);
+            if closed {
+                rendered.push('}');
+            }
+        }
+    }
+
+    rendered
 }
 
 fn entries_for_mode(mode: &str, messages: Vec<VoiceMessage>) -> Vec<VoiceMessageEntry> {
@@ -569,19 +613,25 @@ F2 -,
     }
 
     #[test]
-    fn validate_with_voicekeyer_dir_checks_referenced_files() {
+    fn validate_with_voicekeyer_dir_checks_non_template_referenced_files() {
         let root =
             std::env::temp_dir().join(format!("log73-voice-messages-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        fs::create_dir_all(root.join("{OPERATOR}")).expect("voicekeyer dir creates");
-        fs::write(root.join("{OPERATOR}/CQ.wav"), b"audio").expect("cq file writes");
-        fs::write(root.join("{OPERATOR}/QRL.wav"), b"audio").expect("qrl file writes");
+        fs::create_dir_all(root.join("operator1")).expect("voicekeyer dir creates");
+        fs::write(root.join("operator1/QRL.wav"), b"audio").expect("qrl file writes");
 
-        validate_with_voicekeyer_dir(TEST_MESSAGES, &root).expect("files exist");
+        let mixed_messages = r#"
+# RUN Messages
+F1 CQ,{OPERATOR}/CQ.wav
+# S&P Messages
+F1 QRL,operator1/QRL.wav
+"#;
+        validate_with_voicekeyer_dir(mixed_messages, &root)
+            .expect("template paths can defer existence");
 
-        fs::remove_file(root.join("{OPERATOR}/QRL.wav")).expect("qrl removed");
-        let error =
-            validate_with_voicekeyer_dir(TEST_MESSAGES, &root).expect_err("missing file fails");
+        fs::remove_file(root.join("operator1/QRL.wav")).expect("qrl removed");
+        let error = validate_with_voicekeyer_dir(mixed_messages, &root)
+            .expect_err("missing file fails");
         assert!(error.contains("QRL.wav"));
 
         let _ = fs::remove_dir_all(&root);
@@ -599,15 +649,41 @@ F2 -,
         let root = base.join("voicekeyer");
         let outside = base.join("outside.wav");
         let _ = fs::remove_dir_all(&base);
-        fs::create_dir_all(root.join("{OPERATOR}")).expect("voicekeyer dir creates");
+        fs::create_dir_all(root.join("operator1")).expect("voicekeyer dir creates");
         fs::write(&outside, b"outside-audio").expect("outside file writes");
-        fs::write(root.join("{OPERATOR}/QRL.wav"), b"inside-audio").expect("inside file writes");
-        symlink(&outside, root.join("{OPERATOR}/CQ.wav")).expect("symlink creates");
+        fs::write(root.join("operator1/QRL.wav"), b"inside-audio").expect("inside file writes");
+        symlink(&outside, root.join("operator1/CQ.wav")).expect("symlink creates");
 
-        let error =
-            validate_with_voicekeyer_dir(TEST_MESSAGES, &root).expect_err("symlink escape fails");
+        let non_template_messages = r#"
+# RUN Messages
+F1 CQ,operator1/CQ.wav
+# S&P Messages
+F1 QRL,operator1/QRL.wav
+"#;
+        let error = validate_with_voicekeyer_dir(non_template_messages, &root)
+            .expect_err("symlink escape fails");
         assert!(error.contains("must stay within voicekeyer/"));
 
         let _ = fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn validate_with_voicekeyer_dir_rejects_unsafe_template_paths() {
+        let root = std::env::temp_dir()
+            .join(format!("log73-voice-messages-template-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).expect("voicekeyer dir creates");
+
+        let invalid_template_messages = r#"
+# RUN Messages
+F1 CQ,{OPERATOR}/../CQ.wav
+# S&P Messages
+F1 QRL,operator1/QRL.wav
+"#;
+        let error = validate_with_voicekeyer_dir(invalid_template_messages, &root)
+            .expect_err("unsafe template fails");
+        assert!(error.contains("cannot contain '..'"));
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

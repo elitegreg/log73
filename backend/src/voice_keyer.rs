@@ -446,6 +446,13 @@ impl VoiceKeyer {
         voice_messages::validate(config)
     }
 
+    pub fn validate_radio_voice_messages(
+        &self,
+        config: &str,
+    ) -> Result<voice_messages::VoiceLabels, String> {
+        voice_messages::validate_with_voicekeyer_dir(config, &self.voicekeyer_dir)
+    }
+
     pub fn sync_radio_messages(&self, config: &RadioConfig) -> Result<(), String> {
         self.validate_voice_messages(&config.voice_messages)?;
         self.clear_radio_messages(config.id)?;
