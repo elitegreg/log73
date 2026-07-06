@@ -79,6 +79,8 @@ struct AppState {
 
 const MAX_CLIENT_ERROR_TEXT_LENGTH: usize = 4096;
 const MAX_CLIENT_ERROR_JSON_LENGTH: usize = 8192;
+const MAX_DEBUG_PAYLOAD_LOG_LENGTH: usize = 4096;
+const MAX_DEBUG_LOG_STRING_LENGTH: usize = 256;
 
 fn disabled_auth_config() -> AuthConfig {
     AuthConfig {
@@ -137,9 +139,99 @@ fn redacted_headers(headers: &HeaderMap) -> Vec<(String, String)> {
         .collect()
 }
 
-fn pretty_json<T: serde::Serialize>(value: &T) -> String {
-    serde_json::to_string_pretty(value)
-        .unwrap_or_else(|error| format!("<unable to serialize json: {error}>"))
+fn debug_payload_log<T: serde::Serialize>(value: &T) -> String {
+    let mut json = match serde_json::to_value(value) {
+        Ok(json) => json,
+        Err(error) => return format!("<unable to serialize json: {error}>"),
+    };
+    sanitize_debug_payload_value(None, &mut json);
+
+    let serialized = serde_json::to_string(&json)
+        .unwrap_or_else(|error| format!("<unable to serialize json: {error}>"));
+    truncate_debug_log_text(&serialized, MAX_DEBUG_PAYLOAD_LOG_LENGTH)
+}
+
+fn sanitize_debug_payload_value(key: Option<&str>, value: &mut serde_json::Value) {
+    if let Some(key) = key {
+        if should_fully_redact_debug_field(key) {
+            *value = serde_json::Value::String(redacted_debug_value_summary(value));
+            return;
+        }
+        if should_redact_debug_string_field(key) {
+            *value = serde_json::Value::String("<redacted>".to_string());
+            return;
+        }
+    }
+
+    match value {
+        serde_json::Value::Object(map) => {
+            for (child_key, child_value) in map.iter_mut() {
+                sanitize_debug_payload_value(Some(child_key), child_value);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items.iter_mut() {
+                sanitize_debug_payload_value(None, item);
+            }
+        }
+        serde_json::Value::String(text) => {
+            if text.chars().count() > MAX_DEBUG_LOG_STRING_LENGTH {
+                *text = format!("<string length={}>", text.chars().count());
+            }
+        }
+        serde_json::Value::Null
+        | serde_json::Value::Bool(_)
+        | serde_json::Value::Number(_) => {}
+    }
+}
+
+fn should_fully_redact_debug_field(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().as_str(),
+        "adif"
+            | "contest_params"
+            | "cw_messages"
+            | "voice_messages"
+            | "dxcluster_commands"
+    )
+}
+
+fn should_redact_debug_string_field(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().as_str(),
+        "call"
+            | "station_callsign"
+            | "dxcluster_callsign"
+            | "tcp_host"
+            | "dxcluster_host"
+            | "serial_port"
+            | "winkeyer_serial_port"
+            | "cw_serial_port"
+            | "sessionid"
+            | "session_id"
+    )
+}
+
+fn redacted_debug_value_summary(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => format!("<redacted string length={}>", text.chars().count()),
+        serde_json::Value::Array(items) => format!("<redacted array length={}>", items.len()),
+        serde_json::Value::Object(map) => format!("<redacted object keys={}>", map.len()),
+        serde_json::Value::Null => "<redacted null>".to_string(),
+        serde_json::Value::Bool(_) => "<redacted bool>".to_string(),
+        serde_json::Value::Number(_) => "<redacted number>".to_string(),
+    }
+}
+
+fn truncate_debug_log_text(text: &str, max_len: usize) -> String {
+    if text.chars().count() <= max_len {
+        return text.to_string();
+    }
+
+    let suffix = format!("…<truncated total_chars={}>", text.chars().count());
+    let keep_len = max_len.saturating_sub(suffix.chars().count());
+    let prefix = text.chars().take(keep_len).collect::<String>();
+    format!("{prefix}{suffix}")
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -1259,7 +1351,7 @@ async fn create_log(
     State(app_state): State<AppState>,
     Json(payload): Json<NewLog>,
 ) -> ApiResult<db::Log> {
-    debug!(payload = %pretty_json(&payload), "create log POST body");
+    debug!(payload = %debug_payload_log(&payload), "create log POST body");
     if let Err(error) = validation::validate_new_log(&app_state.contest_rules, &payload) {
         return Err(ApiError::bad_request(error));
     }
@@ -1276,7 +1368,7 @@ async fn update_log(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateLog>,
 ) -> ApiResult<db::Log> {
-    debug!(id, payload = %pretty_json(&payload), "update log PUT body");
+    debug!(id, payload = %debug_payload_log(&payload), "update log PUT body");
     let log = match app_state.db.log(id).await {
         Ok(Some(log)) => log,
         Ok(None) => return Err(ApiError::not_found("not found")),
@@ -1725,7 +1817,7 @@ async fn create_radio(
     State(app_state): State<AppState>,
     Json(payload): Json<NewRadio>,
 ) -> Json<serde_json::Value> {
-    debug!(payload = %pretty_json(&payload), "create radio POST body");
+    debug!(payload = %debug_payload_log(&payload), "create radio POST body");
     if let Err(error) = validation::validate_radio(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
@@ -1752,7 +1844,7 @@ async fn update_radio(
     Path(id): Path<i64>,
     Json(payload): Json<NewRadio>,
 ) -> Json<serde_json::Value> {
-    debug!(id, payload = %pretty_json(&payload), "update radio PUT body");
+    debug!(id, payload = %debug_payload_log(&payload), "update radio PUT body");
     if let Err(error) = validation::validate_radio(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
@@ -1940,7 +2032,7 @@ async fn commit_contact(
     Path(log_id): Path<i64>,
     Json(payload): Json<serde_json::Value>,
 ) -> Json<serde_json::Value> {
-    debug!(log_id, payload = %pretty_json(&payload), "commit contact POST body");
+    debug!(log_id, payload = %debug_payload_log(&payload), "commit contact POST body");
     let input_contacts = match contacts_from_payload(payload) {
         Ok(contacts) => contacts,
         Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
@@ -2267,5 +2359,54 @@ mod tests {
 
         assert!(loaded.login_user.is_empty());
         assert!(loaded.login_password.is_empty());
+    }
+
+    #[test]
+    fn debug_payload_log_redacts_sensitive_fields() {
+        let payload = json!({
+            "station_callsign": "N0CALL",
+            "contest_params": { "State": "SC" },
+            "cw_messages": "F1 CQ TEST",
+            "voice_messages": "F1 CQ,operator1/cq.wav",
+            "dxcluster_commands": "set/whatever",
+            "tcp_host": "127.0.0.1",
+            "serial_port": "/dev/ttyUSB0",
+            "call": "K1ABC",
+            "sessionId": "origin-session",
+            "name": "Local radio"
+        });
+
+        let logged = debug_payload_log(&payload);
+
+        assert!(logged.contains("\"station_callsign\":\"<redacted>\""));
+        assert!(logged.contains("\"contest_params\":\"<redacted object keys=1>\""));
+        assert!(logged.contains("\"cw_messages\":\"<redacted string length=10>\""));
+        assert!(logged.contains("\"voice_messages\":\"<redacted string length="));
+        assert!(logged.contains("\"dxcluster_commands\":\"<redacted string length=12>\""));
+        assert!(logged.contains("\"tcp_host\":\"<redacted>\""));
+        assert!(logged.contains("\"serial_port\":\"<redacted>\""));
+        assert!(logged.contains("\"call\":\"<redacted>\""));
+        assert!(logged.contains("\"sessionId\":\"<redacted>\""));
+        assert!(logged.contains("\"name\":\"Local radio\""));
+        assert!(!logged.contains("N0CALL"));
+        assert!(!logged.contains("SC"));
+        assert!(!logged.contains("operator1/cq.wav"));
+        assert!(!logged.contains("127.0.0.1"));
+        assert!(!logged.contains("/dev/ttyUSB0"));
+        assert!(!logged.contains("K1ABC"));
+    }
+
+    #[test]
+    fn debug_payload_log_truncates_large_output() {
+        let payload = json!({
+            "notes": "x".repeat(MAX_DEBUG_PAYLOAD_LOG_LENGTH * 2),
+            "other": vec!["value"; MAX_DEBUG_PAYLOAD_LOG_LENGTH]
+        });
+
+        let logged = debug_payload_log(&payload);
+
+        assert!(logged.contains("<string length="));
+        assert!(logged.contains("<truncated total_chars="));
+        assert!(logged.chars().count() <= MAX_DEBUG_PAYLOAD_LOG_LENGTH);
     }
 }

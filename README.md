@@ -92,7 +92,7 @@ cargo run -p log73-backend -- --bind 0.0.0.0:7300
 cargo run -p log73-backend -- --bind 127.0.0.1:8080
 ```
 
-Backend logging defaults to `info` on stdout. You can change the level or write to a file. At `debug` level, incoming request details and pretty-printed POST JSON bodies are logged, with sensitive HTTP headers redacted:
+Backend logging defaults to `info` on stdout. You can change the level or write to a file. At `debug` level, incoming request details and selected POST JSON payload summaries are logged, with sensitive HTTP headers redacted, sensitive payload fields redacted, and long payloads truncated:
 
 ```bash
 cargo run -p log73-backend -- --data-dir ./data --log-level debug
