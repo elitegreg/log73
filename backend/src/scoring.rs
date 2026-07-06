@@ -36,201 +36,6 @@ fn scoring_module_key(contest_id: &str, contest_params: &Value) -> String {
     )
 }
 
-#[allow(dead_code)]
-#[derive(Clone, Default)]
-pub struct ContestScoreTracker {
-    logs: Arc<Mutex<HashMap<i64, TrackedLogScore>>>,
-}
-
-#[allow(dead_code)]
-#[derive(Clone)]
-struct TrackedLogScore {
-    contacts: Vec<Contact>,
-    scorer: ContestScorer,
-    totals: ScoreTotals,
-}
-
-#[allow(dead_code)]
-impl ContestScoreTracker {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn reset_log(
-        &self,
-        log_id: i64,
-        module: Arc<ContestScoringModule>,
-        contacts: &mut [Contact],
-    ) -> ScoreTotals {
-        let mut scorer = module.scorer();
-        scorer.reset();
-        for contact in contacts.iter_mut() {
-            scorer.add_qso(contact);
-        }
-        let totals = scorer.totals();
-
-        let mut logs = self.logs.lock().expect("score tracker mutex poisoned");
-        logs.insert(
-            log_id,
-            TrackedLogScore {
-                contacts: contacts.to_vec(),
-                scorer,
-                totals: totals.clone(),
-            },
-        );
-
-        totals
-    }
-
-    pub fn totals(&self, log_id: i64) -> Option<ScoreTotals> {
-        let logs = self.logs.lock().expect("score tracker mutex poisoned");
-        logs.get(&log_id).map(|score| score.totals.clone())
-    }
-
-    pub fn remove_log(&self, log_id: i64) {
-        let mut logs = self.logs.lock().expect("score tracker mutex poisoned");
-        logs.remove(&log_id);
-    }
-
-    pub fn contact(&self, log_id: i64, contact_id: i64) -> Option<Contact> {
-        let logs = self.logs.lock().expect("score tracker mutex poisoned");
-        logs.get(&log_id).and_then(|score| {
-            score
-                .contacts
-                .iter()
-                .find(|contact| contact_id_for(contact) == Some(contact_id))
-                .cloned()
-        })
-    }
-
-    pub fn contacts(&self, log_id: i64) -> Vec<Contact> {
-        let logs = self.logs.lock().expect("score tracker mutex poisoned");
-        logs.get(&log_id)
-            .map(|score| score.contacts.clone())
-            .unwrap_or_default()
-    }
-
-    pub fn contacts_display_page(&self, log_id: i64, offset: usize, limit: usize) -> Vec<Contact> {
-        if limit == 0 {
-            return Vec::new();
-        }
-
-        let logs = self.logs.lock().expect("score tracker mutex poisoned");
-        let Some(score) = logs.get(&log_id) else {
-            return Vec::new();
-        };
-
-        let total = score.contacts.len();
-        if offset >= total {
-            return Vec::new();
-        }
-
-        let end_from_newest = offset.saturating_add(limit).min(total);
-        let start = total - end_from_newest;
-        let end = total - offset;
-
-        let mut page = score.contacts[start..end].to_vec();
-        page.reverse();
-        page
-    }
-
-    pub fn can_append(&self, log_id: i64, contact: &Contact) -> bool {
-        let logs = self.logs.lock().expect("score tracker mutex poisoned");
-        let Some(score) = logs.get(&log_id) else {
-            return false;
-        };
-        score
-            .contacts
-            .last()
-            .map(|last_contact| contact_score_order(last_contact) <= contact_score_order(contact))
-            .unwrap_or(true)
-    }
-
-    pub fn removing_contact_affects_dupes(&self, log_id: i64, contact: &Contact) -> bool {
-        if contact_meta_value(contact, "dupe")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            return false;
-        }
-
-        let logs = self.logs.lock().expect("score tracker mutex poisoned");
-        let Some(score) = logs.get(&log_id) else {
-            return true;
-        };
-        let Some(contact_key) = score.scorer.dupe_key(contact) else {
-            return false;
-        };
-        let contact_id = contact_id_for(contact);
-
-        score.contacts.iter().any(|other| {
-            contact_id_for(other) != contact_id
-                && score.scorer.dupe_key(other).as_deref() == Some(contact_key.as_str())
-        })
-    }
-
-    pub fn is_last_contact(&self, log_id: i64, contact: &Contact) -> bool {
-        let contact_id = contact_id_for(contact);
-        let logs = self.logs.lock().expect("score tracker mutex poisoned");
-        logs.get(&log_id)
-            .and_then(|score| score.contacts.last())
-            .map(|last_contact| contact_id_for(last_contact) == contact_id)
-            .unwrap_or(false)
-    }
-
-    pub fn add_incremental(
-        &self,
-        log_id: i64,
-        mut contact: Contact,
-    ) -> Option<(Contact, ScoreTotals)> {
-        let mut logs = self.logs.lock().expect("score tracker mutex poisoned");
-        let score = logs.get_mut(&log_id)?;
-
-        score.scorer.add_qso(&mut contact);
-        score.contacts.push(contact.clone());
-        score.totals = score.scorer.totals();
-
-        Some((contact, score.totals.clone()))
-    }
-
-    pub fn replace_incremental(
-        &self,
-        log_id: i64,
-        mut contact: Contact,
-    ) -> Option<(Contact, ScoreTotals)> {
-        let contact_id = contact_id_for(&contact)?;
-        let mut logs = self.logs.lock().expect("score tracker mutex poisoned");
-        let score = logs.get_mut(&log_id)?;
-        let index = score
-            .contacts
-            .iter()
-            .position(|current| contact_id_for(current) == Some(contact_id))?;
-
-        let old_contact = score.contacts[index].clone();
-        score.scorer.remove_scored_qso(&old_contact);
-        score.scorer.add_qso(&mut contact);
-        score.contacts[index] = contact.clone();
-        score.totals = score.scorer.totals();
-
-        Some((contact, score.totals.clone()))
-    }
-
-    pub fn delete_incremental(&self, log_id: i64, contact_id: i64) -> Option<ScoreTotals> {
-        let mut logs = self.logs.lock().expect("score tracker mutex poisoned");
-        let score = logs.get_mut(&log_id)?;
-        let index = score
-            .contacts
-            .iter()
-            .position(|current| contact_id_for(current) == Some(contact_id))?;
-
-        let old_contact = score.contacts.remove(index);
-        score.scorer.remove_scored_qso(&old_contact);
-        score.totals = score.scorer.totals();
-
-        Some(score.totals.clone())
-    }
-}
-
 pub struct ContestScoringModule {
     rules: ContestRules,
     #[allow(dead_code)]
@@ -1224,11 +1029,9 @@ mod tests {
         let mut adif = Map::new();
         for (key, value) in fields {
             match key {
-                "_id" => {
-                    meta.insert("id".to_string(), value);
-                }
-                _ if key.starts_with('_') => {
-                    meta.insert(key.trim_start_matches('_').to_string(), value);
+                "id" | "logId" | "status" | "sessionId" | "clientId" | "force" | "error"
+                | "pts" | "mult" | "bonus" | "dupe" => {
+                    meta.insert(key.to_string(), value);
                 }
                 _ => {
                     adif.insert(key.to_string(), value);
@@ -1456,13 +1259,13 @@ mod tests {
         let tracker = IncrementalScoreTracker::new();
         let mut contacts = vec![
             contact(vec![
-                ("_id", json!(1)),
+                ("id", json!(1)),
                 ("CALL", json!("K1ABC")),
                 ("BAND", json!("20m")),
                 ("MODE", json!("CW")),
             ]),
             contact(vec![
-                ("_id", json!(2)),
+                ("id", json!(2)),
                 ("CALL", json!("K1ABC")),
                 ("BAND", json!("20m")),
                 ("MODE", json!("CW")),
@@ -1507,21 +1310,21 @@ mod tests {
         let tracker = IncrementalScoreTracker::new();
         let mut contacts = vec![
             contact(vec![
-                ("_id", json!(1)),
+                ("id", json!(1)),
                 ("CALL", json!("K1AAA")),
                 ("BAND", json!("20m")),
                 ("MODE", json!("CW")),
                 ("STATE", json!("SC")),
             ]),
             contact(vec![
-                ("_id", json!(2)),
+                ("id", json!(2)),
                 ("CALL", json!("K1BBB")),
                 ("BAND", json!("20m")),
                 ("MODE", json!("CW")),
                 ("STATE", json!("NC")),
             ]),
             contact(vec![
-                ("_id", json!(3)),
+                ("id", json!(3)),
                 ("CALL", json!("K1CCC")),
                 ("BAND", json!("20m")),
                 ("MODE", json!("CW")),

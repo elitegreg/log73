@@ -31,31 +31,11 @@ pub fn contact_adif(contact: &Contact) -> Option<&ContactFields> {
 }
 
 pub fn contact_meta_value<'a>(contact: &'a Contact, key: &str) -> Option<&'a Value> {
-    contact_meta(contact)
-        .and_then(|meta| meta.get(key))
-        .or_else(|| {
-            let legacy_key = match key {
-                "id" => Some("_id"),
-                "logId" => Some("_log_id"),
-                "status" => Some("_status"),
-                "sessionId" => Some("_session_id"),
-                "clientId" => Some("_client_id"),
-                "force" => Some("_force"),
-                "error" => Some("_error"),
-                "pts" => Some("_pts"),
-                "mult" => Some("_mult"),
-                "bonus" => Some("_bonus"),
-                "dupe" => Some("_dupe"),
-                _ => None,
-            };
-            legacy_key.and_then(|legacy| contact.get(legacy))
-        })
+    contact_meta(contact).and_then(|meta| meta.get(key))
 }
 
 pub fn contact_adif_value<'a>(contact: &'a Contact, key: &str) -> Option<&'a Value> {
-    contact_adif(contact)
-        .and_then(|adif| adif.get(key))
-        .or_else(|| contact.get(key))
+    contact_adif(contact).and_then(|adif| adif.get(key))
 }
 
 pub fn set_contact_meta(contact: &mut Contact, key: &str, value: Value) {
@@ -78,9 +58,7 @@ pub fn set_contact_adif(contact: &mut Contact, key: &str, value: Value) {
 }
 
 pub fn contact_id(contact: &Contact) -> Option<i64> {
-    contact_meta_value(contact, "id")
-        .or_else(|| contact.get("ID"))
-        .and_then(json_i64_value)
+    contact_meta_value(contact, "id").and_then(json_i64_value)
 }
 
 pub fn contact_log_id(contact: &Contact) -> Option<i64> {
@@ -1437,7 +1415,7 @@ fn json_serial_value(value: &Value) -> Option<i64> {
 }
 
 fn upsert_contact(connection: &Connection, contact: Contact) -> rusqlite::Result<i64> {
-    let id = contact_id(&contact).or_else(|| json_i64(contact.get("ID")));
+    let id = contact_id(&contact);
     let requested_log_id = contact_log_id(&contact).unwrap_or(1);
 
     if let Some(id) = id
@@ -1477,7 +1455,6 @@ fn contact_to_sql_values(contact: &Contact) -> Vec<SqlValue> {
             }
             if *column == "QSO_DATE_TIME_ON" {
                 return json_i64(contact_adif_value(contact, "QSO_DATE_TIME_ON"))
-                    .or_else(|| legacy_epoch(contact))
                     .map(SqlValue::Integer)
                     .unwrap_or(SqlValue::Null);
             }
@@ -1577,36 +1554,6 @@ fn json_i64_value(value: &Value) -> Option<i64> {
         Value::String(string) => string.parse::<i64>().ok(),
         _ => None,
     }
-}
-
-fn legacy_epoch(contact: &Contact) -> Option<i64> {
-    let date = contact_adif_value(contact, "QSO_DATE")?.as_str()?;
-    let time = contact_adif_value(contact, "TIME_ON")?.as_str()?;
-    if date.len() != 8 || time.len() != 6 {
-        return None;
-    }
-    let year = date[0..4].parse::<i32>().ok()?;
-    let month = date[4..6].parse::<u32>().ok()?;
-    let day = date[6..8].parse::<u32>().ok()?;
-    let hour = time[0..2].parse::<u32>().ok()?;
-    let minute = time[2..4].parse::<u32>().ok()?;
-    let second = time[4..6].parse::<u32>().ok()?;
-    let days = days_from_civil(year, month, day)?;
-    Some(days * 86_400 + i64::from(hour * 3_600 + minute * 60 + second))
-}
-
-fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let year = year - i32::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let yoe = year - era * 400;
-    let month = month as i32;
-    let day = day as i32;
-    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    Some(i64::from(era * 146_097 + doe - 719_468))
 }
 
 fn frequency_hz(value: Option<&Value>) -> Option<i64> {

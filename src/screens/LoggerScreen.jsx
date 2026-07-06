@@ -109,7 +109,7 @@ function formatSocketDebugDetails(details) {
 
 function callsignPrefixMatches(contact, callsignPrefix) {
   if (!callsignPrefix) return true;
-  const callsign = String(adifValue(contact, 'CALL') ?? contact?.Call ?? '')
+  const callsign = String(adifValue(contact, 'CALL') ?? '')
     .trim()
     .toUpperCase();
   return callsign.startsWith(callsignPrefix);

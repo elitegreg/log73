@@ -870,8 +870,7 @@ fn validate_json_value_size(value: &Value, depth: usize) -> Result<(), String> {
 }
 
 fn validate_qso_epoch(contact: &Contact) -> Result<(), String> {
-    let epoch =
-        json_i64(contact_adif_value(contact, "QSO_DATE_TIME_ON")).or_else(|| legacy_epoch(contact));
+    let epoch = json_i64(contact_adif_value(contact, "QSO_DATE_TIME_ON"));
     let Some(epoch) = epoch else {
         return Err("QSO date/time is required".to_string());
     };
@@ -1193,36 +1192,6 @@ fn json_trimmed_string(value: Option<&Value>) -> Option<String> {
     }
 }
 
-fn legacy_epoch(contact: &Contact) -> Option<i64> {
-    let date = contact_adif_value(contact, "QSO_DATE")?.as_str()?;
-    let time = contact_adif_value(contact, "TIME_ON")?.as_str()?;
-    if date.len() != 8 || time.len() != 6 {
-        return None;
-    }
-    let year = date[0..4].parse::<i32>().ok()?;
-    let month = date[4..6].parse::<u32>().ok()?;
-    let day = date[6..8].parse::<u32>().ok()?;
-    let hour = time[0..2].parse::<u32>().ok()?;
-    let minute = time[2..4].parse::<u32>().ok()?;
-    let second = time[4..6].parse::<u32>().ok()?;
-    let days = days_from_civil(year, month, day)?;
-    Some(days * 86_400 + i64::from(hour * 3_600 + minute * 60 + second))
-}
-
-fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i64> {
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    let year = year - i32::from(month <= 2);
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let yoe = year - era * 400;
-    let month = month as i32;
-    let day = day as i32;
-    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    Some(i64::from(era * 146_097 + doe - 719_468))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1261,17 +1230,19 @@ mod tests {
     }
 
     fn test_contact() -> Contact {
-        Map::from_iter([
-            ("_log_id".to_string(), json!(1)),
-            ("CONTEST_ID".to_string(), json!("TEST")),
-            ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
-            ("STATION_CALLSIGN".to_string(), json!("N0CALL")),
-            ("CALL".to_string(), json!("K1ABC")),
-            ("BAND".to_string(), json!("20m")),
-            ("FREQ".to_string(), json!(14_074_000_i64)),
-            ("MODE".to_string(), json!("CW")),
-            ("RST_RCVD".to_string(), json!(599)),
-        ])
+        crate::db::build_contact(
+            Map::from_iter([("logId".to_string(), json!(1))]),
+            Map::from_iter([
+                ("CONTEST_ID".to_string(), json!("TEST")),
+                ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
+                ("STATION_CALLSIGN".to_string(), json!("N0CALL")),
+                ("CALL".to_string(), json!("K1ABC")),
+                ("BAND".to_string(), json!("20m")),
+                ("FREQ".to_string(), json!(14_074_000_i64)),
+                ("MODE".to_string(), json!("CW")),
+                ("RST_RCVD".to_string(), json!(599)),
+            ]),
+        )
     }
 
     fn test_radio() -> NewRadio {

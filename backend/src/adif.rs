@@ -590,21 +590,25 @@ mod tests {
     }
 
     fn test_contact() -> Contact {
-        Map::from_iter([
-            ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_123_i64)),
-            ("OPERATOR".to_string(), json!("K1ABC")),
-            ("CALL".to_string(), json!("W1AW")),
-            ("BAND".to_string(), json!("20m")),
-            ("FREQ".to_string(), json!(14_250_000_i64)),
-            ("MODE".to_string(), json!("SSB")),
-            ("RST_SENT".to_string(), json!(59)),
-            ("RST_RCVD".to_string(), json!(59)),
-            ("SRX_STRING".to_string(), json!("NC")),
-            ("STX_STRING".to_string(), json!("ABBE")),
-            ("APP_LOG73_FOO".to_string(), json!("bar")),
-            ("_id".to_string(), json!(99)),
-            ("LOG_ID".to_string(), json!(1)),
-        ])
+        crate::db::build_contact(
+            Map::from_iter([
+                ("id".to_string(), json!(99)),
+                ("logId".to_string(), json!(1)),
+            ]),
+            Map::from_iter([
+                ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_123_i64)),
+                ("OPERATOR".to_string(), json!("K1ABC")),
+                ("CALL".to_string(), json!("W1AW")),
+                ("BAND".to_string(), json!("20m")),
+                ("FREQ".to_string(), json!(14_250_000_i64)),
+                ("MODE".to_string(), json!("SSB")),
+                ("RST_SENT".to_string(), json!(59)),
+                ("RST_RCVD".to_string(), json!(59)),
+                ("SRX_STRING".to_string(), json!("NC")),
+                ("STX_STRING".to_string(), json!("ABBE")),
+                ("APP_LOG73_FOO".to_string(), json!("bar")),
+            ]),
+        )
     }
 
     fn test_rules() -> ContestRules {
@@ -680,7 +684,7 @@ mod tests {
     #[test]
     fn render_log_maps_cw_reverse_to_adif_cw() {
         let mut contact = test_contact();
-        contact.insert("MODE".to_string(), json!("CW-R"));
+        crate::db::set_contact_adif(&mut contact, "MODE", json!("CW-R"));
         let text = render_log(&test_log(), &[contact]).expect("ADIF export should render");
 
         assert!(text.contains("<MODE:2>CW"));
@@ -689,14 +693,20 @@ mod tests {
 
     #[test]
     fn render_log_rejects_missing_epoch() {
-        let error = render_log(&test_log(), &[Map::new()]).expect_err("epoch is required");
+        let error = render_log(
+            &test_log(),
+            &[crate::db::build_contact(Map::new(), Map::new())],
+        )
+        .expect_err("epoch is required");
         assert_eq!(error, "contact is missing QSO_DATE_TIME_ON");
     }
 
     #[tokio::test]
     async fn render_log_output_parses_with_radif_tokio() {
         let mut contact = test_contact();
-        contact.remove("APP_LOG73_FOO");
+        if let Some(adif) = contact.get_mut("adif").and_then(Value::as_object_mut) {
+            adif.remove("APP_LOG73_FOO");
+        }
         let text = render_log(&test_log(), &[contact]).expect("ADIF export should render");
         let (mut writer, reader) = tokio::io::duplex(4096);
         let bytes = text.into_bytes();

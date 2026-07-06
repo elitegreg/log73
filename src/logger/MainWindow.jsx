@@ -1493,7 +1493,7 @@ function MainWindow({
 
     if (!spotCallsign) {
       spotCallsign = String(
-        lastContact?.adif?.CALL ?? lastContact?.CALL ?? lastContact?.Call ?? '',
+        lastContact?.adif?.CALL ?? '',
       )
         .trim()
         .toUpperCase();

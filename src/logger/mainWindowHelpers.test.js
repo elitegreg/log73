@@ -247,17 +247,19 @@ test('previousContactExchangeAutofill copies non-serial fields from exact callsi
     ],
   };
   const newestContact = {
-    CALL: 'K1ABC',
-    STX: '123',
-    NAME: 'alice',
-    QTH: 'ny',
+    adif: {
+      CALL: 'K1ABC',
+      STX: '123',
+      NAME: 'alice',
+      QTH: 'ny',
+    },
   };
 
   const result = previousContactExchangeAutofill({
     settings,
     contacts: [
       newestContact,
-      { CALL: 'K1ABC', STX: '122', NAME: 'older', QTH: 'ma' },
+      { adif: { CALL: 'K1ABC', STX: '122', NAME: 'older', QTH: 'ma' } },
     ],
     callsign: ' k1abc ',
     exchangeValues: { Serial: '999', Name: '', QTH: '' },
@@ -284,7 +286,7 @@ test('previousContactExchangeAutofill preserves user-entered values and requires
 
   const prefixOnly = previousContactExchangeAutofill({
     settings,
-    contacts: [{ CALL: 'K1ABC', NAME: 'Alice', ARRL_SECT: 'SC' }],
+    contacts: [{ adif: { CALL: 'K1ABC', NAME: 'Alice', ARRL_SECT: 'SC' } }],
     callsign: 'K1A',
     exchangeValues: { Name: '', Section: '' },
   });
@@ -295,7 +297,7 @@ test('previousContactExchangeAutofill preserves user-entered values and requires
 
   const exact = previousContactExchangeAutofill({
     settings,
-    contacts: [{ Call: 'k1abc', NAME: 'Alice', ARRL_SECT: 'SC' }],
+    contacts: [{ adif: { CALL: 'k1abc', NAME: 'Alice', ARRL_SECT: 'SC' } }],
     callsign: 'K1ABC',
     exchangeValues: { Name: 'BOB', Section: '' },
   });

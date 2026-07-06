@@ -7,23 +7,29 @@ const settings = {
   qso_column_fields: {},
 };
 
+function contact(adif) {
+  return { adif };
+}
+
 test('dupeAlertText is blank without dupe key fields', () => {
   assert.equal(
-    dupeAlertText({ dupe_key: [] }, { CALL: 'K1ABC' }, [{ CALL: 'K1ABC' }]),
+    dupeAlertText({ dupe_key: [] }, contact({ CALL: 'K1ABC' }), [
+      contact({ CALL: 'K1ABC' }),
+    ]),
     '',
   );
 });
 
 test('dupeAlertText detects exact dupes', () => {
-  const currentContact = {
+  const currentContact = contact({
     CALL: 'K1ABC',
     BAND: '20m',
     MODE: 'CW',
     SRX_STRING: 'SC',
-  };
+  });
   const historicContacts = [
-    { CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'NC' },
-    { CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' },
+    contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'NC' }),
+    contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' }),
   ];
 
   assert.equal(
@@ -33,14 +39,14 @@ test('dupeAlertText detects exact dupes', () => {
 });
 
 test('dupeAlertText detects possible dupes before exact exchange is known', () => {
-  const currentContact = {
+  const currentContact = contact({
     CALL: 'K1ABC',
     BAND: '20m',
     MODE: 'CW',
     SRX_STRING: '',
-  };
+  });
   const historicContacts = [
-    { CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' },
+    contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' }),
   ];
 
   assert.equal(
@@ -58,8 +64,8 @@ test('dupeAlertText possible key uses only call, band, and mode fields from dupe
   assert.equal(
     dupeAlertText(
       callOnlyPossibleSettings,
-      { CALL: 'K1ABC', SRX_STRING: 'SC' },
-      [{ CALL: 'K1ABC', SRX_STRING: 'NC' }],
+      contact({ CALL: 'K1ABC', SRX_STRING: 'SC' }),
+      [contact({ CALL: 'K1ABC', SRX_STRING: 'NC' })],
     ),
     'Possible Dupe',
   );
@@ -77,24 +83,24 @@ test('dupeAlertText normalizes callsigns and mapped field values like scoring', 
   assert.equal(
     dupeAlertText(
       mappedSettings,
-      { CALL: 'k1abc/p', BAND: '20m', MODE: 'cw' },
-      [{ Call: 'K1ABC', BAND: '20M', MODE: 'CW' }],
+      contact({ CALL: 'k1abc/p', BAND: '20m', MODE: 'cw' }),
+      [contact({ CALL: 'K1ABC', BAND: '20M', MODE: 'CW' })],
     ),
     'Dupe',
   );
 });
 
 test('dupeAlertText stops scanning after the matching callsign group', () => {
-  const currentContact = {
+  const currentContact = contact({
     CALL: 'K1ABC',
     BAND: '20m',
     MODE: 'CW',
     SRX_STRING: 'SC',
-  };
+  });
   const historicContacts = [
-    { CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'NC' },
-    { CALL: 'K1ABCD', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' },
-    { CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' },
+    contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'NC' }),
+    contact({ CALL: 'K1ABCD', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' }),
+    contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' }),
   ];
 
   assert.equal(

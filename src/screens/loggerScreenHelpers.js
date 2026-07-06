@@ -44,46 +44,17 @@ export function contactAdif(contact) {
 
 export function metaValue(contact, key) {
   const meta = contactMeta(contact);
-  if (Object.prototype.hasOwnProperty.call(meta, key)) return meta[key];
-  const legacyKey = {
-    id: '_id',
-    logId: '_log_id',
-    status: '_status',
-    sessionId: '_session_id',
-    clientId: '_client_id',
-    force: '_force',
-    error: '_error',
-    pts: '_pts',
-    mult: '_mult',
-    bonus: '_bonus',
-    dupe: '_dupe',
-    timeOnEpoch: '_time_on_epoch',
-  }[key];
-  return legacyKey ? contact?.[legacyKey] : undefined;
+  return Object.prototype.hasOwnProperty.call(meta, key) ? meta[key] : undefined;
 }
 
 export function adifValue(contact, key) {
   const adif = contactAdif(contact);
-  if (Object.prototype.hasOwnProperty.call(adif, key)) return adif[key];
-  return contact?.[key];
+  return Object.prototype.hasOwnProperty.call(adif, key) ? adif[key] : undefined;
 }
 
 export function contactSortValue(contact) {
   const qsoDateTimeOn = adifValue(contact, 'QSO_DATE_TIME_ON');
-  if (typeof qsoDateTimeOn === 'number') return qsoDateTimeOn;
-  const timeOnEpoch = metaValue(contact, 'timeOnEpoch');
-  if (typeof timeOnEpoch === 'number') return timeOnEpoch;
-  const date = String(adifValue(contact, 'QSO_DATE') ?? '');
-  const time = String(adifValue(contact, 'TIME_ON') ?? '');
-  const parsed = Date.UTC(
-    Number.parseInt(date.slice(0, 4), 10),
-    Number.parseInt(date.slice(4, 6), 10) - 1,
-    Number.parseInt(date.slice(6, 8), 10),
-    Number.parseInt(time.slice(0, 2), 10),
-    Number.parseInt(time.slice(2, 4), 10),
-    Number.parseInt(time.slice(4, 6), 10),
-  );
-  return Number.isFinite(parsed) ? Math.floor(parsed / 1000) : 0;
+  return typeof qsoDateTimeOn === 'number' ? qsoDateTimeOn : 0;
 }
 
 export function sortContacts(contacts) {
@@ -93,9 +64,7 @@ export function sortContacts(contacts) {
 }
 
 function contactCallsign(contact) {
-  return String(adifValue(contact, 'CALL') ?? contact?.Call ?? '')
-    .trim()
-    .toUpperCase();
+  return String(adifValue(contact, 'CALL') ?? '').trim().toUpperCase();
 }
 
 function compareText(left, right) {
@@ -134,37 +103,8 @@ export function sortContactsByCallsignThenTime(contacts) {
 }
 
 export function normalizeContact(contact) {
-  const legacyMeta = {
-    id: contact?._id,
-    logId: contact?._log_id,
-    status: contact?._status,
-    sessionId: contact?._session_id,
-    clientId: contact?._client_id,
-    force: contact?._force,
-    error: contact?._error,
-    pts: contact?._pts,
-    mult: contact?._mult,
-    bonus: contact?._bonus,
-    dupe: contact?._dupe,
-    timeOnEpoch: contact?._time_on_epoch,
-  };
-  const meta = {
-    ...(isObject(contact?.meta) ? contact.meta : {}),
-    ...Object.fromEntries(
-      Object.entries(legacyMeta).filter(([, value]) => value !== undefined),
-    ),
-  };
-  const adif = isObject(contact?.adif)
-    ? { ...contact.adif }
-    : Object.fromEntries(
-        Object.entries(contact ?? {}).filter(
-          ([key, value]) =>
-            key !== 'meta' &&
-            key !== 'adif' &&
-            !key.startsWith('_') &&
-            value !== undefined,
-        ),
-      );
+  const meta = isObject(contact?.meta) ? { ...contact.meta } : {};
+  const adif = isObject(contact?.adif) ? { ...contact.adif } : {};
 
   if (
     meta.status === 'Committed' &&
@@ -172,10 +112,6 @@ export function normalizeContact(contact) {
     meta.id !== null
   ) {
     meta.clientId = String(meta.id);
-  }
-  if (typeof adif.QSO_DATE_TIME_ON !== 'number') {
-    const epoch = contactSortValue({ meta, adif });
-    if (epoch > 0) adif.QSO_DATE_TIME_ON = epoch;
   }
   if (adif.FREQ !== undefined) {
     const frequency = Number.parseFloat(String(adif.FREQ));
@@ -185,9 +121,6 @@ export function normalizeContact(contact) {
       );
     }
   }
-  delete adif.QSO_DATE;
-  delete adif.TIME_ON;
-  delete meta.timeOnEpoch;
 
   return { meta, adif };
 }

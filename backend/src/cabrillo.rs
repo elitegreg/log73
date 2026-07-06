@@ -457,18 +457,21 @@ mod tests {
     }
 
     fn test_contact(operator: &str, call: &str, epoch: i64) -> Contact {
-        Map::from_iter([
-            ("QSO_DATE_TIME_ON".to_string(), json!(epoch)),
-            ("STATION_CALLSIGN".to_string(), json!("N0CALL")),
-            ("OPERATOR".to_string(), json!(operator)),
-            ("CALL".to_string(), json!(call)),
-            ("FREQ".to_string(), json!(14_250_000_i64)),
-            ("MODE".to_string(), json!("SSB")),
-            ("RST_SENT".to_string(), json!(59)),
-            ("STX_STRING".to_string(), json!("ABBE")),
-            ("RST_RCVD".to_string(), json!(59)),
-            ("SRX_STRING".to_string(), json!("NC")),
-        ])
+        crate::db::build_contact(
+            Map::new(),
+            Map::from_iter([
+                ("QSO_DATE_TIME_ON".to_string(), json!(epoch)),
+                ("STATION_CALLSIGN".to_string(), json!("N0CALL")),
+                ("OPERATOR".to_string(), json!(operator)),
+                ("CALL".to_string(), json!(call)),
+                ("FREQ".to_string(), json!(14_250_000_i64)),
+                ("MODE".to_string(), json!("SSB")),
+                ("RST_SENT".to_string(), json!(59)),
+                ("STX_STRING".to_string(), json!("ABBE")),
+                ("RST_RCVD".to_string(), json!(59)),
+                ("SRX_STRING".to_string(), json!("NC")),
+            ]),
+        )
     }
 
     #[test]
@@ -516,7 +519,10 @@ mod tests {
             ("FT8", "DG"),
             ("PSK", "DG"),
         ] {
-            let contact = Map::from_iter([("MODE".to_string(), json!(mode))]);
+            let contact = crate::db::build_contact(
+                Map::new(),
+                Map::from_iter([("MODE".to_string(), json!(mode))]),
+            );
             assert_eq!(qso_mode_token(&contact).as_deref(), Some(token));
         }
     }
