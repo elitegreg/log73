@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ConfiguredFields from '../components/ConfiguredFields';
 import { sanitizeConfiguredValue } from '../domain/contactFields';
-import { validateConfiguredField } from '../domain/validation';
+import { validateCallsign, validateConfiguredField } from '../domain/validation';
 import { apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
@@ -161,6 +161,14 @@ function CreateLogScreen() {
       );
       notifyError(validation.error, {
         dedupeKey: `CreateLogScreen.invalid:${invalidField.name}`,
+      });
+      return;
+    }
+
+    const stationCallsignValidation = validateCallsign(stationCallsign);
+    if (!stationCallsignValidation.ok) {
+      notifyError(stationCallsignValidation.error, {
+        dedupeKey: 'CreateLogScreen.invalid:station_callsign',
       });
       return;
     }

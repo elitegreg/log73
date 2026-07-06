@@ -70,11 +70,7 @@ pub enum LoginPasswordChange {
 
 pub fn validate_new_log(contest_rules: &ContestRulesStore, payload: &NewLog) -> Result<(), String> {
     validate_required_text("log name", &payload.name, MAX_LOG_NAME_LEN)?;
-    validate_required_text(
-        "station callsign",
-        &payload.station_callsign,
-        MAX_CALLSIGN_LEN,
-    )?;
+    validate_callsign("station callsign", &payload.station_callsign, false)?;
 
     let contest_id = payload.contest_id.trim();
     validate_required_text("contest", contest_id, MAX_CONTEST_ID_LEN)?;
@@ -86,11 +82,7 @@ pub fn validate_new_log(contest_rules: &ContestRulesStore, payload: &NewLog) -> 
 
 pub fn validate_update_log(rules: &ContestRules, payload: &UpdateLog) -> Result<(), String> {
     validate_required_text("log name", &payload.name, MAX_LOG_NAME_LEN)?;
-    validate_required_text(
-        "station callsign",
-        &payload.station_callsign,
-        MAX_CALLSIGN_LEN,
-    )?;
+    validate_callsign("station callsign", &payload.station_callsign, false)?;
     validate_persisted_log_params(rules, &payload.contest_params)
 }
 
@@ -586,10 +578,7 @@ pub fn validate_dxcluster_spot_request(
     comment: &str,
 ) -> Result<(), String> {
     validate_radio_frequency_hz(frequency_hz)?;
-    validate_required_text("DX spot callsign", call, MAX_CALLSIGN_LEN)?;
-    if call.trim().chars().any(char::is_whitespace) {
-        return Err("DX spot callsign cannot contain whitespace".to_string());
-    }
+    validate_callsign("DX spot callsign", call, false)?;
     validate_optional_plain_text("DX spot comment", comment, MAX_DXCLUSTER_SPOT_COMMENT_LEN)?;
     Ok(())
 }
@@ -745,14 +734,14 @@ fn validate_contact(rules: &ContestRules, log_id: i64, contact: &Contact) -> Res
     validate_qso_epoch(contact)?;
     let station_callsign =
         json_trimmed_string(contact_adif_value(contact, "STATION_CALLSIGN")).unwrap_or_default();
-    validate_required_text("station callsign", &station_callsign, MAX_CALLSIGN_LEN)?;
+    validate_callsign("station callsign", &station_callsign, false)?;
     if let Some(operator) = json_trimmed_string(contact_adif_value(contact, "OPERATOR"))
         && !operator.is_empty()
     {
-        validate_required_text("operator callsign", &operator, MAX_CALLSIGN_LEN)?;
+        validate_callsign("operator callsign", &operator, false)?;
     }
     let callsign = json_trimmed_string(contact_adif_value(contact, "CALL")).unwrap_or_default();
-    validate_required_text("callsign", &callsign, MAX_CALLSIGN_LEN)?;
+    validate_callsign("callsign", &callsign, false)?;
     validate_contact_band_and_frequency(rules, contact)?;
     let mode = validate_contact_mode(rules, contact)?;
 
@@ -1071,6 +1060,46 @@ fn validate_required_text(label: &str, value: &str, max_length: usize) -> Result
     Ok(())
 }
 
+fn validate_callsign(label: &str, value: &str, allow_query: bool) -> Result<(), String> {
+    validate_required_text(label, value, MAX_CALLSIGN_LEN)?;
+    let value = value.trim().to_uppercase();
+
+    if !value.chars().all(|character| {
+        character.is_ascii_uppercase()
+            || character.is_ascii_digit()
+            || character == '/'
+            || (allow_query && character == '?')
+    }) {
+        let allowed = if allow_query {
+            "A-Z, 0-9, '/', and '?'"
+        } else {
+            "A-Z, 0-9, and '/'"
+        };
+        return Err(format!("{label} can only contain {allowed}"));
+    }
+
+    if !allow_query && value.contains('?') {
+        return Err(format!("{label} cannot contain '?'"));
+    }
+
+    let slash_count = value.chars().filter(|character| *character == '/').count();
+    if slash_count > 1 {
+        return Err(format!("{label} can contain at most one slash"));
+    }
+    if value.starts_with('/') || value.ends_with('/') {
+        return Err(format!("{label} slash must be in the middle, not at the ends"));
+    }
+
+    let characters = value.chars().collect::<Vec<_>>();
+    let second_character = characters.get(1).copied().unwrap_or_default();
+    let third_character = characters.get(2).copied().unwrap_or_default();
+    if !second_character.is_ascii_digit() && !third_character.is_ascii_digit() {
+        return Err(format!("{label} must have a digit in the 2nd or 3rd character"));
+    }
+
+    Ok(())
+}
+
 fn validate_optional_plain_text(label: &str, value: &str, max_length: usize) -> Result<(), String> {
     let value = value.trim();
     if value.chars().count() > max_length {
@@ -1359,6 +1388,25 @@ mod tests {
     fn validates_contact_payload() {
         let rules = test_rules();
         assert!(validate_contact(&rules, 1, &test_contact()).is_ok());
+    }
+
+    #[test]
+    fn validates_callsigns_for_logs_and_contacts() {
+        assert!(validate_callsign("station callsign", "K1ABC/P", false).is_ok());
+        assert!(validate_callsign("station callsign", "K1ABC/4", false).is_ok());
+        assert!(validate_callsign("operator callsign", "N0CALL/M", false).is_ok());
+        assert!(validate_callsign("callsign", "W1AW/4", false).is_ok());
+    }
+
+    #[test]
+    fn rejects_invalid_station_and_operator_callsigns() {
+        let error = validate_callsign("station callsign", "KABC", false)
+            .expect_err("invalid station callsign should fail");
+        assert!(error.contains("station callsign must have a digit in the 2nd or 3rd character"));
+
+        let error = validate_callsign("operator callsign", "BAD", false)
+            .expect_err("invalid operator callsign should fail");
+        assert!(error.contains("operator callsign must have a digit in the 2nd or 3rd character"));
     }
 
     #[test]

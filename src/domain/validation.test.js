@@ -18,6 +18,7 @@ test('validateCallsign enforces logging rules', () => {
   assert.equal(validateCallsign('4O9A').ok, true);
   assert.equal(validateCallsign('KA1BC').ok, true);
   assert.equal(validateCallsign('K1ABC/4').ok, true);
+  assert.equal(validateCallsign('K1ABC/P').ok, true);
 
   assert.equal(validateCallsign('').ok, false);
   assert.equal(validateCallsign('WB4?').ok, false);
