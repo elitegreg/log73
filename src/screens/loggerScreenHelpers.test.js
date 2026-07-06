@@ -5,6 +5,8 @@ import {
   appendSerialRange,
   mergeContact,
   reserveNextSerial,
+  saveLocalContacts,
+  saveSerialAllocation,
   serialBatchSize,
   serialRangesRemaining,
   serialRefillRemainingThreshold,
@@ -123,4 +125,69 @@ test('mergeContact updates pending contact and rekeys committed meta.clientId to
   assert.equal(merged[0].meta.id, 77);
   assert.equal(merged[0].meta.status, 'Committed');
   assert.equal(merged[0].meta.clientId, '77');
+});
+
+test('saveLocalContacts catches storage write failures and reports once', async () => {
+  const fetchCalls = [];
+  globalThis.window = {
+    location: { href: 'https://example.test/logger' },
+    navigator: { userAgent: 'node-test' },
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    fetchCalls.push({ url, options });
+    return {
+      ok: true,
+      json: async () => ({ ok: true }),
+    };
+  };
+  globalThis.localStorage = {
+    setItem() {
+      throw new Error('quota exceeded');
+    },
+  };
+
+  const resultA = saveLocalContacts(7, [
+    {
+      meta: { status: 'Pending' },
+      adif: { CALL: 'K1ABC', QSO_DATE_TIME_ON: 100 },
+    },
+  ]);
+  const resultB = saveLocalContacts(7, []);
+  await Promise.resolve();
+
+  assert.equal(resultA, false);
+  assert.equal(resultB, false);
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, '/api/client-errors');
+});
+
+test('saveSerialAllocation catches storage write failures and reports once', async () => {
+  const fetchCalls = [];
+  globalThis.window = {
+    location: { href: 'https://example.test/logger' },
+    navigator: { userAgent: 'node-test' },
+  };
+  globalThis.fetch = async (url, options = {}) => {
+    fetchCalls.push({ url, options });
+    return {
+      ok: true,
+      json: async () => ({ ok: true }),
+    };
+  };
+  globalThis.localStorage = {
+    setItem() {
+      throw new Error('private mode denied');
+    },
+  };
+
+  const resultA = saveSerialAllocation(7, 'STX', 'instance-1', {
+    ranges: [{ next: 10, end: 12 }],
+  });
+  const resultB = saveSerialAllocation(7, 'STX', 'instance-1', { ranges: [] });
+  await Promise.resolve();
+
+  assert.equal(resultA, false);
+  assert.equal(resultB, false);
+  assert.equal(fetchCalls.length, 1);
+  assert.equal(fetchCalls[0].url, '/api/client-errors');
 });

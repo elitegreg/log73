@@ -28,6 +28,8 @@ export const EMPTY_SCORE_SUMMARY = {
   score: 0,
 };
 
+const reportedStorageWriteFailures = new Set();
+
 function isObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -217,11 +219,33 @@ export function loadLocalContacts(logId) {
   }
 }
 
+function reportStorageWriteFailureOnce(kind, message, error, details) {
+  if (reportedStorageWriteFailures.has(kind)) return;
+  reportedStorageWriteFailures.add(kind);
+  reportClientErrorLater({
+    source: `loggerScreenHelpers.${kind}`,
+    message,
+    error,
+    details,
+  });
+}
+
 export function saveLocalContacts(logId, contacts) {
-  localStorage.setItem(
-    contactStorageKey(logId),
-    JSON.stringify(contacts.filter(shouldPersistLocally)),
-  );
+  try {
+    localStorage.setItem(
+      contactStorageKey(logId),
+      JSON.stringify(contacts.filter(shouldPersistLocally)),
+    );
+    return true;
+  } catch (error) {
+    reportStorageWriteFailureOnce(
+      'saveLocalContacts',
+      'Unable to save locally stored contacts. Offline caching is degraded.',
+      error,
+      { logId },
+    );
+    return false;
+  }
 }
 
 export function serialBatchSize(contestParams = {}) {
@@ -292,10 +316,21 @@ export function loadSerialAllocation(logId, fieldAdif, instanceId) {
 }
 
 export function saveSerialAllocation(logId, fieldAdif, instanceId, allocation) {
-  localStorage.setItem(
-    serialAllocationStorageKey(logId, fieldAdif, instanceId),
-    JSON.stringify({ ranges: normalizeSerialRanges(allocation?.ranges) }),
-  );
+  try {
+    localStorage.setItem(
+      serialAllocationStorageKey(logId, fieldAdif, instanceId),
+      JSON.stringify({ ranges: normalizeSerialRanges(allocation?.ranges) }),
+    );
+    return true;
+  } catch (error) {
+    reportStorageWriteFailureOnce(
+      'saveSerialAllocation',
+      'Unable to save locally stored serial allocation. Offline caching is degraded.',
+      error,
+      { logId, fieldAdif },
+    );
+    return false;
+  }
 }
 
 export function normalizeSerialRanges(ranges) {

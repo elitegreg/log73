@@ -208,6 +208,13 @@ function LoggerScreen() {
     [notifyError],
   );
 
+  const notifyOfflineCachingDegraded = useCallback(() => {
+    notifyError(
+      'Offline caching is degraded in this browser. Pending contacts and serial allocations may not be saved locally.',
+      { dedupeKey: 'LoggerScreen.offlineCachingDegraded' },
+    );
+  }, [notifyError]);
+
   const sendRadioMessage = useCallback((message) => {
     const socket = backendSocketRef.current;
     if (socket?.readyState === WebSocket.OPEN)
@@ -279,8 +286,10 @@ function LoggerScreen() {
   }, []);
 
   useEffect(() => {
-    saveLocalContacts(logId, allContacts);
-  }, [allContacts, logId]);
+    if (!saveLocalContacts(logId, allContacts)) {
+      notifyOfflineCachingDegraded();
+    }
+  }, [allContacts, logId, notifyOfflineCachingDegraded]);
 
   useEffect(() => {
     setScoreSummary(EMPTY_SCORE_SUMMARY);
@@ -440,12 +449,16 @@ function LoggerScreen() {
     }
 
     function persist() {
-      saveSerialAllocation(
-        numericLogId,
-        field.adif,
-        instanceId,
-        manager.allocation,
-      );
+      if (
+        !saveSerialAllocation(
+          numericLogId,
+          field.adif,
+          instanceId,
+          manager.allocation,
+        )
+      ) {
+        notifyOfflineCachingDegraded();
+      }
     }
 
     function publish() {
@@ -591,7 +604,12 @@ function LoggerScreen() {
         serialAllocatorRef.current = null;
       }
     };
-  }, [settings, log?.contest_params, numericLogId]);
+  }, [
+    settings,
+    log?.contest_params,
+    numericLogId,
+    notifyOfflineCachingDegraded,
+  ]);
 
   const handleSerialContactLogged = useCallback(() => {
     serialAllocatorRef.current?.consumeLoggedSerial?.();
@@ -1477,7 +1495,9 @@ function LoggerScreen() {
             {
               logId: numericLogId,
               contactId:
-                metaValue(contact, 'id') ?? metaValue(contact, 'clientId') ?? null,
+                metaValue(contact, 'id') ??
+                metaValue(contact, 'clientId') ??
+                null,
             },
           );
           setAllContacts((currentContacts) =>
@@ -1522,7 +1542,9 @@ function LoggerScreen() {
             {
               logId: numericLogId,
               contactId:
-                metaValue(contact, 'id') ?? metaValue(contact, 'clientId') ?? null,
+                metaValue(contact, 'id') ??
+                metaValue(contact, 'clientId') ??
+                null,
             },
           );
           setAllContacts((currentContacts) =>
@@ -1543,7 +1565,9 @@ function LoggerScreen() {
             {
               logId: numericLogId,
               contactId:
-                metaValue(contact, 'id') ?? metaValue(contact, 'clientId') ?? null,
+                metaValue(contact, 'id') ??
+                metaValue(contact, 'clientId') ??
+                null,
             },
           );
         }
@@ -1657,7 +1681,8 @@ function LoggerScreen() {
           return {
             meta: {
               ...contactMeta(contact),
-              status: metaValue(contact, 'id') === undefined ? 'Pending' : 'Updating',
+              status:
+                metaValue(contact, 'id') === undefined ? 'Pending' : 'Updating',
               error: undefined,
             },
             adif: {
