@@ -5,6 +5,7 @@ use crate::db::{
     self, Contact, Database, NewLog, NewRadio, UpdateLog, contact_adif_value, contact_id,
     contact_log_id, contact_meta_value,
 };
+use crate::message_mode::is_valid_message_mode;
 use crate::voice_messages;
 use radio_cat_rs::{Frequency, supported_drivers};
 use regex::Regex;
@@ -542,9 +543,8 @@ pub fn validate_message_request(
 ) -> Result<(), String> {
     validate_required_text("Message request id", request_id, MAX_CW_REQUEST_ID_LEN)?;
 
-    let normalized_mode = mode.trim().to_lowercase();
-    if normalized_mode != "run" && normalized_mode != "s&p" && normalized_mode != "sp" {
-        return Err("Message mode must be run or s&p".to_string());
+    if !is_valid_message_mode(mode) {
+        return Err("Message mode must be run or S&P".to_string());
     }
 
     if keys.is_empty() {
@@ -1372,6 +1372,16 @@ mod tests {
         }
         assert!(validate_radio_mode("AM").is_ok());
         assert!(validate_radio_mode("USB").is_err());
+    }
+
+    #[test]
+    fn validates_search_and_pounce_message_mode_aliases() {
+        let fields = Map::new();
+        let keys = vec!["F1".to_string()];
+
+        assert!(validate_message_request("req1", "s&p", &keys, &fields).is_ok());
+        assert!(validate_message_request("req1", "sp", &keys, &fields).is_ok());
+        assert!(validate_message_request("req1", "search_and_pounce", &keys, &fields).is_ok());
     }
 
     #[test]

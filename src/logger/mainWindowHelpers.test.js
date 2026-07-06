@@ -226,6 +226,7 @@ F12 Clear,CQ
 
   assert.equal(cwActionForMessage(config, 'run', 'F12'), 'Clear');
   assert.equal(cwActionForMessage(config, 's&p', 'F12'), null);
+  assert.equal(cwActionForMessage(config, 'search_and_pounce', 'F12'), null);
   assert.equal(cwActionForMessage(config, 'run', 'F1'), null);
   assert.equal(cwActionForMessage(config, 'run', 'F9'), null);
 });

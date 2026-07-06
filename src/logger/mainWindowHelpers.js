@@ -12,6 +12,10 @@ import {
   modeIsPhone,
   normalizeLoggerMode,
 } from '../domain/modes.js';
+import {
+  parseMessageModeSectionHeader,
+  normalizeMessageMode,
+} from '../domain/messageModes.js';
 
 export { adifModeForLoggerMode, isSelectableMode, modeIsCw, modeIsPhone };
 
@@ -270,12 +274,7 @@ export function messageActionForRadioMode(
 }
 
 export function cwActionForMessage(config, mode, key) {
-  const normalizedMode =
-    String(mode ?? '')
-      .trim()
-      .toLowerCase() === 'run'
-      ? 'run'
-      : 's&p';
+  const normalizedMode = normalizeMessageMode(mode);
   const normalizedKey = String(key ?? '')
     .trim()
     .toUpperCase();
@@ -286,13 +285,9 @@ export function cwActionForMessage(config, mode, key) {
     const line = rawLine.trim();
     if (!line) continue;
 
-    const upper = line.toUpperCase();
-    if (upper.includes('RUN MESSAGES')) {
-      currentMode = 'run';
-      continue;
-    }
-    if (upper.includes('S&P MESSAGES') || upper.includes('SP MESSAGES')) {
-      currentMode = 's&p';
+    const sectionMode = parseMessageModeSectionHeader(line);
+    if (sectionMode) {
+      currentMode = sectionMode;
       continue;
     }
     if (line.startsWith('#') || currentMode !== normalizedMode) continue;

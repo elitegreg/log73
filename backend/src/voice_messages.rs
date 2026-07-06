@@ -1,3 +1,7 @@
+use crate::message_mode::{
+    RUN_MESSAGE_MODE, SEARCH_AND_POUNCE_MESSAGE_MODE,
+    normalize_message_mode as normalized_message_mode, parse_message_mode_section_header,
+};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -91,13 +95,8 @@ pub fn validate(config: &str) -> Result<VoiceLabels, String> {
             continue;
         }
 
-        let upper = line.to_uppercase();
-        if upper.contains("RUN MESSAGES") {
-            current_mode = Some("run");
-            continue;
-        }
-        if upper.contains("S&P MESSAGES") || upper.contains("SP MESSAGES") {
-            current_mode = Some("s&p");
+        if let Some(mode) = parse_message_mode_section_header(line) {
+            current_mode = Some(mode);
             continue;
         }
         if line.starts_with('#') {
@@ -118,7 +117,7 @@ pub fn validate(config: &str) -> Result<VoiceLabels, String> {
                 .map_err(|error| format!("line {line_number}: {error}"))?;
         }
 
-        let keys = if mode == "run" {
+        let keys = if mode == RUN_MESSAGE_MODE {
             &mut run_keys
         } else {
             &mut search_and_pounce_keys
@@ -167,8 +166,11 @@ pub fn validate_with_voicekeyer_dir(
 pub fn entries(config: &str) -> Vec<VoiceMessageEntry> {
     let messages = parse_messages(config);
     let mut entries = Vec::new();
-    entries.extend(entries_for_mode("run", messages.run));
-    entries.extend(entries_for_mode("s&p", messages.search_and_pounce));
+    entries.extend(entries_for_mode(RUN_MESSAGE_MODE, messages.run));
+    entries.extend(entries_for_mode(
+        SEARCH_AND_POUNCE_MESSAGE_MODE,
+        messages.search_and_pounce,
+    ));
     entries
 }
 
@@ -194,10 +196,7 @@ pub fn resolved_file_path_for(
 }
 
 pub fn normalize_message_mode(mode: &str) -> &'static str {
-    match mode.trim().to_lowercase().as_str() {
-        "run" => "run",
-        _ => "s&p",
-    }
+    normalized_message_mode(mode)
 }
 
 pub fn voicekeyer_file_path(voicekeyer_dir: &Path, relative_path: &str) -> Result<PathBuf, String> {
@@ -281,13 +280,8 @@ fn parse_messages(config: &str) -> VoiceMessages {
             continue;
         }
 
-        let upper = line.to_uppercase();
-        if upper.contains("RUN MESSAGES") {
-            current_mode = Some("run");
-            continue;
-        }
-        if upper.contains("S&P MESSAGES") || upper.contains("SP MESSAGES") {
-            current_mode = Some("s&p");
+        if let Some(mode) = parse_message_mode_section_header(line) {
+            current_mode = Some(mode);
             continue;
         }
         if line.starts_with('#') {
@@ -298,8 +292,8 @@ fn parse_messages(config: &str) -> VoiceMessages {
             continue;
         };
         match current_mode {
-            Some("run") => messages.run.push(message),
-            Some("s&p") => messages.search_and_pounce.push(message),
+            Some(RUN_MESSAGE_MODE) => messages.run.push(message),
+            Some(SEARCH_AND_POUNCE_MESSAGE_MODE) => messages.search_and_pounce.push(message),
             _ => {}
         }
     }
@@ -507,6 +501,10 @@ F2 -,
         );
         assert_eq!(file_path_for(TEST_MESSAGES, "run", "F12"), None);
         assert_eq!(file_path_for(TEST_MESSAGES, "s&p", "F2"), None);
+        assert_eq!(
+            file_path_for(TEST_MESSAGES, "search_and_pounce", "F2"),
+            None
+        );
     }
 
     #[test]

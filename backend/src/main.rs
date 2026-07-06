@@ -9,6 +9,7 @@ mod db;
 mod dxcc;
 mod dxcluster;
 mod log_cache;
+mod message_mode;
 mod radio;
 mod radio_manager;
 mod scoring;

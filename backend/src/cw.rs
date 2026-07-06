@@ -1,3 +1,7 @@
+use crate::message_mode::{
+    RUN_MESSAGE_MODE, SEARCH_AND_POUNCE_MESSAGE_MODE, normalize_message_mode,
+    parse_message_mode_section_header,
+};
 use serde::Serialize;
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -81,13 +85,8 @@ pub fn validate(config: &str) -> Result<CwLabels, String> {
             continue;
         }
 
-        let upper = line.to_uppercase();
-        if upper.contains("RUN MESSAGES") {
-            current_mode = Some("run");
-            continue;
-        }
-        if upper.contains("S&P MESSAGES") || upper.contains("SP MESSAGES") {
-            current_mode = Some("s&p");
+        if let Some(mode) = parse_message_mode_section_header(line) {
+            current_mode = Some(mode);
             continue;
         }
         if line.starts_with('#') {
@@ -104,7 +103,7 @@ pub fn validate(config: &str) -> Result<CwLabels, String> {
             ));
         }
 
-        let keys = if mode == "run" {
+        let keys = if mode == RUN_MESSAGE_MODE {
             &mut run_keys
         } else {
             &mut search_and_pounce_keys
@@ -129,7 +128,7 @@ pub fn validate(config: &str) -> Result<CwLabels, String> {
 
 pub fn render(config: &str, mode: &str, key: &str, fields: &Map<String, Value>) -> Option<String> {
     let messages = parse_messages(config);
-    let mode_messages = if normalize_mode(mode) == "run" {
+    let mode_messages = if normalize_message_mode(mode) == RUN_MESSAGE_MODE {
         messages.run
     } else {
         messages.search_and_pounce
@@ -160,13 +159,8 @@ fn parse_messages(config: &str) -> CwMessages {
             continue;
         }
 
-        let upper = line.to_uppercase();
-        if upper.contains("RUN MESSAGES") {
-            current_mode = Some("run");
-            continue;
-        }
-        if upper.contains("S&P MESSAGES") || upper.contains("SP MESSAGES") {
-            current_mode = Some("s&p");
+        if let Some(mode) = parse_message_mode_section_header(line) {
+            current_mode = Some(mode);
             continue;
         }
         if line.starts_with('#') {
@@ -177,8 +171,8 @@ fn parse_messages(config: &str) -> CwMessages {
             continue;
         };
         match current_mode {
-            Some("run") => messages.run.push(message),
-            Some("s&p") => messages.search_and_pounce.push(message),
+            Some(RUN_MESSAGE_MODE) => messages.run.push(message),
+            Some(SEARCH_AND_POUNCE_MESSAGE_MODE) => messages.search_and_pounce.push(message),
             _ => {}
         }
     }
@@ -236,13 +230,6 @@ fn field_string(fields: &Map<String, Value>, key: &str) -> String {
         Some(Value::Number(value)) => value.to_string(),
         Some(Value::Bool(value)) => value.to_string(),
         _ => String::new(),
-    }
-}
-
-fn normalize_mode(mode: &str) -> String {
-    match mode.trim().to_lowercase().as_str() {
-        "run" => "run".to_string(),
-        _ => "s&p".to_string(),
     }
 }
 
@@ -306,6 +293,10 @@ F1 His Call,{CALL}
         );
         assert_eq!(
             render(TEST_MESSAGES, "s&p", "F1", &fields),
+            Some("K1ABC".to_string())
+        );
+        assert_eq!(
+            render(TEST_MESSAGES, "search_and_pounce", "F1", &fields),
             Some("K1ABC".to_string())
         );
     }
