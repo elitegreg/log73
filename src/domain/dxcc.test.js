@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  callsignFilterPrefix,
   callsignPrefix,
   dxccLabel,
   lookupDxcc,
@@ -73,6 +74,15 @@ test('callsignPrefix follows the digit-delimited prefix rule', () => {
   assert.equal(callsignPrefix('4O9A'), '4O');
   assert.equal(callsignPrefix('KP'), null);
   assert.equal(callsignPrefix('4O'), null);
+});
+
+test('callsignFilterPrefix waits for a full prefix plus number', () => {
+  assert.equal(callsignFilterPrefix('K'), '');
+  assert.equal(callsignFilterPrefix('KP'), '');
+  assert.equal(callsignFilterPrefix('4O'), '');
+  assert.equal(callsignFilterPrefix('K1'), 'K1');
+  assert.equal(callsignFilterPrefix('KP2'), 'KP2');
+  assert.equal(callsignFilterPrefix('4O9A'), '4O9');
 });
 
 test('lookupDxcc prefers exact matches and then longest prefixes', () => {

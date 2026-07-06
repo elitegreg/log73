@@ -39,6 +39,11 @@ export function callsignPrefix(callsign) {
   return splitCallsign(callsign)?.prefix ?? null;
 }
 
+export function callsignFilterPrefix(callsign) {
+  const parts = splitCallsign(callsign);
+  return parts ? `${parts.prefix}${parts.number}` : '';
+}
+
 export function lookupDxcc(database, callsign) {
   const normalizedCallsign = normalizeCallsign(callsign);
   if (!normalizedCallsign || !callsignPrefix(normalizedCallsign)) return null;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { callsignFilterPrefix } from '../../domain/dxcc.js';
 import { apiJson } from '../../lib/api';
 import {
   CONTACTS_PAGE_SIZE,
@@ -68,13 +69,13 @@ export function useContactsOutbox({
   }, [numericLogId]);
 
   useEffect(() => {
-    activeCallsignPrefixRef.current = debouncedCallsignSearch
-      .trim()
-      .toUpperCase();
+    activeCallsignPrefixRef.current = callsignFilterPrefix(
+      debouncedCallsignSearch,
+    );
   }, [debouncedCallsignSearch]);
 
   const visibleContacts = useMemo(() => {
-    const callsignPrefix = debouncedCallsignSearch.trim().toUpperCase();
+    const callsignPrefix = callsignFilterPrefix(debouncedCallsignSearch);
     if (!callsignPrefix) return allContacts;
 
     return allContacts.filter((contact) => {
@@ -90,7 +91,7 @@ export function useContactsOutbox({
     let contactsLoadInFlightPromise = null;
     let offset = 0;
     let hasMore = true;
-    const callsignPrefix = debouncedCallsignSearch.trim().toUpperCase();
+    const callsignPrefix = callsignFilterPrefix(debouncedCallsignSearch);
     activeCallsignPrefixRef.current = callsignPrefix;
     setHasMoreContacts(true);
     setIsLoadingMoreContacts(false);
