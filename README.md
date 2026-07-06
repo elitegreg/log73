@@ -598,8 +598,8 @@ High Contrast
 ## Limitations / future work
 
 - Contest scoring and validation are still incomplete; YAML metadata is loaded for future validation work.
-- Basic Auth credentials are static development credentials.
+- Basic Auth is intentionally simple local auth with a single configured user; there are no sessions, roles, or per-user permissions.
 - No database migrations yet.
 - Backend does not start or supervise external CAT daemons.
 - Radio support is limited by the `radio-cat-rs` factory model list (see `/api/radio-kinds`).
-- No cluster, band map, SO2R, or multi-transmitter rule enforcement yet.
+- DX cluster and band map support exist, but reconnect/backoff tuning and broader contest-rule enforcement (for example SO2R and multi-transmitter constraints) still need more work.
