@@ -66,7 +66,26 @@ pub struct AdifRecord {
 }
 
 pub fn export_filename(log: &Log) -> String {
-    format!("{}.adi", log.station_callsign.trim())
+    format!("{}.adi", sanitized_export_stem(&log.station_callsign))
+}
+
+fn sanitized_export_stem(callsign: &str) -> String {
+    let sanitized = callsign
+        .trim()
+        .to_uppercase()
+        .chars()
+        .map(|character| match character {
+            'A'..='Z' | '0'..='9' | '_' | '-' => character,
+            _ => '_',
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string();
+    if sanitized.is_empty() {
+        "LOG73".to_string()
+    } else {
+        sanitized
+    }
 }
 
 pub fn import_contacts(
@@ -660,6 +679,14 @@ mod tests {
     #[test]
     fn export_filename_uses_adi_extension() {
         assert_eq!(export_filename(&test_log()), "N0CALL.adi");
+    }
+
+    #[test]
+    fn export_filename_sanitizes_station_callsign() {
+        let mut log = test_log();
+        log.station_callsign = "N0/CALL:\"bad\"".to_string();
+
+        assert_eq!(export_filename(&log), "N0_CALL__BAD.adi");
     }
 
     #[test]

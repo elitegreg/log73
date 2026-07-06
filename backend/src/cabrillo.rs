@@ -7,7 +7,26 @@ const START_OF_LOG_VERSION: &str = "3.0";
 const CREATED_BY_VALUE: &str = "Log73";
 
 pub fn export_filename(log: &Log) -> String {
-    format!("{}.log", log.station_callsign.trim())
+    format!("{}.log", sanitized_export_stem(&log.station_callsign))
+}
+
+fn sanitized_export_stem(callsign: &str) -> String {
+    let sanitized = callsign
+        .trim()
+        .to_uppercase()
+        .chars()
+        .map(|character| match character {
+            'A'..='Z' | '0'..='9' | '_' | '-' => character,
+            _ => '_',
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string();
+    if sanitized.is_empty() {
+        "LOG73".to_string()
+    } else {
+        sanitized
+    }
 }
 
 pub fn render_log(
@@ -454,6 +473,14 @@ mod tests {
                 "CATEGORY-MODE": "MIXED"
             }),
         }
+    }
+
+    #[test]
+    fn export_filename_sanitizes_station_callsign() {
+        let mut log = test_log();
+        log.station_callsign = "N0/CALL:\"bad\"".to_string();
+
+        assert_eq!(export_filename(&log), "N0_CALL__BAD.log");
     }
 
     fn test_contact(operator: &str, call: &str, epoch: i64) -> Contact {

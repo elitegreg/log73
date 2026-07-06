@@ -1595,6 +1595,7 @@ fn download_response(body: String, content_type: &str, filename: &str) -> axum::
             .headers_mut()
             .insert(header::CONTENT_TYPE, content_type);
     }
+    let filename = sanitize_download_filename(filename);
     if let Ok(disposition) = HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
     {
         response
@@ -1602,6 +1603,43 @@ fn download_response(body: String, content_type: &str, filename: &str) -> axum::
             .insert(header::CONTENT_DISPOSITION, disposition);
     }
     response
+}
+
+fn sanitize_download_filename(filename: &str) -> String {
+    let trimmed = filename.trim();
+    let (stem, extension) = match trimmed.rsplit_once('.') {
+        Some((stem, extension)) if !stem.is_empty() && !extension.is_empty() => (stem, Some(extension)),
+        _ => (trimmed, None),
+    };
+
+    let sanitized_stem = stem
+        .chars()
+        .map(|character| match character {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '_' | '-' => character,
+            _ => '_',
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string();
+    let sanitized_stem = if sanitized_stem.is_empty() {
+        "download".to_string()
+    } else {
+        sanitized_stem
+    };
+
+    match extension {
+        Some(extension) => {
+            let sanitized_extension = extension
+                .chars()
+                .map(|character| match character {
+                    'A'..='Z' | 'a'..='z' | '0'..='9' => character,
+                    _ => '_',
+                })
+                .collect::<String>();
+            format!("{sanitized_stem}.{}", sanitized_extension)
+        }
+        None => sanitized_stem,
+    }
 }
 
 async fn delete_log(
@@ -2333,6 +2371,22 @@ mod tests {
         assert_eq!(
             response.headers().get(header::ETAG),
             Some(&HeaderValue::from_str(&etag).expect("etag header should parse"))
+        );
+    }
+
+    #[test]
+    fn download_response_sanitizes_content_disposition_filename() {
+        let response = download_response(
+            "test".to_string(),
+            "text/plain; charset=utf-8",
+            "N0/CALL:\"bad\".adi",
+        );
+
+        assert_eq!(
+            response.headers().get(header::CONTENT_DISPOSITION),
+            Some(&HeaderValue::from_static(
+                "attachment; filename=\"N0_CALL__bad.adi\""
+            ))
         );
     }
 
