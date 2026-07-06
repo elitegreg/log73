@@ -187,11 +187,8 @@ impl LogCache {
             })
             .collect::<Vec<_>>();
 
-        for committed_contact in &committed_contacts {
-            merge_contact(&mut cached_log.contacts, committed_contact);
-        }
-        sort_contacts_desc(&mut cached_log.contacts);
-        cached_log.rebuild_indexes();
+        let indexes_dirty =
+            cached_log.apply_upserted_contacts(&committed_contacts, &previous_contacts);
 
         let committed_contact_ids = committed_contacts
             .iter()
@@ -209,7 +206,9 @@ impl LogCache {
             ));
         }
 
-        cached_log.rebuild_indexes();
+        if indexes_dirty {
+            cached_log.rebuild_indexes();
+        }
         let changed_contacts = dedupe_contacts(changed_contacts, &committed_contact_ids);
 
         let contacts = committed_contacts
@@ -369,6 +368,98 @@ impl CachedLog {
         }
     }
 
+    fn apply_upserted_contacts(
+        &mut self,
+        committed_contacts: &[Contact],
+        previous_contacts: &[Option<Contact>],
+    ) -> bool {
+        // Current processors operate on the contact slice and do not need the
+        // cache indexes while they run. Inserts keep indexes current
+        // incrementally; updates take the slower path and rebuild once after
+        // processors finish.
+        if previous_contacts.iter().any(Option::is_some) {
+            for committed_contact in committed_contacts {
+                merge_contact(&mut self.contacts, committed_contact);
+            }
+            sort_contacts_desc(&mut self.contacts);
+            return true;
+        }
+
+        let mut indexes_dirty = false;
+        for committed_contact in committed_contacts {
+            if indexes_dirty || self.has_contact_id(committed_contact) {
+                merge_contact(&mut self.contacts, committed_contact);
+                indexes_dirty = true;
+            } else {
+                self.insert_new_contact_sorted(committed_contact);
+            }
+        }
+
+        if indexes_dirty {
+            sort_contacts_desc(&mut self.contacts);
+        }
+        indexes_dirty
+    }
+
+    fn has_contact_id(&self, contact: &Contact) -> bool {
+        contact_id(contact)
+            .is_some_and(|contact_id| self.contact_positions.contains_key(&contact_id))
+    }
+
+    fn insert_new_contact_sorted(&mut self, contact: &Contact) {
+        let index = self.sorted_insert_position(contact);
+        if index == self.contacts.len() {
+            self.contacts.push(contact.clone());
+        } else {
+            self.contacts.insert(index, contact.clone());
+        }
+
+        self.refresh_contact_positions_from(index);
+        self.add_contact_to_callsign_index(contact);
+    }
+
+    fn sorted_insert_position(&self, contact: &Contact) -> usize {
+        let contact_key = contact_order_key(contact);
+        let Some(first_contact) = self.contacts.first() else {
+            return 0;
+        };
+
+        if contact_key > contact_order_key(first_contact) {
+            return 0;
+        }
+
+        if let Some(last_contact) = self.contacts.last()
+            && contact_order_key(last_contact) >= contact_key
+        {
+            return self.contacts.len();
+        }
+
+        self.contacts
+            .partition_point(|existing| contact_order_key(existing) >= contact_key)
+    }
+
+    fn refresh_contact_positions_from(&mut self, start: usize) {
+        for (index, contact) in self.contacts.iter().enumerate().skip(start) {
+            if let Some(contact_id) = contact_id(contact) {
+                self.contact_positions.insert(contact_id, index);
+            }
+        }
+    }
+
+    fn add_contact_to_callsign_index(&mut self, contact: &Contact) {
+        let Some(contact_id) = contact_id(contact) else {
+            return;
+        };
+        let Some(callsign) = contact_callsign(contact) else {
+            return;
+        };
+
+        self.callsign_index
+            .entry(callsign)
+            .or_default()
+            .push(contact_id);
+    }
+
     fn contact_by_id(&self, contact_id: i64) -> Option<Contact> {
         let index = *self.contact_positions.get(&contact_id)?;
         self.contacts.get(index).cloned()
@@ -441,4 +532,151 @@ fn contact_order_key(contact: &Contact) -> (i64, i64) {
             .unwrap_or(0),
         contact_id(contact).unwrap_or(0),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contest_rules::ContestRules;
+    use crate::db::build_contact;
+    use serde_json::{Map, Value, json};
+
+    fn cached_log(contacts: Vec<Contact>) -> CachedLog {
+        CachedLog::new(test_module(), contacts)
+    }
+
+    fn test_module() -> Arc<ContestScoringModule> {
+        let rules = ContestRules {
+            contest: "test".to_string(),
+            display_name: "Test".to_string(),
+            allowed_bands: Vec::new(),
+            allowed_modes: Vec::new(),
+            define: Vec::new(),
+            exchange: Vec::new(),
+            qso_columns: Vec::new(),
+            qso_column_fields: Default::default(),
+            log_params: Vec::new(),
+            qso_points: None,
+            dupe_key: Vec::new(),
+            multipliers: Vec::new(),
+            bonus_points: Vec::new(),
+            power_multiplier: Vec::new(),
+            cabrillo: None,
+            metadata: None,
+        };
+        ScoringModules::new().get(&rules, Value::Null)
+    }
+
+    fn contact(id: i64, epoch: i64, callsign: &str) -> Contact {
+        build_contact(
+            Map::from_iter([("id".to_string(), json!(id))]),
+            Map::from_iter([
+                ("QSO_DATE_TIME_ON".to_string(), json!(epoch)),
+                ("CALL".to_string(), json!(callsign)),
+            ]),
+        )
+    }
+
+    fn contact_ids(cached_log: &CachedLog) -> Vec<i64> {
+        cached_log.contacts.iter().filter_map(contact_id).collect()
+    }
+
+    fn assert_indexes_are_consistent(cached_log: &CachedLog) {
+        let mut expected_callsigns = BTreeMap::<String, Vec<i64>>::new();
+        for (index, contact) in cached_log.contacts.iter().enumerate() {
+            let Some(contact_id) = contact_id(contact) else {
+                continue;
+            };
+            assert_eq!(
+                cached_log.contact_positions.get(&contact_id),
+                Some(&index),
+                "contact_positions should point to the contact vector index"
+            );
+
+            if let Some(callsign) = contact_callsign(contact) {
+                expected_callsigns
+                    .entry(callsign)
+                    .or_default()
+                    .push(contact_id);
+            }
+        }
+
+        for (indexed_contact_id, index) in &cached_log.contact_positions {
+            assert_eq!(
+                cached_log.contacts.get(*index).and_then(contact_id),
+                Some(*indexed_contact_id),
+                "contact_positions should not contain stale entries"
+            );
+        }
+
+        let mut actual_callsigns = cached_log.callsign_index.clone();
+        for contact_ids in actual_callsigns.values_mut() {
+            contact_ids.sort_unstable();
+        }
+        for contact_ids in expected_callsigns.values_mut() {
+            contact_ids.sort_unstable();
+        }
+        assert_eq!(actual_callsigns, expected_callsigns);
+    }
+
+    #[test]
+    fn insert_upsert_appends_when_sorted_order_allows_it() {
+        let mut cached_log = cached_log(vec![contact(3, 300, "K3AAA"), contact(2, 200, "K2AAA")]);
+
+        let indexes_dirty =
+            cached_log.apply_upserted_contacts(&[contact(1, 100, "K1AAA")], &[None]);
+
+        assert!(!indexes_dirty);
+        assert_eq!(contact_ids(&cached_log), vec![3, 2, 1]);
+        assert_indexes_are_consistent(&cached_log);
+    }
+
+    #[test]
+    fn insert_upsert_binary_inserts_near_end_and_refreshes_shifted_positions() {
+        let mut cached_log = cached_log(vec![
+            contact(4, 400, "K4AAA"),
+            contact(2, 200, "K2AAA"),
+            contact(1, 100, "K1AAA"),
+        ]);
+
+        let indexes_dirty =
+            cached_log.apply_upserted_contacts(&[contact(3, 150, "K3AAA")], &[None]);
+
+        assert!(!indexes_dirty);
+        assert_eq!(contact_ids(&cached_log), vec![4, 2, 3, 1]);
+        assert_eq!(cached_log.contact_positions.get(&3), Some(&2));
+        assert_eq!(cached_log.contact_positions.get(&1), Some(&3));
+        assert_indexes_are_consistent(&cached_log);
+    }
+
+    #[test]
+    fn insert_upsert_handles_beginning_boundary_for_descending_order() {
+        let mut cached_log = cached_log(vec![contact(2, 200, "K2AAA"), contact(1, 100, "K1AAA")]);
+
+        let indexes_dirty =
+            cached_log.apply_upserted_contacts(&[contact(3, 300, "K3AAA")], &[None]);
+
+        assert!(!indexes_dirty);
+        assert_eq!(contact_ids(&cached_log), vec![3, 2, 1]);
+        assert_indexes_are_consistent(&cached_log);
+    }
+
+    #[test]
+    fn update_upsert_uses_slow_path_and_rebuilds_indexes() {
+        let original = contact(1, 100, "K1AAA");
+        let mut cached_log = cached_log(vec![contact(3, 300, "K3AAA"), original.clone()]);
+        let updated = contact(1, 400, "W1NEW");
+
+        let indexes_dirty = cached_log.apply_upserted_contacts(&[updated], &[Some(original)]);
+        assert!(indexes_dirty);
+        cached_log.rebuild_indexes();
+
+        assert_eq!(contact_ids(&cached_log), vec![1, 3]);
+        assert_eq!(
+            cached_log.matching_contact_ids_for_prefix("W1"),
+            HashSet::from([1])
+        );
+        assert!(cached_log.matching_contact_ids_for_prefix("K1").is_empty());
+        assert_indexes_are_consistent(&cached_log);
+    }
 }
