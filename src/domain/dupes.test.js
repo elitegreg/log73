@@ -90,7 +90,7 @@ test('dupeAlertText normalizes callsigns and mapped field values like scoring', 
   );
 });
 
-test('dupeAlertText stops scanning after the matching callsign group', () => {
+test('dupeAlertText keeps scanning newest-first contacts after unrelated callsigns', () => {
   const currentContact = contact({
     CALL: 'K1ABC',
     BAND: '20m',
@@ -98,13 +98,10 @@ test('dupeAlertText stops scanning after the matching callsign group', () => {
     SRX_STRING: 'SC',
   });
   const historicContacts = [
+    contact({ CALL: 'K9ZZZ', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' }),
     contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'NC' }),
-    contact({ CALL: 'K1ABCD', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' }),
     contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' }),
   ];
 
-  assert.equal(
-    dupeAlertText(settings, currentContact, historicContacts),
-    'Possible Dupe',
-  );
+  assert.equal(dupeAlertText(settings, currentContact, historicContacts), 'Dupe');
 });

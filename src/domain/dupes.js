@@ -64,7 +64,7 @@ export function dupeAlertText(settings, currentContact, historicContacts) {
       historicContact,
       'CALL',
     );
-    if (historicCallsign !== currentCallsign) break;
+    if (historicCallsign !== currentCallsign) continue;
 
     if (
       keyForFields(settings, historicContact, possibleFields) !==
