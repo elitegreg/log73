@@ -331,29 +331,29 @@ pub fn validate_dxcluster_config(
     max_age_min: u16,
     commands: &str,
 ) -> Result<(), String> {
-    validate_optional_plain_text("DX cluster host", host, MAX_DXCLUSTER_HOST_LEN)?;
-    validate_host("DX cluster host", host)?;
-    validate_optional_plain_text("DX cluster callsign", callsign, MAX_DXCLUSTER_CALLSIGN_LEN)?;
+    validate_optional_plain_text("DX Cluster host", host, MAX_DXCLUSTER_HOST_LEN)?;
+    validate_host("DX Cluster host", host)?;
+    validate_optional_plain_text("DX Cluster callsign", callsign, MAX_DXCLUSTER_CALLSIGN_LEN)?;
     if callsign.trim().chars().any(char::is_whitespace) {
-        return Err("DX cluster callsign cannot contain whitespace".to_string());
+        return Err("DX Cluster callsign cannot contain whitespace".to_string());
     }
     if !(db::MIN_DXCLUSTER_MAX_AGE_MIN..=db::MAX_DXCLUSTER_MAX_AGE_MIN).contains(&max_age_min) {
         return Err(format!(
-            "DX cluster max age must be between {} and {} minutes",
+            "DX Cluster max age must be between {} and {} minutes",
             db::MIN_DXCLUSTER_MAX_AGE_MIN,
             db::MAX_DXCLUSTER_MAX_AGE_MIN
         ));
     }
     if commands.chars().count() > MAX_DXCLUSTER_COMMANDS_LEN {
         return Err(format!(
-            "DX cluster commands must be at most {MAX_DXCLUSTER_COMMANDS_LEN} characters"
+            "DX Cluster commands must be at most {MAX_DXCLUSTER_COMMANDS_LEN} characters"
         ));
     }
     if commands
         .chars()
         .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
     {
-        return Err("DX cluster commands cannot contain control characters".to_string());
+        return Err("DX Cluster commands cannot contain control characters".to_string());
     }
 
     Ok(())

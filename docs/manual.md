@@ -111,14 +111,14 @@ Configure Log73 includes:
 - Theme selection
 - Zoom selection
 - Login username/password
-- DX cluster settings
+- DX Cluster settings
 - Logger side image URL (browser-local setting)
 - Reset-to-defaults convenience button
 
 ### Key details
 
 - Leaving both password fields blank disables login.
-- DX cluster config includes enable toggle, host, port, callsign, max age, and startup commands.
+- DX Cluster config includes enable toggle, host, port, callsign, max age, and startup commands.
 - Logger side image URL is stored in local browser storage (not backend DB) and used by logger UI.
 - The logger side image is only shown if download succeeds; refresh attempts occur hourly.
 

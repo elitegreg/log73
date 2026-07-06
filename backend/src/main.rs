@@ -335,7 +335,7 @@ async fn main() {
     let voice_keyer = VoiceKeyer::with_voicekeyer_dir(voicekeyer_dir);
     match db.dxcluster_config().await {
         Ok(config) => dxcluster.apply_config(config).await,
-        Err(error) => warn!(%error, "failed to load dxcluster config; listener task not started"),
+        Err(error) => warn!(%error, "failed to load DX Cluster config; listener task not started"),
     }
     let radio_manager = RadioManager::new(db.clone(), voice_keyer.clone());
     let scoring_modules = ScoringModules::new();
@@ -892,7 +892,7 @@ async fn handle_socket(
                     comment.trim()
                 );
                 if let Err(error) = app_state.dxcluster.send_text(text).await {
-                    warn!(session_id, radio_id, frequency_hz, call = %normalized_call, %error, "failed to send DX cluster spot");
+                    warn!(session_id, radio_id, frequency_hz, call = %normalized_call, %error, "failed to send DX Cluster spot");
                 }
             }
             Ok(ClientMessage::StopKeying) => {

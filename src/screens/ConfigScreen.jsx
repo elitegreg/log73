@@ -244,19 +244,19 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
           checked={dxClusterEnabled}
           onChange={(event) => setDxClusterEnabled(event.target.checked)}
         />
-        Enable DxCluster
+        Enable DX Cluster
       </label>
       {dxClusterEnabled ? (
         <>
           <label>
-            DxCluster Host
+            DX Cluster Host
             <input
               value={dxClusterHost}
               onChange={(event) => setDxClusterHost(event.target.value)}
             />
           </label>
           <label>
-            DxCluster Port
+            DX Cluster Port
             <input
               type="number"
               min="0"
@@ -266,7 +266,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
             />
           </label>
           <label>
-            DxCluster Callsign
+            DX Cluster Callsign
             <input
               value={dxClusterCallsign}
               onChange={(event) =>
@@ -275,7 +275,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
             />
           </label>
           <label>
-            DxCluster Max Age (minutes)
+            DX Cluster Max Age (minutes)
             <input
               type="number"
               min="15"
@@ -285,7 +285,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
             />
           </label>
           <label>
-            DxCluster Commands
+            DX Cluster Commands
             <textarea
               value={dxClusterCommands}
               onChange={(event) => setDxClusterCommands(event.target.value)}
