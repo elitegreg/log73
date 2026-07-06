@@ -1,4 +1,4 @@
-use super::models::{NewRadio, RadioConfig};
+use super::models::{RadioPayload, RadioConfig};
 use rusqlite::{Connection, OptionalExtension, params};
 
 pub(super) fn normalized_optional_device_id(value: Option<&str>) -> Option<String> {
@@ -18,7 +18,7 @@ pub(super) fn db_radios(connection: &Connection) -> rusqlite::Result<Vec<RadioCo
 
 pub(super) fn db_create_radio(
     connection: &Connection,
-    radio: NewRadio,
+    radio: RadioPayload,
 ) -> rusqlite::Result<RadioConfig> {
     connection.execute(
         "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
@@ -52,7 +52,7 @@ pub(super) fn db_create_radio(
 pub(super) fn db_update_radio(
     connection: &Connection,
     id: i64,
-    radio: NewRadio,
+    radio: RadioPayload,
 ) -> rusqlite::Result<Option<RadioConfig>> {
     let updated = connection.execute(
         "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, OPTIONS = ?8, CW_TUNING_INCREMENT_HZ = ?9, SSB_TUNING_INCREMENT_HZ = ?10, RIT_CLEAR_ON_LOG = ?11, VOICE_INPUT_DEVICE_ID = ?12, VOICE_OUTPUT_DEVICE_ID = ?13, CW_KEYER_TYPE = ?14, WINKEYER_SERIAL_PORT = ?15, CW_SERIAL_PORT = ?16, CW_SERIAL_BAUD_RATE = ?17, CW_SERIAL_LINE = ?18, CW_MESSAGES = ?19, VOICE_MESSAGES = ?20 WHERE ID = ?21",

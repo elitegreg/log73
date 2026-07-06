@@ -35,7 +35,7 @@ use axum::{
 use clap::Parser;
 use contest_rules::{ContestRules, ContestRulesStore};
 use db::{
-    AuthConfig, Contact, Database, NewLog, NewRadio, UpdateLog, contact_adif_value, contact_id,
+    AuthConfig, Contact, Database, NewLog, RadioPayload, UpdateLog, contact_adif_value, contact_id,
     contact_log_id, contact_meta_value, set_contact_meta,
 };
 use dxcluster::{DxClusterEvent, DxClusterManager, format_dxcluster_frequency_khz};
@@ -1811,7 +1811,7 @@ async fn validate_voice_messages(
 
 async fn create_radio(
     State(app_state): State<AppState>,
-    Json(payload): Json<NewRadio>,
+    Json(payload): Json<RadioPayload>,
 ) -> Json<serde_json::Value> {
     debug!(payload = %debug_payload_log(&payload), "create radio POST body");
     if let Err(error) = validation::validate_radio(&payload) {
@@ -1838,7 +1838,7 @@ async fn create_radio(
 async fn update_radio(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-    Json(payload): Json<NewRadio>,
+    Json(payload): Json<RadioPayload>,
 ) -> Json<serde_json::Value> {
     debug!(id, payload = %debug_payload_log(&payload), "update radio PUT body");
     if let Err(error) = validation::validate_radio(&payload) {

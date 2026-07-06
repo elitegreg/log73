@@ -7,7 +7,7 @@ use super::logs::{
     db_create_log, db_delete_log, db_log_qso_count, db_logs, db_update_log, select_log,
 };
 use super::models::{
-    AuthConfig, ConfigView, DxClusterConfig, Log, NewLog, NewRadio, RadioConfig, SerialAllocation,
+    AuthConfig, ConfigView, DxClusterConfig, Log, NewLog, RadioPayload, RadioConfig, SerialAllocation,
     UpdateConfig, UpdateLog,
 };
 use super::radios::{db_create_radio, db_delete_radio, db_radios, db_update_radio, select_radio};
@@ -63,12 +63,12 @@ enum DbCommand {
         response: oneshot::Sender<rusqlite::Result<()>>,
     },
     CreateRadio {
-        radio: NewRadio,
+        radio: RadioPayload,
         response: oneshot::Sender<rusqlite::Result<RadioConfig>>,
     },
     UpdateRadio {
         id: i64,
-        radio: NewRadio,
+        radio: RadioPayload,
         response: oneshot::Sender<rusqlite::Result<Option<RadioConfig>>>,
     },
     DeleteRadio {
@@ -232,7 +232,7 @@ impl Database {
             .await
     }
 
-    pub async fn create_radio(&self, radio: NewRadio) -> rusqlite::Result<RadioConfig> {
+    pub async fn create_radio(&self, radio: RadioPayload) -> rusqlite::Result<RadioConfig> {
         self.call(|response| DbCommand::CreateRadio { radio, response })
             .await
     }
@@ -240,7 +240,7 @@ impl Database {
     pub async fn update_radio(
         &self,
         id: i64,
-        radio: NewRadio,
+        radio: RadioPayload,
     ) -> rusqlite::Result<Option<RadioConfig>> {
         self.call(|response| DbCommand::UpdateRadio {
             id,
@@ -753,8 +753,8 @@ mod tests {
         ));
     }
 
-    fn tcp_radio() -> NewRadio {
-        NewRadio {
+    fn tcp_radio() -> RadioPayload {
+        RadioPayload {
             name: "Elecraft TCP".to_string(),
             radio_kind: "elecraft-k4".to_string(),
             transport_kind: "tcp".to_string(),

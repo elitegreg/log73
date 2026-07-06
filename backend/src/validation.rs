@@ -2,7 +2,7 @@ use crate::bands::{USA_AMATEUR_BANDS, band_for_frequency};
 use crate::contest_rules::{ContestParam, ContestRules, ContestRulesStore, ExchangeField};
 use crate::cw;
 use crate::db::{
-    self, Contact, Database, NewLog, NewRadio, UpdateLog, contact_adif_value, contact_id,
+    self, Contact, Database, NewLog, RadioPayload, UpdateLog, contact_adif_value, contact_id,
     contact_log_id, contact_meta_value,
 };
 use crate::message_mode::is_valid_message_mode;
@@ -101,7 +101,7 @@ pub fn validate_cabrillo_export_params(
     validate_configured_params(cabrillo_export_fields(rules), export_params)
 }
 
-pub fn validate_radio(payload: &NewRadio) -> Result<(), String> {
+pub fn validate_radio(payload: &RadioPayload) -> Result<(), String> {
     validate_required_text("radio name", &payload.name, MAX_RADIO_NAME_LEN)?;
 
     let radio_kind = payload.radio_kind.trim();
@@ -1245,8 +1245,8 @@ mod tests {
         )
     }
 
-    fn test_radio() -> NewRadio {
-        NewRadio {
+    fn test_radio() -> RadioPayload {
+        RadioPayload {
             name: "Elecraft TCP".to_string(),
             radio_kind: "elecraft-k4".to_string(),
             transport_kind: "tcp".to_string(),

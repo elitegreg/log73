@@ -111,7 +111,7 @@ pub struct UpdateConfig {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct NewRadio {
+pub struct RadioPayload {
     pub name: String,
     pub radio_kind: String,
     pub transport_kind: String,
