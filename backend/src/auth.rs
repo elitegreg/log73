@@ -18,10 +18,7 @@ pub async fn basic_auth(
     request: Request<Body>,
     next: Next,
 ) -> Response {
-    let Ok(config) = app_state.db.auth_config().await else {
-        debug!(method = %request.method(), uri = %request.uri(), "request failed basic authentication config lookup");
-        return unauthorized(request);
-    };
+    let config = app_state.auth_config.read().await.clone();
 
     if !is_auth_enabled(&config) || authorized(&request, &config) {
         return next.run(request).await;
@@ -122,5 +119,17 @@ mod tests {
 
         assert!(verify_password_hash("secret", &hash));
         assert!(!verify_password_hash("not-secret", &hash));
+    }
+
+    #[test]
+    fn auth_is_disabled_when_username_or_password_is_blank() {
+        assert!(!is_auth_enabled(&AuthConfig {
+            login_user: String::new(),
+            login_password: "hash".to_string(),
+        }));
+        assert!(!is_auth_enabled(&AuthConfig {
+            login_user: "greg".to_string(),
+            login_password: String::new(),
+        }));
     }
 }

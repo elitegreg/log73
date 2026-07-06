@@ -34,8 +34,8 @@ use axum::{
 use clap::Parser;
 use contest_rules::{ContestRules, ContestRulesStore};
 use db::{
-    Contact, Database, NewLog, NewRadio, UpdateLog, contact_adif_value, contact_id, contact_log_id,
-    contact_meta_value, set_contact_meta,
+    AuthConfig, Contact, Database, NewLog, NewRadio, UpdateLog, contact_adif_value, contact_id,
+    contact_log_id, contact_meta_value, set_contact_meta,
 };
 use dxcluster::{DxClusterEvent, DxClusterManager, format_dxcluster_frequency_khz};
 use futures_util::{SinkExt, StreamExt};
@@ -54,8 +54,8 @@ use std::{
     time::Duration,
 };
 use supercheckpartial::SuperCheckPartial;
-use tokio::sync::{broadcast, mpsc, oneshot};
-use tower_http::{cors::CorsLayer, trace::TraceLayer};
+use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
+use tower_http::trace::TraceLayer;
 use tracing::{Span, debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use voice_keyer::VoiceKeyer;
@@ -65,6 +65,7 @@ struct AppState {
     radio_manager: RadioManager,
     log_events: broadcast::Sender<ServerMessage>,
     db: Database,
+    auth_config: std::sync::Arc<RwLock<AuthConfig>>,
     contest_rules: ContestRulesStore,
     log_cache: LogCache,
     incremental_scoring: IncrementalScoreTracker,
@@ -77,6 +78,23 @@ struct AppState {
 
 const MAX_CLIENT_ERROR_TEXT_LENGTH: usize = 4096;
 const MAX_CLIENT_ERROR_JSON_LENGTH: usize = 8192;
+
+fn disabled_auth_config() -> AuthConfig {
+    AuthConfig {
+        login_user: String::new(),
+        login_password: String::new(),
+    }
+}
+
+fn auth_config_or_disabled(result: rusqlite::Result<AuthConfig>) -> AuthConfig {
+    match result {
+        Ok(config) => config,
+        Err(error) => {
+            warn!(%error, "failed to load auth config; basic auth disabled until config reload");
+            disabled_auth_config()
+        }
+    }
+}
 
 fn init_tracing(cli: &Cli) -> std::io::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
     let filter = EnvFilter::try_new(&cli.log_level).unwrap_or_else(|_| EnvFilter::new("info"));
@@ -266,6 +284,8 @@ async fn main() {
         "loaded DXCC country data"
     );
     let db = Database::open(&paths.database_path).expect("failed to open log73 database");
+    let auth_config =
+        std::sync::Arc::new(RwLock::new(auth_config_or_disabled(db.auth_config().await)));
     let dxcluster = DxClusterManager::new();
     let voicekeyer_dir = paths.data_dir.join("voicekeyer");
     let voice_keyer = VoiceKeyer::with_voicekeyer_dir(voicekeyer_dir);
@@ -285,6 +305,7 @@ async fn main() {
         radio_manager,
         log_events,
         db,
+        auth_config,
         contest_rules,
         log_cache,
         incremental_scoring,
@@ -380,8 +401,7 @@ async fn main() {
         .fallback(static_assets::static_handler)
         .with_state(app_state.clone())
         .layer(middleware::from_fn_with_state(app_state, auth::basic_auth))
-        .layer(request_trace_layer)
-        .layer(CorsLayer::permissive());
+        .layer(request_trace_layer);
 
     let listener = tokio::net::TcpListener::bind(&cli.bind)
         .await
@@ -1158,9 +1178,13 @@ async fn update_config(
         .await
     {
         Ok(()) => {
+            match app_state.db.auth_config().await {
+                Ok(config) => *app_state.auth_config.write().await = config,
+                Err(error) => warn!(%error, "failed to reload auth config after update"),
+            }
             match app_state.db.dxcluster_config().await {
                 Ok(config) => app_state.dxcluster.apply_config(config).await,
-                Err(error) => warn!(%error, "failed to reload dxcluster config after update"),
+                Err(error) => warn!(%error, "failed to reload DX Cluster config after update"),
             }
             match app_state.db.config_view().await {
                 Ok(config) => Json(serde_json::json!({ "ok": true, "config": config })),
@@ -2176,5 +2200,26 @@ mod tests {
             response.headers().get(header::ETAG),
             Some(&HeaderValue::from_str(&etag).expect("etag header should parse"))
         );
+    }
+
+    #[test]
+    fn auth_config_or_disabled_returns_loaded_auth_config() {
+        let config = AuthConfig {
+            login_user: "greg".to_string(),
+            login_password: "hash".to_string(),
+        };
+
+        let loaded = auth_config_or_disabled(Ok(config.clone()));
+
+        assert_eq!(loaded.login_user, config.login_user);
+        assert_eq!(loaded.login_password, config.login_password);
+    }
+
+    #[test]
+    fn auth_config_or_disabled_falls_back_to_disabled_auth() {
+        let loaded = auth_config_or_disabled(Err(rusqlite::Error::InvalidQuery));
+
+        assert!(loaded.login_user.is_empty());
+        assert!(loaded.login_password.is_empty());
     }
 }
