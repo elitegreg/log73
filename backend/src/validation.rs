@@ -9,7 +9,10 @@ use crate::voice_messages;
 use radio_cat_rs::{Frequency, supported_drivers};
 use regex::Regex;
 use serde_json::Value;
-use std::collections::HashSet;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Mutex, OnceLock},
+};
 
 const MAX_LOG_NAME_LEN: usize = 100;
 const MAX_CONTEST_ID_LEN: usize = 100;
@@ -47,6 +50,9 @@ const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat", "serial"];
 const LOGGER_MODE_OPTIONS: &[&str] = &[
     "CW", "CW-R", "SSB", "FM", "AM", "FT8", "JT65", "JT9", "MFSK", "PSK", "RTTY",
 ];
+
+static COMPILED_REGEX_CACHE: OnceLock<Mutex<HashMap<String, Result<Regex, String>>>> =
+    OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ParsedFieldType {
@@ -989,14 +995,35 @@ fn validate_typed_field(
     }
 
     if let Some(pattern) = pattern {
-        let regex =
-            Regex::new(pattern).map_err(|error| format!("invalid regex for {label}: {error}"))?;
+        let regex = compiled_regex(pattern)
+            .map_err(|error| format!("invalid regex for {label}: {error}"))?;
         if !regex.is_match(&normalized_value) {
             return Err(format!("{label} is invalid"));
         }
     }
 
     Ok(())
+}
+
+fn compiled_regex(pattern: &str) -> Result<Regex, String> {
+    let cache = COMPILED_REGEX_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut cache = cache.lock().expect("compiled regex cache mutex poisoned");
+    if let Some(cached) = cache.get(pattern) {
+        return cached.clone();
+    }
+
+    let compiled = Regex::new(pattern).map_err(|error| error.to_string());
+    cache.insert(pattern.to_string(), compiled.clone());
+    compiled
+}
+
+#[cfg(test)]
+fn compiled_regex_cache_size() -> usize {
+    COMPILED_REGEX_CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .expect("compiled regex cache mutex poisoned")
+        .len()
 }
 
 fn parse_field_type(field_type: &str, radio_mode: &str) -> ParsedFieldType {
@@ -1289,6 +1316,29 @@ mod tests {
             validate_typed_field("Section", "String:3", "GA", &["SC".to_string()], None, "CW")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn typed_field_regexes_are_cached_by_pattern() {
+        let baseline = compiled_regex_cache_size();
+        let pattern = "^(?:SC|NC|GA|VA)$";
+
+        assert!(
+            validate_typed_field("Section", "String:3", "SC", &[], Some(pattern), "CW").is_ok()
+        );
+        assert!(
+            validate_typed_field("Section", "String:3", "NC", &[], Some(pattern), "CW").is_ok()
+        );
+
+        assert!(compiled_regex_cache_size() >= baseline + 1);
+    }
+
+    #[test]
+    fn typed_field_reports_invalid_regex_patterns() {
+        let error = validate_typed_field("Section", "String:3", "SC", &[], Some("("), "CW")
+            .expect_err("invalid regex should be rejected");
+
+        assert!(error.starts_with("invalid regex for Section:"));
     }
 
     #[test]
