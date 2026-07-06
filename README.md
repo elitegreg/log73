@@ -560,7 +560,7 @@ For `SC-QSO-PARTY (In State)`, the received value is labeled `Exchange` because 
 
 ## UI themes
 
-The open-log screen includes a theme selector. The selected theme is stored in browser local storage under `log73.theme` and applied by adding a theme class to `document.body`.
+The config screen includes the theme and zoom selectors. The selected theme is stored in browser local storage under `log73.theme` and applied by adding a theme class to `document.body`.
 
 Available themes:
 
