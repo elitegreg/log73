@@ -17,6 +17,7 @@ import {
 } from '../loggerScreenHelpers.js';
 import {
   formatSocketDebugDetails,
+  logSocketDebug,
   readSocketDebugPanelEnabled,
   websocketReadyStateLabel,
 } from './backendSocketController.js';
@@ -88,7 +89,7 @@ export function useBackendSocket({
           });
         });
       }
-      console.debug('[LoggerScreen websocket]', {
+      logSocketDebug(isSocketDebugPanelEnabled, {
         event,
         sessionId,
         logId: numericLogId,

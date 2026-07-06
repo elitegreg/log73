@@ -42,3 +42,8 @@ export function readSocketDebugPanelEnabled(win = window) {
     return false;
   }
 }
+
+export function logSocketDebug(enabled, payload, logger = console) {
+  if (!enabled || typeof logger?.debug !== 'function') return;
+  logger.debug('[LoggerScreen websocket]', payload);
+}

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   formatSocketDebugDetails,
+  logSocketDebug,
   readSocketDebugPanelEnabled,
   websocketReadyStateLabel,
 } from './loggerScreen/backendSocketController.js';
@@ -51,6 +52,22 @@ test('readSocketDebugPanelEnabled honors query string and persists preference', 
   storage.set('log73.socket_debug_panel', '1');
   win.location.search = '';
   assert.equal(readSocketDebugPanelEnabled(win), true);
+});
+
+test('logSocketDebug only writes to the console when socket debug is enabled', () => {
+  const calls = [];
+  const logger = {
+    debug(...args) {
+      calls.push(args);
+    },
+  };
+
+  logSocketDebug(false, { event: 'socket_open' }, logger);
+  logSocketDebug(true, { event: 'socket_open' }, logger);
+
+  assert.deepEqual(calls, [
+    ['[LoggerScreen websocket]', { event: 'socket_open' }],
+  ]);
 });
 
 test('contacts outbox state merges committed pages without dropping local pending contacts', () => {
