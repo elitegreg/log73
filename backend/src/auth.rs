@@ -33,7 +33,7 @@ pub async fn basic_auth(
 
 pub fn hash_password(password: &str) -> Result<String, String> {
     if password.is_empty() {
-        return Ok(String::new());
+        return Err("login password cannot be empty".to_string());
     }
 
     let salt = SaltString::generate(&mut OsRng);
@@ -43,7 +43,7 @@ pub fn hash_password(password: &str) -> Result<String, String> {
         .map_err(|error| format!("failed to hash login password: {error}"))
 }
 
-fn verify_password_hash(candidate: &str, stored_hash: &str) -> bool {
+pub(crate) fn verify_password_hash(candidate: &str, stored_hash: &str) -> bool {
     if stored_hash.is_empty() {
         return candidate.is_empty();
     }
@@ -107,6 +107,13 @@ mod tests {
         let right = hash_password("secret").expect("password hash should be generated");
 
         assert_ne!(left, right);
+    }
+
+    #[test]
+    fn hash_password_rejects_empty_password() {
+        let error = hash_password("").expect_err("empty password should be rejected");
+
+        assert_eq!(error, "login password cannot be empty");
     }
 
     #[test]

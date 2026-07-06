@@ -54,6 +54,13 @@ struct ParsedFieldType {
     max_length: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginPasswordChange {
+    Preserve,
+    Change(String),
+    Disable,
+}
+
 pub fn validate_new_log(contest_rules: &ContestRulesStore, payload: &NewLog) -> Result<(), String> {
     validate_required_text("log name", &payload.name, MAX_LOG_NAME_LEN)?;
     validate_required_text(
@@ -255,22 +262,28 @@ pub fn validate_voice_messages(value: &str) -> Result<(), String> {
 
 pub fn validate_auth_config(
     login_user: &str,
-    login_password: &str,
-    login_password_confirm: &str,
-) -> Result<(), String> {
-    if login_password != login_password_confirm {
-        return Err("passwords do not match".to_string());
-    }
-
+    login_password_change: Option<&str>,
+    login_password_confirm: Option<&str>,
+    disable_login: bool,
+) -> Result<LoginPasswordChange, String> {
     if login_user.chars().count() > MAX_LOGIN_USER_LEN {
         return Err(format!(
             "username must be at most {MAX_LOGIN_USER_LEN} characters"
         ));
     }
-    if login_password.chars().count() > MAX_LOGIN_PASSWORD_LEN {
-        return Err(format!(
-            "password must be at most {MAX_LOGIN_PASSWORD_LEN} characters"
-        ));
+
+    for password in [
+        login_password_change.unwrap_or(""),
+        login_password_confirm.unwrap_or(""),
+    ] {
+        if password.chars().count() > MAX_LOGIN_PASSWORD_LEN {
+            return Err(format!(
+                "password must be at most {MAX_LOGIN_PASSWORD_LEN} characters"
+            ));
+        }
+        if password.chars().any(char::is_control) {
+            return Err("password cannot contain control characters".to_string());
+        }
     }
 
     let trimmed_user = login_user.trim();
@@ -283,11 +296,26 @@ pub fn validate_auth_config(
         }
     }
 
-    if login_password.chars().any(char::is_control) {
-        return Err("password cannot contain control characters".to_string());
+    if disable_login {
+        return Ok(LoginPasswordChange::Disable);
     }
 
-    Ok(())
+    let login_password_change = login_password_change.unwrap_or("");
+    let login_password_confirm = login_password_confirm.unwrap_or("");
+    let password_change_requested =
+        !login_password_change.is_empty() || !login_password_confirm.is_empty();
+
+    if !password_change_requested {
+        return Ok(LoginPasswordChange::Preserve);
+    }
+
+    if login_password_change != login_password_confirm {
+        return Err("passwords do not match".to_string());
+    }
+
+    Ok(LoginPasswordChange::Change(
+        login_password_change.to_string(),
+    ))
 }
 
 pub fn validate_dxcluster_config(
@@ -1261,6 +1289,30 @@ mod tests {
             validate_typed_field("Section", "String:3", "GA", &["SC".to_string()], None, "CW")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn validate_auth_config_preserves_existing_password_when_blank() {
+        let change = validate_auth_config("greg", Some(""), Some(""), false)
+            .expect("blank passwords should preserve existing auth");
+
+        assert_eq!(change, LoginPasswordChange::Preserve);
+    }
+
+    #[test]
+    fn validate_auth_config_disables_login_only_when_explicitly_requested() {
+        let change = validate_auth_config("greg", Some(""), Some(""), true)
+            .expect("explicit disable should be accepted");
+
+        assert_eq!(change, LoginPasswordChange::Disable);
+    }
+
+    #[test]
+    fn validate_auth_config_requires_matching_confirmation_when_changing_password() {
+        let error = validate_auth_config("greg", Some("secret"), Some("different"), false)
+            .expect_err("mismatched passwords should be rejected");
+
+        assert_eq!(error, "passwords do not match");
     }
 
     #[test]

@@ -61,7 +61,9 @@ export function adifFieldOptions(fields) {
 }
 
 export function adifFieldOptionLabel(field) {
-  const value = String(field?.value ?? '').replace(/\s+/g, ' ').trim();
+  const value = String(field?.value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!value) return field.name;
   return `${field.name} (e.g. '${value.slice(0, 40)}')`;
 }
@@ -84,7 +86,7 @@ function parseFieldTag(tag) {
   const parts = tag.split(':');
   if (parts.length < 2) return null;
   const name = normalizeAdifFieldName(parts[0]);
-  const length = Number.parseInt(parts[parts.length - 1], 10);
+  const length = Number.parseInt(parts[1], 10);
   if (!name || !Number.isFinite(length) || length < 0) return null;
   return { name, length };
 }

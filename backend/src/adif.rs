@@ -208,12 +208,9 @@ pub fn parse_records(text: &str) -> Result<Vec<AdifRecord>, String> {
 }
 
 fn parse_tag(tag: &str) -> Option<(String, usize)> {
-    let parts = tag.split(':').collect::<Vec<_>>();
-    if parts.len() < 2 {
-        return None;
-    }
-    let name = normalize_field_name(parts[0]);
-    let length = parts.last()?.trim().parse::<usize>().ok()?;
+    let mut parts = tag.split(':');
+    let name = normalize_field_name(parts.next()?);
+    let length = parts.next()?.trim().parse::<usize>().ok()?;
     Some((name, length))
 }
 
@@ -735,6 +732,59 @@ mod tests {
         assert_eq!(
             records[0].fields.get("CALL").map(String::as_str),
             Some("W1AW")
+        );
+    }
+
+    #[test]
+    fn parse_records_accepts_typed_tags() {
+        let records = parse_records("<CALL:4:S>W1AW<EOR>").expect("ADIF should parse");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].fields.get("CALL").map(String::as_str),
+            Some("W1AW")
+        );
+    }
+
+    #[test]
+    fn parse_records_ignores_typed_header_tags() {
+        let records = parse_records("Log73\n<ADIF_VER:5:S>3.1.0<EOH>\n<CALL:4:S>W1AW<EOR>\n")
+            .expect("ADIF should parse");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].fields.get("CALL").map(String::as_str),
+            Some("W1AW")
+        );
+    }
+
+    #[test]
+    fn parse_records_ignores_extra_tag_suffixes() {
+        let records = parse_records("<CALL:4:SOMETHING>W1AW<EOR>").expect("ADIF should parse");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].fields.get("CALL").map(String::as_str),
+            Some("W1AW")
+        );
+    }
+
+    #[test]
+    fn parse_records_requires_length_in_second_tag_segment() {
+        let error = parse_records("<CALL:S:4>W1AW<EOR>")
+            .expect_err("invalid typed length should be rejected");
+
+        assert!(error.contains("invalid ADIF tag <CALL:S:4>"));
+    }
+
+    #[test]
+    fn parse_records_accepts_zero_length_typed_fields() {
+        let records = parse_records("<COMMENT:0:S><EOR>").expect("ADIF should parse");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].fields.get("COMMENT").map(String::as_str),
+            Some("")
         );
     }
 

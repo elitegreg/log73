@@ -27,6 +27,46 @@ test('parseFirstAdifRecord handles ADIF without EOH', () => {
   });
 });
 
+test('parseFirstAdifRecord reads typed tags', () => {
+  const record = parseFirstAdifRecord('<CALL:4:S>W1AW<EOR>');
+
+  assert.deepEqual(record.fields, {
+    CALL: 'W1AW',
+  });
+});
+
+test('parseFirstAdifRecord ignores typed header tags', () => {
+  const record = parseFirstAdifRecord(
+    'Log73\n<ADIF_VER:5:S>3.1.0<EOH>\n<CALL:4:S>W1AW<EOR>',
+  );
+
+  assert.deepEqual(record.fields, {
+    CALL: 'W1AW',
+  });
+});
+
+test('parseFirstAdifRecord ignores extra tag suffixes', () => {
+  const record = parseFirstAdifRecord('<CALL:4:SOMETHING>W1AW<EOR>');
+
+  assert.deepEqual(record.fields, {
+    CALL: 'W1AW',
+  });
+});
+
+test('parseFirstAdifRecord requires the length in the second tag segment', () => {
+  const record = parseFirstAdifRecord('<CALL:S:4>W1AW<EOR>');
+
+  assert.deepEqual(record.fields, {});
+});
+
+test('parseFirstAdifRecord accepts zero-length typed fields', () => {
+  const record = parseFirstAdifRecord('<COMMENT:0:S><EOR>');
+
+  assert.deepEqual(record.fields, {
+    COMMENT: '',
+  });
+});
+
 test('adifFieldOptions sorts fields and labels examples', () => {
   const options = adifFieldOptions({ SRX_STRING: 'NC', CALL: 'W1AW' });
 

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
+import { buildConfigUpdatePayload } from '../domain/configUpdate';
 import {
   DEFAULT_LOGGER_IMAGE_URL,
   loadLoggerImageUrl,
@@ -17,6 +18,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
   const [loginPassword, setLoginPassword] = useState('');
   const [loginPasswordConfirm, setLoginPasswordConfirm] = useState('');
   const [loginEnabled, setLoginEnabled] = useState(false);
+  const [disableLogin, setDisableLogin] = useState(false);
   const [dxClusterEnabled, setDxClusterEnabled] = useState(false);
   const [dxClusterHost, setDxClusterHost] = useState('');
   const [dxClusterPort, setDxClusterPort] = useState('23');
@@ -46,6 +48,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
           throw new Error(result.error ?? 'Unable to load config');
         setLoginUser(result.config.login_user ?? '');
         setLoginEnabled(Boolean(result.config.login_enabled));
+        setDisableLogin(false);
         setDxClusterEnabled(Boolean(result.config.dxcluster_enabled));
         setDxClusterHost(result.config.dxcluster_host ?? '');
         setDxClusterPort(String(result.config.dxcluster_port ?? 23));
@@ -69,6 +72,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
     setLoginPassword('');
     setLoginPasswordConfirm('');
     setLoginEnabled(false);
+    setDisableLogin(true);
     setDxClusterEnabled(false);
     setDxClusterHost('');
     setDxClusterPort('23');
@@ -86,7 +90,13 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
 
   async function saveConfig(event) {
     event.preventDefault();
-    if (loginPassword !== loginPasswordConfirm) {
+    const passwordChangeRequested =
+      loginPassword !== '' || loginPasswordConfirm !== '';
+    if (
+      !disableLogin &&
+      passwordChangeRequested &&
+      loginPassword !== loginPasswordConfirm
+    ) {
       notifyError('Passwords do not match.', {
         dedupeKey: 'ConfigScreen.passwordMismatch',
       });
@@ -95,17 +105,20 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
 
     const result = await apiJson('/config', {
       method: 'PUT',
-      body: JSON.stringify({
-        login_user: loginUser,
-        login_password: loginPassword,
-        login_password_confirm: loginPasswordConfirm,
-        dxcluster_enabled: dxClusterEnabled,
-        dxcluster_host: dxClusterHost,
-        dxcluster_port: Number.parseInt(dxClusterPort, 10) || 23,
-        dxcluster_callsign: dxClusterCallsign,
-        dxcluster_max_age_min: Number.parseInt(dxClusterMaxAgeMin, 10) || 60,
-        dxcluster_commands: dxClusterCommands,
-      }),
+      body: JSON.stringify(
+        buildConfigUpdatePayload({
+          loginUser,
+          loginPassword,
+          loginPasswordConfirm,
+          disableLogin,
+          dxClusterEnabled,
+          dxClusterHost,
+          dxClusterPort,
+          dxClusterCallsign,
+          dxClusterMaxAgeMin,
+          dxClusterCommands,
+        }),
+      ),
     });
 
     if (!result.ok) {
@@ -120,6 +133,12 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
     saveLoggerImageUrl(loggerImageUrl);
     navigate('/ui/open_log');
   }
+
+  const loginStatus = disableLogin
+    ? 'Login will be disabled on save.'
+    : loginEnabled
+      ? 'Login is enabled.'
+      : 'Login is disabled.';
 
   return (
     <form className="form-window" onSubmit={saveConfig}>
@@ -165,7 +184,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
             ))}
           </select>
         </label>
-        <span>{loginEnabled ? 'Login is enabled.' : 'Login is disabled.'}</span>
+        <span>{loginStatus}</span>
       </div>
       <label>
         Username
@@ -179,6 +198,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
         <input
           type="password"
           value={loginPassword}
+          disabled={disableLogin}
           onChange={(event) => setLoginPassword(event.target.value)}
         />
       </label>
@@ -187,14 +207,26 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
         <input
           type="password"
           value={loginPasswordConfirm}
+          disabled={disableLogin}
           onChange={(event) => setLoginPasswordConfirm(event.target.value)}
         />
+      </label>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={disableLogin}
+          onChange={(event) => setDisableLogin(event.target.checked)}
+        />
+        Disable login on save
       </label>
       <div
         className="selection-actions"
         style={{ justifyContent: 'flex-start', padding: '0 12px' }}
       >
-        <span>Leave both password fields blank to disable login.</span>
+        <span>
+          Leave password fields blank to keep the current password. Check
+          Disable login to turn authentication off.
+        </span>
       </div>
       <label>
         Logger side image URL

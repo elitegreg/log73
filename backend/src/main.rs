@@ -971,11 +971,16 @@ async fn config(State(app_state): State<AppState>) -> Json<serde_json::Value> {
     }
 }
 
-#[derive(Debug, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
 struct UpdateConfigPayload {
+    #[serde(default)]
     login_user: String,
-    login_password: String,
-    login_password_confirm: String,
+    #[serde(default)]
+    login_password_change: Option<String>,
+    #[serde(default)]
+    login_password_confirm: Option<String>,
+    #[serde(default)]
+    disable_login: bool,
     #[serde(default)]
     dxcluster_enabled: bool,
     #[serde(default)]
@@ -1102,13 +1107,22 @@ async fn update_config(
     Json(payload): Json<UpdateConfigPayload>,
 ) -> Json<serde_json::Value> {
     debug!("update config PUT request");
-    if let Err(error) = validation::validate_auth_config(
+    let login_password = match validation::validate_auth_config(
         &payload.login_user,
-        &payload.login_password,
-        &payload.login_password_confirm,
+        payload.login_password_change.as_deref(),
+        payload.login_password_confirm.as_deref(),
+        payload.disable_login,
     ) {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
-    }
+        Ok(validation::LoginPasswordChange::Preserve) => db::LoginPasswordUpdate::Preserve,
+        Ok(validation::LoginPasswordChange::Disable) => db::LoginPasswordUpdate::Disable,
+        Ok(validation::LoginPasswordChange::Change(password)) => {
+            match auth::hash_password(&password) {
+                Ok(login_password) => db::LoginPasswordUpdate::Set(login_password),
+                Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
+            }
+        }
+        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
+    };
     if let Err(error) = validation::validate_dxcluster_config(
         &payload.dxcluster_host,
         payload.dxcluster_port,
@@ -1118,11 +1132,6 @@ async fn update_config(
     ) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
-
-    let login_password = match auth::hash_password(&payload.login_password) {
-        Ok(login_password) => login_password,
-        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
-    };
 
     match app_state
         .db

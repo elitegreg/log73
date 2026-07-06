@@ -188,10 +188,17 @@ impl Default for DxClusterConfig {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub enum LoginPasswordUpdate {
+    Preserve,
+    Set(String),
+    Disable,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdateConfig {
     pub login_user: String,
-    pub login_password: String,
+    pub login_password: LoginPasswordUpdate,
     pub dxcluster_enabled: bool,
     pub dxcluster_host: String,
     pub dxcluster_port: u16,
@@ -954,31 +961,41 @@ fn db_update_config(connection: &Connection, config: UpdateConfig) -> rusqlite::
     let max_age_min = config
         .dxcluster_max_age_min
         .clamp(MIN_DXCLUSTER_MAX_AGE_MIN, MAX_DXCLUSTER_MAX_AGE_MIN);
+    let login_password = match config.login_password {
+        LoginPasswordUpdate::Preserve => db_auth_config(connection)?.login_password,
+        LoginPasswordUpdate::Set(login_password) => login_password,
+        LoginPasswordUpdate::Disable => String::new(),
+    };
+    let login_user = config.login_user.trim();
+    let dxcluster_host = config.dxcluster_host.trim();
+    let dxcluster_callsign = config.dxcluster_callsign.trim().to_uppercase();
+    let dxcluster_commands = &config.dxcluster_commands;
+
     let updated = connection.execute(
         "UPDATE config SET LOGIN_USER = ?1, LOGIN_PASSWORD = ?2, DXCLUSTER_ENABLED = ?3, DXCLUSTER_HOST = ?4, DXCLUSTER_PORT = ?5, DXCLUSTER_CALLSIGN = ?6, DXCLUSTER_MAX_AGE_MIN = ?7, DXCLUSTER_COMMANDS = ?8",
         params![
-            config.login_user.trim(),
-            config.login_password,
+            login_user,
+            &login_password,
             config.dxcluster_enabled,
-            config.dxcluster_host.trim(),
+            dxcluster_host,
             config.dxcluster_port,
-            config.dxcluster_callsign.trim().to_uppercase(),
+            &dxcluster_callsign,
             max_age_min,
-            config.dxcluster_commands
+            dxcluster_commands
         ],
     )?;
     if updated == 0 {
         connection.execute(
             "INSERT INTO config (version, LOGIN_USER, LOGIN_PASSWORD, DXCLUSTER_ENABLED, DXCLUSTER_HOST, DXCLUSTER_PORT, DXCLUSTER_CALLSIGN, DXCLUSTER_MAX_AGE_MIN, DXCLUSTER_COMMANDS) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
-                config.login_user.trim(),
-                config.login_password,
+                login_user,
+                &login_password,
                 config.dxcluster_enabled,
-                config.dxcluster_host.trim(),
+                dxcluster_host,
                 config.dxcluster_port,
-                config.dxcluster_callsign.trim().to_uppercase(),
+                &dxcluster_callsign,
                 max_age_min,
-                config.dxcluster_commands
+                dxcluster_commands
             ],
         )?;
     }
@@ -1661,7 +1678,7 @@ mod tests {
         database
             .update_config(UpdateConfig {
                 login_user: "greg".to_string(),
-                login_password: "hash".to_string(),
+                login_password: LoginPasswordUpdate::Set("hash".to_string()),
                 dxcluster_enabled: true,
                 dxcluster_host: "cluster.example.test".to_string(),
                 dxcluster_port: 7300,
@@ -1680,6 +1697,302 @@ mod tests {
         assert_eq!(config.dxcluster_callsign, "N0CALL");
         assert_eq!(config.dxcluster_max_age_min, 120);
         assert_eq!(config.dxcluster_commands, "set/page 0\nsh/dx");
+    }
+
+    #[tokio::test]
+    async fn username_only_update_preserves_existing_password_hash() {
+        let database = test_database();
+        let original_hash =
+            crate::auth::hash_password("secret").expect("password hash should be generated");
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "greg".to_string(),
+                login_password: LoginPasswordUpdate::Set(original_hash.clone()),
+                dxcluster_enabled: false,
+                dxcluster_host: String::new(),
+                dxcluster_port: DEFAULT_DXCLUSTER_PORT,
+                dxcluster_callsign: String::new(),
+                dxcluster_max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+                dxcluster_commands: String::new(),
+            })
+            .await
+            .expect("initial config updates");
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "gregory".to_string(),
+                login_password: LoginPasswordUpdate::Preserve,
+                dxcluster_enabled: true,
+                dxcluster_host: "cluster.example.test".to_string(),
+                dxcluster_port: 7373,
+                dxcluster_callsign: "n0call".to_string(),
+                dxcluster_max_age_min: 90,
+                dxcluster_commands: "show/dx".to_string(),
+            })
+            .await
+            .expect("config updates preserve password");
+
+        let auth = database.auth_config().await.expect("auth config loads");
+        assert_eq!(auth.login_user, "gregory");
+        assert_eq!(auth.login_password, original_hash);
+    }
+
+    #[tokio::test]
+    async fn blank_password_update_without_explicit_disable_preserves_hash() {
+        let database = test_database();
+        let original_hash =
+            crate::auth::hash_password("secret").expect("password hash should be generated");
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "greg".to_string(),
+                login_password: LoginPasswordUpdate::Set(original_hash.clone()),
+                dxcluster_enabled: false,
+                dxcluster_host: String::new(),
+                dxcluster_port: DEFAULT_DXCLUSTER_PORT,
+                dxcluster_callsign: String::new(),
+                dxcluster_max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+                dxcluster_commands: String::new(),
+            })
+            .await
+            .expect("initial config updates");
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "greg".to_string(),
+                login_password: LoginPasswordUpdate::Preserve,
+                dxcluster_enabled: true,
+                dxcluster_host: "cluster.example.test".to_string(),
+                dxcluster_port: 7300,
+                dxcluster_callsign: "n0call".to_string(),
+                dxcluster_max_age_min: 120,
+                dxcluster_commands: String::new(),
+            })
+            .await
+            .expect("config updates preserve password");
+
+        let auth = database.auth_config().await.expect("auth config loads");
+        assert_eq!(auth.login_password, original_hash);
+    }
+
+    #[tokio::test]
+    async fn password_change_updates_hash_and_keeps_login_enabled() {
+        let database = test_database();
+        let original_hash =
+            crate::auth::hash_password("secret").expect("password hash should be generated");
+        let replacement_hash =
+            crate::auth::hash_password("new-secret").expect("password hash should be generated");
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "greg".to_string(),
+                login_password: LoginPasswordUpdate::Set(original_hash.clone()),
+                dxcluster_enabled: false,
+                dxcluster_host: String::new(),
+                dxcluster_port: DEFAULT_DXCLUSTER_PORT,
+                dxcluster_callsign: String::new(),
+                dxcluster_max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+                dxcluster_commands: String::new(),
+            })
+            .await
+            .expect("initial config updates");
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "greg".to_string(),
+                login_password: LoginPasswordUpdate::Set(replacement_hash.clone()),
+                dxcluster_enabled: false,
+                dxcluster_host: String::new(),
+                dxcluster_port: DEFAULT_DXCLUSTER_PORT,
+                dxcluster_callsign: String::new(),
+                dxcluster_max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+                dxcluster_commands: String::new(),
+            })
+            .await
+            .expect("config updates password");
+
+        let auth = database.auth_config().await.expect("auth config loads");
+        let view = database.config_view().await.expect("config view loads");
+
+        assert_ne!(auth.login_password, original_hash);
+        assert_eq!(auth.login_password, replacement_hash);
+        assert!(view.login_enabled);
+    }
+
+    #[tokio::test]
+    async fn explicit_disable_clears_password_and_disables_login() {
+        let database = test_database();
+        let original_hash =
+            crate::auth::hash_password("secret").expect("password hash should be generated");
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "greg".to_string(),
+                login_password: LoginPasswordUpdate::Set(original_hash),
+                dxcluster_enabled: false,
+                dxcluster_host: String::new(),
+                dxcluster_port: DEFAULT_DXCLUSTER_PORT,
+                dxcluster_callsign: String::new(),
+                dxcluster_max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+                dxcluster_commands: String::new(),
+            })
+            .await
+            .expect("initial config updates");
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "greg".to_string(),
+                login_password: LoginPasswordUpdate::Disable,
+                dxcluster_enabled: false,
+                dxcluster_host: String::new(),
+                dxcluster_port: DEFAULT_DXCLUSTER_PORT,
+                dxcluster_callsign: String::new(),
+                dxcluster_max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+                dxcluster_commands: String::new(),
+            })
+            .await
+            .expect("config disables auth");
+
+        let auth = database.auth_config().await.expect("auth config loads");
+        let view = database.config_view().await.expect("config view loads");
+
+        assert_eq!(auth.login_password, "");
+        assert!(!view.login_enabled);
+    }
+
+    #[tokio::test]
+    async fn config_view_login_enabled_reflects_preserve_change_and_disable() {
+        let database = test_database();
+        let original_hash =
+            crate::auth::hash_password("secret").expect("password hash should be generated");
+        let replacement_hash =
+            crate::auth::hash_password("new-secret").expect("password hash should be generated");
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "greg".to_string(),
+                login_password: LoginPasswordUpdate::Set(original_hash.clone()),
+                dxcluster_enabled: false,
+                dxcluster_host: String::new(),
+                dxcluster_port: DEFAULT_DXCLUSTER_PORT,
+                dxcluster_callsign: String::new(),
+                dxcluster_max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+                dxcluster_commands: String::new(),
+            })
+            .await
+            .expect("initial config updates");
+        assert!(
+            database
+                .config_view()
+                .await
+                .expect("config view loads")
+                .login_enabled
+        );
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "gregory".to_string(),
+                login_password: LoginPasswordUpdate::Preserve,
+                dxcluster_enabled: false,
+                dxcluster_host: String::new(),
+                dxcluster_port: DEFAULT_DXCLUSTER_PORT,
+                dxcluster_callsign: String::new(),
+                dxcluster_max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+                dxcluster_commands: String::new(),
+            })
+            .await
+            .expect("config preserves password");
+        assert!(
+            database
+                .config_view()
+                .await
+                .expect("config view loads")
+                .login_enabled
+        );
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "gregory".to_string(),
+                login_password: LoginPasswordUpdate::Set(replacement_hash),
+                dxcluster_enabled: false,
+                dxcluster_host: String::new(),
+                dxcluster_port: DEFAULT_DXCLUSTER_PORT,
+                dxcluster_callsign: String::new(),
+                dxcluster_max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+                dxcluster_commands: String::new(),
+            })
+            .await
+            .expect("config changes password");
+        assert!(
+            database
+                .config_view()
+                .await
+                .expect("config view loads")
+                .login_enabled
+        );
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "gregory".to_string(),
+                login_password: LoginPasswordUpdate::Disable,
+                dxcluster_enabled: false,
+                dxcluster_host: String::new(),
+                dxcluster_port: DEFAULT_DXCLUSTER_PORT,
+                dxcluster_callsign: String::new(),
+                dxcluster_max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+                dxcluster_commands: String::new(),
+            })
+            .await
+            .expect("config disables auth");
+        assert!(
+            !database
+                .config_view()
+                .await
+                .expect("config view loads")
+                .login_enabled
+        );
+    }
+
+    #[tokio::test]
+    async fn auth_still_succeeds_after_non_auth_config_save() {
+        let database = test_database();
+        let original_hash =
+            crate::auth::hash_password("secret").expect("password hash should be generated");
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "greg".to_string(),
+                login_password: LoginPasswordUpdate::Set(original_hash),
+                dxcluster_enabled: false,
+                dxcluster_host: String::new(),
+                dxcluster_port: DEFAULT_DXCLUSTER_PORT,
+                dxcluster_callsign: String::new(),
+                dxcluster_max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+                dxcluster_commands: String::new(),
+            })
+            .await
+            .expect("initial config updates");
+
+        database
+            .update_config(UpdateConfig {
+                login_user: "greg".to_string(),
+                login_password: LoginPasswordUpdate::Preserve,
+                dxcluster_enabled: true,
+                dxcluster_host: "cluster.example.test".to_string(),
+                dxcluster_port: 7300,
+                dxcluster_callsign: "n0call".to_string(),
+                dxcluster_max_age_min: 120,
+                dxcluster_commands: "show/dx".to_string(),
+            })
+            .await
+            .expect("non-auth config updates");
+
+        let auth = database.auth_config().await.expect("auth config loads");
+        assert!(crate::auth::verify_password_hash(
+            "secret",
+            &auth.login_password
+        ));
     }
 
     fn tcp_radio() -> NewRadio {
