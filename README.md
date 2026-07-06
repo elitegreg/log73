@@ -235,7 +235,7 @@ cargo run -p launcher
 src/                                  React/Rsbuild frontend
 src/index.jsx                         frontend entry point
 src/app/App.jsx                       frontend routes and theme application
-src/screens/OpenLogScreen.jsx         log/radio selection screen and theme picker
+src/screens/OpenLogScreen.jsx         log/radio selection screen
 src/screens/CreateLogScreen.jsx       create log screen
 src/screens/CreateRadioScreen.jsx     create radio screen, CAT transport, and Winkeyer settings
 src/screens/LoggerScreen.jsx          logger state, websocket, contact commit flow
@@ -256,9 +256,9 @@ backend/src/radio.rs                  radio/CW websocket messages, mode conversi
 backend/src/radio_manager.rs          lazy/refcounted multi-radio manager and CW task
 backend/src/cw.rs                     CW message parsing, labels, and template rendering
 backend/src/static_assets.rs          embedded frontend asset serving
-backend/src/scqso_in_state.rs         SC QSO Party contest rules
-backend/src/bands.rs                  USA amateur band helpers
-backend/src/frequency.rs              frequency type and macros
+backend/src/contest_rules.rs          contest rule loading, inheritance, and summaries
+backend/src/bands.rs                  amateur band helpers
+backend/src/scoring.rs                incremental contest scoring helpers
 ```
 
 ## UI routes
