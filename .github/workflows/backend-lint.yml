@@ -36,12 +36,11 @@ jobs:
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: backend
+          workspaces: |
+            . -> target
 
       - name: Check formatting
-        working-directory: backend
-        run: cargo fmt -- --check
+        run: cargo fmt --all -- --check
 
       - name: Run clippy
-        working-directory: backend
-        run: cargo clippy --all-targets --all-features
+        run: cargo clippy -p log73-backend --all-targets --all-features
