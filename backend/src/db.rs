@@ -13,10 +13,13 @@ pub use config::{
     DEFAULT_DXCLUSTER_MAX_AGE_MIN, DEFAULT_DXCLUSTER_PORT, MAX_DXCLUSTER_MAX_AGE_MIN,
     MIN_DXCLUSTER_MAX_AGE_MIN,
 };
+#[cfg(test)]
+#[allow(unused_imports)]
+pub use contact::set_contact_adif;
 #[allow(unused_imports)]
 pub use contact::{
     Contact, ContactFields, build_contact, contact_adif, contact_adif_value, contact_id,
-    contact_log_id, contact_meta, contact_meta_value, set_contact_adif, set_contact_meta,
+    contact_log_id, contact_meta, contact_meta_value, set_contact_meta,
 };
 #[allow(unused_imports)]
 pub use models::{

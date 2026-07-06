@@ -1,10 +1,5 @@
-use super::config::{
-    DEFAULT_DXCLUSTER_MAX_AGE_MIN, DEFAULT_DXCLUSTER_PORT, db_auth_config, db_dxcluster_config,
-    db_update_config,
-};
-use super::contact::{
-    Contact, contact_adif_value, contact_id, contact_log_id, set_contact_adif, set_contact_meta,
-};
+use super::config::{db_auth_config, db_dxcluster_config, db_update_config};
+use super::contact::Contact;
 use super::contacts::{
     db_contacts, db_delete_contact, db_upsert_contacts, select_contact, select_contact_log_id,
 };
@@ -12,16 +7,13 @@ use super::logs::{
     db_create_log, db_delete_log, db_log_qso_count, db_logs, db_update_log, select_log,
 };
 use super::models::{
-    AuthConfig, ConfigView, DxClusterConfig, Log, LoginPasswordUpdate, NewLog, NewRadio,
-    RadioConfig, SerialAllocation, UpdateConfig, UpdateLog,
+    AuthConfig, ConfigView, DxClusterConfig, Log, NewLog, NewRadio, RadioConfig, SerialAllocation,
+    UpdateConfig, UpdateLog,
 };
 use super::radios::{db_create_radio, db_delete_radio, db_radios, db_update_radio, select_radio};
 use super::schema::initialize_schema;
 use super::serials::db_allocate_serials;
-use crate::cw::DEFAULT_CW_MESSAGES;
-use crate::voice_messages::DEFAULT_VOICE_MESSAGES;
 use rusqlite::Connection;
-use serde_json::{Map, Value};
 use std::path::Path;
 use std::thread;
 use tokio::sync::{mpsc, oneshot};
@@ -404,7 +396,14 @@ fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbComm
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use crate::cw::DEFAULT_CW_MESSAGES;
+    use crate::db::config::{DEFAULT_DXCLUSTER_MAX_AGE_MIN, DEFAULT_DXCLUSTER_PORT};
+    use crate::db::contact::{
+        contact_adif_value, contact_id, contact_log_id, set_contact_adif, set_contact_meta,
+    };
+    use crate::db::models::LoginPasswordUpdate;
+    use crate::voice_messages::DEFAULT_VOICE_MESSAGES;
+    use serde_json::{Map, Value, json};
 
     fn test_database() -> Database {
         Database::open(":memory:").expect("in-memory database opens")

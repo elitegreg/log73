@@ -2,7 +2,7 @@ use super::rit::{next_rit_offset_hz, set_rit_offset_hz};
 use crate::radio::{RadioCommand, RadioState, mode_candidates_for_request, normalize_mode};
 use radio_cat_rs::{Frequency, Radio, RadioError};
 use std::sync::Arc;
-use tokio::sync::{RwLock, oneshot};
+use tokio::sync::RwLock;
 use tracing::{debug, trace, warn};
 
 pub(super) fn logger_state_from_cat_state(
@@ -206,6 +206,7 @@ mod tests {
     use super::*;
     use crate::radio::RadioCommand;
     use serde_json::Map;
+    use tokio::sync::oneshot;
 
     #[tokio::test]
     async fn fail_unavailable_radio_command_rejects_send_message() {
