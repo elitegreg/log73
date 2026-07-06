@@ -1,4 +1,5 @@
 use crate::db::DxClusterConfig;
+use backon::{BackoffBuilder, ExponentialBuilder};
 use dxcllistener::Listener;
 use dxclparser::{DX, ParseError, RBN, Spot};
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,8 @@ use tracing::{debug, error, info, warn};
 const DXCLUSTER_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const DXCLUSTER_PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 const DXCLUSTER_EVENT_BUFFER: usize = 512;
+const DXCLUSTER_RECONNECT_MIN_DELAY: Duration = Duration::from_secs(1);
+const DXCLUSTER_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DxClusterRbnSpot {
@@ -54,11 +57,20 @@ struct DxClusterManagerInner {
     events: broadcast::Sender<DxClusterEvent>,
     task: Mutex<Option<JoinHandle<()>>>,
     outbound: Mutex<Option<mpsc::Sender<DxClusterOutboundCommand>>>,
+    connection_state: Mutex<DxClusterConnectionState>,
 }
 
 struct DxClusterOutboundCommand {
     text: String,
     completed: oneshot::Sender<Result<(), String>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DxClusterConnectionState {
+    Stopped,
+    Connecting,
+    Connected,
+    Reconnecting,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -85,6 +97,7 @@ impl DxClusterManager {
                 events,
                 task: Mutex::new(None),
                 outbound: Mutex::new(None),
+                connection_state: Mutex::new(DxClusterConnectionState::Stopped),
             }),
         }
     }
@@ -97,13 +110,14 @@ impl DxClusterManager {
         self.stop_task().await;
 
         if !config.enabled {
-            info!("dxcluster disabled; listener task not started");
+            info!("DX Cluster disabled; listener task not started");
             return;
         }
 
         let manager = self.clone();
         let (outbound_tx, outbound_rx) = mpsc::channel(64);
         *self.inner.outbound.lock().await = Some(outbound_tx);
+        *self.inner.connection_state.lock().await = DxClusterConnectionState::Connecting;
         let handle = tokio::spawn(async move {
             run_dxcluster_task(config, manager, outbound_rx).await;
         });
@@ -111,6 +125,14 @@ impl DxClusterManager {
     }
 
     pub async fn send_text(&self, text: impl Into<String>) -> Result<(), String> {
+        let connection_state = *self.inner.connection_state.lock().await;
+        if matches!(
+            connection_state,
+            DxClusterConnectionState::Connecting | DxClusterConnectionState::Reconnecting
+        ) {
+            return Err("DX Cluster listener is currently reconnecting".to_string());
+        }
+
         let (completed_tx, completed_rx) = oneshot::channel();
         let command = DxClusterOutboundCommand {
             text: text.into(),
@@ -122,14 +144,14 @@ impl DxClusterManager {
             .lock()
             .await
             .clone()
-            .ok_or_else(|| "DX cluster listener is not running".to_string())?;
+            .ok_or_else(|| "DX Cluster listener is not running".to_string())?;
         sender
             .send(command)
             .await
-            .map_err(|_| "DX cluster listener is not running".to_string())?;
+            .map_err(|_| "DX Cluster listener is not running".to_string())?;
         completed_rx
             .await
-            .map_err(|_| "DX cluster listener stopped before sending text".to_string())?
+            .map_err(|_| "DX Cluster listener stopped before sending text".to_string())?
     }
 
     pub async fn spots(&self) -> Vec<DxClusterSpot> {
@@ -180,6 +202,7 @@ impl DxClusterManager {
     }
 
     async fn stop_task(&self) {
+        *self.inner.connection_state.lock().await = DxClusterConnectionState::Stopped;
         *self.inner.outbound.lock().await = None;
         if let Some(task) = self.inner.task.lock().await.take() {
             task.abort();
@@ -391,30 +414,88 @@ async fn run_dxcluster_task(
     let max_age = Duration::from_secs(u64::from(config.max_age_min) * 60);
 
     if host.is_empty() {
-        error!("dxcluster host is empty; listener task stopped");
+        error!("DX Cluster host is empty; listener task stopped");
+        *manager.inner.connection_state.lock().await = DxClusterConnectionState::Stopped;
         return;
     }
     if port == 0 {
-        error!("dxcluster port is 0; listener task stopped");
+        error!("DX Cluster port is 0; listener task stopped");
+        *manager.inner.connection_state.lock().await = DxClusterConnectionState::Stopped;
         return;
     }
     if callsign.is_empty() {
-        error!("dxcluster callsign is empty; listener task stopped");
+        error!("DX Cluster callsign is empty; listener task stopped");
+        *manager.inner.connection_state.lock().await = DxClusterConnectionState::Stopped;
         return;
     }
 
-    manager.prune_old_spots(max_age).await;
+    let mut reconnect_backoff = dxcluster_reconnect_backoff().build();
+    let mut connected_once = false;
 
+    loop {
+        manager.prune_old_spots(max_age).await;
+        *manager.inner.connection_state.lock().await = if connected_once {
+            DxClusterConnectionState::Reconnecting
+        } else {
+            DxClusterConnectionState::Connecting
+        };
+
+        match run_dxcluster_session(
+            &config,
+            &manager,
+            &host,
+            port,
+            &callsign,
+            max_age,
+            &mut outbound_rx,
+        )
+        .await
+        {
+            DxClusterTaskOutcome::ChannelClosed => {
+                *manager.inner.connection_state.lock().await = DxClusterConnectionState::Stopped;
+                return;
+            }
+            DxClusterTaskOutcome::Reconnect => {
+                connected_once = true;
+                let reconnect_deadline = next_dxcluster_reconnect_deadline(&mut reconnect_backoff);
+                *manager.inner.connection_state.lock().await =
+                    DxClusterConnectionState::Reconnecting;
+                if wait_for_dxcluster_reconnect(&mut outbound_rx, reconnect_deadline).await {
+                    *manager.inner.connection_state.lock().await =
+                        DxClusterConnectionState::Stopped;
+                    return;
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DxClusterTaskOutcome {
+    Reconnect,
+    ChannelClosed,
+}
+
+async fn run_dxcluster_session(
+    config: &DxClusterConfig,
+    manager: &DxClusterManager,
+    host: &str,
+    port: u16,
+    callsign: &str,
+    max_age: Duration,
+    outbound_rx: &mut mpsc::Receiver<DxClusterOutboundCommand>,
+) -> DxClusterTaskOutcome {
     let (line_tx, mut line_rx) = mpsc::unbounded_channel();
-    let mut listener = Listener::new(host.clone(), port, callsign.clone());
-    info!(host = %host, port, callsign = %callsign, "starting dxcluster listener");
+    let mut listener = Listener::new(host.to_string(), port, callsign.to_string());
+    info!(host, port, callsign, "starting DX Cluster listener");
 
     if let Err(error) = listener.listen(line_tx, DXCLUSTER_CONNECT_TIMEOUT).await {
-        error!(host = %host, port, callsign = %callsign, %error, "failed to start dxcluster listener");
-        return;
+        error!(host, port, callsign, %error, "failed to start DX Cluster listener");
+        return DxClusterTaskOutcome::Reconnect;
     }
 
-    info!(host = %host, port, callsign = %callsign, "dxcluster listener connected");
+    *manager.inner.connection_state.lock().await = DxClusterConnectionState::Connected;
+    info!(host, port, callsign, "DX Cluster listener connected");
     for command in config
         .commands
         .lines()
@@ -422,47 +503,85 @@ async fn run_dxcluster_task(
         .filter(|line| !line.is_empty())
     {
         if let Err(error) = listener.send_text(command) {
-            warn!(host = %host, port, callsign = %callsign, command, %error, "failed to send dxcluster command");
+            warn!(host, port, callsign, command, %error, "failed to send DX Cluster command");
         }
     }
 
     let mut prune_interval = tokio::time::interval(DXCLUSTER_PRUNE_INTERVAL);
-    loop {
+    let outcome = loop {
         tokio::select! {
             line = line_rx.recv() => {
                 let Some(line) = line else {
-                    break;
+                    break DxClusterTaskOutcome::Reconnect;
                 };
-                handle_cluster_line(&line, &manager, max_age).await;
+                handle_cluster_line(&line, manager, max_age).await;
             }
             _ = prune_interval.tick() => {
                 manager.prune_old_spots(max_age).await;
                 if !listener.is_running() {
-                    break;
+                    break DxClusterTaskOutcome::Reconnect;
                 }
             }
             command = outbound_rx.recv() => {
                 let Some(command) = command else {
-                    break;
+                    break DxClusterTaskOutcome::ChannelClosed;
                 };
-                let result = listener
-                    .send_text(command.text)
-                    .map_err(|error| error.to_string());
+                let result = listener.send_text(command.text).map_err(|error| error.to_string());
                 let _ = command.completed.send(result);
             }
         }
-    }
+    };
 
     if listener.is_running() {
         let _ = listener.request_stop();
     }
 
     match listener.join().await {
-        Ok(()) => info!(host = %host, port, callsign = %callsign, "dxcluster listener stopped"),
+        Ok(()) => info!(host, port, callsign, "DX Cluster listener stopped"),
         Err(error) => {
-            warn!(host = %host, port, callsign = %callsign, %error, "dxcluster listener stopped with error")
+            warn!(host, port, callsign, %error, "DX Cluster listener stopped with error")
         }
     }
+
+    outcome
+}
+
+async fn wait_for_dxcluster_reconnect(
+    outbound_rx: &mut mpsc::Receiver<DxClusterOutboundCommand>,
+    reconnect_deadline: tokio::time::Instant,
+) -> bool {
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep_until(reconnect_deadline) => return false,
+            command = outbound_rx.recv() => {
+                let Some(command) = command else {
+                    return true;
+                };
+                let _ = command.completed.send(Err("DX Cluster listener is currently reconnecting".to_string()));
+            }
+        }
+    }
+}
+
+fn dxcluster_reconnect_backoff() -> ExponentialBuilder {
+    ExponentialBuilder::default()
+        .with_min_delay(DXCLUSTER_RECONNECT_MIN_DELAY)
+        .with_max_delay(DXCLUSTER_RECONNECT_MAX_DELAY)
+        .without_max_times()
+}
+
+fn next_dxcluster_reconnect_deadline(
+    reconnect_backoff: &mut impl Iterator<Item = Duration>,
+) -> tokio::time::Instant {
+    let delay = reconnect_backoff
+        .next()
+        .unwrap_or(DXCLUSTER_RECONNECT_MAX_DELAY);
+    debug!(
+        reconnect_delay_ms = delay.as_millis(),
+        reconnect_delay_secs = delay.as_secs_f64(),
+        "scheduled next DX Cluster reconnect attempt"
+    );
+    tokio::time::Instant::now() + delay
 }
 
 async fn handle_cluster_line(line: &str, manager: &DxClusterManager, max_age: Duration) {
@@ -672,5 +791,53 @@ mod tests {
         let deleted_ids = manager.clear_spots().await;
         assert_eq!(deleted_ids.len(), 1);
         assert!(manager.spots().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn send_text_reports_not_running_without_listener() {
+        let manager = DxClusterManager::new();
+
+        let error = manager
+            .send_text("sh/dx")
+            .await
+            .expect_err("send should fail");
+
+        assert_eq!(error, "DX Cluster listener is not running");
+    }
+
+    #[tokio::test]
+    async fn send_text_reports_reconnecting_while_disconnected() {
+        let manager = DxClusterManager::new();
+        let (outbound_tx, _outbound_rx) = mpsc::channel(1);
+        *manager.inner.outbound.lock().await = Some(outbound_tx);
+        *manager.inner.connection_state.lock().await = DxClusterConnectionState::Reconnecting;
+
+        let error = manager
+            .send_text("sh/dx")
+            .await
+            .expect_err("send should fail");
+
+        assert_eq!(error, "DX Cluster listener is currently reconnecting");
+    }
+
+    #[test]
+    fn dxcluster_reconnect_backoff_starts_at_one_second() {
+        let mut backoff = dxcluster_reconnect_backoff().build();
+        assert_eq!(backoff.next(), Some(Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn dxcluster_reconnect_backoff_caps_at_max_delay() {
+        let mut backoff = dxcluster_reconnect_backoff().build();
+        let delays: Vec<Duration> = (0..10)
+            .map(|_| backoff.next().expect("backoff should continue"))
+            .collect();
+
+        assert!(delays.contains(&DXCLUSTER_RECONNECT_MAX_DELAY));
+        assert!(
+            delays
+                .into_iter()
+                .all(|delay| delay <= DXCLUSTER_RECONNECT_MAX_DELAY)
+        );
     }
 }
