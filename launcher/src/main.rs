@@ -71,6 +71,7 @@ struct Launcher {
     screen: Screen,
     main_icon: ImageHandle,
     settings: LauncherSettings,
+    settings_dirty: bool,
     status: String,
     child: Option<Arc<SharedChild>>,
     active_token: Option<u64>,
@@ -85,6 +86,7 @@ impl Default for Launcher {
             screen: Screen::Main,
             main_icon: launcher_image_handle(),
             settings: load_settings_or_default(),
+            settings_dirty: false,
             status: "Backend is stopped.".to_string(),
             child: None,
             active_token: None,
@@ -351,58 +353,59 @@ fn update(state: &mut Launcher, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::BackToMainPressed => {
+            persist_settings_if_dirty(state);
             state.screen = Screen::Main;
             Task::none()
         }
         Message::SetDefaultsPressed => {
             state.settings = LauncherSettings::default();
-            persist_settings_quietly(&state.settings);
+            state.settings_dirty = true;
             state.status = "Settings reset to defaults.".to_string();
             Task::none()
         }
         Message::BackendPathChanged(path) => {
             state.settings.backend_path = path;
-            persist_settings_quietly(&state.settings);
+            state.settings_dirty = true;
             Task::none()
         }
         Message::ConfigDirPathChanged(path) => {
             state.settings.config_dir = path;
-            persist_settings_quietly(&state.settings);
+            state.settings_dirty = true;
             Task::none()
         }
         Message::DataDirPathChanged(path) => {
             state.settings.data_dir = path;
-            persist_settings_quietly(&state.settings);
+            state.settings_dirty = true;
             Task::none()
         }
         Message::AppDirPathChanged(path) => {
             state.settings.app_dir = path;
-            persist_settings_quietly(&state.settings);
+            state.settings_dirty = true;
             Task::none()
         }
         Message::LogLevelSelected(level) => {
             state.settings.log_level = level;
-            persist_settings_quietly(&state.settings);
+            state.settings_dirty = true;
             Task::none()
         }
         Message::LogFilePathChanged(path) => {
             state.settings.log_file_path = path;
-            persist_settings_quietly(&state.settings);
+            state.settings_dirty = true;
             Task::none()
         }
         Message::BindModeSelected(bind_mode) => {
             state.settings.bind_mode = bind_mode;
-            persist_settings_quietly(&state.settings);
+            state.settings_dirty = true;
             Task::none()
         }
         Message::PortChanged(port) => {
             state.settings.port = port;
-            persist_settings_quietly(&state.settings);
+            state.settings_dirty = true;
             Task::none()
         }
         Message::AppBrowserSelected(browser) => {
             state.settings.app_browser = browser;
-            persist_settings_quietly(&state.settings);
+            state.settings_dirty = true;
             Task::none()
         }
         Message::StartPressed => start_backend(state),
@@ -425,6 +428,7 @@ fn update(state: &mut Launcher, message: Message) -> Task<Message> {
         }
         Message::WindowCloseRequested(window_id) => {
             eprintln!("log73-launcher: window close requested");
+            persist_settings_if_dirty(state);
             state.pending_close_window = Some(window_id);
 
             if state.child.is_some() || state.stop_in_progress {
@@ -452,6 +456,8 @@ fn start_backend(state: &mut Launcher) -> Task<Message> {
     if state.child.is_some() || state.stop_in_progress {
         return Task::none();
     }
+
+    persist_settings_if_dirty(state);
 
     let backend_path = state.settings.backend_path.trim();
     if backend_path.is_empty() {
@@ -494,8 +500,6 @@ fn start_backend(state: &mut Launcher) -> Task<Message> {
         state.status = format!("Failed to create data directory: {error}");
         return Task::none();
     }
-
-    persist_settings_quietly(&state.settings);
 
     let bind_address = format!("{}:{port}", state.settings.bind_mode.bind_ip());
     let backend_binary_path = PathBuf::from(backend_path);
@@ -1217,8 +1221,11 @@ fn resolve_command_in_path(command_name: &str) -> Option<PathBuf> {
 }
 
 fn load_settings_or_default() -> LauncherSettings {
+    load_settings_or_default_from_path(&settings_file_path())
+}
+
+fn load_settings_or_default_from_path(path: &Path) -> LauncherSettings {
     let settings = LauncherSettings::default();
-    let path = settings_file_path();
 
     let Ok(contents) = fs::read_to_string(path) else {
         return settings;
@@ -1253,14 +1260,22 @@ fn load_settings_or_default() -> LauncherSettings {
     }
 }
 
-fn persist_settings_quietly(settings: &LauncherSettings) {
-    if let Err(error) = save_settings(settings) {
-        eprintln!("failed to save launcher settings: {error}");
+fn persist_settings_if_dirty(state: &mut Launcher) {
+    persist_settings_if_dirty_to_path(state, &settings_file_path())
+}
+
+fn persist_settings_if_dirty_to_path(state: &mut Launcher, path: &Path) {
+    if !state.settings_dirty {
+        return;
+    }
+
+    match save_settings_to_path(&state.settings, path) {
+        Ok(()) => state.settings_dirty = false,
+        Err(error) => eprintln!("failed to save launcher settings: {error}"),
     }
 }
 
-fn save_settings(settings: &LauncherSettings) -> Result<(), String> {
-    let path = settings_file_path();
+fn save_settings_to_path(settings: &LauncherSettings, path: &Path) -> Result<(), String> {
     let Some(parent) = path.parent() else {
         return Err("settings path has no parent directory".to_string());
     };
@@ -1268,4 +1283,103 @@ fn save_settings(settings: &LauncherSettings) -> Result<(), String> {
     fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let serialized = toml::to_string_pretty(settings).map_err(|error| error.to_string())?;
     fs::write(path, serialized).map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_launcher() -> Launcher {
+        Launcher {
+            screen: Screen::Settings,
+            main_icon: launcher_image_handle(),
+            settings: LauncherSettings::default(),
+            settings_dirty: false,
+            status: String::new(),
+            child: None,
+            active_token: None,
+            next_token: 1,
+            stop_in_progress: false,
+            pending_close_window: None,
+        }
+    }
+
+    fn temp_settings_path(name: &str) -> PathBuf {
+        let base = std::env::temp_dir().join(format!(
+            "log73-launcher-tests-{}-{}",
+            std::process::id(),
+            name
+        ));
+        let _ = fs::remove_dir_all(&base);
+        base.join("launcher-settings.toml")
+    }
+
+    #[test]
+    fn settings_edits_only_mark_state_dirty() {
+        let mut launcher = test_launcher();
+
+        let _ = update(
+            &mut launcher,
+            Message::BackendPathChanged("/tmp/custom-backend".to_string()),
+        );
+        let _ = update(&mut launcher, Message::PortChanged("7301".to_string()));
+
+        assert_eq!(launcher.settings.backend_path, "/tmp/custom-backend");
+        assert_eq!(launcher.settings.port, "7301");
+        assert!(launcher.settings_dirty);
+    }
+
+    #[test]
+    fn persist_settings_if_dirty_to_path_skips_clean_state_and_saves_dirty_state() {
+        let path = temp_settings_path("dirty-save");
+        let mut launcher = test_launcher();
+
+        persist_settings_if_dirty_to_path(&mut launcher, &path);
+        assert!(!path.exists());
+        assert!(!launcher.settings_dirty);
+
+        launcher.settings.backend_path = "/tmp/custom-backend".to_string();
+        launcher.settings.port = "7400".to_string();
+        launcher.settings_dirty = true;
+        persist_settings_if_dirty_to_path(&mut launcher, &path);
+
+        assert!(path.exists());
+        assert!(!launcher.settings_dirty);
+        let loaded = load_settings_or_default_from_path(&path);
+        assert_eq!(loaded.backend_path, "/tmp/custom-backend");
+        assert_eq!(loaded.port, "7400");
+
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_and_load_settings_round_trip_custom_values() {
+        let path = temp_settings_path("round-trip");
+        let settings = LauncherSettings {
+            backend_path: "/tmp/backend".to_string(),
+            config_dir: "/tmp/config".to_string(),
+            data_dir: "/tmp/data".to_string(),
+            app_dir: "/tmp/app".to_string(),
+            log_level: LogLevel::Debug,
+            log_file_path: "/tmp/log73.log".to_string(),
+            bind_mode: BindMode::Open,
+            port: "8123".to_string(),
+            app_browser: AppBrowser::Edge,
+        };
+
+        save_settings_to_path(&settings, &path).expect("settings save succeeds");
+        let loaded = load_settings_or_default_from_path(&path);
+
+        assert_eq!(loaded.backend_path, settings.backend_path);
+        assert_eq!(loaded.config_dir, settings.config_dir);
+        assert_eq!(loaded.data_dir, settings.data_dir);
+        assert_eq!(loaded.app_dir, settings.app_dir);
+        assert_eq!(loaded.log_level, settings.log_level);
+        assert_eq!(loaded.log_file_path, settings.log_file_path);
+        assert_eq!(loaded.bind_mode, settings.bind_mode);
+        assert_eq!(loaded.port, settings.port);
+        assert_eq!(loaded.app_browser, settings.app_browser);
+
+        let _ = fs::remove_file(path);
+    }
 }
