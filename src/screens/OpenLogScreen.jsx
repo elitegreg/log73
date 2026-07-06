@@ -87,31 +87,34 @@ function OpenLogScreen() {
   async function deleteLog() {
     if (!selectedLogId) return;
 
-    const qsoCountResult = await apiJson(`/logs/${selectedLogId}/qso-count`);
-    if (!qsoCountResult.ok) {
+    let qsoCountResult;
+    try {
+      qsoCountResult = await apiJson(`/logs/${selectedLogId}/qso-count`);
+    } catch (error) {
       notifyOperationalError(
         'OpenLogScreen.deleteLog.qsoCount',
         'Unable to check log QSO count.',
-        qsoCountResult.error,
+        error,
         { selectedLogId },
       );
       return;
     }
 
-    const qsoCount = Number(qsoCountResult.qso_count ?? 0);
+    const qsoCount = Number(qsoCountResult?.qso_count ?? qsoCountResult ?? 0);
     if (qsoCount > 0) {
       const qsoLabel = qsoCount === 1 ? '1 QSO' : `${qsoCount} QSOs`;
       if (!window.confirm(`Delete log containing ${qsoLabel}?`)) return;
     }
 
-    const result = await apiJson(`/logs/${selectedLogId}`, {
-      method: 'DELETE',
-    });
-    if (!result.ok) {
+    try {
+      await apiJson(`/logs/${selectedLogId}`, {
+        method: 'DELETE',
+      });
+    } catch (error) {
       notifyOperationalError(
         'OpenLogScreen.deleteLog',
         'Unable to delete log.',
-        result.error,
+        error,
         { selectedLogId },
       );
       return;
@@ -129,14 +132,15 @@ function OpenLogScreen() {
 
   async function deleteRadio() {
     if (!selectedRadioId) return;
-    const result = await apiJson(`/radios/${selectedRadioId}`, {
-      method: 'DELETE',
-    });
-    if (!result.ok) {
+    try {
+      await apiJson(`/radios/${selectedRadioId}`, {
+        method: 'DELETE',
+      });
+    } catch (error) {
       notifyOperationalError(
         'OpenLogScreen.deleteRadio',
         'Unable to delete radio.',
-        result.error,
+        error,
         { selectedRadioId },
       );
       return;

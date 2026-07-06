@@ -182,14 +182,7 @@ function CreateRadioScreen() {
 
       let serialPorts = [];
       try {
-        const serialPortsResult = await apiJson('/serial-ports');
-        if (serialPortsResult.ok) {
-          serialPorts = normalizeSerialPorts(serialPortsResult.serial_ports);
-        } else {
-          throw new Error(
-            serialPortsResult.error ?? 'Unable to load available serial ports.',
-          );
-        }
+        serialPorts = normalizeSerialPorts(await apiJson('/serial-ports'));
       } catch (error) {
         notifyOperationalError(
           'CreateRadioScreen.loadSerialPorts',
@@ -200,12 +193,8 @@ function CreateRadioScreen() {
 
       let loadedDefaultCwMessages = '';
       try {
-        const defaultMessagesResult = await apiJson(
-          '/radios/cw-messages/default',
-        );
-        if (defaultMessagesResult.ok) {
-          loadedDefaultCwMessages = defaultMessagesResult.cw_messages ?? '';
-        }
+        loadedDefaultCwMessages =
+          (await apiJson('/radios/cw-messages/default')) ?? '';
       } catch (error) {
         notifyOperationalError(
           'CreateRadioScreen.loadDefaultCwMessages',
@@ -216,13 +205,8 @@ function CreateRadioScreen() {
 
       let loadedDefaultVoiceMessages = '';
       try {
-        const defaultMessagesResult = await apiJson(
-          '/radios/voice-messages/default',
-        );
-        if (defaultMessagesResult.ok) {
-          loadedDefaultVoiceMessages =
-            defaultMessagesResult.voice_messages ?? '';
-        }
+        loadedDefaultVoiceMessages =
+          (await apiJson('/radios/voice-messages/default')) ?? '';
       } catch (error) {
         notifyOperationalError(
           'CreateRadioScreen.loadDefaultVoiceMessages',
@@ -234,11 +218,8 @@ function CreateRadioScreen() {
       let loadedVoiceInputDevices = [];
       try {
         const inputDevicesResult = await apiJson('/audio-devices/input');
-        if (
-          inputDevicesResult.ok &&
-          Array.isArray(inputDevicesResult.devices)
-        ) {
-          loadedVoiceInputDevices = inputDevicesResult.devices;
+        if (Array.isArray(inputDevicesResult)) {
+          loadedVoiceInputDevices = inputDevicesResult;
         }
       } catch (error) {
         notifyOperationalError(
@@ -251,11 +232,8 @@ function CreateRadioScreen() {
       let loadedVoiceOutputDevices = [];
       try {
         const outputDevicesResult = await apiJson('/audio-devices/output');
-        if (
-          outputDevicesResult.ok &&
-          Array.isArray(outputDevicesResult.devices)
-        ) {
-          loadedVoiceOutputDevices = outputDevicesResult.devices;
+        if (Array.isArray(outputDevicesResult)) {
+          loadedVoiceOutputDevices = outputDevicesResult;
         }
       } catch (error) {
         notifyOperationalError(
@@ -286,44 +264,41 @@ function CreateRadioScreen() {
         return;
       }
 
-      const result = await apiJson(`/radios/${radioId}`);
-      if (!result.ok) throw new Error(result.error ?? 'Radio not found');
+      const radio = await apiJson(`/radios/${radioId}`);
       if (isCancelled) return;
 
-      setName(result.radio.name ?? '');
-      setRadioKind(result.radio.radio_kind ?? '');
-      setTransportKind(result.radio.transport_kind ?? DEFAULT_TRANSPORT_KIND);
-      setTcpHost(result.radio.tcp_host ?? '127.0.0.1');
-      setTcpPort(result.radio.tcp_port);
-      setSerialPort(result.radio.serial_port ?? '');
-      setSerialBaudRate(result.radio.serial_baud_rate ?? 115200);
-      setOptions(result.radio.options ?? '');
+      setName(radio.name ?? '');
+      setRadioKind(radio.radio_kind ?? '');
+      setTransportKind(radio.transport_kind ?? DEFAULT_TRANSPORT_KIND);
+      setTcpHost(radio.tcp_host ?? '127.0.0.1');
+      setTcpPort(radio.tcp_port);
+      setSerialPort(radio.serial_port ?? '');
+      setSerialBaudRate(radio.serial_baud_rate ?? 115200);
+      setOptions(radio.options ?? '');
       setCwTuningIncrementHz(
-        result.radio.cw_tuning_increment_hz ?? DEFAULT_CW_TUNING_INCREMENT_HZ,
+        radio.cw_tuning_increment_hz ?? DEFAULT_CW_TUNING_INCREMENT_HZ,
       );
       setSsbTuningIncrementHz(
-        result.radio.ssb_tuning_increment_hz ?? DEFAULT_SSB_TUNING_INCREMENT_HZ,
+        radio.ssb_tuning_increment_hz ?? DEFAULT_SSB_TUNING_INCREMENT_HZ,
       );
-      setRitClearOnLog(Boolean(result.radio.rit_clear_on_log));
+      setRitClearOnLog(Boolean(radio.rit_clear_on_log));
       setVoiceInputDeviceId(
-        normalizeSoundDeviceId(result.radio.voice_input_device_id) ??
+        normalizeSoundDeviceId(radio.voice_input_device_id) ??
           NONE_SOUND_DEVICE_ID,
       );
       setVoiceOutputDeviceId(
-        normalizeSoundDeviceId(result.radio.voice_output_device_id) ??
+        normalizeSoundDeviceId(radio.voice_output_device_id) ??
           NONE_SOUND_DEVICE_ID,
       );
-      setCwKeyerType(result.radio.cw_keyer_type ?? DEFAULT_CW_KEYER_TYPE);
-      setWinkeyerSerialPort(result.radio.winkeyer_serial_port ?? '');
-      setCwSerialPort(result.radio.cw_serial_port ?? '');
+      setCwKeyerType(radio.cw_keyer_type ?? DEFAULT_CW_KEYER_TYPE);
+      setWinkeyerSerialPort(radio.winkeyer_serial_port ?? '');
+      setCwSerialPort(radio.cw_serial_port ?? '');
       setCwSerialBaudRate(
-        result.radio.cw_serial_baud_rate ?? DEFAULT_CW_SERIAL_BAUD_RATE,
+        radio.cw_serial_baud_rate ?? DEFAULT_CW_SERIAL_BAUD_RATE,
       );
-      setCwSerialLine(result.radio.cw_serial_line ?? DEFAULT_CW_SERIAL_LINE);
-      setCwMessages(result.radio.cw_messages ?? loadedDefaultCwMessages);
-      setVoiceMessages(
-        result.radio.voice_messages ?? loadedDefaultVoiceMessages,
-      );
+      setCwSerialLine(radio.cw_serial_line ?? DEFAULT_CW_SERIAL_LINE);
+      setCwMessages(radio.cw_messages ?? loadedDefaultCwMessages);
+      setVoiceMessages(radio.voice_messages ?? loadedDefaultVoiceMessages);
     }
 
     loadContext().catch((error) =>
@@ -342,19 +317,17 @@ function CreateRadioScreen() {
 
   async function validateCwMessages() {
     setCwMessagesValidationMessage('');
-    const result = await apiJson('/radios/cw-messages/validate', {
-      method: 'POST',
-      body: JSON.stringify({ cw_messages: cwMessages }),
-    });
-
-    if (!result.ok) {
-      setCwMessagesValidationMessage(
-        result.error ?? 'CW messages are invalid.',
-      );
+    try {
+      await apiJson('/radios/cw-messages/validate', {
+        method: 'POST',
+        body: JSON.stringify({ cw_messages: cwMessages }),
+      });
+    } catch (error) {
+      setCwMessagesValidationMessage(errorMessage(error, 'CW messages are invalid.'));
       notifyOperationalError(
         'CreateRadioScreen.validateCwMessages',
         'CW messages are invalid.',
-        result.error,
+        error,
       );
       return false;
     }
@@ -365,19 +338,19 @@ function CreateRadioScreen() {
 
   async function validateVoiceMessages() {
     setVoiceMessagesValidationMessage('');
-    const result = await apiJson('/radios/voice-messages/validate', {
-      method: 'POST',
-      body: JSON.stringify({ voice_messages: voiceMessages }),
-    });
-
-    if (!result.ok) {
+    try {
+      await apiJson('/radios/voice-messages/validate', {
+        method: 'POST',
+        body: JSON.stringify({ voice_messages: voiceMessages }),
+      });
+    } catch (error) {
       setVoiceMessagesValidationMessage(
-        result.error ?? 'Voice messages are invalid.',
+        errorMessage(error, 'Voice messages are invalid.'),
       );
       notifyOperationalError(
         'CreateRadioScreen.validateVoiceMessages',
         'Voice messages are invalid.',
-        result.error,
+        error,
       );
       return false;
     }
@@ -395,41 +368,42 @@ function CreateRadioScreen() {
     if (!(await validateCwMessages())) return;
     if (!(await validateVoiceMessages())) return;
 
-    const result = await apiJson(isEditing ? `/radios/${radioId}` : '/radios', {
-      method: isEditing ? 'PUT' : 'POST',
-      body: JSON.stringify({
-        name,
-        radio_kind: selectedRadioKind,
-        transport_kind: transportKind,
-        tcp_host: tcpHost,
-        tcp_port: Number(tcpPort),
-        serial_port: serialPort,
-        serial_baud_rate: Number(serialBaudRate),
-        options: options,
-        cw_tuning_increment_hz: Number(cwTuningIncrementHz),
-        ssb_tuning_increment_hz: Number(ssbTuningIncrementHz),
-        rit_clear_on_log: Boolean(ritClearOnLog),
-        voice_input_device_id: normalizeSoundDeviceId(voiceInputDeviceId),
-        voice_output_device_id: normalizeSoundDeviceId(voiceOutputDeviceId),
-        cw_keyer_type: cwKeyerType,
-        winkeyer_serial_port:
-          cwKeyerType === 'winkeyer' ? winkeyerSerialPort : '',
-        cw_serial_port: cwKeyerType === 'serial' ? cwSerialPort : '',
-        cw_serial_baud_rate:
-          cwKeyerType === 'serial'
-            ? Number(cwSerialBaudRate)
-            : DEFAULT_CW_SERIAL_BAUD_RATE,
-        cw_serial_line:
-          cwKeyerType === 'serial' ? cwSerialLine : DEFAULT_CW_SERIAL_LINE,
-        cw_messages: cwMessages,
-        voice_messages: voiceMessages,
-      }),
-    });
-    if (!result.ok) {
+    try {
+      await apiJson(isEditing ? `/radios/${radioId}` : '/radios', {
+        method: isEditing ? 'PUT' : 'POST',
+        body: JSON.stringify({
+          name,
+          radio_kind: selectedRadioKind,
+          transport_kind: transportKind,
+          tcp_host: tcpHost,
+          tcp_port: Number(tcpPort),
+          serial_port: serialPort,
+          serial_baud_rate: Number(serialBaudRate),
+          options: options,
+          cw_tuning_increment_hz: Number(cwTuningIncrementHz),
+          ssb_tuning_increment_hz: Number(ssbTuningIncrementHz),
+          rit_clear_on_log: Boolean(ritClearOnLog),
+          voice_input_device_id: normalizeSoundDeviceId(voiceInputDeviceId),
+          voice_output_device_id: normalizeSoundDeviceId(voiceOutputDeviceId),
+          cw_keyer_type: cwKeyerType,
+          winkeyer_serial_port:
+            cwKeyerType === 'winkeyer' ? winkeyerSerialPort : '',
+          cw_serial_port: cwKeyerType === 'serial' ? cwSerialPort : '',
+          cw_serial_baud_rate:
+            cwKeyerType === 'serial'
+              ? Number(cwSerialBaudRate)
+              : DEFAULT_CW_SERIAL_BAUD_RATE,
+          cw_serial_line:
+            cwKeyerType === 'serial' ? cwSerialLine : DEFAULT_CW_SERIAL_LINE,
+          cw_messages: cwMessages,
+          voice_messages: voiceMessages,
+        }),
+      });
+    } catch (error) {
       notifyOperationalError(
         'CreateRadioScreen.saveRadio',
         `Unable to ${isEditing ? 'update' : 'create'} radio.`,
-        result.error,
+        error,
         {
           isEditing,
           radioId,

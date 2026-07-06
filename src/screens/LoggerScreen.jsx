@@ -260,11 +260,10 @@ function LoggerScreen() {
     async (payload) => {
       try {
         const result = await saveDxclusterSpot(payload);
-        if (!result.ok)
-          throw new Error(result.error ?? 'Unable to store band map spot');
-        if (result.spot) {
+        const spot = result?.spot ?? result;
+        if (spot) {
           setBandMapSpotStore((currentStore) =>
-            addBandMapSpot(currentStore, result.spot),
+            addBandMapSpot(currentStore, spot),
           );
         }
       } catch (error) {
@@ -366,9 +365,11 @@ function LoggerScreen() {
     dxclusterSpots()
       .then((result) => {
         if (isCancelled) return;
-        if (!result.ok)
-          throw new Error(result.error ?? 'Unable to load band map spots');
-        const spots = Array.isArray(result.spots) ? result.spots : [];
+        const spots = Array.isArray(result?.spots)
+          ? result.spots
+          : Array.isArray(result)
+            ? result
+            : [];
         setBandMapSpotStore((currentStore) =>
           spots.reduce(addBandMapSpot, currentStore),
         );
@@ -535,10 +536,7 @@ function LoggerScreen() {
             }),
           },
         );
-        if (!result.ok) {
-          throw new Error(result.error ?? 'Unable to allocate serial numbers');
-        }
-        const allocation = result.allocation ?? {};
+        const allocation = result?.allocation ?? result ?? {};
         manager.allocation = appendSerialRange(
           manager.allocation,
           allocation.start,
@@ -644,20 +642,19 @@ function LoggerScreen() {
         apiJson(`/radios/${numericRadioId}`),
         apiJson(`/radios/${numericRadioId}/message-labels`),
       ]);
-      if (!logResult.ok) throw new Error(logResult.error ?? 'Log not found');
-      if (!radioResult.ok)
-        throw new Error(radioResult.error ?? 'Radio not found');
+      const log = logResult?.log ?? logResult;
+      const radio = radioResult?.radio ?? radioResult;
+      const messageLabels = messageLabelsResult?.labels ?? messageLabelsResult;
       const contestSettings = await apiJson(
-        `/contest-settings?contest_id=${encodeURIComponent(logResult.log.contest_id)}`,
+        `/contest-settings?contest_id=${encodeURIComponent(log.contest_id)}`,
       );
       if (isCancelled) return;
       setSettings(contestSettings);
-      setLog(logResult.log);
-      setRadio(radioResult.radio);
-      if (messageLabelsResult.ok) setMessageLabels(messageLabelsResult.labels);
+      setLog(log);
+      setRadio(radio);
+      setMessageLabels(messageLabels);
       setOperatorCallsign(
-        (current) =>
-          current || promptForOperatorCallsign(logResult.log.station_callsign),
+        (current) => current || promptForOperatorCallsign(log.station_callsign),
       );
     }
     const loadContextPromise = loadContext();
@@ -1119,11 +1116,11 @@ function LoggerScreen() {
           dxclusterSpots()
             .then((result) => {
               if (backendSocketRef.current !== socket) return;
-              if (!result.ok)
-                throw new Error(
-                  result.error ?? 'Unable to load band map spots',
-                );
-              const spots = Array.isArray(result.spots) ? result.spots : [];
+              const spots = Array.isArray(result?.spots)
+                ? result.spots
+                : Array.isArray(result)
+                  ? result
+                  : [];
               setBandMapSpotStore((currentStore) =>
                 spots.reduce(addBandMapSpot, currentStore),
               );
@@ -1487,28 +1484,6 @@ function LoggerScreen() {
             adif: { ...contactAdif(contact) },
           }),
         });
-        if (!responseBody.ok) {
-          notifyOperationalError(
-            'LoggerScreen.commitContactRejected',
-            responseBody.error ?? 'Contact upload failed.',
-            responseBody.error,
-            {
-              logId: numericLogId,
-              contactId:
-                metaValue(contact, 'id') ??
-                metaValue(contact, 'clientId') ??
-                null,
-            },
-          );
-          setAllContacts((currentContacts) =>
-            markContactFailed(
-              currentContacts,
-              contact,
-              responseBody.error ?? 'Contact upload failed.',
-            ),
-          );
-          return;
-        }
         if (responseBody.contact) {
           commitContactErrorNotifiedRef.current = false;
           const callsignPrefix = activeCallsignPrefixRef.current;
@@ -1623,9 +1598,9 @@ function LoggerScreen() {
         const result = await apiJson(`/contacts/${contactId}`, {
           method: 'DELETE',
         });
-        if (!result.ok)
-          throw new Error(result.error ?? 'Unable to delete contact');
-        if (result.deleted) successfullyDeletedIds.push(String(contactId));
+        if ((result?.deleted ?? result) === true) {
+          successfullyDeletedIds.push(String(contactId));
+        }
       }),
     );
     const failureCount = results.filter(

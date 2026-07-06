@@ -55,19 +55,18 @@ function ExportLogScreen() {
     let cancelled = false;
 
     async function load() {
-      const logResult = await apiJson(`/logs/${numericLogId}`);
-      if (!logResult.ok) throw new Error(logResult.error ?? 'Log not found');
+      const log = await apiJson(`/logs/${numericLogId}`);
       const contestSettings = await apiJson(
-        `/contest-settings?contest_id=${encodeURIComponent(logResult.log.contest_id)}`,
+        `/contest-settings?contest_id=${encodeURIComponent(log.contest_id)}`,
       );
       if (cancelled) return;
-      setLog(logResult.log);
+      setLog(log);
       setSettings(contestSettings);
       setExportParams(
         defaultExportValues(
           contestSettings,
-          logResult.log,
-          loadStoredExportValues(logResult.log.contest_id),
+          log,
+          loadStoredExportValues(log.contest_id),
         ),
       );
     }

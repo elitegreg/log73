@@ -66,11 +66,11 @@ export async function reportClientError({
   };
 
   try {
-    const result = await apiJson('/client-errors', {
+    await apiJson('/client-errors', {
       method: 'POST',
       body: JSON.stringify(payload),
     });
-    return Boolean(result?.ok);
+    return true;
   } catch {
     return false;
   }

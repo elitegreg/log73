@@ -43,20 +43,16 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
 
   useEffect(() => {
     apiJson('/config')
-      .then((result) => {
-        if (!result.ok)
-          throw new Error(result.error ?? 'Unable to load config');
-        setLoginUser(result.config.login_user ?? '');
-        setLoginEnabled(Boolean(result.config.login_enabled));
+      .then((config) => {
+        setLoginUser(config.login_user ?? '');
+        setLoginEnabled(Boolean(config.login_enabled));
         setDisableLogin(false);
-        setDxClusterEnabled(Boolean(result.config.dxcluster_enabled));
-        setDxClusterHost(result.config.dxcluster_host ?? '');
-        setDxClusterPort(String(result.config.dxcluster_port ?? 23));
-        setDxClusterCallsign(result.config.dxcluster_callsign ?? '');
-        setDxClusterMaxAgeMin(
-          String(result.config.dxcluster_max_age_min ?? 60),
-        );
-        setDxClusterCommands(result.config.dxcluster_commands ?? '');
+        setDxClusterEnabled(Boolean(config.dxcluster_enabled));
+        setDxClusterHost(config.dxcluster_host ?? '');
+        setDxClusterPort(String(config.dxcluster_port ?? 23));
+        setDxClusterCallsign(config.dxcluster_callsign ?? '');
+        setDxClusterMaxAgeMin(String(config.dxcluster_max_age_min ?? 60));
+        setDxClusterCommands(config.dxcluster_commands ?? '');
       })
       .catch((error) =>
         notifyOperationalError(
@@ -103,29 +99,29 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
       return;
     }
 
-    const result = await apiJson('/config', {
-      method: 'PUT',
-      body: JSON.stringify(
-        buildConfigUpdatePayload({
-          loginUser,
-          loginPassword,
-          loginPasswordConfirm,
-          disableLogin,
-          dxClusterEnabled,
-          dxClusterHost,
-          dxClusterPort,
-          dxClusterCallsign,
-          dxClusterMaxAgeMin,
-          dxClusterCommands,
-        }),
-      ),
-    });
-
-    if (!result.ok) {
+    try {
+      await apiJson('/config', {
+        method: 'PUT',
+        body: JSON.stringify(
+          buildConfigUpdatePayload({
+            loginUser,
+            loginPassword,
+            loginPasswordConfirm,
+            disableLogin,
+            dxClusterEnabled,
+            dxClusterHost,
+            dxClusterPort,
+            dxClusterCallsign,
+            dxClusterMaxAgeMin,
+            dxClusterCommands,
+          }),
+        ),
+      });
+    } catch (error) {
       notifyOperationalError(
         'ConfigScreen.saveConfig',
         'Unable to save config.',
-        result.error,
+        error,
       );
       return;
     }

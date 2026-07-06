@@ -1,3 +1,45 @@
+function unwrapLegacySuccessPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return payload;
+  }
+  if (payload.ok === false) {
+    const error = new Error(payload.error ?? 'request failed');
+    error.payload = payload;
+    throw error;
+  }
+  if (payload.ok !== true) {
+    return payload;
+  }
+
+  const entries = Object.entries(payload).filter(([key]) => key !== 'ok');
+  if (entries.length === 1) {
+    return entries[0][1];
+  }
+  return Object.fromEntries(entries);
+}
+
+async function errorFromResponse(response) {
+  let message = `request failed: ${response.status}`;
+  const contentType = response.headers.get('content-type') ?? '';
+
+  try {
+    if (contentType.includes('application/json')) {
+      const payload = await response.json();
+      message = payload?.error ?? message;
+      const error = new Error(message);
+      error.payload = payload;
+      return error;
+    } else {
+      const text = await response.text();
+      if (text.trim()) message = text.trim();
+    }
+  } catch {
+    // Keep the fallback message if the error body cannot be parsed.
+  }
+
+  return new Error(message);
+}
+
 export async function apiJson(path, options = {}) {
   const response = await fetch(`/api${path}`, {
     ...options,
@@ -8,10 +50,11 @@ export async function apiJson(path, options = {}) {
   });
 
   if (!response.ok) {
-    throw new Error(`request failed: ${response.status}`);
+    throw await errorFromResponse(response);
   }
 
-  return response.json();
+  if (response.status === 204) return null;
+  return unwrapLegacySuccessPayload(await response.json());
 }
 
 export async function apiDownload(path, options = {}) {
@@ -24,20 +67,7 @@ export async function apiDownload(path, options = {}) {
   });
 
   if (!response.ok) {
-    let message = `request failed: ${response.status}`;
-    const contentType = response.headers.get('content-type') ?? '';
-    try {
-      if (contentType.includes('application/json')) {
-        const payload = await response.json();
-        message = payload?.error ?? message;
-      } else {
-        const text = await response.text();
-        if (text.trim()) message = text.trim();
-      }
-    } catch {
-      // Keep the fallback message if the error body cannot be parsed.
-    }
-    throw new Error(message);
+    throw await errorFromResponse(response);
   }
 
   const blob = await response.blob();

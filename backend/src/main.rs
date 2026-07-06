@@ -141,6 +141,50 @@ fn pretty_json<T: serde::Serialize>(value: &T) -> String {
         .unwrap_or_else(|error| format!("<unable to serialize json: {error}>"))
 }
 
+#[derive(Debug, serde::Serialize)]
+struct ErrorBody {
+    error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code: Option<&'static str>,
+}
+
+struct ApiError {
+    status: StatusCode,
+    body: ErrorBody,
+}
+
+impl ApiError {
+    fn new(status: StatusCode, error: impl Into<String>) -> Self {
+        Self {
+            status,
+            body: ErrorBody {
+                error: error.into(),
+                code: None,
+            },
+        }
+    }
+
+    fn bad_request(error: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, error)
+    }
+
+    fn not_found(error: impl Into<String>) -> Self {
+        Self::new(StatusCode::NOT_FOUND, error)
+    }
+
+    fn internal(error: impl Into<String>) -> Self {
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, error)
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        (self.status, Json(self.body)).into_response()
+    }
+}
+
+type ApiResult<T> = Result<Json<T>, ApiError>;
+
 #[derive(Debug, Parser)]
 #[command(version, about = "Log73 contest logger backend")]
 struct Cli {
@@ -941,24 +985,24 @@ async fn supercheckpartial_matches(
 ) -> Response {
     cached_json_response(
         &headers,
-        &serde_json::json!({ "ok": true, "callsigns": app_state.supercheckpartial.callsigns() }),
+        &serde_json::json!({ "callsigns": app_state.supercheckpartial.callsigns() }),
     )
 }
 
 async fn dxcc_data(State(app_state): State<AppState>, headers: HeaderMap) -> Response {
     cached_json_response(
         &headers,
-        &serde_json::json!({ "ok": true, "dxcc": app_state.dxcc.as_ref() }),
+        &serde_json::json!({ "dxcc": app_state.dxcc.as_ref() }),
     )
 }
 
 async fn dxcluster_spots(State(app_state): State<AppState>) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "ok": true, "spots": app_state.dxcluster.spots().await }))
+    Json(serde_json::json!({ "spots": app_state.dxcluster.spots().await }))
 }
 
 async fn clear_dxcluster_spots(State(app_state): State<AppState>) -> Json<serde_json::Value> {
     let deleted_ids = app_state.dxcluster.clear_spots().await;
-    Json(serde_json::json!({ "ok": true, "deleted_ids": deleted_ids }))
+    Json(serde_json::json!({ "deleted_ids": deleted_ids }))
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -972,13 +1016,13 @@ struct SaveDxClusterSpotPayload {
 async fn save_dxcluster_spot(
     State(app_state): State<AppState>,
     Json(payload): Json<SaveDxClusterSpotPayload>,
-) -> Json<serde_json::Value> {
+) -> ApiResult<serde_json::Value> {
     if let Err(error) = validation::validate_dxcluster_spot_request(
         payload.frequency_hz,
         &payload.call,
         &payload.comment,
     ) {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
+        return Err(ApiError::bad_request(error));
     }
 
     let comment = payload.comment.trim();
@@ -991,14 +1035,16 @@ async fn save_dxcluster_spot(
         )
         .await;
 
-    Json(serde_json::json!({ "ok": true, "spot": spot }))
+    Ok(Json(serde_json::json!({ "spot": spot })))
 }
 
-async fn config(State(app_state): State<AppState>) -> Json<serde_json::Value> {
-    match app_state.db.config_view().await {
-        Ok(config) => Json(serde_json::json!({ "ok": true, "config": config })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-    }
+async fn config(State(app_state): State<AppState>) -> ApiResult<db::ConfigView> {
+    app_state
+        .db
+        .config_view()
+        .await
+        .map(Json)
+        .map_err(|error| ApiError::internal(error.to_string()))
 }
 
 #[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
@@ -1086,9 +1132,7 @@ fn normalized_json_text(value: Option<&serde_json::Value>, max_len: usize) -> Op
     Some(truncate_text(&serialized, max_len))
 }
 
-async fn report_client_error(
-    Json(payload): Json<ClientErrorReportPayload>,
-) -> Json<serde_json::Value> {
+async fn report_client_error(Json(payload): Json<ClientErrorReportPayload>) -> StatusCode {
     let source = normalized_text(payload.source.as_deref(), MAX_CLIENT_ERROR_TEXT_LENGTH)
         .unwrap_or_else(|| "frontend".to_string());
     let message = normalized_text(payload.message.as_deref(), MAX_CLIENT_ERROR_TEXT_LENGTH);
@@ -1129,13 +1173,13 @@ async fn report_client_error(
         "frontend client error reported"
     );
 
-    Json(serde_json::json!({ "ok": true }))
+    StatusCode::NO_CONTENT
 }
 
 async fn update_config(
     State(app_state): State<AppState>,
     Json(payload): Json<UpdateConfigPayload>,
-) -> Json<serde_json::Value> {
+) -> ApiResult<db::ConfigView> {
     debug!("update config PUT request");
     let login_password = match validation::validate_auth_config(
         &payload.login_user,
@@ -1148,10 +1192,10 @@ async fn update_config(
         Ok(validation::LoginPasswordChange::Change(password)) => {
             match auth::hash_password(&password) {
                 Ok(login_password) => db::LoginPasswordUpdate::Set(login_password),
-                Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
+                Err(error) => return Err(ApiError::bad_request(error)),
             }
         }
-        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
+        Err(error) => return Err(ApiError::bad_request(error)),
     };
     if let Err(error) = validation::validate_dxcluster_config(
         &payload.dxcluster_host,
@@ -1160,10 +1204,10 @@ async fn update_config(
         payload.dxcluster_max_age_min,
         &payload.dxcluster_commands,
     ) {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
+        return Err(ApiError::bad_request(error));
     }
 
-    match app_state
+    app_state
         .db
         .update_config(db::UpdateConfig {
             login_user: payload.login_user,
@@ -1176,83 +1220,83 @@ async fn update_config(
             dxcluster_commands: payload.dxcluster_commands,
         })
         .await
-    {
-        Ok(()) => {
-            match app_state.db.auth_config().await {
-                Ok(config) => *app_state.auth_config.write().await = config,
-                Err(error) => warn!(%error, "failed to reload auth config after update"),
-            }
-            match app_state.db.dxcluster_config().await {
-                Ok(config) => app_state.dxcluster.apply_config(config).await,
-                Err(error) => warn!(%error, "failed to reload DX Cluster config after update"),
-            }
-            match app_state.db.config_view().await {
-                Ok(config) => Json(serde_json::json!({ "ok": true, "config": config })),
-                Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-            }
-        }
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+
+    match app_state.db.auth_config().await {
+        Ok(config) => *app_state.auth_config.write().await = config,
+        Err(error) => warn!(%error, "failed to reload auth config after update"),
     }
+    match app_state.db.dxcluster_config().await {
+        Ok(config) => app_state.dxcluster.apply_config(config).await,
+        Err(error) => warn!(%error, "failed to reload DX Cluster config after update"),
+    }
+
+    app_state
+        .db
+        .config_view()
+        .await
+        .map(Json)
+        .map_err(|error| ApiError::internal(error.to_string()))
 }
 
-async fn logs(State(app_state): State<AppState>) -> Json<Vec<db::Log>> {
-    match app_state.db.logs().await {
-        Ok(logs) => Json(logs),
-        Err(error) => {
-            error!(%error, "failed to load logs");
-            Json(Vec::new())
-        }
-    }
+async fn logs(State(app_state): State<AppState>) -> ApiResult<Vec<db::Log>> {
+    app_state.db.logs().await.map(Json).map_err(|error| {
+        error!(%error, "failed to load logs");
+        ApiError::internal(error.to_string())
+    })
 }
 
-async fn log(State(app_state): State<AppState>, Path(id): Path<i64>) -> Json<serde_json::Value> {
+async fn log(State(app_state): State<AppState>, Path(id): Path<i64>) -> ApiResult<db::Log> {
     match app_state.db.log(id).await {
-        Ok(Some(log)) => Json(serde_json::json!({ "ok": true, "log": log })),
-        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Ok(Some(log)) => Ok(Json(log)),
+        Ok(None) => Err(ApiError::not_found("not found")),
+        Err(error) => Err(ApiError::internal(error.to_string())),
     }
 }
 
 async fn create_log(
     State(app_state): State<AppState>,
     Json(payload): Json<NewLog>,
-) -> Json<serde_json::Value> {
+) -> ApiResult<db::Log> {
     debug!(payload = %pretty_json(&payload), "create log POST body");
     if let Err(error) = validation::validate_new_log(&app_state.contest_rules, &payload) {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
+        return Err(ApiError::bad_request(error));
     }
-    match app_state.db.create_log(payload).await {
-        Ok(log) => Json(serde_json::json!({ "ok": true, "log": log })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-    }
+    app_state
+        .db
+        .create_log(payload)
+        .await
+        .map(Json)
+        .map_err(|error| ApiError::internal(error.to_string()))
 }
 
 async fn update_log(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
     Json(payload): Json<UpdateLog>,
-) -> Json<serde_json::Value> {
+) -> ApiResult<db::Log> {
     debug!(id, payload = %pretty_json(&payload), "update log PUT body");
     let log = match app_state.db.log(id).await {
         Ok(Some(log)) => log,
-        Ok(None) => return Json(serde_json::json!({ "ok": false, "error": "not found" })),
-        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Ok(None) => return Err(ApiError::not_found("not found")),
+        Err(error) => return Err(ApiError::internal(error.to_string())),
     };
     let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
-        return Json(
-            serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id) }),
-        );
+        return Err(ApiError::bad_request(format!(
+            "unknown contest: {}",
+            log.contest_id
+        )));
     };
     if let Err(error) = validation::validate_update_log(rules, &payload) {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
+        return Err(ApiError::bad_request(error));
     }
     match app_state.db.update_log(id, payload).await {
         Ok(Some(log)) => {
             app_state.log_cache.remove_log(id);
-            Json(serde_json::json!({ "ok": true, "log": log }))
+            Ok(Json(log))
         }
-        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Ok(None) => Err(ApiError::not_found("not found")),
+        Err(error) => Err(ApiError::internal(error.to_string())),
     }
 }
 
@@ -1474,31 +1518,31 @@ fn download_response(body: String, content_type: &str, filename: &str) -> axum::
 async fn delete_log(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-) -> Json<serde_json::Value> {
+) -> ApiResult<serde_json::Value> {
     match app_state.db.delete_log(id).await {
         Ok(deleted) => {
             if deleted {
                 app_state.log_cache.remove_log(id);
             }
-            Json(serde_json::json!({ "ok": true, "deleted": deleted }))
+            Ok(Json(serde_json::json!({ "deleted": deleted })))
         }
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Err(error) => Err(ApiError::internal(error.to_string())),
     }
 }
 
 async fn log_qso_count(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-) -> Json<serde_json::Value> {
+) -> ApiResult<serde_json::Value> {
     match app_state.db.log(id).await {
         Ok(Some(_)) => {}
-        Ok(None) => return Json(serde_json::json!({ "ok": false, "error": "not found" })),
-        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Ok(None) => return Err(ApiError::not_found("not found")),
+        Err(error) => return Err(ApiError::internal(error.to_string())),
     }
 
     match app_state.db.log_qso_count(id).await {
-        Ok(qso_count) => Json(serde_json::json!({ "ok": true, "qso_count": qso_count })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Ok(qso_count) => Ok(Json(serde_json::json!({ "qso_count": qso_count }))),
+        Err(error) => Err(ApiError::internal(error.to_string())),
     }
 }
 
@@ -1516,31 +1560,37 @@ async fn log_stats(
     }
 }
 
-async fn input_audio_devices(State(app_state): State<AppState>) -> Json<serde_json::Value> {
-    match app_state.voice_keyer.input_devices() {
-        Ok(devices) => Json(serde_json::json!({ "ok": true, "devices": devices })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
-    }
+async fn input_audio_devices(
+    State(app_state): State<AppState>,
+) -> ApiResult<Vec<voice_keyer::AudioDeviceInfo>> {
+    app_state
+        .voice_keyer
+        .input_devices()
+        .map(Json)
+        .map_err(ApiError::internal)
 }
 
-async fn output_audio_devices(State(app_state): State<AppState>) -> Json<serde_json::Value> {
-    match app_state.voice_keyer.output_devices() {
-        Ok(devices) => Json(serde_json::json!({ "ok": true, "devices": devices })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
-    }
+async fn output_audio_devices(
+    State(app_state): State<AppState>,
+) -> ApiResult<Vec<voice_keyer::AudioDeviceInfo>> {
+    app_state
+        .voice_keyer
+        .output_devices()
+        .map(Json)
+        .map_err(ApiError::internal)
 }
 
-async fn radios(State(app_state): State<AppState>) -> Json<Vec<db::RadioConfig>> {
+async fn radios(State(app_state): State<AppState>) -> ApiResult<Vec<db::RadioConfig>> {
     match app_state.db.radios().await {
         Ok(mut radios) => {
             for radio in &mut radios {
                 app_state.voice_keyer.sanitize_radio_config(radio);
             }
-            Json(radios)
+            Ok(Json(radios))
         }
         Err(error) => {
             error!(%error, "failed to load radios");
-            Json(Vec::new())
+            Err(ApiError::internal(error.to_string()))
         }
     }
 }
@@ -1571,63 +1621,58 @@ struct SerialPortOption {
     display_name: String,
 }
 
-async fn serial_ports() -> Json<serde_json::Value> {
-    match list_serial_ports() {
-        Ok(entries) => Json(serde_json::json!({
-            "ok": true,
-            "serial_ports": entries
-                .into_iter()
-                .map(|entry| SerialPortOption {
-                    display_name: entry.to_string(),
-                    name: entry.name,
-                })
-                .collect::<Vec<_>>()
-        })),
-        Err(error) => Json(serde_json::json!({
-            "ok": false,
-            "error": error.to_string()
-        })),
-    }
+async fn serial_ports() -> ApiResult<Vec<SerialPortOption>> {
+    list_serial_ports()
+        .map(|entries| {
+            Json(
+                entries
+                    .into_iter()
+                    .map(|entry| SerialPortOption {
+                        display_name: entry.to_string(),
+                        name: entry.name,
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .map_err(|error| ApiError::internal(error.to_string()))
 }
 
-async fn radio(State(app_state): State<AppState>, Path(id): Path<i64>) -> Json<serde_json::Value> {
+async fn radio(
+    State(app_state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<db::RadioConfig> {
     match app_state.db.radio(id).await {
         Ok(Some(mut radio)) => {
             app_state.voice_keyer.sanitize_radio_config(&mut radio);
-            Json(serde_json::json!({ "ok": true, "radio": radio }))
+            Ok(Json(radio))
         }
-        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Ok(None) => Err(ApiError::not_found("not found")),
+        Err(error) => Err(ApiError::internal(error.to_string())),
     }
 }
 
 async fn cw_labels(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-) -> Json<serde_json::Value> {
+) -> ApiResult<cw::CwLabels> {
     match app_state.db.radio(id).await {
-        Ok(Some(radio)) => {
-            Json(serde_json::json!({ "ok": true, "labels": cw::labels(&radio.cw_messages) }))
-        }
-        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Ok(Some(radio)) => Ok(Json(cw::labels(&radio.cw_messages))),
+        Ok(None) => Err(ApiError::not_found("not found")),
+        Err(error) => Err(ApiError::internal(error.to_string())),
     }
 }
 
 async fn message_labels(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-) -> Json<serde_json::Value> {
+) -> ApiResult<serde_json::Value> {
     match app_state.db.radio(id).await {
-        Ok(Some(radio)) => Json(serde_json::json!({
-            "ok": true,
-            "labels": {
-                "cw": cw::labels(&radio.cw_messages),
-                "voice": voice_messages::labels(&radio.voice_messages)
-            }
-        })),
-        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Ok(Some(radio)) => Ok(Json(serde_json::json!({
+            "cw": cw::labels(&radio.cw_messages),
+            "voice": voice_messages::labels(&radio.voice_messages)
+        }))),
+        Ok(None) => Err(ApiError::not_found("not found")),
+        Err(error) => Err(ApiError::internal(error.to_string())),
     }
 }
 
@@ -1641,8 +1686,8 @@ struct VoiceMessagesPayload {
     voice_messages: String,
 }
 
-async fn default_cw_messages() -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "ok": true, "cw_messages": cw::DEFAULT_CW_MESSAGES }))
+async fn default_cw_messages() -> Json<String> {
+    Json(cw::DEFAULT_CW_MESSAGES.to_string())
 }
 
 async fn validate_cw_messages(Json(payload): Json<CwMessagesPayload>) -> Json<serde_json::Value> {

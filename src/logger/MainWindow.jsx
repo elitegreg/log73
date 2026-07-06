@@ -290,9 +290,12 @@ function MainWindow({
     supercheckpartial()
       .then((result) => {
         if (!cancelled) {
-          setSupercheckpartialCallsigns(
-            Array.isArray(result.callsigns) ? result.callsigns : [],
-          );
+          const callsigns = Array.isArray(result?.callsigns)
+            ? result.callsigns
+            : Array.isArray(result)
+              ? result
+              : [];
+          setSupercheckpartialCallsigns(callsigns);
         }
       })
       .catch(() => {
@@ -311,7 +314,7 @@ function MainWindow({
     dxcc()
       .then((result) => {
         if (!cancelled) {
-          setDxccData(result?.ok ? (result.dxcc ?? null) : null);
+          setDxccData(result?.dxcc ?? result ?? null);
         }
       })
       .catch(() => {

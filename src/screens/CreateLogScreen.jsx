@@ -108,12 +108,11 @@ function CreateLogScreen() {
   useEffect(() => {
     if (!isEditing) return;
     apiJson(`/logs/${logId}`)
-      .then((result) => {
-        if (!result.ok) throw new Error(result.error ?? 'Log not found');
-        setName(result.log.name ?? '');
-        setStationCallsign(result.log.station_callsign ?? '');
-        setContestId(result.log.contest_id ?? '');
-        setContestParams(result.log.contest_params ?? {});
+      .then((log) => {
+        setName(log.name ?? '');
+        setStationCallsign(log.station_callsign ?? '');
+        setContestId(log.contest_id ?? '');
+        setContestParams(log.contest_params ?? {});
       })
       .catch((error) =>
         notifyOperationalError(
@@ -166,28 +165,29 @@ function CreateLogScreen() {
       return;
     }
 
-    const result = await apiJson(isEditing ? `/logs/${logId}` : '/logs', {
-      method: isEditing ? 'PUT' : 'POST',
-      body: JSON.stringify(
-        isEditing
-          ? {
-              name,
-              station_callsign: stationCallsign,
-              contest_params: normalizedParams,
-            }
-          : {
-              name,
-              contest_id: contestId,
-              station_callsign: stationCallsign,
-              contest_params: normalizedParams,
-            },
-      ),
-    });
-    if (!result.ok) {
+    try {
+      await apiJson(isEditing ? `/logs/${logId}` : '/logs', {
+        method: isEditing ? 'PUT' : 'POST',
+        body: JSON.stringify(
+          isEditing
+            ? {
+                name,
+                station_callsign: stationCallsign,
+                contest_params: normalizedParams,
+              }
+            : {
+                name,
+                contest_id: contestId,
+                station_callsign: stationCallsign,
+                contest_params: normalizedParams,
+              },
+        ),
+      });
+    } catch (error) {
       notifyOperationalError(
         'CreateLogScreen.saveLog',
         `Unable to ${isEditing ? 'update' : 'create'} log.`,
-        result.error,
+        error,
         {
           isEditing,
           logId,

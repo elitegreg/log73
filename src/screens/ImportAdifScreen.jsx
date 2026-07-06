@@ -82,13 +82,12 @@ function ImportAdifScreen() {
     let cancelled = false;
 
     async function load() {
-      const logResult = await apiJson(`/logs/${numericLogId}`);
-      if (!logResult.ok) throw new Error(logResult.error ?? 'Log not found');
+      const log = await apiJson(`/logs/${numericLogId}`);
       const contestSettings = await apiJson(
-        `/contest-settings?contest_id=${encodeURIComponent(logResult.log.contest_id)}`,
+        `/contest-settings?contest_id=${encodeURIComponent(log.contest_id)}`,
       );
       if (cancelled) return;
-      setLog(logResult.log);
+      setLog(log);
       setSettings(contestSettings);
     }
 
@@ -227,29 +226,26 @@ function ImportAdifScreen() {
 
     setImporting(true);
     try {
-      const result = await apiJson(`/logs/${numericLogId}/adif/import`, {
+      await apiJson(`/logs/${numericLogId}/adif/import`, {
         method: 'POST',
         body: JSON.stringify({
           adif: fileText,
           mappings: importPayloadMappings(),
         }),
       });
-      if (!result.ok) {
-        setImportErrors(
-          Array.isArray(result.errors) && result.errors.length > 0
-            ? result.errors
-            : [{ line: result.line ?? 1, error: result.error ?? 'Import failed' }],
-        );
-        return;
-      }
       navigate('/ui/open_log', { replace: true });
     } catch (error) {
-      notifyOperationalError(
-        'ImportAdifScreen.import',
-        'Unable to import ADIF file.',
-        error,
-        { logId: numericLogId },
-      );
+      const payload = error?.payload;
+      if (Array.isArray(payload?.errors) && payload.errors.length > 0) {
+        setImportErrors(payload.errors);
+      } else {
+        notifyOperationalError(
+          'ImportAdifScreen.import',
+          'Unable to import ADIF file.',
+          error,
+          { logId: numericLogId },
+        );
+      }
     } finally {
       setImporting(false);
     }
