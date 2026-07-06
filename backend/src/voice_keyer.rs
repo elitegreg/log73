@@ -459,7 +459,7 @@ impl VoiceKeyer {
                 continue;
             }
             let registry_key = voice_message_registry_key(config.id, &entry.mode, &entry.key)?;
-            let path = voice_messages::voicekeyer_file_path(&self.voicekeyer_dir, file_path)?;
+            let path = voice_messages::existing_voicekeyer_file_path(&self.voicekeyer_dir, file_path)?;
             if let Err(error) = self.register_registry_file(path, registry_key) {
                 errors.push(format!("{} {}: {error}", entry.mode, entry.key));
             }
@@ -544,7 +544,7 @@ impl VoiceKeyer {
         relative_path: &str,
         output_device_id: Option<&str>,
     ) -> Result<VoicePlayback, String> {
-        let path = voice_messages::voicekeyer_file_path(&self.voicekeyer_dir, relative_path)?;
+        let path = voice_messages::existing_voicekeyer_file_path(&self.voicekeyer_dir, relative_path)?;
         let bytes = fs::read(&path).map_err(|error| {
             format!(
                 "failed to read voice keyer file relative_path='{}' absolute_path='{}': {error}",
@@ -1274,6 +1274,33 @@ F1 QRL,operator1/run.wav
         assert_eq!(backend.plays.lock().unwrap()[0].data, b"run-audio");
 
         let _ = fs::remove_dir_all(&voicekeyer_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn play_relative_path_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let base =
+            std::env::temp_dir().join(format!("log73-voicekeyer-{}-symlink", std::process::id()));
+        let voicekeyer_dir = base.join("voicekeyer");
+        let outside = base.join("outside.wav");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(voicekeyer_dir.join("operator1")).expect("voicekeyer dir creates");
+        fs::write(&outside, b"outside-audio").expect("outside file writes");
+        symlink(&outside, voicekeyer_dir.join("operator1/run.wav")).expect("symlink creates");
+        let backend = Arc::new(FakeAudioBackend::default());
+        let keyer =
+            VoiceKeyer::with_backend_and_voicekeyer_dir(backend.clone(), voicekeyer_dir.clone());
+
+        let error = keyer
+            .play_relative_path("operator1/run.wav", None)
+            .expect_err("symlink escape should fail");
+
+        assert!(error.contains("must stay within voicekeyer/"));
+        assert!(backend.plays.lock().unwrap().is_empty());
+
+        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]

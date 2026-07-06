@@ -150,14 +150,8 @@ pub fn validate_with_voicekeyer_dir(
         let Some(file_path) = entry.file_path.as_deref() else {
             continue;
         };
-        let path = voicekeyer_file_path(voicekeyer_dir, file_path)?;
-        if !path.is_file() {
-            return Err(format!(
-                "{} {} voice file not found under voicekeyer/: {}",
-                mode_label(&entry.mode),
-                entry.key,
-                file_path
-            ));
+        if let Err(error) = existing_voicekeyer_file_path(voicekeyer_dir, file_path) {
+            return Err(format!("{} {} {error}", mode_label(&entry.mode), entry.key));
         }
     }
     Ok(labels)
@@ -202,6 +196,37 @@ pub fn normalize_message_mode(mode: &str) -> &'static str {
 pub fn voicekeyer_file_path(voicekeyer_dir: &Path, relative_path: &str) -> Result<PathBuf, String> {
     validate_voice_file_path(relative_path)?;
     Ok(voicekeyer_dir.join(relative_path.trim()))
+}
+
+pub fn existing_voicekeyer_file_path(
+    voicekeyer_dir: &Path,
+    relative_path: &str,
+) -> Result<PathBuf, String> {
+    let path = voicekeyer_file_path(voicekeyer_dir, relative_path)?;
+    if !path.is_file() {
+        return Err(format!(
+            "voice file not found under voicekeyer/: {}",
+            relative_path.trim()
+        ));
+    }
+
+    let canonical_root = voicekeyer_dir.canonicalize().map_err(|error| {
+        format!(
+            "failed to resolve voicekeyer/ directory '{}': {error}",
+            voicekeyer_dir.display()
+        )
+    })?;
+    let canonical_path = path.canonicalize().map_err(|error| {
+        format!(
+            "failed to resolve voice message file '{}': {error}",
+            relative_path.trim()
+        )
+    })?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Err("voice message file path must stay within voicekeyer/".to_string());
+    }
+
+    Ok(canonical_path)
 }
 
 pub fn resolve_file_path_template(
@@ -560,5 +585,29 @@ F2 -,
         assert!(error.contains("QRL.wav"));
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_with_voicekeyer_dir_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let base = std::env::temp_dir().join(format!(
+            "log73-voice-messages-symlink-{}",
+            std::process::id()
+        ));
+        let root = base.join("voicekeyer");
+        let outside = base.join("outside.wav");
+        let _ = fs::remove_dir_all(&base);
+        fs::create_dir_all(root.join("{OPERATOR}")).expect("voicekeyer dir creates");
+        fs::write(&outside, b"outside-audio").expect("outside file writes");
+        fs::write(root.join("{OPERATOR}/QRL.wav"), b"inside-audio").expect("inside file writes");
+        symlink(&outside, root.join("{OPERATOR}/CQ.wav")).expect("symlink creates");
+
+        let error =
+            validate_with_voicekeyer_dir(TEST_MESSAGES, &root).expect_err("symlink escape fails");
+        assert!(error.contains("must stay within voicekeyer/"));
+
+        let _ = fs::remove_dir_all(&base);
     }
 }
