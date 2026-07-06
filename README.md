@@ -70,7 +70,7 @@ Example TCP CAT target:
 Install frontend dependencies:
 
 ```bash
-npm install
+pnpm install
 ```
 
 Start the backend from a source checkout, using the repository data directory:
@@ -103,7 +103,7 @@ cargo run -p log73-backend -- --config-dir /tmp/log73-config --data-dir ./data
 Start the frontend dev server in another terminal:
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 In development, Rsbuild proxies `/api` and `/ws` to the backend on port `7300`.
@@ -121,7 +121,7 @@ Open the app, then:
 Build frontend assets:
 
 ```bash
-npm run build
+pnpm run build
 ```
 
 Build the backend:
@@ -215,8 +215,8 @@ Launcher settings are persisted in the Log73 platform config directory. Browser 
 Frontend:
 
 ```bash
-npm run lint
-npm run build
+pnpm run lint
+pnpm run build
 ```
 
 Backend:
