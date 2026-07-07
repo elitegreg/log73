@@ -20,7 +20,7 @@ import {
   modeIsPhone,
   esmEnterAction,
   bandForFrequency,
-  bandByMeters,
+  bandByName,
   createContactId,
   createMessageRequestId,
   callsignHasQuery,
@@ -134,12 +134,15 @@ function MainWindow({
   const radioFrequencyHz =
     radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
   const allowedBands = settings?.allowed_bands ?? [];
-  const currentBand = bandForFrequency(radioFrequencyHz);
-  const currentBandValue = currentBand ? String(currentBand.meters) : 'unknown';
+  const bandCatalog = settings?.band_catalog ?? [];
+  const currentBand = bandForFrequency(radioFrequencyHz, bandCatalog);
+  const currentBandValue = currentBand ? currentBand.name : 'unknown';
   const currentBandAllowed = currentBand
-    ? allowedBands.includes(currentBand.meters)
+    ? allowedBands.includes(currentBand.name)
     : false;
-  const bandOptions = allowedBands.map(bandByMeters).filter(Boolean);
+  const bandOptions = allowedBands
+    .map((bandName) => bandByName(bandCatalog, bandName))
+    .filter(Boolean);
   const loadingStatus = isContextLoading
     ? 'Loading logger context...'
     : contactsLoadState === 'initial-loading'
@@ -152,7 +155,7 @@ function MainWindow({
 
   if (
     currentBand &&
-    !bandOptions.some((band) => band.meters === currentBand.meters)
+    !bandOptions.some((band) => band.name === currentBand.name)
   ) {
     bandOptions.push(currentBand);
   }

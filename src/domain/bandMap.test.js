@@ -108,7 +108,7 @@ test('band map navigation finds the nearest callsign spot above and below VFO', 
 
 test('band map special spots display labels and track CQ frequencies', () => {
   const store = addInUseBandMapSpot(
-    addCqBandMapSpot(createBandMapSpotStore(), 14074000, 20),
+    addCqBandMapSpot(createBandMapSpotStore(), 14074000, '20m'),
     14075000,
   );
   const rows = bandMapRows(store, 14073000);
@@ -117,7 +117,7 @@ test('band map special spots display labels and track CQ frequencies', () => {
     rows.filter((row) => row.type === 'spot').map((row) => row.callsign),
     [BAND_MAP_CQ_CALLSIGN, BAND_MAP_IN_USE_CALLSIGN],
   );
-  assert.equal(lastCqFrequencyForBand(store, 20), 14074000);
+  assert.equal(lastCqFrequencyForBand(store, '20m'), 14074000);
 });
 
 test('band map supports multiple in-use markers by frequency', () => {

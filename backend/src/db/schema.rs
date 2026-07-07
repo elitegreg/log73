@@ -23,6 +23,16 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
             CONTEST_PARAMS_JSON TEXT NOT NULL
         ) STRICT;
 
+        CREATE TABLE IF NOT EXISTS bands (
+            IARU_REGION INTEGER NOT NULL CHECK (IARU_REGION IN (1, 2, 3)),
+            NAME TEXT NOT NULL,
+            LOWER_HZ INTEGER NOT NULL,
+            UPPER_HZ INTEGER NOT NULL,
+            DEFAULT_SSB_MODE TEXT NOT NULL CHECK (DEFAULT_SSB_MODE IN ('LSB', 'USB')),
+            SORT_ORDER INTEGER NOT NULL,
+            PRIMARY KEY (IARU_REGION, NAME)
+        ) STRICT;
+
         CREATE TABLE IF NOT EXISTS radios (
             ID INTEGER PRIMARY KEY,
             NAME TEXT NOT NULL,
@@ -86,6 +96,26 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
             NEXT_SERIAL INTEGER NOT NULL CHECK (NEXT_SERIAL > 0),
             PRIMARY KEY (LOG_ID, FIELD_ADIF)
         ) STRICT;
+        "#,
+    )?;
+
+    connection.execute("DELETE FROM bands WHERE IARU_REGION = 2", [])?;
+    connection.execute_batch(
+        r#"
+        INSERT INTO bands (IARU_REGION, NAME, LOWER_HZ, UPPER_HZ, DEFAULT_SSB_MODE, SORT_ORDER) VALUES
+        (2, '160m', 1800000, 2000000, 'LSB', 1),
+        (2, '80m', 3500000, 4000000, 'LSB', 2),
+        (2, '60m', 5330500, 5406500, 'USB', 3),
+        (2, '40m', 7000000, 7300000, 'LSB', 4),
+        (2, '30m', 10100000, 10150000, 'USB', 5),
+        (2, '20m', 14000000, 14350000, 'USB', 6),
+        (2, '17m', 18068000, 18168000, 'USB', 7),
+        (2, '15m', 21000000, 21450000, 'USB', 8),
+        (2, '12m', 24890000, 24990000, 'USB', 9),
+        (2, '10m', 28000000, 29700000, 'USB', 10),
+        (2, '6m', 50000000, 54000000, 'USB', 11),
+        (2, '2m', 144000000, 148000000, 'USB', 12)
+        ;
         "#,
     )?;
 

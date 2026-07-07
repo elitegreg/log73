@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   availableModeOptions,
+  bandByName,
+  bandForFrequency,
   callsignClearThresholdHz,
   callsignHasQuery,
   cwActionForMessage,
@@ -24,7 +26,11 @@ import {
   typedModeFromCallsignInput,
 } from './mainWindowHelpers.js';
 
-test('availableModeOptions includes concrete selectable modes', () => {
+test('availableModeOptions prefers backend-provided mode catalog', () => {
+  assert.deepEqual(availableModeOptions({ mode_catalog: ['CW', 'RTTY'] }), [
+    'CW',
+    'RTTY',
+  ]);
   assert.deepEqual(availableModeOptions({ allowed_modes: ['cw'] }), [
     'CW',
     'CW-R',
@@ -38,6 +44,17 @@ test('availableModeOptions includes concrete selectable modes', () => {
     'PSK',
     'RTTY',
   ]);
+});
+
+test('band helpers use backend-provided band catalog', () => {
+  const bands = [
+    { name: '40m', lowerHz: 7000000, upperHz: 7300000 },
+    { name: '20m', lowerHz: 14000000, upperHz: 14350000 },
+  ];
+
+  assert.equal(bandForFrequency(14074000, bands)?.name, '20m');
+  assert.equal(bandByName(bands, '40m')?.lowerHz, 7000000);
+  assert.equal(bandByName(bands, '15m'), undefined);
 });
 
 test('typedModeFromCallsignInput matches exact mode tokens only', () => {

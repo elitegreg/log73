@@ -120,9 +120,9 @@ export function addBandMapSpot(store, rawSpot) {
   const previousSpot = spotsById.get(spot.id);
   if (
     previousSpot?.spot_type === BAND_MAP_SPOT_TYPES.CQ &&
-    previousSpot.band_meters
+    previousSpot.band_name
   ) {
-    cqFrequencyHzByBand.delete(String(previousSpot.band_meters));
+    cqFrequencyHzByBand.delete(String(previousSpot.band_name));
   }
   const sortedSpots = baseStore.sortedSpots.filter(
     (currentSpot) => currentSpot.id !== spot.id,
@@ -130,8 +130,8 @@ export function addBandMapSpot(store, rawSpot) {
   const insertIndex = sortedInsertIndex(sortedSpots, spot);
   sortedSpots.splice(insertIndex, 0, spot);
   spotsById.set(spot.id, spot);
-  if (spot.spot_type === BAND_MAP_SPOT_TYPES.CQ && spot.band_meters) {
-    cqFrequencyHzByBand.set(String(spot.band_meters), spot.frequency_hz);
+  if (spot.spot_type === BAND_MAP_SPOT_TYPES.CQ && spot.band_name) {
+    cqFrequencyHzByBand.set(String(spot.band_name), spot.frequency_hz);
   }
 
   return { spotsById, sortedSpots, cqFrequencyHzByBand };
@@ -148,9 +148,9 @@ export function removeBandMapSpot(store, id) {
   spotsById.delete(key);
   if (
     removedSpot?.spot_type === BAND_MAP_SPOT_TYPES.CQ &&
-    removedSpot.band_meters
+    removedSpot.band_name
   ) {
-    cqFrequencyHzByBand.delete(String(removedSpot.band_meters));
+    cqFrequencyHzByBand.delete(String(removedSpot.band_name));
   }
   return {
     spotsById,
@@ -159,15 +159,15 @@ export function removeBandMapSpot(store, id) {
   };
 }
 
-export function addCqBandMapSpot(store, frequencyHz, bandMeters) {
+export function addCqBandMapSpot(store, frequencyHz, bandName) {
   const normalizedFrequency = normalizedFrequencyHz(frequencyHz);
-  if (!normalizedFrequency || !bandMeters)
+  if (!normalizedFrequency || !bandName)
     return store ?? createBandMapSpotStore();
   return addBandMapSpot(store, {
-    id: `cq:${bandMeters}`,
+    id: `cq:${bandName}`,
     spot_type: BAND_MAP_SPOT_TYPES.CQ,
     frequency_hz: normalizedFrequency,
-    band_meters: bandMeters,
+    band_name: bandName,
   });
 }
 
@@ -181,9 +181,9 @@ export function addInUseBandMapSpot(store, frequencyHz) {
   });
 }
 
-export function lastCqFrequencyForBand(store, bandMeters) {
-  if (!bandMeters) return null;
-  return store?.cqFrequencyHzByBand?.get(String(bandMeters)) ?? null;
+export function lastCqFrequencyForBand(store, bandName) {
+  if (!bandName) return null;
+  return store?.cqFrequencyHzByBand?.get(String(bandName)) ?? null;
 }
 
 function isNavigableSpot(spot) {

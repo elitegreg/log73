@@ -10,6 +10,9 @@ mod dxcc;
 mod dxcluster;
 mod log_cache;
 mod message_mode;
+mod messages;
+mod modes;
+mod qso_time;
 mod radio;
 mod radio_manager;
 mod scoring;
@@ -68,6 +71,7 @@ struct AppState {
     db: Database,
     auth_config: std::sync::Arc<RwLock<AuthConfig>>,
     contest_rules: ContestRulesStore,
+    bands: std::sync::Arc<Vec<bands::Band>>,
     log_cache: LogCache,
     incremental_scoring: IncrementalScoreTracker,
     stats: StatsTracker,
@@ -426,7 +430,12 @@ async fn main() {
         Ok(config) => dxcluster.apply_config(config).await,
         Err(error) => warn!(%error, "failed to load DX Cluster config; listener task not started"),
     }
-    let radio_manager = RadioManager::new(db.clone(), voice_keyer.clone());
+    let loaded_bands = std::sync::Arc::new(
+        db.bands(2)
+            .await
+            .unwrap_or_else(|error| panic!("failed to load region 2 bands: {error}")),
+    );
+    let radio_manager = RadioManager::new(db.clone(), voice_keyer.clone(), loaded_bands.clone());
     let scoring_modules = ScoringModules::new();
     let incremental_scoring = IncrementalScoreTracker::new();
     let stats = StatsTracker::new();
@@ -440,6 +449,7 @@ async fn main() {
         db,
         auth_config,
         contest_rules,
+        bands: loaded_bands,
         log_cache,
         incremental_scoring,
         stats,
@@ -480,6 +490,8 @@ async fn main() {
     let api = Router::new()
         .route("/contest-rules", get(list_contest_rules))
         .route("/contest-settings", get(contest_settings))
+        .route("/bands", get(bands_catalog))
+        .route("/modes", get(modes_catalog))
         .route("/config", get(config).put(update_config))
         .route("/client-errors", post(report_client_error))
         .route("/supercheckpartial", get(supercheckpartial_matches))
@@ -1068,6 +1080,19 @@ async fn contest_settings(
     Json(rules)
 }
 
+async fn bands_catalog(State(app_state): State<AppState>) -> Json<Vec<bands::Band>> {
+    Json(app_state.bands.as_ref().clone())
+}
+
+async fn modes_catalog() -> Json<Vec<String>> {
+    Json(
+        modes::LOGGER_MODE_OPTIONS
+            .iter()
+            .map(|mode| (*mode).to_string())
+            .collect(),
+    )
+}
+
 async fn supercheckpartial_matches(
     State(app_state): State<AppState>,
     headers: HeaderMap,
@@ -1544,9 +1569,14 @@ async fn import_adif(
         .map(|imported| imported.contact.clone())
         .collect::<Vec<_>>();
 
-    if let Err((index, error)) =
-        validation::validate_import_contacts(&app_state.db, &app_state.contest_rules, id, &contacts)
-            .await
+    if let Err((index, error)) = validation::validate_import_contacts(
+        &app_state.db,
+        &app_state.contest_rules,
+        app_state.bands.as_ref(),
+        id,
+        &contacts,
+    )
+    .await
     {
         let line = imported
             .get(index)
@@ -2076,6 +2106,7 @@ async fn commit_contact(
     if let Err(error) = validation::validate_contacts(
         &app_state.db,
         &app_state.contest_rules,
+        app_state.bands.as_ref(),
         log_id,
         &input_contacts,
     )

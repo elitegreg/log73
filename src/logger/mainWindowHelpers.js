@@ -13,9 +13,9 @@ import {
   normalizeLoggerMode,
 } from '../domain/modes.js';
 import {
-  parseMessageModeSectionHeader,
-  normalizeMessageMode,
-} from '../domain/messageModes.js';
+  actionFromTemplate,
+  messageActionForConfig,
+} from '../domain/messages.js';
 
 export { adifModeForLoggerMode, isSelectableMode, modeIsCw, modeIsPhone };
 
@@ -55,21 +55,6 @@ export const CW_DIGITAL_CALLSIGN_CLEAR_THRESHOLD_HZ = 100;
 export const PHONE_CALLSIGN_CLEAR_THRESHOLD_HZ = 200;
 
 const PHONE_MODES = new Set(['SSB', 'FM', 'AM']);
-
-const AMATEUR_BANDS = [
-  { meters: 160, name: '160m', lowerHz: 1800000, upperHz: 2000000 },
-  { meters: 80, name: '80m', lowerHz: 3500000, upperHz: 4000000 },
-  { meters: 60, name: '60m', lowerHz: 5330500, upperHz: 5406500 },
-  { meters: 40, name: '40m', lowerHz: 7000000, upperHz: 7300000 },
-  { meters: 30, name: '30m', lowerHz: 10100000, upperHz: 10150000 },
-  { meters: 20, name: '20m', lowerHz: 14000000, upperHz: 14350000 },
-  { meters: 17, name: '17m', lowerHz: 18068000, upperHz: 18168000 },
-  { meters: 15, name: '15m', lowerHz: 21000000, upperHz: 21450000 },
-  { meters: 12, name: '12m', lowerHz: 24890000, upperHz: 24990000 },
-  { meters: 10, name: '10m', lowerHz: 28000000, upperHz: 29700000 },
-  { meters: 6, name: '6m', lowerHz: 50000000, upperHz: 54000000 },
-  { meters: 2, name: '2m', lowerHz: 144000000, upperHz: 148000000 },
-];
 
 export function exchangeDefaults(settings, radioMode, contestParams = {}) {
   return Object.fromEntries(
@@ -218,14 +203,14 @@ export function isFrequencyInput(value) {
   return /^\d+(\.\d+)?$/.test(value.trim());
 }
 
-export function bandForFrequency(frequencyHz) {
-  return AMATEUR_BANDS.find(
+export function bandForFrequency(frequencyHz, bands = []) {
+  return bands.find(
     (band) => frequencyHz >= band.lowerHz && frequencyHz <= band.upperHz,
   );
 }
 
-export function bandByMeters(meters) {
-  return AMATEUR_BANDS.find((band) => band.meters === meters);
+export function bandByName(bands = [], name) {
+  return bands.find((band) => band.name === name);
 }
 
 export function createContactId(date, callSign) {
@@ -251,10 +236,7 @@ export function messageButtonIsSendable(button) {
 }
 
 export function cwActionFromTemplate(template) {
-  const match = String(template ?? '')
-    .trim()
-    .match(/^\{\s*action\s*:\s*([^}]+?)\s*\}$/i);
-  return match ? match[1].trim() : null;
+  return actionFromTemplate(template);
 }
 
 export function messageActionForRadioMode(
@@ -269,40 +251,13 @@ export function messageActionForRadioMode(
 }
 
 export function cwActionForMessage(config, mode, key) {
-  const normalizedMode = normalizeMessageMode(mode);
-  const normalizedKey = String(key ?? '')
-    .trim()
-    .toUpperCase();
-  if (!normalizedKey) return null;
-
-  let currentMode = null;
-  for (const rawLine of String(config ?? '').split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (!line) continue;
-
-    const sectionMode = parseMessageModeSectionHeader(line);
-    if (sectionMode) {
-      currentMode = sectionMode;
-      continue;
-    }
-    if (line.startsWith('#') || currentMode !== normalizedMode) continue;
-
-    const commaIndex = line.indexOf(',');
-    if (commaIndex <= 0) continue;
-
-    const keyAndLabel = line.slice(0, commaIndex).trim();
-    const message = line.slice(commaIndex + 1).trim();
-    const parsedKey = keyAndLabel.split(/\s+/, 1)[0]?.trim().toUpperCase();
-    if (parsedKey !== normalizedKey) continue;
-
-    return cwActionFromTemplate(message);
-  }
-
-  return null;
+  return messageActionForConfig(config, mode, key);
 }
 
-export function availableModeOptions() {
-  return MODE_OPTIONS;
+export function availableModeOptions(settings = {}) {
+  return settings?.mode_catalog?.length > 0
+    ? settings.mode_catalog
+    : MODE_OPTIONS;
 }
 
 export function typedModeFromCallsignInput(value, settings) {

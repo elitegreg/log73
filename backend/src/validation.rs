@@ -1,4 +1,4 @@
-use crate::bands::{USA_AMATEUR_BANDS, band_for_frequency};
+use crate::bands::{Band, band_by_name, band_for_frequency};
 use crate::contest_rules::{ContestParam, ContestRules, ContestRulesStore, ExchangeField};
 use crate::cw;
 use crate::db::{
@@ -6,6 +6,7 @@ use crate::db::{
     contact_log_id, contact_meta_value,
 };
 use crate::message_mode::is_valid_message_mode;
+use crate::modes::mode_is_cw;
 use crate::voice_messages;
 use radio_cat_rs::{Frequency, supported_drivers};
 use regex::Regex;
@@ -48,9 +49,7 @@ const MAX_CW_MESSAGES_LEN: usize = 16_384;
 const MAX_VOICE_MESSAGES_LEN: usize = 16_384;
 const MAX_WS_FIELDS: usize = 100;
 const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat", "serial"];
-const LOGGER_MODE_OPTIONS: &[&str] = &[
-    "CW", "CW-R", "SSB", "FM", "AM", "FT8", "JT65", "JT9", "MFSK", "PSK", "RTTY",
-];
+const LOGGER_MODE_OPTIONS: &[&str] = crate::modes::LOGGER_MODE_OPTIONS;
 
 static COMPILED_REGEX_CACHE: OnceLock<Mutex<HashMap<String, Result<Regex, String>>>> =
     OnceLock::new();
@@ -355,6 +354,7 @@ pub fn validate_dxcluster_config(
 pub async fn validate_contacts(
     database: &Database,
     contest_rules: &ContestRulesStore,
+    bands: &[Band],
     log_id: i64,
     contacts: &[Contact],
 ) -> Result<(), String> {
@@ -384,7 +384,7 @@ pub async fn validate_contacts(
             validate_contact_shape(contact)
                 .map_err(|error| format!("contact {}: {error}", index + 1))?;
         } else {
-            validate_contact(rules, log_id, contact)
+            validate_contact(rules, bands, log_id, contact)
                 .map_err(|error| format!("contact {}: {error}", index + 1))?;
         }
 
@@ -412,6 +412,7 @@ pub async fn validate_contacts(
 pub async fn validate_import_contacts(
     database: &Database,
     contest_rules: &ContestRulesStore,
+    bands: &[Band],
     log_id: i64,
     contacts: &[Contact],
 ) -> Result<(), (usize, String)> {
@@ -432,7 +433,7 @@ pub async fn validate_import_contacts(
         .ok_or_else(|| (0, format!("unknown contest: {}", log.contest_id)))?;
 
     for (index, contact) in contacts.iter().enumerate() {
-        validate_contact(rules, log_id, contact).map_err(|error| (index, error))?;
+        validate_contact(rules, bands, log_id, contact).map_err(|error| (index, error))?;
 
         if let Some(contact_id) = contact_id(contact)
             && let Some(existing_log_id) = database
@@ -710,7 +711,12 @@ fn validate_contest_param(param: &ContestParam, value: Option<&Value>) -> Result
     )
 }
 
-fn validate_contact(rules: &ContestRules, log_id: i64, contact: &Contact) -> Result<(), String> {
+fn validate_contact(
+    rules: &ContestRules,
+    bands: &[Band],
+    log_id: i64,
+    contact: &Contact,
+) -> Result<(), String> {
     validate_contact_shape(contact)?;
 
     if let Some(id) = contact_id(contact)
@@ -742,7 +748,7 @@ fn validate_contact(rules: &ContestRules, log_id: i64, contact: &Contact) -> Res
     }
     let callsign = json_trimmed_string(contact_adif_value(contact, "CALL")).unwrap_or_default();
     validate_callsign("callsign", &callsign, false)?;
-    validate_contact_band_and_frequency(rules, contact)?;
+    validate_contact_band_and_frequency(rules, bands, contact)?;
     let mode = validate_contact_mode(rules, contact)?;
 
     if let Some(client_id) = json_trimmed_string(contact_meta_value(contact, "clientId")) {
@@ -873,23 +879,30 @@ fn validate_qso_epoch(contact: &Contact) -> Result<(), String> {
 
 fn validate_contact_band_and_frequency(
     rules: &ContestRules,
+    bands: &[Band],
     contact: &Contact,
 ) -> Result<(), String> {
     let band_text = json_trimmed_string(contact_adif_value(contact, "BAND")).unwrap_or_default();
     if band_text.is_empty() {
         return Err("band is required".to_string());
     }
-    let band_meters = band_meters(&band_text).ok_or_else(|| "band is invalid".to_string())?;
-    if !rules.allowed_bands.is_empty() && !rules.allowed_bands.contains(&band_meters) {
+    let contact_band =
+        band_by_name(bands, &band_text).ok_or_else(|| "band is invalid".to_string())?;
+    if !rules.allowed_bands.is_empty()
+        && !rules
+            .allowed_bands
+            .iter()
+            .any(|allowed_band| allowed_band.eq_ignore_ascii_case(&contact_band.name))
+    {
         return Err(format!("band must be one of: {}", allowed_bands(rules)));
     }
 
     let frequency_hz = contact_frequency_hz(contact_adif_value(contact, "FREQ"))
         .ok_or_else(|| "frequency is required".to_string())?;
     validate_radio_frequency_hz(frequency_hz)?;
-    let frequency_band = band_for_frequency(Frequency::from_hz(frequency_hz))
+    let frequency_band = band_for_frequency(bands, Frequency::from_hz(frequency_hz))
         .ok_or_else(|| "frequency is outside supported amateur bands".to_string())?;
-    if frequency_band.meters != band_meters {
+    if !frequency_band.name.eq_ignore_ascii_case(&contact_band.name) {
         return Err("frequency does not match band".to_string());
     }
 
@@ -1031,10 +1044,6 @@ fn parse_field_type(field_type: &str, radio_mode: &str) -> ParsedFieldType {
     ParsedFieldType { kind, max_length }
 }
 
-fn mode_is_cw(mode: &str) -> bool {
-    matches!(mode.trim().to_uppercase().as_str(), "CW" | "CW-R")
-}
-
 fn is_valid_rst(value: &str, expected_length: usize) -> bool {
     value.len() == expected_length
         && value.len() >= 2
@@ -1145,27 +1154,7 @@ fn validate_tuning_increment_hz(label: &str, value: u32) -> Result<(), String> {
 }
 
 fn allowed_bands(rules: &ContestRules) -> String {
-    rules
-        .allowed_bands
-        .iter()
-        .map(|meters| format!("{meters}m"))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-fn band_meters(value: &str) -> Option<u16> {
-    let normalized = value.trim().to_lowercase();
-    USA_AMATEUR_BANDS
-        .iter()
-        .find(|band| band.name.eq_ignore_ascii_case(&normalized))
-        .map(|band| band.meters)
-        .or_else(|| {
-            normalized
-                .strip_suffix('m')
-                .unwrap_or(&normalized)
-                .parse::<u16>()
-                .ok()
-        })
+    rules.allowed_bands.join(", ")
 }
 
 fn contact_frequency_hz(value: Option<&Value>) -> Option<u64> {
@@ -1228,13 +1217,34 @@ fn json_trimmed_string(value: Option<&Value>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_bands() -> Vec<Band> {
+        vec![
+            Band {
+                iaru_region: 2,
+                name: "40m".to_string(),
+                lower_hz: 7_000_000,
+                upper_hz: 7_300_000,
+                default_ssb_mode: "LSB".to_string(),
+                sort_order: 1,
+            },
+            Band {
+                iaru_region: 2,
+                name: "20m".to_string(),
+                lower_hz: 14_000_000,
+                upper_hz: 14_350_000,
+                default_ssb_mode: "USB".to_string(),
+                sort_order: 2,
+            },
+        ]
+    }
     use serde_json::{Map, json};
 
     fn test_rules() -> ContestRules {
         ContestRules {
             contest: "TEST".to_string(),
             display_name: "Test".to_string(),
-            allowed_bands: vec![20],
+            allowed_bands: vec!["20m".to_string()],
             allowed_modes: vec!["CW".to_string(), "SSB".to_string()],
             define: Vec::new(),
             exchange: vec![ExchangeField {
@@ -1391,7 +1401,7 @@ mod tests {
     #[test]
     fn validates_contact_payload() {
         let rules = test_rules();
-        assert!(validate_contact(&rules, 1, &test_contact()).is_ok());
+        assert!(validate_contact(&rules, &test_bands(), 1, &test_contact()).is_ok());
     }
 
     #[test]
@@ -1418,7 +1428,7 @@ mod tests {
         let rules = test_rules();
         let mut contact = test_contact();
         contact.insert("RST_RCVD".to_string(), json!(59));
-        assert!(validate_contact(&rules, 1, &contact).is_err());
+        assert!(validate_contact(&rules, &test_bands(), 1, &contact).is_err());
     }
 
     #[test]
@@ -1426,7 +1436,7 @@ mod tests {
         let rules = test_rules();
         let mut contact = test_contact();
         contact.insert("BAND".to_string(), json!("40m"));
-        assert!(validate_contact(&rules, 1, &contact).is_err());
+        assert!(validate_contact(&rules, &test_bands(), 1, &contact).is_err());
     }
 
     #[test]

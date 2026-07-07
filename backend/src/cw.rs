@@ -1,10 +1,9 @@
 use crate::message_mode::{
     RUN_MESSAGE_MODE, SEARCH_AND_POUNCE_MESSAGE_MODE, normalize_message_mode,
-    parse_message_mode_section_header,
 };
+use crate::messages::{ParsedMessageEntry, parse_message_entries, validate_message_config};
 use serde::Serialize;
 use serde_json::{Map, Value};
-use std::collections::HashSet;
 
 pub const DEFAULT_CW_MESSAGES: &str = r#"###################
 #   RUN Messages
@@ -74,55 +73,8 @@ pub fn labels(config: &str) -> CwLabels {
 }
 
 pub fn validate(config: &str) -> Result<CwLabels, String> {
-    let mut current_mode = None::<&str>;
-    let mut run_keys = HashSet::new();
-    let mut search_and_pounce_keys = HashSet::new();
-
-    for (index, raw_line) in config.lines().enumerate() {
-        let line_number = index + 1;
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        if let Some(mode) = parse_message_mode_section_header(line) {
-            current_mode = Some(mode);
-            continue;
-        }
-        if line.starts_with('#') {
-            continue;
-        }
-
-        let mode = current_mode
-            .ok_or_else(|| format!("line {line_number}: message is outside a mode section"))?;
-        let message = parse_message_line(line)
-            .ok_or_else(|| format!("line {line_number}: expected 'F# Label,Message'"))?;
-        if !is_valid_function_key(&message.key) {
-            return Err(format!(
-                "line {line_number}: message key must be F1 through F12"
-            ));
-        }
-
-        let keys = if mode == RUN_MESSAGE_MODE {
-            &mut run_keys
-        } else {
-            &mut search_and_pounce_keys
-        };
-        if !keys.insert(message.key.clone()) {
-            return Err(format!(
-                "line {line_number}: duplicate {} message in {mode} section",
-                message.key
-            ));
-        }
-    }
-
-    if run_keys.is_empty() {
-        return Err("CW messages must include at least one Run message".to_string());
-    }
-    if search_and_pounce_keys.is_empty() {
-        return Err("CW messages must include at least one S&P message".to_string());
-    }
-
+    validate_message_config(config, "Message")
+        .map_err(|error| error.replace("messages must", "CW messages must"))?;
     Ok(labels(config))
 }
 
@@ -151,28 +103,13 @@ fn labels_for(messages: Vec<CwMessage>) -> Vec<CwLabel> {
 
 fn parse_messages(config: &str) -> CwMessages {
     let mut messages = CwMessages::default();
-    let mut current_mode = None::<&str>;
 
-    for raw_line in config.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        if let Some(mode) = parse_message_mode_section_header(line) {
-            current_mode = Some(mode);
-            continue;
-        }
-        if line.starts_with('#') {
-            continue;
-        }
-
-        let Some(message) = parse_message_line(line) else {
-            continue;
-        };
-        match current_mode {
-            Some(RUN_MESSAGE_MODE) => messages.run.push(message),
-            Some(SEARCH_AND_POUNCE_MESSAGE_MODE) => messages.search_and_pounce.push(message),
+    for entry in parse_message_entries(config) {
+        let mode = entry.mode.clone();
+        let message = cw_message_from_entry(entry);
+        match mode.as_str() {
+            RUN_MESSAGE_MODE => messages.run.push(message),
+            SEARCH_AND_POUNCE_MESSAGE_MODE => messages.search_and_pounce.push(message),
             _ => {}
         }
     }
@@ -180,28 +117,12 @@ fn parse_messages(config: &str) -> CwMessages {
     messages
 }
 
-fn parse_message_line(line: &str) -> Option<CwMessage> {
-    let (key_and_label, message) = line.split_once(',')?;
-    let mut parts = key_and_label.splitn(2, char::is_whitespace);
-    let key = parts.next()?.trim();
-    let label = parts.next().unwrap_or("").trim();
-    let normalized_key = key.to_uppercase();
-    if !normalized_key.starts_with('F') {
-        return None;
+fn cw_message_from_entry(entry: ParsedMessageEntry) -> CwMessage {
+    CwMessage {
+        key: entry.key,
+        label: entry.label,
+        message: entry.target,
     }
-
-    Some(CwMessage {
-        key: normalized_key,
-        label: label.to_string(),
-        message: message.trim().to_string(),
-    })
-}
-
-fn is_valid_function_key(key: &str) -> bool {
-    matches!(
-        key.trim().to_uppercase().as_str(),
-        "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12"
-    )
 }
 
 fn render_template(template: &str, fields: &Map<String, Value>) -> String {

@@ -47,7 +47,7 @@ function RadioControls({
         Band:
         <select value={currentBandValue} onChange={handleBandChange}>
           {bandOptions.map((band) => (
-            <option key={band.meters} value={band.meters}>
+            <option key={band.name} value={band.name}>
               {band.name}
             </option>
           ))}

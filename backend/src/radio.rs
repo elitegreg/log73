@@ -1,4 +1,4 @@
-use crate::bands::band_for_frequency;
+use crate::bands::{Band, band_for_frequency};
 use crate::db::RadioConfig;
 use crate::dxcluster::DxClusterSpot;
 use radio_cat_rs::{Frequency, Mode};
@@ -150,13 +150,17 @@ pub fn normalize_mode(mode: &Mode) -> String {
     }
 }
 
-pub fn mode_candidates_for_request(requested: &str, frequency_hz: u64) -> Vec<Mode> {
+pub fn mode_candidates_for_request(
+    requested: &str,
+    frequency_hz: u64,
+    bands: &[Band],
+) -> Vec<Mode> {
     match requested.trim().to_uppercase().as_str() {
         "CW" => vec![Mode::Cw],
         "CW-R" => vec![Mode::CwReverse, Mode::Cw],
         "FM" => vec![Mode::Fm],
         "AM" => vec![Mode::Am],
-        "SSB" => vec![ssb_mode_for_frequency(frequency_hz)],
+        "SSB" => vec![ssb_mode_for_frequency(frequency_hz, bands)],
         "FT8" | "JT65" | "JT9" | "MFSK" | "PSK" => vec![Mode::DataUsb, Mode::Rtty],
         "RTTY" => vec![Mode::Rtty, Mode::DataUsb],
         _ => Vec::new(),
@@ -167,11 +171,14 @@ pub fn mode_is_phone(mode: &str) -> bool {
     matches!(mode.trim().to_uppercase().as_str(), "SSB" | "FM" | "AM")
 }
 
-fn ssb_mode_for_frequency(frequency_hz: u64) -> Mode {
+fn ssb_mode_for_frequency(frequency_hz: u64, bands: &[Band]) -> Mode {
     let frequency = Frequency::from_hz(frequency_hz);
 
-    match band_for_frequency(frequency).map(|band| band.meters) {
-        Some(meters) if meters >= 40 => Mode::Lsb,
+    match band_for_frequency(bands, frequency)
+        .map(|band| band.default_ssb_mode.trim().to_uppercase())
+        .as_deref()
+    {
+        Some("LSB") => Mode::Lsb,
         _ => Mode::Usb,
     }
 }
@@ -179,6 +186,27 @@ fn ssb_mode_for_frequency(frequency_hz: u64) -> Mode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_bands() -> Vec<Band> {
+        vec![
+            Band {
+                iaru_region: 2,
+                name: "40m".to_string(),
+                lower_hz: 7_000_000,
+                upper_hz: 7_300_000,
+                default_ssb_mode: "LSB".to_string(),
+                sort_order: 1,
+            },
+            Band {
+                iaru_region: 2,
+                name: "20m".to_string(),
+                lower_hz: 14_000_000,
+                upper_hz: 14_350_000,
+                default_ssb_mode: "USB".to_string(),
+                sort_order: 2,
+            },
+        ]
+    }
 
     #[test]
     fn serializes_radio_status_server_message() {
@@ -411,23 +439,23 @@ mod tests {
     #[test]
     fn mode_candidates_for_request_use_fallbacks() {
         assert_eq!(
-            mode_candidates_for_request("CW", 14_000_000),
+            mode_candidates_for_request("CW", 14_000_000, &test_bands()),
             vec![Mode::Cw]
         );
         assert_eq!(
-            mode_candidates_for_request("CW-R", 14_000_000),
+            mode_candidates_for_request("CW-R", 14_000_000, &test_bands()),
             vec![Mode::CwReverse, Mode::Cw]
         );
         assert_eq!(
-            mode_candidates_for_request("FT8", 14_000_000),
+            mode_candidates_for_request("FT8", 14_000_000, &test_bands()),
             vec![Mode::DataUsb, Mode::Rtty]
         );
         assert_eq!(
-            mode_candidates_for_request("RTTY", 14_000_000),
+            mode_candidates_for_request("RTTY", 14_000_000, &test_bands()),
             vec![Mode::Rtty, Mode::DataUsb]
         );
         assert_eq!(
-            mode_candidates_for_request("AM", 14_000_000),
+            mode_candidates_for_request("AM", 14_000_000, &test_bands()),
             vec![Mode::Am]
         );
     }
@@ -444,11 +472,11 @@ mod tests {
     #[test]
     fn ssb_request_uses_band_dependent_sideband() {
         assert_eq!(
-            mode_candidates_for_request("SSB", 7_200_000),
+            mode_candidates_for_request("SSB", 7_200_000, &test_bands()),
             vec![Mode::Lsb]
         );
         assert_eq!(
-            mode_candidates_for_request("SSB", 14_200_000),
+            mode_candidates_for_request("SSB", 14_200_000, &test_bands()),
             vec![Mode::Usb]
         );
     }

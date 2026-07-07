@@ -51,9 +51,9 @@ export function useBandMap({
     [sendRadioMessage],
   );
 
-  const handleStoreCqFrequency = useCallback((frequencyHz, bandMeters) => {
+  const handleStoreCqFrequency = useCallback((frequencyHz, bandName) => {
     setBandMapSpotStore((currentStore) =>
-      addCqBandMapSpot(currentStore, frequencyHz, bandMeters),
+      addCqBandMapSpot(currentStore, frequencyHz, bandName),
     );
   }, []);
 
@@ -125,12 +125,13 @@ export function useBandMap({
 
   const visibleBandMapSpotStore = useMemo(() => {
     const allowedBands = settings?.allowed_bands ?? [];
+    const bandCatalog = settings?.band_catalog ?? [];
     if (allowedBands.length === 0) return bandMapSpotStore;
 
     return createBandMapSpotStore(
       (bandMapSpotStore?.sortedSpots ?? []).filter((spot) => {
-        const band = bandForFrequency(Number(spot?.frequency_hz));
-        return band ? allowedBands.includes(band.meters) : false;
+        const band = bandForFrequency(Number(spot?.frequency_hz), bandCatalog);
+        return band ? allowedBands.includes(band.name) : false;
       }),
     );
   }, [bandMapSpotStore, settings]);

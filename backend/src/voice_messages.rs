@@ -1,10 +1,12 @@
 use crate::message_mode::{
     RUN_MESSAGE_MODE, SEARCH_AND_POUNCE_MESSAGE_MODE,
-    normalize_message_mode as normalized_message_mode, parse_message_mode_section_header,
+    normalize_message_mode as normalized_message_mode,
+};
+use crate::messages::{
+    ParsedMessageEntry, action_from_template, parse_message_entries, validate_message_config,
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
-use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
 pub const DEFAULT_VOICE_MESSAGES: &str = r#"###################
@@ -84,59 +86,15 @@ pub fn labels(config: &str) -> VoiceLabels {
 }
 
 pub fn validate(config: &str) -> Result<VoiceLabels, String> {
-    let mut current_mode = None::<&str>;
-    let mut run_keys = HashSet::new();
-    let mut search_and_pounce_keys = HashSet::new();
-
-    for (index, raw_line) in config.lines().enumerate() {
-        let line_number = index + 1;
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        if let Some(mode) = parse_message_mode_section_header(line) {
-            current_mode = Some(mode);
-            continue;
-        }
-        if line.starts_with('#') {
-            continue;
-        }
-
-        let mode = current_mode
-            .ok_or_else(|| format!("line {line_number}: message is outside a mode section"))?;
-        let message = parse_message_line(line)
-            .ok_or_else(|| format!("line {line_number}: expected 'F# Label,File'"))?;
-        if !is_valid_function_key(&message.key) {
-            return Err(format!(
-                "line {line_number}: message key must be F1 through F12"
-            ));
-        }
-        if let Some(file_path) = file_path_from_target(&message.target) {
-            validate_voice_file_path(&file_path)
-                .map_err(|error| format!("line {line_number}: {error}"))?;
-        }
-
-        let keys = if mode == RUN_MESSAGE_MODE {
-            &mut run_keys
-        } else {
-            &mut search_and_pounce_keys
-        };
-        if !keys.insert(message.key.clone()) {
-            return Err(format!(
-                "line {line_number}: duplicate {} message in {mode} section",
-                message.key
-            ));
+    validate_message_config(config, "File")
+        .map_err(|error| error.replace("messages must", "Voice messages must"))?;
+    for (index, entry) in entries(config).into_iter().enumerate() {
+        if let Some(file_path) = entry.file_path.as_deref()
+            && let Err(error) = validate_voice_file_path(file_path)
+        {
+            return Err(format!("line {}: {error}", index + 1));
         }
     }
-
-    if run_keys.is_empty() {
-        return Err("Voice messages must include at least one Run message".to_string());
-    }
-    if search_and_pounce_keys.is_empty() {
-        return Err("Voice messages must include at least one S&P message".to_string());
-    }
-
     Ok(labels(config))
 }
 
@@ -341,28 +299,13 @@ fn labels_for(messages: Vec<VoiceMessage>) -> Vec<VoiceLabel> {
 
 fn parse_messages(config: &str) -> VoiceMessages {
     let mut messages = VoiceMessages::default();
-    let mut current_mode = None::<&str>;
 
-    for raw_line in config.lines() {
-        let line = raw_line.trim();
-        if line.is_empty() {
-            continue;
-        }
-
-        if let Some(mode) = parse_message_mode_section_header(line) {
-            current_mode = Some(mode);
-            continue;
-        }
-        if line.starts_with('#') {
-            continue;
-        }
-
-        let Some(message) = parse_message_line(line) else {
-            continue;
-        };
-        match current_mode {
-            Some(RUN_MESSAGE_MODE) => messages.run.push(message),
-            Some(SEARCH_AND_POUNCE_MESSAGE_MODE) => messages.search_and_pounce.push(message),
+    for entry in parse_message_entries(config) {
+        let mode = entry.mode.clone();
+        let message = voice_message_from_entry(entry);
+        match mode.as_str() {
+            RUN_MESSAGE_MODE => messages.run.push(message),
+            SEARCH_AND_POUNCE_MESSAGE_MODE => messages.search_and_pounce.push(message),
             _ => {}
         }
     }
@@ -370,37 +313,11 @@ fn parse_messages(config: &str) -> VoiceMessages {
     messages
 }
 
-fn parse_message_line(line: &str) -> Option<VoiceMessage> {
-    let (key_and_label, target) = line.split_once(',')?;
-    let mut parts = key_and_label.splitn(2, char::is_whitespace);
-    let key = parts.next()?.trim();
-    let label = parts.next().unwrap_or("").trim();
-    let normalized_key = key.to_uppercase();
-    if !normalized_key.starts_with('F') {
-        return None;
-    }
-
-    Some(VoiceMessage {
-        key: normalized_key,
-        label: label.to_string(),
-        target: target.trim().to_string(),
-    })
-}
-
-fn is_valid_function_key(key: &str) -> bool {
-    matches!(
-        key.trim().to_uppercase().as_str(),
-        "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12"
-    )
-}
-
-fn action_from_template(template: &str) -> Option<String> {
-    let inner = template.trim().strip_prefix('{')?.strip_suffix('}')?.trim();
-    let (name, value) = inner.split_once(':')?;
-    if name.trim().eq_ignore_ascii_case("action") {
-        Some(value.trim().to_string())
-    } else {
-        None
+fn voice_message_from_entry(entry: ParsedMessageEntry) -> VoiceMessage {
+    VoiceMessage {
+        key: entry.key,
+        label: entry.label,
+        target: entry.target,
     }
 }
 

@@ -1,3 +1,4 @@
+use super::bands::db_bands;
 use super::config::{db_auth_config, db_dxcluster_config, db_update_config};
 use super::contact::Contact;
 use super::contacts::{
@@ -13,6 +14,7 @@ use super::models::{
 use super::radios::{db_create_radio, db_delete_radio, db_radios, db_update_radio, select_radio};
 use super::schema::initialize_schema;
 use super::serials::db_allocate_serials;
+use crate::bands::Band;
 use rusqlite::Connection;
 use std::path::Path;
 use std::thread;
@@ -44,6 +46,10 @@ enum DbCommand {
     LogQsoCount {
         id: i64,
         response: oneshot::Sender<rusqlite::Result<usize>>,
+    },
+    Bands {
+        iaru_region: i64,
+        response: oneshot::Sender<rusqlite::Result<Vec<Band>>>,
     },
     Radios {
         response: oneshot::Sender<rusqlite::Result<Vec<RadioConfig>>>,
@@ -191,6 +197,14 @@ impl Database {
             .await
     }
 
+    pub async fn bands(&self, iaru_region: i64) -> rusqlite::Result<Vec<Band>> {
+        self.call(|response| DbCommand::Bands {
+            iaru_region,
+            response,
+        })
+        .await
+    }
+
     pub async fn radios(&self) -> rusqlite::Result<Vec<RadioConfig>> {
         self.call(|response| DbCommand::Radios { response }).await
     }
@@ -328,6 +342,12 @@ fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbComm
             }
             DbCommand::LogQsoCount { id, response } => {
                 let _ = response.send(db_log_qso_count(&connection, id));
+            }
+            DbCommand::Bands {
+                iaru_region,
+                response,
+            } => {
+                let _ = response.send(db_bands(&connection, iaru_region));
             }
             DbCommand::Radios { response } => {
                 let _ = response.send(db_radios(&connection));

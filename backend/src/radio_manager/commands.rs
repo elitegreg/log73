@@ -1,4 +1,5 @@
 use super::rit::{next_rit_offset_hz, set_rit_offset_hz};
+use crate::bands::Band;
 use crate::radio::{RadioCommand, RadioState, mode_candidates_for_request, normalize_mode};
 use radio_cat_rs::{Frequency, Radio, RadioError};
 use std::sync::Arc;
@@ -55,6 +56,7 @@ pub(super) async fn apply_command(
     current: &Arc<RwLock<Option<RadioState>>>,
     command: RadioCommand,
     last_rit_offset_hz: &mut i32,
+    bands: &[Band],
 ) -> Result<(), RadioError> {
     match command {
         RadioCommand::SetFrequency(frequency_hz) => {
@@ -83,7 +85,7 @@ pub(super) async fn apply_command(
                 "translating CAT mode request"
             );
 
-            let radio_modes = mode_candidates_for_request(&mode, frequency_hz);
+            let radio_modes = mode_candidates_for_request(&mode, frequency_hz, bands);
             if radio_modes.is_empty() {
                 debug!(mode, frequency_hz, "ignoring unsupported CAT radio mode");
                 return Ok(());

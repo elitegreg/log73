@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react';
 import { apiJson } from '../../lib/api';
 
+function normalizeBand(band) {
+  return {
+    iaruRegion: Number(band?.iaru_region ?? 0),
+    name: String(band?.name ?? ''),
+    lowerHz: Number(band?.lower_hz ?? 0),
+    upperHz: Number(band?.upper_hz ?? 0),
+    defaultSsbMode: String(band?.default_ssb_mode ?? ''),
+    sortOrder: Number(band?.sort_order ?? 0),
+  };
+}
+
 let promptedOperatorCallsign;
 
 function promptForOperatorCallsign(defaultCallsign) {
@@ -27,10 +38,18 @@ export function useLoggerContext(logId, radioId, { notifyOperationalError }) {
 
     async function loadContext() {
       setIsContextLoading(true);
-      const [logResult, radioResult, messageLabelsResult] = await Promise.all([
+      const [
+        logResult,
+        radioResult,
+        messageLabelsResult,
+        bandCatalog,
+        modeCatalog,
+      ] = await Promise.all([
         apiJson(`/logs/${logId}`),
         apiJson(`/radios/${radioId}`),
         apiJson(`/radios/${radioId}/message-labels`),
+        apiJson('/bands'),
+        apiJson('/modes'),
       ]);
       const loadedLog = logResult?.log ?? logResult;
       const loadedRadio = radioResult?.radio ?? radioResult;
@@ -40,7 +59,13 @@ export function useLoggerContext(logId, radioId, { notifyOperationalError }) {
         `/contest-settings?contest_id=${encodeURIComponent(loadedLog.contest_id)}`,
       );
       if (isCancelled) return;
-      setSettings(contestSettings);
+      setSettings({
+        ...contestSettings,
+        band_catalog: (bandCatalog ?? []).map(normalizeBand),
+        mode_catalog: (modeCatalog ?? []).map((mode) =>
+          String(mode).trim().toUpperCase(),
+        ),
+      });
       setLog(loadedLog);
       setRadio(loadedRadio);
       setMessageLabels(loadedMessageLabels);

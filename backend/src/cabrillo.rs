@@ -1,5 +1,6 @@
 use crate::contest_rules::{ContestParam, ContestRules, ExchangeField};
 use crate::db::{Contact, Log, contact_adif_value};
+use crate::qso_time::qso_datetime_cabrillo;
 use serde_json::{Map, Value};
 use std::collections::BTreeSet;
 
@@ -188,7 +189,7 @@ fn render_qso_line(rules: &ContestRules, log: &Log, contact: &Contact) -> Result
     let mode = qso_mode_token(contact).ok_or_else(|| "contact is missing mode".to_string())?;
     let epoch = contact_i64(contact_adif_value(contact, "QSO_DATE_TIME_ON"))
         .ok_or_else(|| "contact is missing QSO date/time".to_string())?;
-    let (date, time) = qso_datetime(epoch)?;
+    let (date, time) = qso_datetime_cabrillo(epoch)?;
     let station_callsign = contact_string(contact_adif_value(contact, "STATION_CALLSIGN"))
         .map(|value| value.to_uppercase())
         .unwrap_or_else(|| log.station_callsign.trim().to_uppercase());
@@ -264,35 +265,6 @@ fn cabrillo_mode_token(mode: &str) -> &'static str {
     }
 }
 
-fn qso_datetime(epoch: i64) -> Result<(String, String), String> {
-    if epoch < 0 {
-        return Err("contact QSO time must be positive".to_string());
-    }
-    let days = epoch.div_euclid(86_400);
-    let seconds = epoch.rem_euclid(86_400);
-    let (year, month, day) = civil_from_days(days);
-    let hour = seconds / 3_600;
-    let minute = (seconds % 3_600) / 60;
-    Ok((
-        format!("{year:04}-{month:02}-{day:02}"),
-        format!("{hour:02}{minute:02}"),
-    ))
-}
-
-fn civil_from_days(days: i64) -> (i32, u32, u32) {
-    let z = days + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = mp + if mp < 10 { 3 } else { -9 };
-    let year = y + i64::from(month <= 2);
-    (year as i32, month as u32, day as u32)
-}
-
 fn parameter_value(values: &Map<String, Value>, field: &ContestParam) -> Option<String> {
     let value = values
         .get(&field.name)
@@ -347,7 +319,7 @@ mod tests {
         ContestRules {
             contest: "SC-QSO-PARTY".to_string(),
             display_name: "SC QSO Party".to_string(),
-            allowed_bands: vec![20],
+            allowed_bands: vec!["20m".to_string()],
             allowed_modes: vec!["CW".to_string(), "SSB".to_string()],
             define: Vec::new(),
             exchange: vec![

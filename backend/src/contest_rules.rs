@@ -142,7 +142,7 @@ pub struct ContestRules {
     pub contest: String,
     #[serde(default)]
     pub display_name: String,
-    pub allowed_bands: Vec<u16>,
+    pub allowed_bands: Vec<String>,
     pub allowed_modes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub define: Vec<ValueSet>,
@@ -185,6 +185,13 @@ struct RulesFile {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum AllowedBandValue {
+    Name(String),
+    Meters(u16),
+}
+
+#[derive(Debug, Clone, Deserialize)]
 struct RawContestRules {
     id: String,
     #[serde(default)]
@@ -192,7 +199,7 @@ struct RawContestRules {
     #[serde(default)]
     display_name: Option<String>,
     #[serde(default)]
-    allowed_bands: Option<Vec<u16>>,
+    allowed_bands: Option<Vec<AllowedBandValue>>,
     #[serde(default)]
     allowed_modes: Option<Vec<String>>,
     #[serde(default)]
@@ -245,6 +252,13 @@ struct RawScoringRules {
     bonus_points: Option<Vec<BonusPointRule>>,
     #[serde(default)]
     power_multiplier: Option<Vec<i64>>,
+}
+
+fn allowed_band_name(value: &AllowedBandValue) -> String {
+    match value {
+        AllowedBandValue::Name(name) => name.trim().to_string(),
+        AllowedBandValue::Meters(meters) => format!("{meters}m"),
+    }
 }
 
 impl ContestRulesStore {
@@ -607,7 +621,7 @@ fn resolve_contest(
         contest.display_name = id.to_string();
     }
     if let Some(allowed_bands) = &raw.allowed_bands {
-        contest.allowed_bands = allowed_bands.clone();
+        contest.allowed_bands = allowed_bands.iter().map(allowed_band_name).collect();
     }
     if let Some(allowed_modes) = &raw.allowed_modes {
         contest.allowed_modes = allowed_modes.clone();

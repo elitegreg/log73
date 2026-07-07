@@ -1,3 +1,4 @@
+mod bands;
 mod config;
 mod contact;
 mod contacts;

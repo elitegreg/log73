@@ -1,5 +1,5 @@
 import {
-  bandByMeters,
+  bandByName,
   isSelectableMode,
   steppedFrequencyHz,
   tuningIncrementHzForMode,
@@ -27,13 +27,13 @@ export function useBandControls({
 }) {
   function storeCurrentCqFrequency() {
     if (!currentBand) return;
-    onStoreCqFrequency?.(radioFrequencyHz, currentBand.meters);
+    onStoreCqFrequency?.(radioFrequencyHz, currentBand.name);
   }
 
   function jumpToLastCqFrequency() {
     const frequencyHz = lastCqFrequencyForBand(
       bandMapSpotStore,
-      currentBand?.meters,
+      currentBand?.name,
     );
     if (frequencyHz) onSetRadioFrequency?.(frequencyHz);
   }
@@ -85,10 +85,10 @@ export function useBandControls({
     if (!currentBand || bandOptions.length === 0) return;
 
     const sortedBands = [
-      ...new Map(bandOptions.map((band) => [band.meters, band])).values(),
+      ...new Map(bandOptions.map((band) => [band.name, band])).values(),
     ].sort((left, right) => left.lowerHz - right.lowerHz);
     const currentIndex = sortedBands.findIndex(
-      (band) => band.meters === currentBand.meters,
+      (band) => band.name === currentBand.name,
     );
     if (currentIndex === -1) return;
 
@@ -103,7 +103,7 @@ export function useBandControls({
   }
 
   function handleBandChange(event) {
-    const selectedBand = bandByMeters(Number.parseInt(event.target.value, 10));
+    const selectedBand = bandByName(bandOptions, String(event.target.value));
 
     if (selectedBand) {
       onSetRadioFrequency?.(selectedBand.lowerHz);
