@@ -5,3 +5,7 @@ DB Migrations: Always assume I'm starting from a fresh database and don't need m
 ## Database query safety
 
 Use safe query patterns for database access. Prefer static SQL with prepared statements and bound parameters, or a query builder. Do not construct SQL by formatting or interpolating user-provided values into SQL strings. If SQL identifiers must vary, select them from a hardcoded whitelist.
+
+## CI
+
+`make ci` should run and succeed on any code before you are allowed to commit. If a commit isn't requested, this is not required.
