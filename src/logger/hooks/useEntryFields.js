@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   CALLSIGN_LOOKUP_DEBOUNCE_MS,
   exchangeDefaults,
-  callsignClearThresholdHz,
   shouldAdvanceFromCallsignAutofill,
 } from '../mainWindowHelpers';
 import {
@@ -124,26 +123,6 @@ export function useEntryFields({
     callSignEditedAtRef.current = new Date();
     window.requestAnimationFrame(() => callSignRef.current?.focus());
   }, [bandMapSelection]);
-
-  useEffect(() => {
-    const baseline = callsignFrequencyBaselineRef.current;
-    if (!callSign.trim() || !baseline) return;
-    const thresholdHz = callsignClearThresholdHz(radioMode);
-    const pendingBandMapTuneFrequency = pendingBandMapTuneFrequencyRef.current;
-    if (pendingBandMapTuneFrequency) {
-      if (
-        Math.abs(radioFrequencyHz - pendingBandMapTuneFrequency) < thresholdHz
-      ) {
-        pendingBandMapTuneFrequencyRef.current = null;
-      }
-      return;
-    }
-    if (Math.abs(radioFrequencyHz - baseline) < thresholdHz) return;
-    setCallSign('');
-    pendingPreviousContactAutofillRef.current = '';
-    callsignFrequencyBaselineRef.current = null;
-    callSignEditedAtRef.current = new Date();
-  }, [callSign, radioFrequencyHz, radioMode]);
 
   function updateExchangeField(field, value) {
     setExchangeValues((current) => ({

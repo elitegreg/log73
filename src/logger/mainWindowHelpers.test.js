@@ -5,6 +5,7 @@ import {
   bandByName,
   bandForFrequency,
   callsignClearThresholdHz,
+  loggerFrequencyChangeAction,
   callsignHasQuery,
   cwActionForMessage,
   messageActionForRadioMode,
@@ -83,6 +84,42 @@ test('callsign clear threshold distinguishes phone modes', () => {
   assert.equal(callsignClearThresholdHz('FT8'), 100);
   assert.equal(callsignClearThresholdHz('SSB'), 200);
   assert.equal(callsignClearThresholdHz('FM'), 200);
+});
+
+test('loggerFrequencyChangeAction clears on significant tuning changes and ignores pending band map tuning', () => {
+  assert.equal(
+    loggerFrequencyChangeAction({
+      previousFrequencyHz: 14000000,
+      nextFrequencyHz: 14000100,
+      thresholdHz: 100,
+    }),
+    'clear-logger',
+  );
+  assert.equal(
+    loggerFrequencyChangeAction({
+      previousFrequencyHz: 14000000,
+      nextFrequencyHz: 14000099,
+      thresholdHz: 100,
+    }),
+    'none',
+  );
+  assert.equal(
+    loggerFrequencyChangeAction({
+      previousFrequencyHz: 14000000,
+      nextFrequencyHz: 14000200,
+      thresholdHz: 100,
+      pendingBandMapTuneFrequencyHz: 14000250,
+    }),
+    'clear-pending-bandmap-tune',
+  );
+  assert.equal(
+    loggerFrequencyChangeAction({
+      previousFrequencyHz: null,
+      nextFrequencyHz: 14000100,
+      thresholdHz: 100,
+    }),
+    'none',
+  );
 });
 
 test('normalizedContactFrequencyHz accepts hertz and MHz values', () => {

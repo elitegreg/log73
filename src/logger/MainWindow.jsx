@@ -27,6 +27,8 @@ import {
   shouldBlockEsmCallEnter,
   normalizedContactFrequencyHz,
   shouldAdvanceFromCallsignAutofill,
+  callsignClearThresholdHz,
+  loggerFrequencyChangeAction,
 } from './mainWindowHelpers';
 import RadioControls from './components/RadioControls';
 import EntryFields from './components/EntryFields';
@@ -130,6 +132,7 @@ function MainWindow({
     return Number.isFinite(storedWpm) ? storedWpm : DEFAULT_CW_WPM;
   });
   const setCwWpmRef = useRef(onSetCwWpm);
+  const previousRadioFrequencyHzRef = useRef(null);
   const radioMode = radioState?.mode ?? 'CW';
   const radioFrequencyHz =
     radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
@@ -178,6 +181,26 @@ function MainWindow({
   useEffect(() => {
     onDebouncedCallsignChange?.(debouncedCallSign.trim().toUpperCase());
   }, [debouncedCallSign, onDebouncedCallsignChange]);
+
+  useEffect(() => {
+    const previousFrequencyHz = previousRadioFrequencyHzRef.current;
+    previousRadioFrequencyHzRef.current = radioFrequencyHz;
+    const action = loggerFrequencyChangeAction({
+      previousFrequencyHz,
+      nextFrequencyHz: radioFrequencyHz,
+      thresholdHz: callsignClearThresholdHz(radioMode),
+      pendingBandMapTuneFrequencyHz: pendingBandMapTuneFrequencyRef.current,
+    });
+    if (action === 'clear-pending-bandmap-tune') {
+      pendingBandMapTuneFrequencyRef.current = null;
+      return;
+    }
+    if (action !== 'clear-logger') return;
+    if (operatingMode === 'Run') {
+      setOperatingMode('S&P');
+    }
+    clearEntryFields();
+  }, [operatingMode, radioFrequencyHz, radioMode]);
 
   const messageModeKey = operatingMode === 'Run' ? 'run' : 's&p';
   const modeMessageLabels = modeIsPhone(radioMode)

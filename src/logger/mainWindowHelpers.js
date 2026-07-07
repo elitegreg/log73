@@ -191,6 +191,25 @@ export function callsignClearThresholdHz(mode) {
     : CW_DIGITAL_CALLSIGN_CLEAR_THRESHOLD_HZ;
 }
 
+export function loggerFrequencyChangeAction({
+  previousFrequencyHz,
+  nextFrequencyHz,
+  thresholdHz,
+  pendingBandMapTuneFrequencyHz = null,
+} = {}) {
+  if (!Number.isFinite(previousFrequencyHz) || !Number.isFinite(nextFrequencyHz)) {
+    return 'none';
+  }
+  if (Number.isFinite(pendingBandMapTuneFrequencyHz)) {
+    return Math.abs(nextFrequencyHz - pendingBandMapTuneFrequencyHz) < thresholdHz
+      ? 'clear-pending-bandmap-tune'
+      : 'none';
+  }
+  return Math.abs(nextFrequencyHz - previousFrequencyHz) >= thresholdHz
+    ? 'clear-logger'
+    : 'none';
+}
+
 export function normalizedContactFrequencyHz(value) {
   const frequency = Number.parseFloat(String(value ?? ''));
   if (!Number.isFinite(frequency) || frequency <= 0) return 0;
