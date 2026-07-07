@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   committedBackendContact,
   appendSerialRange,
+  getSessionId,
   mergeContact,
   reserveNextSerial,
   saveLocalContacts,
@@ -10,6 +11,7 @@ import {
   serialBatchSize,
   serialRangesRemaining,
   serialRefillRemainingThreshold,
+  SESSION_STORAGE_KEY,
   sortContacts,
   sortContactsByCallsignThenTime,
 } from './loggerScreenHelpers.js';
@@ -126,6 +128,67 @@ test('mergeContact updates pending contact and rekeys committed meta.clientId to
   assert.equal(merged[0].meta.id, 77);
   assert.equal(merged[0].meta.status, 'Committed');
   assert.equal(merged[0].meta.clientId, '77');
+});
+
+test('getSessionId reuses sessionStorage value and does not read localStorage', () => {
+  let localStorageReads = 0;
+  globalThis.sessionStorage = {
+    getItem(key) {
+      assert.equal(key, SESSION_STORAGE_KEY);
+      return 'tab-session-id';
+    },
+    setItem() {
+      throw new Error('should not write when session id already exists');
+    },
+  };
+  globalThis.localStorage = {
+    getItem() {
+      localStorageReads += 1;
+      return 'shared-local-storage-session';
+    },
+    setItem() {
+      throw new Error('should not write localStorage for session id');
+    },
+  };
+
+  assert.equal(getSessionId(), 'tab-session-id');
+  assert.equal(localStorageReads, 0);
+});
+
+test('getSessionId stores newly created id in sessionStorage only', () => {
+  const sessionStorageWrites = [];
+  let localStorageWrites = 0;
+  const originalCrypto = globalThis.window?.crypto;
+  globalThis.window = {
+    ...(globalThis.window ?? {}),
+    crypto: {
+      randomUUID() {
+        return 'new-session-id';
+      },
+    },
+  };
+  globalThis.sessionStorage = {
+    getItem(key) {
+      assert.equal(key, SESSION_STORAGE_KEY);
+      return null;
+    },
+    setItem(key, value) {
+      sessionStorageWrites.push([key, value]);
+    },
+  };
+  globalThis.localStorage = {
+    getItem() {
+      return null;
+    },
+    setItem() {
+      localStorageWrites += 1;
+    },
+  };
+
+  assert.equal(getSessionId(), 'new-session-id');
+  assert.deepEqual(sessionStorageWrites, [[SESSION_STORAGE_KEY, 'new-session-id']]);
+  assert.equal(localStorageWrites, 0);
+  globalThis.window.crypto = originalCrypto;
 });
 
 test('saveLocalContacts catches storage write failures and reports once', async () => {

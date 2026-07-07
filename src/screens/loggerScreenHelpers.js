@@ -332,10 +332,10 @@ export function createSessionId() {
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 export function getSessionId() {
-  const existingSessionId = localStorage.getItem(SESSION_STORAGE_KEY);
+  const existingSessionId = sessionStorage.getItem(SESSION_STORAGE_KEY);
   if (existingSessionId) return existingSessionId;
   const sessionId = createSessionId();
-  localStorage.setItem(SESSION_STORAGE_KEY, sessionId);
+  sessionStorage.setItem(SESSION_STORAGE_KEY, sessionId);
   return sessionId;
 }
 
