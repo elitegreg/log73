@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  BAND_MAP_CQ_CALLSIGN,
   BAND_MAP_IN_USE_CALLSIGN,
   BAND_MAP_VFO_CALLSIGN,
   addBandMapSpot,
@@ -17,12 +16,13 @@ import {
   removeBandMapSpot,
 } from './bandMap.js';
 
-function spot(id, frequencyHz, callDx) {
+function spot(id, frequencyHz, callDx, extras = {}) {
   return {
     id,
     frequency_hz: frequencyHz,
     call_dx: callDx,
     call_de: 'N0CALL',
+    ...extras,
   };
 }
 
@@ -68,7 +68,7 @@ test('band map rows mark a spot matching the rounded VFO frequency', () => {
 
   assert.equal(rows.length, 1);
   assert.equal(rows[0].marker, '➜');
-  assert.equal(rows[0].callsign, 'K1ABC');
+  assert.equal(rows[0].callsign, 'K1ABC (DX)');
 });
 
 test('band map rows insert VFO row when no spot matches', () => {
@@ -82,7 +82,7 @@ test('band map rows insert VFO row when no spot matches', () => {
 
   assert.deepEqual(
     rows.map((row) => row.callsign),
-    ['W9XYZ', BAND_MAP_VFO_CALLSIGN, 'K1ABC'],
+    ['W9XYZ (DX)', BAND_MAP_VFO_CALLSIGN, 'K1ABC (DX)'],
   );
 });
 
@@ -95,7 +95,9 @@ test('band map navigation finds the nearest callsign spot above and below VFO', 
         spot(3, 14074400, 'W9XYZ'),
       ]),
       14074300,
-      20,
+      '20m',
+      1,
+      'K4',
     ),
     14074150,
   );
@@ -106,18 +108,19 @@ test('band map navigation finds the nearest callsign spot above and below VFO', 
   assert.equal(nextBandMapSpotBelow(store, 14074100), null);
 });
 
-test('band map special spots display labels and track CQ frequencies', () => {
+test('band map special spots display labels and track CQ frequencies per radio', () => {
   const store = addInUseBandMapSpot(
-    addCqBandMapSpot(createBandMapSpotStore(), 14074000, '20m'),
+    addCqBandMapSpot(createBandMapSpotStore(), 14074000, '20m', 7, 'K4'),
     14075000,
   );
   const rows = bandMapRows(store, 14073000);
 
   assert.deepEqual(
     rows.filter((row) => row.type === 'spot').map((row) => row.callsign),
-    [BAND_MAP_CQ_CALLSIGN, BAND_MAP_IN_USE_CALLSIGN],
+    ['*** CQ (K4) ***', BAND_MAP_IN_USE_CALLSIGN],
   );
-  assert.equal(lastCqFrequencyForBand(store, '20m'), 14074000);
+  assert.equal(lastCqFrequencyForBand(store, '20m', 7), 14074000);
+  assert.equal(lastCqFrequencyForBand(store, '20m', 8), null);
 });
 
 test('band map supports multiple in-use markers by frequency', () => {
@@ -140,4 +143,20 @@ test('band map frequency helpers round and format to one decimal kHz', () => {
   assert.equal(frequencyTenthKhz(14074245), 140742);
   assert.equal(formatBandMapKhz(frequencyTenthKhz(14074245)), '14074.2');
   assert.equal(formatBandMapKhz(frequencyTenthKhz(144000000)), '144000.0');
+});
+
+test('band map displays source suffixes for dx, rbn, and local spots', () => {
+  const rows = bandMapRows(
+    createBandMapSpotStore([
+      spot(1, 14074000, 'K1ABC'),
+      spot(2, 14074100, 'N1JB', { spot_type: 'rbn', source: 'rbn' }),
+      spot(3, 14074200, 'W1AW', { spot_type: 'local', source: 'local' }),
+    ]),
+    14073000,
+  );
+
+  assert.deepEqual(
+    rows.filter((row) => row.type === 'spot').map((row) => row.callsign),
+    ['K1ABC (DX)', 'N1JB (RBN)', 'W1AW (LOCAL)'],
+  );
 });

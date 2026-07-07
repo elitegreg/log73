@@ -6,6 +6,7 @@ export const BAND_MAP_ROW_HEIGHT_PX = 22;
 export const BAND_MAP_SPOT_TYPES = {
   DX: 'dx',
   RBN: 'rbn',
+  LOCAL: 'local',
   CQ: 'cq',
   IN_USE: 'in_use',
 };
@@ -30,19 +31,41 @@ function normalizedSpotType(spot) {
   if (type === BAND_MAP_SPOT_TYPES.CQ) return BAND_MAP_SPOT_TYPES.CQ;
   if (type === BAND_MAP_SPOT_TYPES.IN_USE) return BAND_MAP_SPOT_TYPES.IN_USE;
   if (type === BAND_MAP_SPOT_TYPES.RBN) return BAND_MAP_SPOT_TYPES.RBN;
+  if (type === BAND_MAP_SPOT_TYPES.LOCAL) return BAND_MAP_SPOT_TYPES.LOCAL;
   return spot?.source === BAND_MAP_SPOT_TYPES.RBN
     ? BAND_MAP_SPOT_TYPES.RBN
     : BAND_MAP_SPOT_TYPES.DX;
 }
 
+function cqDisplayCallsign(spot) {
+  const radioName = String(spot?.radio_name ?? '').trim();
+  return radioName ? `*** CQ (${radioName}) ***` : BAND_MAP_CQ_CALLSIGN;
+}
+
+function sourceDisplaySuffix(spot) {
+  switch (spot?.spot_type) {
+    case BAND_MAP_SPOT_TYPES.RBN:
+      return 'RBN';
+    case BAND_MAP_SPOT_TYPES.LOCAL:
+      return 'LOCAL';
+    case BAND_MAP_SPOT_TYPES.DX:
+    default:
+      return 'DX';
+  }
+}
+
 function spotDisplayCallsign(spot) {
   switch (spot?.spot_type) {
     case BAND_MAP_SPOT_TYPES.CQ:
-      return BAND_MAP_CQ_CALLSIGN;
+      return cqDisplayCallsign(spot);
     case BAND_MAP_SPOT_TYPES.IN_USE:
       return BAND_MAP_IN_USE_CALLSIGN;
-    default:
-      return spot?.call_dx ?? '';
+    default: {
+      const callDx = String(spot?.call_dx ?? '')
+        .trim()
+        .toUpperCase();
+      return callDx ? `${callDx} (${sourceDisplaySuffix(spot)})` : '';
+    }
   }
 }
 
@@ -106,7 +129,7 @@ export function createBandMapSpotStore(spots = []) {
   return spots.reduce((store, spot) => addBandMapSpot(store, spot), {
     spotsById: new Map(),
     sortedSpots: [],
-    cqFrequencyHzByBand: new Map(),
+    cqFrequencyHzByBandAndRadio: new Map(),
   });
 }
 
@@ -116,13 +139,19 @@ export function addBandMapSpot(store, rawSpot) {
 
   const baseStore = store ?? createBandMapSpotStore();
   const spotsById = new Map(baseStore.spotsById);
-  const cqFrequencyHzByBand = new Map(baseStore.cqFrequencyHzByBand ?? []);
+  const cqFrequencyHzByBandAndRadio = new Map(
+    baseStore.cqFrequencyHzByBandAndRadio ?? [],
+  );
   const previousSpot = spotsById.get(spot.id);
   if (
     previousSpot?.spot_type === BAND_MAP_SPOT_TYPES.CQ &&
-    previousSpot.band_name
+    previousSpot.band_name &&
+    previousSpot.radio_id !== undefined &&
+    previousSpot.radio_id !== null
   ) {
-    cqFrequencyHzByBand.delete(String(previousSpot.band_name));
+    cqFrequencyHzByBandAndRadio.delete(
+      `${String(previousSpot.band_name)}:${String(previousSpot.radio_id)}`,
+    );
   }
   const sortedSpots = baseStore.sortedSpots.filter(
     (currentSpot) => currentSpot.id !== spot.id,
@@ -130,11 +159,19 @@ export function addBandMapSpot(store, rawSpot) {
   const insertIndex = sortedInsertIndex(sortedSpots, spot);
   sortedSpots.splice(insertIndex, 0, spot);
   spotsById.set(spot.id, spot);
-  if (spot.spot_type === BAND_MAP_SPOT_TYPES.CQ && spot.band_name) {
-    cqFrequencyHzByBand.set(String(spot.band_name), spot.frequency_hz);
+  if (
+    spot.spot_type === BAND_MAP_SPOT_TYPES.CQ &&
+    spot.band_name &&
+    spot.radio_id !== undefined &&
+    spot.radio_id !== null
+  ) {
+    cqFrequencyHzByBandAndRadio.set(
+      `${String(spot.band_name)}:${String(spot.radio_id)}`,
+      spot.frequency_hz,
+    );
   }
 
-  return { spotsById, sortedSpots, cqFrequencyHzByBand };
+  return { spotsById, sortedSpots, cqFrequencyHzByBandAndRadio };
 }
 
 export function removeBandMapSpot(store, id) {
@@ -144,30 +181,44 @@ export function removeBandMapSpot(store, id) {
 
   const removedSpot = baseStore.spotsById.get(key);
   const spotsById = new Map(baseStore.spotsById);
-  const cqFrequencyHzByBand = new Map(baseStore.cqFrequencyHzByBand ?? []);
+  const cqFrequencyHzByBandAndRadio = new Map(
+    baseStore.cqFrequencyHzByBandAndRadio ?? [],
+  );
   spotsById.delete(key);
   if (
     removedSpot?.spot_type === BAND_MAP_SPOT_TYPES.CQ &&
-    removedSpot.band_name
+    removedSpot.band_name &&
+    removedSpot.radio_id !== undefined &&
+    removedSpot.radio_id !== null
   ) {
-    cqFrequencyHzByBand.delete(String(removedSpot.band_name));
+    cqFrequencyHzByBandAndRadio.delete(
+      `${String(removedSpot.band_name)}:${String(removedSpot.radio_id)}`,
+    );
   }
   return {
     spotsById,
     sortedSpots: baseStore.sortedSpots.filter((spot) => spot.id !== key),
-    cqFrequencyHzByBand,
+    cqFrequencyHzByBandAndRadio,
   };
 }
 
-export function addCqBandMapSpot(store, frequencyHz, bandName) {
+export function addCqBandMapSpot(
+  store,
+  frequencyHz,
+  bandName,
+  radioId = 1,
+  radioName = 'K4',
+) {
   const normalizedFrequency = normalizedFrequencyHz(frequencyHz);
   if (!normalizedFrequency || !bandName)
     return store ?? createBandMapSpotStore();
   return addBandMapSpot(store, {
-    id: `cq:${bandName}`,
+    id: `cq:${bandName}:${radioId}`,
     spot_type: BAND_MAP_SPOT_TYPES.CQ,
     frequency_hz: normalizedFrequency,
     band_name: bandName,
+    radio_id: radioId,
+    radio_name: radioName,
   });
 }
 
@@ -181,9 +232,13 @@ export function addInUseBandMapSpot(store, frequencyHz) {
   });
 }
 
-export function lastCqFrequencyForBand(store, bandName) {
-  if (!bandName) return null;
-  return store?.cqFrequencyHzByBand?.get(String(bandName)) ?? null;
+export function lastCqFrequencyForBand(store, bandName, radioId) {
+  if (!bandName || radioId === undefined || radioId === null) return null;
+  return (
+    store?.cqFrequencyHzByBandAndRadio?.get(
+      `${String(bandName)}:${String(radioId)}`,
+    ) ?? null
+  );
 }
 
 function isNavigableSpot(spot) {

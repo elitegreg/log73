@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { BAND_MAP_ROW_HEIGHT_PX, bandMapRows } from '../domain/bandMap';
 
 function BandMapWindow({
@@ -6,6 +6,7 @@ function BandMapWindow({
   radioFrequencyHz,
   height = null,
   onSpotClick,
+  onDeleteSpot,
 }) {
   const scrollContainerRef = useRef(null);
   const userScrolledRef = useRef(false);
@@ -13,6 +14,7 @@ function BandMapWindow({
   const userScrollIntentRef = useRef(false);
   const previousVfoTenthKhzRef = useRef(null);
   const previousVfoIndexRef = useRef(null);
+  const [contextMenu, setContextMenu] = useState(null);
   const rows = useMemo(
     () => bandMapRows(spotStore, radioFrequencyHz),
     [spotStore, radioFrequencyHz],
@@ -60,6 +62,23 @@ function BandMapWindow({
     );
   }, [rows, vfoRow]);
 
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+
+    function closeContextMenu() {
+      setContextMenu(null);
+    }
+
+    window.addEventListener('click', closeContextMenu);
+    window.addEventListener('contextmenu', closeContextMenu);
+    window.addEventListener('blur', closeContextMenu);
+    return () => {
+      window.removeEventListener('click', closeContextMenu);
+      window.removeEventListener('contextmenu', closeContextMenu);
+      window.removeEventListener('blur', closeContextMenu);
+    };
+  }, [contextMenu]);
+
   function setProgrammaticScroll(container, requestedScrollTop) {
     const maxScrollTop = Math.max(
       0,
@@ -88,6 +107,13 @@ function BandMapWindow({
     if (autoScrollingRef.current) return;
     if (!userScrollIntentRef.current) return;
     userScrolledRef.current = true;
+  }
+
+  function handleRowContextMenu(event, spot) {
+    if (!onDeleteSpot || !spot) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({ x: event.clientX, y: event.clientY, spot });
   }
 
   return (
@@ -133,6 +159,11 @@ function BandMapWindow({
                     onClick={
                       isClickableSpot ? () => onSpotClick(row.spot) : undefined
                     }
+                    onContextMenu={
+                      row.type === 'spot'
+                        ? (event) => handleRowContextMenu(event, row.spot)
+                        : undefined
+                    }
                     onKeyDown={
                       isClickableSpot
                         ? (event) => {
@@ -155,6 +186,35 @@ function BandMapWindow({
           </tbody>
         </table>
       </div>
+      {contextMenu ? (
+        <div
+          role="menu"
+          aria-label="Band map spot actions"
+          style={{
+            position: 'fixed',
+            left: `${contextMenu.x}px`,
+            top: `${contextMenu.y}px`,
+            zIndex: 1000,
+            minWidth: '96px',
+            padding: '2px',
+            border: '1px solid #808080',
+            backgroundColor: '#f0f0f0',
+            boxShadow: '2px 2px 0 rgba(0, 0, 0, 0.25)',
+          }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            style={{ width: '100%' }}
+            onClick={() => {
+              onDeleteSpot?.(contextMenu.spot);
+              setContextMenu(null);
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

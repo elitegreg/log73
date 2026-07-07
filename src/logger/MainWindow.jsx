@@ -310,6 +310,7 @@ function MainWindow({
     bandOptions,
     bandMapSpotStore,
     currentCallsign,
+    currentExchangeFields: currentContactFields,
     onStoreCqFrequency,
     onMarkFrequency,
     onStoreBandMapSpot,
@@ -320,6 +321,12 @@ function MainWindow({
     onIncrementRit,
     onDecrementRit,
   });
+
+  useEffect(() => {
+    if (operatingMode === 'Run') {
+      storeCurrentCqFrequency();
+    }
+  }, [operatingMode, storeCurrentCqFrequency]);
 
   function clearEsmState() {
     setEsmRunCallsignAttempt('');
@@ -814,6 +821,7 @@ function MainWindow({
     const normalizedCallsign = currentCallsign();
     let spotCallsign = normalizedCallsign;
     let frequencyHz = radioFrequencyHz;
+    let exchangeFields = currentContactFields();
 
     if (!spotCallsign) {
       spotCallsign = String(lastContact?.adif?.CALL ?? '')
@@ -822,6 +830,7 @@ function MainWindow({
       frequencyHz = normalizedContactFrequencyHz(
         lastContact?.adif?.FREQ ?? lastContact?.FREQ ?? lastContact?.Freq,
       );
+      exchangeFields = { ...(lastContact?.adif ?? {}) };
     }
 
     if (!spotCallsign || !frequencyHz) return;
@@ -829,10 +838,18 @@ function MainWindow({
     const comment = window.prompt(spotLabel, '');
     if (comment === null) return;
 
+    const normalizedComment = String(comment ?? '').trim();
     onSendDxClusterSpot?.({
       frequency_hz: frequencyHz,
       call: spotCallsign,
-      comment: String(comment ?? '').trim(),
+      comment: normalizedComment,
+    });
+    onStoreBandMapSpot?.({
+      spot_type: 'local',
+      frequency_hz: frequencyHz,
+      call: spotCallsign,
+      comment: normalizedComment,
+      exchange_fields: exchangeFields,
     });
   }
 

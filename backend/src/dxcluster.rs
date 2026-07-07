@@ -16,7 +16,7 @@ const DXCLUSTER_EVENT_BUFFER: usize = 512;
 const DXCLUSTER_RECONNECT_MIN_DELAY: Duration = Duration::from_secs(1);
 const DXCLUSTER_RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DxClusterRbnSpot {
     pub mode: String,
     pub db: i16,
@@ -169,35 +169,24 @@ impl DxClusterManager {
         frequency_hz: u64,
         call_dx: String,
         comment: Option<String>,
-    ) -> Option<DxClusterSpot> {
+    ) -> DxClusterSpot {
         let normalized_call_dx = call_dx.trim().to_uppercase();
         let spot = {
             let mut store = self.inner.store.lock().await;
-            store
-                .add(DX {
-                    call_de: "LOCAL".to_string(),
-                    call_dx: normalized_call_dx.clone(),
-                    freq: frequency_hz,
-                    utc: current_utc_hhmm(),
-                    loc: None,
-                    comment,
-                })
-                .or_else(|| {
-                    let key = dedupe_key(frequency_hz, &normalized_call_dx);
-                    store
-                        .spots_by_id
-                        .values()
-                        .find(|spot| dedupe_key(spot.frequency_hz, &spot.call_dx) == key)
-                        .cloned()
-                })
+            store.add(DX {
+                call_de: "LOCAL".to_string(),
+                call_dx: normalized_call_dx,
+                freq: frequency_hz,
+                utc: current_utc_hhmm(),
+                loc: None,
+                comment,
+            })
         };
 
-        if let Some(spot) = spot.clone() {
-            let _ = self
-                .inner
-                .events
-                .send(DxClusterEvent::SpotAdded(Box::new(spot)));
-        }
+        let _ = self
+            .inner
+            .events
+            .send(DxClusterEvent::SpotAdded(Box::new(spot.clone())));
         spot
     }
 
@@ -218,12 +207,10 @@ impl DxClusterManager {
         };
 
         self.broadcast_deletes(&deleted_ids);
-        if let Some(spot) = spot {
-            let _ = self
-                .inner
-                .events
-                .send(DxClusterEvent::SpotAdded(Box::new(spot)));
-        }
+        let _ = self
+            .inner
+            .events
+            .send(DxClusterEvent::SpotAdded(Box::new(spot)));
     }
 
     async fn prune_old_spots(&self, max_age: Duration) {
@@ -248,7 +235,7 @@ impl Default for DxClusterManager {
 }
 
 impl DxClusterSpotStore {
-    fn add(&mut self, dx: DX) -> Option<DxClusterSpot> {
+    fn add(&mut self, dx: DX) -> DxClusterSpot {
         let now = unix_timestamp_secs();
         let call_dx = dx.call_dx.to_uppercase();
         let rbn = parsed_rbn(&dx);
@@ -272,7 +259,7 @@ impl DxClusterSpotStore {
             self.ids_by_time.push_back(id);
             self.ids_by_dedupe_key.remove(&old_dedupe_key);
             self.ids_by_dedupe_key.insert(new_dedupe_key, id);
-            return None;
+            return spot.clone();
         }
 
         self.next_id = self.next_id.saturating_add(1).max(1);
@@ -297,7 +284,7 @@ impl DxClusterSpotStore {
             .insert(id);
         self.ids_by_dedupe_key.insert(new_dedupe_key, id);
         self.spots_by_id.insert(id, spot.clone());
-        Some(spot)
+        spot
     }
 
     fn find_duplicate_id(&mut self, key: &DxClusterDedupeKey) -> Option<u64> {
@@ -648,7 +635,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deduplicates_same_callsign_and_tenth_khz_without_broadcast() {
+    async fn deduplicates_same_callsign_and_tenth_khz_and_broadcasts_refresh() {
         let manager = DxClusterManager::new();
         manager
             .add_dx_spot(dx_with_freq("k1abc", 14_074_241), Duration::from_secs(60))
@@ -668,7 +655,8 @@ mod tests {
         assert_eq!(spots[0].comment.as_deref(), Some("updated"));
         assert!(matches!(
             events.try_recv(),
-            Err(broadcast::error::TryRecvError::Empty)
+            Ok(DxClusterEvent::SpotAdded(spot))
+                if spot.call_de == "W9XYZ" && spot.comment.as_deref() == Some("updated")
         ));
     }
 
@@ -740,7 +728,8 @@ mod tests {
         assert_eq!(spots[0].comment.as_deref(), Some("normal spot"));
         assert!(matches!(
             events.try_recv(),
-            Err(broadcast::error::TryRecvError::Empty)
+            Ok(DxClusterEvent::SpotAdded(spot))
+                if spot.source == "dx" && spot.comment.as_deref() == Some("normal spot")
         ));
     }
 

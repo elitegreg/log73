@@ -1,5 +1,6 @@
 mod adif;
 mod auth;
+mod bandmap;
 mod bands;
 mod cabrillo;
 mod cat_keyer;
@@ -35,6 +36,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
+use bandmap::{BandMapEvent, BandMapManager, CqSpotInput, InUseSpotInput, LocalSpotInput};
 use clap::Parser;
 use contest_rules::{ContestRules, ContestRulesStore};
 use db::{
@@ -78,6 +80,7 @@ struct AppState {
     supercheckpartial: SuperCheckPartial,
     dxcc: std::sync::Arc<dxcc::DxccDatabase>,
     dxcluster: DxClusterManager,
+    bandmap: BandMapManager,
     voice_keyer: VoiceKeyer,
 }
 
@@ -426,15 +429,23 @@ async fn main() {
     let dxcluster = DxClusterManager::new();
     let voicekeyer_dir = paths.data_dir.join("voicekeyer");
     let voice_keyer = VoiceKeyer::with_voicekeyer_dir(voicekeyer_dir);
-    match db.dxcluster_config().await {
-        Ok(config) => dxcluster.apply_config(config).await,
-        Err(error) => warn!(%error, "failed to load DX Cluster config; listener task not started"),
-    }
+    let initial_bandmap_max_age = match db.dxcluster_config().await {
+        Ok(config) => {
+            let max_age = Duration::from_secs(u64::from(config.max_age_min) * 60);
+            dxcluster.apply_config(config).await;
+            max_age
+        }
+        Err(error) => {
+            warn!(%error, "failed to load DX Cluster config; listener task not started");
+            Duration::from_secs(u64::from(db::DEFAULT_DXCLUSTER_MAX_AGE_MIN) * 60)
+        }
+    };
     let loaded_bands = std::sync::Arc::new(
         db.bands(2)
             .await
             .unwrap_or_else(|error| panic!("failed to load region 2 bands: {error}")),
     );
+    let bandmap = BandMapManager::new(loaded_bands.clone(), initial_bandmap_max_age);
     let radio_manager = RadioManager::new(db.clone(), voice_keyer.clone(), loaded_bands.clone());
     let scoring_modules = ScoringModules::new();
     let incremental_scoring = IncrementalScoreTracker::new();
@@ -442,6 +453,7 @@ async fn main() {
     let log_cache = LogCache::new(db.clone(), contest_rules.clone(), scoring_modules.clone());
     log_cache.register_processor(std::sync::Arc::new(incremental_scoring.clone()));
     log_cache.register_processor(std::sync::Arc::new(stats.clone()));
+    log_cache.register_processor(std::sync::Arc::new(bandmap.clone()));
 
     let app_state = AppState {
         radio_manager,
@@ -456,8 +468,10 @@ async fn main() {
         supercheckpartial,
         dxcc: std::sync::Arc::new(dxcc),
         dxcluster,
+        bandmap,
         voice_keyer,
     };
+    spawn_dxcluster_bandmap_bridge(app_state.dxcluster.clone(), app_state.bandmap.clone());
 
     let request_trace_layer = TraceLayer::new_for_http()
         .make_span_with(|request: &Request<axum::body::Body>| {
@@ -496,6 +510,8 @@ async fn main() {
         .route("/client-errors", post(report_client_error))
         .route("/supercheckpartial", get(supercheckpartial_matches))
         .route("/dxcc", get(dxcc_data))
+        .route("/bandmap/spots", get(bandmap_spots).post(save_bandmap_spot))
+        .route("/bandmap/spots/{id}", delete(delete_bandmap_spot))
         .route(
             "/dxcluster/spots",
             get(dxcluster_spots)
@@ -678,8 +694,8 @@ async fn handle_socket(
     let mut radio_updates = radio_handle.subscribe();
     let mut log_events = app_state.log_events.subscribe();
     let (direct_tx, mut direct_rx) = mpsc::channel::<ServerMessage>(32);
-    let mut dxcluster_enabled = false;
-    let mut dxcluster_subscription: Option<tokio::task::JoinHandle<()>> = None;
+    let mut bandmap_enabled = false;
+    let mut bandmap_subscription: Option<tokio::task::JoinHandle<()>> = None;
     let outbound_session_id = session_id.clone();
     let outbound_log_id = log_id;
     let outbound = tokio::spawn(async move {
@@ -740,24 +756,26 @@ async fn handle_socket(
                     break;
                 }
             }
-            Ok(ClientMessage::SetDxClusterEnabled { enabled }) => {
+            Ok(ClientMessage::SetDxClusterEnabled { enabled })
+            | Ok(ClientMessage::SetBandMapEnabled { enabled }) => {
                 debug!(
                     session_id,
-                    radio_id, enabled, "websocket set_dxcluster_enabled command received"
+                    radio_id, enabled, "websocket set_bandmap_enabled command received"
                 );
-                if dxcluster_enabled == enabled {
+                if bandmap_enabled == enabled {
                     continue;
                 }
-                dxcluster_enabled = enabled;
-                if let Some(subscription) = dxcluster_subscription.take() {
+                bandmap_enabled = enabled;
+                if let Some(subscription) = bandmap_subscription.take() {
                     subscription.abort();
                 }
                 if enabled {
-                    dxcluster_subscription = Some(spawn_dxcluster_websocket_subscription(
-                        app_state.dxcluster.clone(),
+                    bandmap_subscription = Some(spawn_bandmap_websocket_subscription(
+                        app_state.bandmap.clone(),
                         direct_tx.clone(),
                         session_id.clone(),
                         radio_id,
+                        log_id,
                     ));
                 }
             }
@@ -1018,7 +1036,7 @@ async fn handle_socket(
         }
     }
 
-    if let Some(subscription) = dxcluster_subscription {
+    if let Some(subscription) = bandmap_subscription {
         subscription.abort();
     }
     outbound.abort();
@@ -1026,33 +1044,68 @@ async fn handle_socket(
     info!(session_id, radio_id, "backend websocket disconnected");
 }
 
-fn spawn_dxcluster_websocket_subscription(
-    dxcluster: DxClusterManager,
+fn spawn_bandmap_websocket_subscription(
+    bandmap: BandMapManager,
     direct_tx: mpsc::Sender<ServerMessage>,
     session_id: String,
     radio_id: i64,
+    log_id: Option<i64>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut events = dxcluster.subscribe();
+        let mut events = bandmap.subscribe();
         loop {
             let message = match events.recv().await {
-                Ok(DxClusterEvent::SpotAdded(spot)) => ServerMessage::DxClusterSpot { spot },
-                Ok(DxClusterEvent::SpotDeleted { id }) => {
-                    ServerMessage::DxClusterSpotDeleted { id }
+                Ok(BandMapEvent::SpotUpserted(spot)) => {
+                    if !bandmap_spot_visible_for_log(&spot, log_id) {
+                        continue;
+                    }
+                    ServerMessage::BandMapSpot { spot }
                 }
+                Ok(BandMapEvent::SpotDeleted { id }) => ServerMessage::BandMapSpotDeleted { id },
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    warn!(session_id = %session_id, radio_id, skipped, "websocket dxcluster subscription lagged");
+                    warn!(session_id = %session_id, radio_id, skipped, "websocket band map subscription lagged");
                     continue;
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             };
 
             if direct_tx.send(message).await.is_err() {
-                debug!(session_id = %session_id, radio_id, "websocket dxcluster subscription closed");
+                debug!(session_id = %session_id, radio_id, "websocket band map subscription closed");
                 break;
             }
         }
     })
+}
+
+fn bandmap_spot_visible_for_log(spot: &bandmap::BandMapSpot, log_id: Option<i64>) -> bool {
+    if !matches!(spot.spot_type, bandmap::BandMapSpotType::Local) {
+        return true;
+    }
+    match (spot.log_id, log_id) {
+        (Some(spot_log_id), Some(requested_log_id)) => spot_log_id == requested_log_id,
+        (Some(_), None) => false,
+        _ => true,
+    }
+}
+
+fn spawn_dxcluster_bandmap_bridge(dxcluster: DxClusterManager, bandmap: BandMapManager) {
+    tokio::spawn(async move {
+        let mut events = dxcluster.subscribe();
+        loop {
+            match events.recv().await {
+                Ok(DxClusterEvent::SpotAdded(spot)) => {
+                    bandmap.upsert_dxcluster_spot(*spot);
+                }
+                Ok(DxClusterEvent::SpotDeleted { id }) => {
+                    let _ = id;
+                }
+                Err(broadcast::error::RecvError::Lagged(skipped)) => {
+                    warn!(skipped, "DX Cluster to band map bridge lagged");
+                }
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -1110,6 +1163,105 @@ async fn dxcc_data(State(app_state): State<AppState>, headers: HeaderMap) -> Res
     )
 }
 
+#[derive(Debug, Default, serde::Deserialize)]
+struct BandMapSpotsQuery {
+    log_id: Option<i64>,
+}
+
+async fn bandmap_spots(
+    State(app_state): State<AppState>,
+    Query(query): Query<BandMapSpotsQuery>,
+) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "spots": app_state.bandmap.spots(query.log_id) }))
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(tag = "spot_type", rename_all = "snake_case")]
+enum SaveBandMapSpotPayload {
+    Local {
+        frequency_hz: u64,
+        call: String,
+        #[serde(default)]
+        comment: String,
+        #[serde(default)]
+        exchange_fields: Option<serde_json::Map<String, serde_json::Value>>,
+        radio_id: Option<i64>,
+        log_id: Option<i64>,
+    },
+    Cq {
+        frequency_hz: u64,
+        radio_id: i64,
+    },
+    InUse {
+        frequency_hz: u64,
+    },
+}
+
+async fn save_bandmap_spot(
+    State(app_state): State<AppState>,
+    Json(payload): Json<SaveBandMapSpotPayload>,
+) -> ApiResult<serde_json::Value> {
+    match payload {
+        SaveBandMapSpotPayload::Local {
+            frequency_hz,
+            call,
+            comment,
+            exchange_fields,
+            radio_id,
+            log_id,
+        } => {
+            if let Err(error) =
+                validation::validate_dxcluster_spot_request(frequency_hz, &call, &comment)
+            {
+                return Err(ApiError::bad_request(error));
+            }
+            let radio_name = radio_name_for_optional_id(&app_state, radio_id).await?;
+            let spot = app_state.bandmap.upsert_local_spot(LocalSpotInput {
+                frequency_hz,
+                call_dx: call.trim().to_uppercase(),
+                comment: (!comment.trim().is_empty()).then(|| comment.trim().to_string()),
+                radio_id,
+                radio_name,
+                log_id,
+                exchange_fields,
+                received_at: None,
+            });
+            Ok(Json(serde_json::json!({ "spot": spot })))
+        }
+        SaveBandMapSpotPayload::Cq {
+            frequency_hz,
+            radio_id,
+        } => {
+            validation::validate_radio_frequency_hz(frequency_hz).map_err(ApiError::bad_request)?;
+            let radio_name = required_radio_name_for_id(&app_state, radio_id).await?;
+            let Some(spot) = app_state.bandmap.upsert_cq(CqSpotInput {
+                frequency_hz,
+                radio_id,
+                radio_name,
+            }) else {
+                return Err(ApiError::bad_request(
+                    "CQ mark frequency must be inside a known band",
+                ));
+            };
+            Ok(Json(serde_json::json!({ "spot": spot })))
+        }
+        SaveBandMapSpotPayload::InUse { frequency_hz } => {
+            validation::validate_radio_frequency_hz(frequency_hz).map_err(ApiError::bad_request)?;
+            let spot = app_state
+                .bandmap
+                .upsert_in_use(InUseSpotInput { frequency_hz });
+            Ok(Json(serde_json::json!({ "spot": spot })))
+        }
+    }
+}
+
+async fn delete_bandmap_spot(
+    State(app_state): State<AppState>,
+    Path(id): Path<u64>,
+) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "deleted": app_state.bandmap.delete_spot(id) }))
+}
+
 async fn dxcluster_spots(State(app_state): State<AppState>) -> Json<serde_json::Value> {
     Json(serde_json::json!({ "spots": app_state.dxcluster.spots().await }))
 }
@@ -1150,6 +1302,31 @@ async fn save_dxcluster_spot(
         .await;
 
     Ok(Json(serde_json::json!({ "spot": spot })))
+}
+
+async fn required_radio_name_for_id(
+    app_state: &AppState,
+    radio_id: i64,
+) -> Result<String, ApiError> {
+    app_state
+        .db
+        .radio(radio_id)
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map(|radio| radio.name)
+        .ok_or_else(|| ApiError::not_found(format!("radio {radio_id} not found")))
+}
+
+async fn radio_name_for_optional_id(
+    app_state: &AppState,
+    radio_id: Option<i64>,
+) -> Result<Option<String>, ApiError> {
+    match radio_id {
+        Some(radio_id) => required_radio_name_for_id(app_state, radio_id)
+            .await
+            .map(Some),
+        None => Ok(None),
+    }
 }
 
 async fn config(State(app_state): State<AppState>) -> ApiResult<db::ConfigView> {
@@ -1341,7 +1518,12 @@ async fn update_config(
         Err(error) => warn!(%error, "failed to reload auth config after update"),
     }
     match app_state.db.dxcluster_config().await {
-        Ok(config) => app_state.dxcluster.apply_config(config).await,
+        Ok(config) => {
+            app_state
+                .bandmap
+                .set_max_age(Duration::from_secs(u64::from(config.max_age_min) * 60));
+            app_state.dxcluster.apply_config(config).await;
+        }
         Err(error) => warn!(%error, "failed to reload DX Cluster config after update"),
     }
 

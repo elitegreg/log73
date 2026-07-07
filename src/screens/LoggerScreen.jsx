@@ -82,11 +82,14 @@ function LoggerScreen() {
     handleStoreCqFrequency,
     handleMarkFrequency,
     handleStoreBandMapSpot,
+    handleDeleteBandMapSpot,
     handleSocketOpenReload,
     handleSocketMessage,
   } = useBandMap({
     settings,
     enabled: bandMapEnabled,
+    logId: numericLogId,
+    radioId: numericRadioId,
     sendRadioMessage,
     notifyOperationalError,
   });
@@ -344,6 +347,7 @@ function LoggerScreen() {
             radioFrequencyHz={radioState?.frequency_hz}
             height={bandMapHeight}
             onSpotClick={handleActivateBandMapSpot}
+            onDeleteSpot={handleDeleteBandMapSpot}
           />
         ) : null}
       </div>

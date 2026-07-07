@@ -114,7 +114,23 @@ export function useEntryFields({
       return;
     bandMapSelectionSequenceRef.current = bandMapSelection.sequence;
     const callsign = sanitizeCallsign(bandMapSelection.spot?.call_dx ?? '');
+    setOperatingMode('S&P');
     setCallSign(callsign);
+    const nextExchangeValues = { ...exchangeValues };
+    const spotExchangeFields = bandMapSelection.spot?.exchange_fields ?? null;
+    if (spotExchangeFields && settings?.exchange) {
+      for (const field of settings.exchange) {
+        const rawValue =
+          spotExchangeFields?.[field.adif] ?? spotExchangeFields?.[field.name];
+        if (rawValue === undefined || rawValue === null) continue;
+        nextExchangeValues[field.name] = sanitizeExchangeValue(
+          field,
+          rawValue,
+          radioMode,
+        );
+      }
+      setExchangeValues(nextExchangeValues);
+    }
     pendingPreviousContactAutofillRef.current = '';
     callsignFrequencyBaselineRef.current =
       Number(bandMapSelection.spot?.frequency_hz) || null;
@@ -122,7 +138,7 @@ export function useEntryFields({
       callsignFrequencyBaselineRef.current;
     callSignEditedAtRef.current = new Date();
     window.requestAnimationFrame(() => callSignRef.current?.focus());
-  }, [bandMapSelection]);
+  }, [bandMapSelection, exchangeValues, radioMode, settings]);
 
   function updateExchangeField(field, value) {
     setExchangeValues((current) => ({

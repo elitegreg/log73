@@ -87,6 +87,26 @@ export async function dxcc() {
   return apiJson('/dxcc');
 }
 
+export async function bandMapSpots({ logId } = {}) {
+  const query = new URLSearchParams();
+  if (logId !== undefined && logId !== null) query.set('log_id', String(logId));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiJson(`/bandmap/spots${suffix}`);
+}
+
+export async function saveBandMapSpot(payload) {
+  return apiJson('/bandmap/spots', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteBandMapSpot(id) {
+  return apiJson(`/bandmap/spots/${id}`, {
+    method: 'DELETE',
+  });
+}
+
 export async function dxclusterSpots() {
   return apiJson('/dxcluster/spots');
 }

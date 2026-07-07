@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { dxclusterSpots, saveDxclusterSpot } from '../../lib/api';
+import {
+  bandMapSpots,
+  deleteBandMapSpot,
+  saveBandMapSpot,
+} from '../../lib/api';
 import {
   addBandMapSpot,
-  addCqBandMapSpot,
-  addInUseBandMapSpot,
   createBandMapSpotStore,
   removeBandMapSpot,
 } from '../../domain/bandMap';
@@ -15,6 +17,8 @@ import {
 export function useBandMap({
   settings,
   enabled,
+  logId,
+  radioId,
   sendRadioMessage,
   notifyOperationalError,
 }) {
@@ -28,12 +32,24 @@ export function useBandMap({
   const sendBandMapSubscription = useCallback(
     (nextEnabled) => {
       sendRadioMessage?.({
-        type: 'set_dxcluster_enabled',
+        type: 'set_bandmap_enabled',
         enabled: nextEnabled,
       });
     },
     [sendRadioMessage],
   );
+
+  const loadBandMapSpots = useCallback(async () => {
+    const result = await bandMapSpots({ logId });
+    const spots = Array.isArray(result?.spots)
+      ? result.spots
+      : Array.isArray(result)
+        ? result
+        : [];
+    setBandMapSpotStore((currentStore) =>
+      spots.reduce(addBandMapSpot, currentStore),
+    );
+  }, [logId]);
 
   const handleActivateBandMapSpot = useCallback(
     (spot) => {
@@ -51,32 +67,70 @@ export function useBandMap({
     [sendRadioMessage],
   );
 
-  const handleStoreCqFrequency = useCallback((frequencyHz, bandName) => {
-    setBandMapSpotStore((currentStore) =>
-      addCqBandMapSpot(currentStore, frequencyHz, bandName),
-    );
-  }, []);
+  const handleStoreCqFrequency = useCallback(
+    async (frequencyHz) => {
+      try {
+        await saveBandMapSpot({
+          spot_type: 'cq',
+          frequency_hz: frequencyHz,
+          radio_id: radioId,
+        });
+      } catch (error) {
+        notifyOperationalError(
+          'storeCqBandMapSpot',
+          'Unable to store CQ mark.',
+          error,
+        );
+      }
+    },
+    [notifyOperationalError, radioId],
+  );
 
-  const handleMarkFrequency = useCallback((frequencyHz) => {
-    setBandMapSpotStore((currentStore) =>
-      addInUseBandMapSpot(currentStore, frequencyHz),
-    );
-  }, []);
+  const handleMarkFrequency = useCallback(
+    async (frequencyHz) => {
+      try {
+        await saveBandMapSpot({
+          spot_type: 'in_use',
+          frequency_hz: frequencyHz,
+        });
+      } catch (error) {
+        notifyOperationalError(
+          'storeInUseBandMapSpot',
+          'Unable to store in-use mark.',
+          error,
+        );
+      }
+    },
+    [notifyOperationalError],
+  );
 
   const handleStoreBandMapSpot = useCallback(
     async (payload) => {
       try {
-        const result = await saveDxclusterSpot(payload);
-        const spot = result?.spot ?? result;
-        if (spot) {
-          setBandMapSpotStore((currentStore) =>
-            addBandMapSpot(currentStore, spot),
-          );
-        }
+        await saveBandMapSpot({
+          ...payload,
+          radio_id: payload.radio_id ?? radioId,
+          log_id: payload.log_id ?? logId,
+        });
       } catch (error) {
         notifyOperationalError(
           'storeBandMapSpot',
           'Unable to store band map spot.',
+          error,
+        );
+      }
+    },
+    [logId, notifyOperationalError, radioId],
+  );
+
+  const handleDeleteBandMapSpot = useCallback(
+    async (spot) => {
+      try {
+        await deleteBandMapSpot(spot?.id);
+      } catch (error) {
+        notifyOperationalError(
+          'deleteBandMapSpot',
+          'Unable to delete band map spot.',
           error,
         );
       }
@@ -98,30 +152,24 @@ export function useBandMap({
     if (!enabled) return undefined;
 
     let isCancelled = false;
-    dxclusterSpots()
-      .then((result) => {
-        if (isCancelled) return;
-        const spots = Array.isArray(result?.spots)
-          ? result.spots
-          : Array.isArray(result)
-            ? result
-            : [];
-        setBandMapSpotStore((currentStore) =>
-          spots.reduce(addBandMapSpot, currentStore),
-        );
-      })
-      .catch((error) =>
-        notifyOperationalError(
-          'loadBandMapSpots',
-          'Unable to load band map spots.',
-          error,
-        ),
+    loadBandMapSpots().catch((error) => {
+      if (isCancelled) return;
+      notifyOperationalError(
+        'loadBandMapSpots',
+        'Unable to load band map spots.',
+        error,
       );
+    });
 
     return () => {
       isCancelled = true;
     };
-  }, [enabled, notifyOperationalError, sendBandMapSubscription]);
+  }, [
+    enabled,
+    loadBandMapSpots,
+    notifyOperationalError,
+    sendBandMapSubscription,
+  ]);
 
   const visibleBandMapSpotStore = useMemo(() => {
     const allowedBands = settings?.allowed_bands ?? [];
@@ -140,15 +188,7 @@ export function useBandMap({
     if (!bandMapEnabledRef.current) return;
     setBandMapSpotStore(createBandMapSpotStore());
     try {
-      const result = await dxclusterSpots();
-      const spots = Array.isArray(result?.spots)
-        ? result.spots
-        : Array.isArray(result)
-          ? result
-          : [];
-      setBandMapSpotStore((currentStore) =>
-        spots.reduce(addBandMapSpot, currentStore),
-      );
+      await loadBandMapSpots();
       sendBandMapSubscription(true);
     } catch (error) {
       notifyOperationalError(
@@ -157,14 +197,14 @@ export function useBandMap({
         error,
       );
     }
-  }, [notifyOperationalError, sendBandMapSubscription]);
+  }, [loadBandMapSpots, notifyOperationalError, sendBandMapSubscription]);
 
   const handleSocketMessage = useCallback((message) => {
-    if (message.type === 'dxcluster_spot') {
+    if (message.type === 'bandmap_spot') {
       setBandMapSpotStore((currentStore) =>
         addBandMapSpot(currentStore, message.spot),
       );
-    } else if (message.type === 'dxcluster_spot_deleted') {
+    } else if (message.type === 'bandmap_spot_deleted') {
       setBandMapSpotStore((currentStore) =>
         removeBandMapSpot(currentStore, message.id),
       );
@@ -178,6 +218,7 @@ export function useBandMap({
     handleStoreCqFrequency,
     handleMarkFrequency,
     handleStoreBandMapSpot,
+    handleDeleteBandMapSpot,
     handleSocketOpenReload,
     handleSocketMessage,
   };

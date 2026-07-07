@@ -1,3 +1,4 @@
+use crate::bandmap::BandMapSpot;
 use crate::bands::{Band, band_for_frequency};
 use crate::db::RadioConfig;
 use crate::dxcluster::DxClusterSpot;
@@ -36,6 +37,14 @@ pub enum ServerMessage {
     },
     #[serde(rename = "dxcluster_spot_deleted")]
     DxClusterSpotDeleted {
+        id: u64,
+    },
+    #[serde(rename = "bandmap_spot")]
+    BandMapSpot {
+        spot: Box<BandMapSpot>,
+    },
+    #[serde(rename = "bandmap_spot_deleted")]
+    BandMapSpotDeleted {
         id: u64,
     },
 }
@@ -99,6 +108,10 @@ pub enum ClientMessage {
     },
     #[serde(rename = "set_dxcluster_enabled")]
     SetDxClusterEnabled {
+        enabled: bool,
+    },
+    #[serde(rename = "set_bandmap_enabled")]
+    SetBandMapEnabled {
         enabled: bool,
     },
 }
@@ -276,6 +289,49 @@ mod tests {
     }
 
     #[test]
+    fn serializes_bandmap_spot_server_message() {
+        let message = ServerMessage::BandMapSpot {
+            spot: Box::new(BandMapSpot {
+                id: 9,
+                received_at: 1_700_000_000,
+                spot_type: crate::bandmap::BandMapSpotType::Local,
+                source: "local".to_string(),
+                call_de: "LOCAL".to_string(),
+                call_dx: "K1ABC".to_string(),
+                frequency_hz: 14_074_000,
+                utc: 1234,
+                loc: None,
+                comment: Some("worked".to_string()),
+                rbn: None,
+                band_name: Some("20m".to_string()),
+                radio_id: Some(4),
+                radio_name: Some("K4".to_string()),
+                log_id: Some(7),
+                exchange_fields: None,
+            }),
+        };
+        let json = serde_json::to_value(message).expect("bandmap spot should serialize");
+
+        assert_eq!(json["type"], "bandmap_spot");
+        assert_eq!(json["spot"]["id"], 9);
+        assert_eq!(json["spot"]["spot_type"], "local");
+    }
+
+    #[test]
+    fn serializes_bandmap_spot_deleted_server_message() {
+        let message = ServerMessage::BandMapSpotDeleted { id: 9 };
+        let json = serde_json::to_value(message).expect("bandmap delete should serialize");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "bandmap_spot_deleted",
+                "id": 9
+            })
+        );
+    }
+
+    #[test]
     fn deserializes_ping_client_message() {
         let message: ClientMessage = serde_json::from_value(serde_json::json!({
             "type": "ping",
@@ -299,6 +355,20 @@ mod tests {
 
         match message {
             ClientMessage::SetDxClusterEnabled { enabled } => assert!(enabled),
+            other => panic!("unexpected client message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deserializes_set_bandmap_enabled_client_message() {
+        let message: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "set_bandmap_enabled",
+            "enabled": true
+        }))
+        .expect("set_bandmap_enabled should deserialize");
+
+        match message {
+            ClientMessage::SetBandMapEnabled { enabled } => assert!(enabled),
             other => panic!("unexpected client message: {other:?}"),
         }
     }

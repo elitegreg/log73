@@ -15,6 +15,7 @@ export function useBandControls({
   bandOptions,
   bandMapSpotStore,
   currentCallsign,
+  currentExchangeFields,
   onStoreCqFrequency,
   onMarkFrequency,
   onStoreBandMapSpot,
@@ -34,6 +35,7 @@ export function useBandControls({
     const frequencyHz = lastCqFrequencyForBand(
       bandMapSpotStore,
       currentBand?.name,
+      radio?.id,
     );
     if (frequencyHz) onSetRadioFrequency?.(frequencyHz);
   }
@@ -46,9 +48,11 @@ export function useBandControls({
     const callsign = currentCallsign();
     if (!callsign) return;
     onStoreBandMapSpot?.({
+      spot_type: 'local',
       frequency_hz: radioFrequencyHz,
       call: callsign,
       comment: '',
+      exchange_fields: currentExchangeFields?.(),
     });
   }
 
