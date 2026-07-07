@@ -7,6 +7,7 @@ import { dxccLabel, lookupDxcc } from '../../domain/dxcc';
 import { dupeAlertText } from '../../domain/dupes';
 import { dxcc, supercheckpartial } from '../../lib/api';
 import { SUPERCHECKPARTIAL_MIN_QUERY_LENGTH } from '../mainWindowHelpers';
+import { mergeSupercheckpartialCallsigns } from '../supercheckpartialCache';
 
 export function useCompletions({
   bandMapSpotStore,
@@ -18,6 +19,7 @@ export function useCompletions({
   callSign,
   exchangeValues,
   currentContactFields,
+  supercheckpartialUpdate,
 }) {
   const [supercheckpartialCallsigns, setSupercheckpartialCallsigns] = useState(
     [],
@@ -35,7 +37,9 @@ export function useCompletions({
             : Array.isArray(result)
               ? result
               : [];
-          setSupercheckpartialCallsigns(callsigns);
+          setSupercheckpartialCallsigns((current) =>
+            mergeSupercheckpartialCallsigns(current, callsigns),
+          );
         }
       })
       .catch(() => {
@@ -48,6 +52,16 @@ export function useCompletions({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    const callsigns = Array.isArray(supercheckpartialUpdate?.callsigns)
+      ? supercheckpartialUpdate.callsigns
+      : [];
+    if (callsigns.length === 0) return;
+    setSupercheckpartialCallsigns((current) =>
+      mergeSupercheckpartialCallsigns(current, callsigns),
+    );
+  }, [supercheckpartialUpdate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -69,13 +83,7 @@ export function useCompletions({
   }, []);
 
   const combinedSupercheckpartialCallsigns = useMemo(() => {
-    const callsigns = new Set(
-      supercheckpartialCallsigns.map((callsign) =>
-        String(callsign ?? '')
-          .trim()
-          .toUpperCase(),
-      ),
-    );
+    const callsigns = new Set(supercheckpartialCallsigns);
     for (const spot of bandMapSpotStore?.sortedSpots ?? []) {
       const callsign = String(spot?.call_dx ?? '')
         .trim()

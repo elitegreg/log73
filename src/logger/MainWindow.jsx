@@ -63,6 +63,7 @@ function MainWindow({
   bandMapEnabled,
   bandMapSpotStore,
   bandMapSelection,
+  supercheckpartialUpdate,
   onSetBandMapEnabled,
   onActivateBandMapSpot,
   onStoreCqFrequency,
@@ -274,6 +275,7 @@ function MainWindow({
       radioMode,
       log,
       currentContactFields,
+      supercheckpartialUpdate,
     });
 
   const {

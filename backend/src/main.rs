@@ -450,10 +450,12 @@ async fn main() {
     let scoring_modules = ScoringModules::new();
     let incremental_scoring = IncrementalScoreTracker::new();
     let stats = StatsTracker::new();
+    let supercheckpartial = supercheckpartial.with_events(log_events.clone());
     let log_cache = LogCache::new(db.clone(), contest_rules.clone(), scoring_modules.clone());
     log_cache.register_processor(std::sync::Arc::new(incremental_scoring.clone()));
     log_cache.register_processor(std::sync::Arc::new(stats.clone()));
     log_cache.register_processor(std::sync::Arc::new(bandmap.clone()));
+    log_cache.register_processor(std::sync::Arc::new(supercheckpartial.clone()));
 
     let app_state = AppState {
         radio_manager,
@@ -2411,6 +2413,9 @@ fn websocket_log_event_for_client(
             bonus_points,
             total_score,
         }),
+        ServerMessage::SupercheckpartialUpdate { callsigns } => {
+            Some(ServerMessage::SupercheckpartialUpdate { callsigns })
+        }
         _ => None,
     }
 }
@@ -2553,6 +2558,17 @@ mod tests {
         };
         assert!(websocket_log_event_for_client(score.clone(), "session", Some(7)).is_some());
         assert!(websocket_log_event_for_client(score, "session", Some(8)).is_none());
+    }
+
+    #[test]
+    fn websocket_supercheckpartial_updates_are_broadcast_globally() {
+        let update = ServerMessage::SupercheckpartialUpdate {
+            callsigns: vec!["K1ABC".to_string()],
+        };
+
+        assert!(websocket_log_event_for_client(update.clone(), "session-a", Some(7)).is_some());
+        assert!(websocket_log_event_for_client(update.clone(), "session-a", Some(8)).is_some());
+        assert!(websocket_log_event_for_client(update, "session-a", None).is_none());
     }
 
     #[test]

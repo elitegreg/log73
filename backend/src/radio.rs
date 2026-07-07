@@ -21,6 +21,9 @@ pub enum ServerMessage {
         id: i64,
         log_id: i64,
     },
+    SupercheckpartialUpdate {
+        callsigns: Vec<String>,
+    },
     ScoreUpdate {
         log_id: i64,
         qso_count: usize,
@@ -327,6 +330,22 @@ mod tests {
             serde_json::json!({
                 "type": "bandmap_spot_deleted",
                 "id": 9
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_supercheckpartial_update_server_message() {
+        let message = ServerMessage::SupercheckpartialUpdate {
+            callsigns: vec!["K1ABC".to_string(), "W1AW".to_string()],
+        };
+        let json = serde_json::to_value(message).expect("scp update should serialize");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "supercheckpartial_update",
+                "callsigns": ["K1ABC", "W1AW"]
             })
         );
     }

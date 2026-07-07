@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiJson } from '../lib/api';
 import BandMapWindow from '../logger/BandMapWindow';
@@ -34,6 +34,7 @@ function LoggerScreen() {
   });
   const loggerMainColumnRef = useRef(null);
   const [bandMapHeight, setBandMapHeight] = useState(null);
+  const [supercheckpartialUpdate, setSupercheckpartialUpdate] = useState(null);
   const { notifyError, notifyOperationalError, notifyOfflineCachingDegraded } =
     useOperationalErrorReporter('LoggerScreen');
 
@@ -125,8 +126,21 @@ function LoggerScreen() {
 
   const loggerImageSrc = useLoggerImage();
 
+  const handleBackendSocketMessage = useCallback(
+    (message) => {
+      handleSocketMessage(message);
+      if (message.type === 'supercheckpartial_update') {
+        setSupercheckpartialUpdate({
+          sequence: Date.now(),
+          callsigns: Array.isArray(message.callsigns) ? message.callsigns : [],
+        });
+      }
+    },
+    [handleSocketMessage],
+  );
+
   socketOpenHandlerRef.current = handleSocketOpenReload;
-  socketMessageHandlerRef.current = handleSocketMessage;
+  socketMessageHandlerRef.current = handleBackendSocketMessage;
   remoteContactHandlerRef.current = upsertRemoteContact;
   remoteContactDeletedHandlerRef.current = removeRemoteContact;
   refreshContactsHandlerRef.current = refreshContacts;
@@ -283,6 +297,7 @@ function LoggerScreen() {
             bandMapEnabled={bandMapEnabled}
             bandMapSpotStore={visibleBandMapSpotStore}
             bandMapSelection={bandMapSelection}
+            supercheckpartialUpdate={supercheckpartialUpdate}
             onSetBandMapEnabled={setBandMapEnabled}
             onActivateBandMapSpot={handleActivateBandMapSpot}
             onStoreCqFrequency={handleStoreCqFrequency}
