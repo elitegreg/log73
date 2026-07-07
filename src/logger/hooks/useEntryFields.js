@@ -224,7 +224,7 @@ export function useEntryFields({
     return autofillResult;
   }
 
-  function shouldAutofillAdvance(esmEnabled) {
+  function shouldAutofillAdvance(esmEnabled, operatingMode = 'S&P') {
     const autofillResult = previousContactExchangeAutofill({
       settings,
       contacts,
@@ -236,6 +236,7 @@ export function useEntryFields({
 
     return shouldAdvanceFromCallsignAutofill({
       esmEnabled,
+      operatingMode,
       autofillResult,
       hasEditableExchangeField: (settings?.exchange ?? []).some(
         (field) => field.fixed !== true,

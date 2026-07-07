@@ -192,10 +192,11 @@ test('cwActiveTimeoutMs waits for completion-capable keyers', () => {
   assert.equal(cwActiveTimeoutMs('none'), 500);
 });
 
-test('shouldAdvanceFromCallsignAutofill advances only when ESM and editable exchange fields exist', () => {
+test('shouldAdvanceFromCallsignAutofill skips run mode so ESM sends the full sequence first', () => {
   assert.equal(
     shouldAdvanceFromCallsignAutofill({
       esmEnabled: true,
+      operatingMode: 'S&P',
       autofillResult: { matchedContact: { CALL: 'K1ABC' } },
       hasEditableExchangeField: true,
     }),
@@ -204,14 +205,7 @@ test('shouldAdvanceFromCallsignAutofill advances only when ESM and editable exch
   assert.equal(
     shouldAdvanceFromCallsignAutofill({
       esmEnabled: true,
-      autofillResult: { matchedContact: null },
-      hasEditableExchangeField: true,
-    }),
-    false,
-  );
-  assert.equal(
-    shouldAdvanceFromCallsignAutofill({
-      esmEnabled: false,
+      operatingMode: 'Run',
       autofillResult: { matchedContact: { CALL: 'K1ABC' } },
       hasEditableExchangeField: true,
     }),
@@ -220,6 +214,25 @@ test('shouldAdvanceFromCallsignAutofill advances only when ESM and editable exch
   assert.equal(
     shouldAdvanceFromCallsignAutofill({
       esmEnabled: true,
+      operatingMode: 'S&P',
+      autofillResult: { matchedContact: null },
+      hasEditableExchangeField: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAdvanceFromCallsignAutofill({
+      esmEnabled: false,
+      operatingMode: 'S&P',
+      autofillResult: { matchedContact: { CALL: 'K1ABC' } },
+      hasEditableExchangeField: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldAdvanceFromCallsignAutofill({
+      esmEnabled: true,
+      operatingMode: 'S&P',
       autofillResult: { matchedContact: { CALL: 'K1ABC' } },
       hasEditableExchangeField: false,
     }),

@@ -161,11 +161,15 @@ export function previousContactExchangeAutofill({
 
 export function shouldAdvanceFromCallsignAutofill({
   esmEnabled,
+  operatingMode,
   autofillResult,
   hasEditableExchangeField,
 } = {}) {
   return Boolean(
-    esmEnabled && autofillResult?.matchedContact && hasEditableExchangeField,
+    esmEnabled &&
+      operatingMode !== 'Run' &&
+      autofillResult?.matchedContact &&
+      hasEditableExchangeField,
   );
 }
 

@@ -747,6 +747,7 @@ function MainWindow({
       if (
         shouldAdvanceFromCallsignAutofill({
           esmEnabled,
+          operatingMode,
           autofillResult,
           hasEditableExchangeField: (settings?.exchange ?? []).some(
             fieldEditable,
