@@ -250,6 +250,10 @@ fn import_record(
 
     let epoch = import_qso_epoch(record).map_err(|error| ImportError { line, error })?;
     adif.insert("QSO_DATE_TIME_ON".to_string(), Value::Number(epoch.into()));
+    adif.insert(
+        "CONTEST_ID".to_string(),
+        Value::String(log.contest_id.clone()),
+    );
 
     let frequency =
         import_frequency_hz(required_field(record, "FREQ")?).ok_or_else(|| ImportError {
@@ -769,6 +773,10 @@ mod tests {
         assert_eq!(
             contact_adif_value(contact, "QSO_DATE_TIME_ON"),
             Some(&json!(1_700_000_123_i64))
+        );
+        assert_eq!(
+            contact_adif_value(contact, "CONTEST_ID"),
+            Some(&json!("SC-QSO-PARTY"))
         );
         assert_eq!(
             contact_adif_value(contact, "FREQ"),

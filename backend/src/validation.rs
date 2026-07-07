@@ -731,9 +731,9 @@ fn validate_contact(
         return Err("contact log id does not match request log id".to_string());
     }
 
-    if let Some(contest_id) = json_trimmed_string(contact_adif_value(contact, "CONTEST_ID"))
-        && !contest_id.eq_ignore_ascii_case(&rules.contest)
-    {
+    let contest_id = json_trimmed_string(contact_adif_value(contact, "CONTEST_ID"))
+        .ok_or_else(|| "contact contest id is required".to_string())?;
+    if !contest_id.eq_ignore_ascii_case(&rules.contest) {
         return Err("contact contest id does not match log contest".to_string());
     }
 
@@ -1429,6 +1429,21 @@ mod tests {
         let mut contact = test_contact();
         contact.insert("RST_RCVD".to_string(), json!(59));
         assert!(validate_contact(&rules, &test_bands(), 1, &contact).is_err());
+    }
+
+    #[test]
+    fn rejects_missing_contact_contest_id() {
+        let rules = test_rules();
+        let mut contact = test_contact();
+        contact
+            .get_mut("adif")
+            .and_then(serde_json::Value::as_object_mut)
+            .expect("contact should have adif")
+            .remove("CONTEST_ID");
+
+        let error = validate_contact(&rules, &test_bands(), 1, &contact)
+            .expect_err("missing contest id should fail");
+        assert_eq!(error, "contact contest id is required");
     }
 
     #[test]
