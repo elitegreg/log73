@@ -804,6 +804,7 @@ mod tests {
             Map::from_iter([
                 ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
                 ("STATION_CALLSIGN".to_string(), json!("N0CALL")),
+                ("CONTEST_ID".to_string(), json!("test-contest")),
                 ("CALL".to_string(), json!("K1ABC")),
                 ("BAND".to_string(), json!("20m")),
                 ("FREQ".to_string(), json!(14_074_000_i64)),
@@ -835,6 +836,51 @@ mod tests {
             .await
             .expect("contacts are listed");
         assert_eq!(contacts.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn upsert_contacts_persists_contest_id_in_qso_column() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+        let mut contact = base_contact();
+        set_contact_adif(&mut contact, "CONTEST_ID", json!("test-contest"));
+
+        let saved = database
+            .upsert_contacts(log.id, vec![contact])
+            .await
+            .expect("contact is inserted");
+
+        assert_eq!(
+            contact_adif_value(&saved[0], "CONTEST_ID").and_then(Value::as_str),
+            Some("test-contest")
+        );
+
+        let contacts = database
+            .contacts(log.id)
+            .await
+            .expect("contacts are listed");
+        assert_eq!(
+            contact_adif_value(&contacts[0], "CONTEST_ID").and_then(Value::as_str),
+            Some("test-contest")
+        );
+    }
+
+    #[tokio::test]
+    async fn upsert_contacts_fills_missing_contest_id_from_log() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+        let mut contact = base_contact();
+        set_contact_adif(&mut contact, "CONTEST_ID", json!(""));
+
+        let saved = database
+            .upsert_contacts(log.id, vec![contact])
+            .await
+            .expect("contact is inserted");
+
+        assert_eq!(
+            contact_adif_value(&saved[0], "CONTEST_ID").and_then(Value::as_str),
+            Some("test-contest")
+        );
     }
 
     #[tokio::test]

@@ -14,7 +14,6 @@ pub use config::{
     DEFAULT_DXCLUSTER_MAX_AGE_MIN, DEFAULT_DXCLUSTER_PORT, MAX_DXCLUSTER_MAX_AGE_MIN,
     MIN_DXCLUSTER_MAX_AGE_MIN,
 };
-#[cfg(test)]
 #[allow(unused_imports)]
 pub use contact::set_contact_adif;
 #[allow(unused_imports)]

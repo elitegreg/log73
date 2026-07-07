@@ -38,7 +38,6 @@ pub fn set_contact_meta(contact: &mut Contact, key: &str, value: Value) {
     }
 }
 
-#[cfg(test)]
 pub fn set_contact_adif(contact: &mut Contact, key: &str, value: Value) {
     if !matches!(contact.get(ADIF_KEY), Some(Value::Object(_))) {
         contact.insert(ADIF_KEY.to_string(), Value::Object(Map::new()));

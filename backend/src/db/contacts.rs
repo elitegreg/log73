@@ -1,6 +1,6 @@
 use super::contact::{
     Contact, build_contact, contact_adif, contact_adif_value, contact_id, contact_log_id,
-    frequency_hz, json_i64, json_string, set_contact_meta,
+    frequency_hz, json_i64, json_string, set_contact_adif, set_contact_meta,
 };
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -12,6 +12,7 @@ const QSO_COLUMNS: &[&str] = &[
     "QSO_DATE_TIME_ON",
     "STATION_CALLSIGN",
     "OPERATOR",
+    "CONTEST_ID",
     "CALL",
     "BAND",
     "FREQ",
@@ -57,67 +58,7 @@ INSERT INTO qsos (
     QSO_DATE_TIME_ON,
     STATION_CALLSIGN,
     OPERATOR,
-    CALL,
-    BAND,
-    FREQ,
-    MODE,
-    RST_SENT,
-    RST_RCVD,
-    ARRL_SECT,
-    CNTY,
-    CQZ,
-    DXCC,
-    GRIDSQUARE,
-    MY_CNTY,
-    MY_CQ_ZONE,
-    MY_GRIDSQUARE,
-    MY_STATE,
-    MY_ARRL_SECT,
-    SRX,
-    SRX_STRING,
-    STATE,
-    STX,
-    STX_STRING,
-    TX_PWR,
-    JSON
-) VALUES (
-    ?1,
-    ?2,
-    ?3,
-    ?4,
-    ?5,
-    ?6,
-    ?7,
-    ?8,
-    ?9,
-    ?10,
-    ?11,
-    ?12,
-    ?13,
-    ?14,
-    ?15,
-    ?16,
-    ?17,
-    ?18,
-    ?19,
-    ?20,
-    ?21,
-    ?22,
-    ?23,
-    ?24,
-    ?25,
-    ?26,
-    ?27
-)
-"#;
-
-const UPSERT_QSO_SQL: &str = r#"
-INSERT INTO qsos (
-    ID,
-    LOG_ID,
-    QSO_DATE_TIME_ON,
-    STATION_CALLSIGN,
-    OPERATOR,
+    CONTEST_ID,
     CALL,
     BAND,
     FREQ,
@@ -171,11 +112,76 @@ INSERT INTO qsos (
     ?27,
     ?28
 )
+"#;
+
+const UPSERT_QSO_SQL: &str = r#"
+INSERT INTO qsos (
+    ID,
+    LOG_ID,
+    QSO_DATE_TIME_ON,
+    STATION_CALLSIGN,
+    OPERATOR,
+    CONTEST_ID,
+    CALL,
+    BAND,
+    FREQ,
+    MODE,
+    RST_SENT,
+    RST_RCVD,
+    ARRL_SECT,
+    CNTY,
+    CQZ,
+    DXCC,
+    GRIDSQUARE,
+    MY_CNTY,
+    MY_CQ_ZONE,
+    MY_GRIDSQUARE,
+    MY_STATE,
+    MY_ARRL_SECT,
+    SRX,
+    SRX_STRING,
+    STATE,
+    STX,
+    STX_STRING,
+    TX_PWR,
+    JSON
+) VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    ?8,
+    ?9,
+    ?10,
+    ?11,
+    ?12,
+    ?13,
+    ?14,
+    ?15,
+    ?16,
+    ?17,
+    ?18,
+    ?19,
+    ?20,
+    ?21,
+    ?22,
+    ?23,
+    ?24,
+    ?25,
+    ?26,
+    ?27,
+    ?28,
+    ?29
+)
 ON CONFLICT(ID) DO UPDATE SET
     LOG_ID = excluded.LOG_ID,
     QSO_DATE_TIME_ON = excluded.QSO_DATE_TIME_ON,
     STATION_CALLSIGN = excluded.STATION_CALLSIGN,
     OPERATOR = excluded.OPERATOR,
+    CONTEST_ID = excluded.CONTEST_ID,
     CALL = excluded.CALL,
     BAND = excluded.BAND,
     FREQ = excluded.FREQ,
@@ -215,9 +221,21 @@ pub(super) fn db_upsert_contacts(
 ) -> rusqlite::Result<Vec<Contact>> {
     let transaction = connection.transaction()?;
     let mut committed = Vec::with_capacity(contacts.len());
+    let contest_id = select_log_contest_id(&transaction, log_id)?;
 
     for mut contact in contacts {
         set_contact_meta(&mut contact, "logId", Value::Number(log_id.into()));
+        if contact_adif_value(&contact, "CONTEST_ID")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .is_none_or(str::is_empty)
+        {
+            set_contact_adif(
+                &mut contact,
+                "CONTEST_ID",
+                Value::String(contest_id.clone()),
+            );
+        }
         let id = upsert_contact(&transaction, contact)?;
         if let Some(saved) = select_contact(&transaction, id)? {
             committed.push(saved);
@@ -261,6 +279,14 @@ pub(super) fn select_contact_log_id(
             |row| row.get::<_, i64>(0),
         )
         .optional()
+}
+
+fn select_log_contest_id(connection: &Connection, log_id: i64) -> rusqlite::Result<String> {
+    connection.query_row(
+        "SELECT CONTEST_ID FROM logs WHERE ID = ?1",
+        params![log_id],
+        |row| row.get(0),
+    )
 }
 
 pub(super) fn qso_column_for_adif(field_adif: &str) -> Option<&'static str> {
@@ -425,6 +451,7 @@ mod tests {
             Map::new(),
             Map::from_iter([
                 ("CALL".to_string(), json!("K1ABC")),
+                ("CONTEST_ID".to_string(), json!("TEST-CONTEST")),
                 ("STX".to_string(), json!(12)),
                 ("COMMENT".to_string(), json!("hello")),
                 ("CUSTOM_SERIAL".to_string(), json!(88)),
@@ -435,6 +462,7 @@ mod tests {
         assert_eq!(parsed.get("COMMENT"), Some(&json!("hello")));
         assert_eq!(parsed.get("CUSTOM_SERIAL"), Some(&json!(88)));
         assert_eq!(parsed.get("CALL"), None);
+        assert_eq!(parsed.get("CONTEST_ID"), None);
         assert_eq!(parsed.get("STX"), None);
     }
 

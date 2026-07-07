@@ -63,6 +63,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
             QSO_DATE_TIME_ON INTEGER NOT NULL,
             STATION_CALLSIGN TEXT NOT NULL,
             OPERATOR TEXT,
+            CONTEST_ID TEXT NOT NULL,
             CALL TEXT NOT NULL,
             BAND TEXT NOT NULL,
             FREQ INTEGER NOT NULL,
