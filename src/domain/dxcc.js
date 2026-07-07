@@ -45,6 +45,27 @@ export function callsignFilterPrefix(callsign) {
 }
 
 export function lookupDxcc(database, callsign) {
+  // Keep this slash-callsign DXCC resolution logic in sync with
+  // backend/src/dxcc.rs when changing either side.
+  const normalizedCallsign = normalizeCallsign(callsign);
+  if (!normalizedCallsign) return null;
+
+  const slashParts = splitSlashCallsign(normalizedCallsign);
+  if (!slashParts) return lookupDxccDirect(database, normalizedCallsign);
+
+  const { left, right } = slashParts;
+  if (left.length < right.length) {
+    return lookupDxccDirect(database, left);
+  }
+
+  if (isIgnoredSlashSuffix(right)) {
+    return lookupDxccDirect(database, left);
+  }
+
+  return lookupDxccDirect(database, right) ?? lookupDxccDirect(database, left);
+}
+
+function lookupDxccDirect(database, callsign) {
   const normalizedCallsign = normalizeCallsign(callsign);
   if (!normalizedCallsign || !callsignPrefix(normalizedCallsign)) return null;
 
@@ -68,6 +89,21 @@ export function lookupDxcc(database, callsign) {
   }
 
   return bestRule ? dxccInfoForRule(bestRule, entities) : null;
+}
+
+function splitSlashCallsign(callsign) {
+  const slashIndex = callsign.indexOf('/');
+  if (slashIndex <= 0 || slashIndex !== callsign.lastIndexOf('/')) return null;
+  if (slashIndex >= callsign.length - 1) return null;
+
+  return {
+    left: callsign.slice(0, slashIndex),
+    right: callsign.slice(slashIndex + 1),
+  };
+}
+
+function isIgnoredSlashSuffix(part) {
+  return part === 'M' || part === 'P' || part === 'MM' || part === 'QRP' || /^\d$/.test(part);
 }
 
 export function dxccLabel(dxccInfo) {

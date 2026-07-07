@@ -112,6 +112,30 @@ impl DxccDatabase {
 
     #[allow(dead_code)]
     pub fn lookup(&self, callsign: &str) -> Option<DxccInfo> {
+        // Keep this slash-callsign DXCC resolution logic in sync with
+        // src/domain/dxcc.js when changing either side.
+        let normalized_callsign = normalize_callsign(callsign);
+        if normalized_callsign.is_empty() {
+            return None;
+        }
+
+        let Some((left, right)) = split_slash_callsign(&normalized_callsign) else {
+            return self.lookup_direct(&normalized_callsign);
+        };
+
+        if left.len() < right.len() {
+            return self.lookup_direct(left);
+        }
+
+        if is_ignored_slash_suffix(right) {
+            return self.lookup_direct(left);
+        }
+
+        self.lookup_direct(right)
+            .or_else(|| self.lookup_direct(left))
+    }
+
+    fn lookup_direct(&self, callsign: &str) -> Option<DxccInfo> {
         let normalized_callsign = normalize_callsign(callsign);
         callsign_prefix(&normalized_callsign)?;
 
@@ -184,6 +208,21 @@ pub fn callsign_prefix(callsign: &str) -> Option<String> {
 
 fn normalize_callsign(callsign: &str) -> String {
     callsign.trim().to_uppercase()
+}
+
+fn split_slash_callsign(callsign: &str) -> Option<(&str, &str)> {
+    let slash_index = callsign.find('/')?;
+    if slash_index == 0 || slash_index != callsign.rfind('/')? || slash_index >= callsign.len() - 1
+    {
+        return None;
+    }
+
+    Some((&callsign[..slash_index], &callsign[slash_index + 1..]))
+}
+
+fn is_ignored_slash_suffix(part: &str) -> bool {
+    matches!(part, "M" | "P" | "MM" | "QRP")
+        || (part.len() == 1 && part.chars().all(|character| character.is_ascii_digit()))
 }
 
 fn parse_entity(line: &str) -> Result<DxccEntity, String> {
@@ -319,15 +358,19 @@ mod tests {
 Testland:                 10:  20:  EU:   50.00:   -10.00:    -1.0:  T1:
     T1,TA(11)[21]<51.0/11.0>{AF}~2.0~,=T1ABC;
 Otherland:                12:  22:  NA:   40.00:    70.00:     5.0:  4O:
-    4O,KP2;
+    4O;
+Canada:                   4:   9:   NA:   56.00:    96.00:     5.0:  VE3:
+    VE3;
+United States:            5:   8:   NA:   38.00:    97.00:     5.0:  K:
+    K,N,W;
 "#;
 
     #[test]
     fn parses_cty_database() {
         let database = DxccDatabase::from_str(SAMPLE_CTY).expect("sample CTY should parse");
 
-        assert_eq!(database.entity_count(), 2);
-        assert!(database.rule_count() >= 4);
+        assert_eq!(database.entity_count(), 4);
+        assert!(database.rule_count() >= 6);
         assert_eq!(database.entities[0].country_name, "Testland");
         assert_eq!(database.entities[1].primary_prefix, "4O");
     }
@@ -376,5 +419,63 @@ Otherland:                12:  22:  NA:   40.00:    70.00:     5.0:  4O:
         assert_eq!(callsign_prefix("K"), None);
         assert_eq!(callsign_prefix("KP"), None);
         assert_eq!(callsign_prefix("4O"), None);
+    }
+
+    #[test]
+    fn lookup_resolves_slash_prefixed_and_slash_suffixed_dxccs() {
+        let database = DxccDatabase::from_str(SAMPLE_CTY).expect("sample CTY should parse");
+
+        assert_eq!(
+            database
+                .lookup("VE3/NG4M")
+                .expect("slash prefix should resolve"),
+            DxccInfo {
+                country_name: "Canada".to_string(),
+                cq_zone: 4,
+                itu_zone: 9,
+                continent: "NA".to_string(),
+                latitude: 56.0,
+                longitude: 96.0,
+                utc_offset: 5.0,
+                primary_prefix: "VE3".to_string(),
+            }
+        );
+
+        assert_eq!(
+            database
+                .lookup("NG4M/VE3")
+                .expect("slash suffix DXCC should resolve"),
+            DxccInfo {
+                country_name: "Canada".to_string(),
+                cq_zone: 4,
+                itu_zone: 9,
+                continent: "NA".to_string(),
+                latitude: 56.0,
+                longitude: 96.0,
+                utc_offset: 5.0,
+                primary_prefix: "VE3".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn lookup_ignores_common_suffixes_and_falls_back_to_root_callsign() {
+        let database = DxccDatabase::from_str(SAMPLE_CTY).expect("sample CTY should parse");
+        let united_states = DxccInfo {
+            country_name: "United States".to_string(),
+            cq_zone: 5,
+            itu_zone: 8,
+            continent: "NA".to_string(),
+            latitude: 38.0,
+            longitude: 97.0,
+            utc_offset: 5.0,
+            primary_prefix: "K".to_string(),
+        };
+
+        assert_eq!(database.lookup("NG4M/P"), Some(united_states.clone()));
+        assert_eq!(database.lookup("NG4M/MM"), Some(united_states.clone()));
+        assert_eq!(database.lookup("NG4M/QRP"), Some(united_states.clone()));
+        assert_eq!(database.lookup("NG4M/1"), Some(united_states.clone()));
+        assert_eq!(database.lookup("NG4M/XYZ"), Some(united_states));
     }
 }
