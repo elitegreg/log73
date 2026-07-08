@@ -491,31 +491,33 @@ impl LogCacheProcessor for BandMapManager {
 
 impl BandMapSpotStore {
     fn upsert(&mut self, key: BandMapDedupeKey, candidate: BandMapSpotCandidate) -> UpsertOutcome {
-        if let Some(id) = self.id_by_key.get(&key).copied()
-            && let Some(spot) = self.spots_by_id.get_mut(&id)
-        {
-            let changed = spot_visible_fields_changed(spot, &candidate);
-            spot.received_at = candidate.received_at;
-            spot.spot_type = candidate.spot_type;
-            spot.source = candidate.source;
-            spot.call_de = candidate.call_de;
-            spot.call_dx = candidate.call_dx;
-            spot.frequency_hz = candidate.frequency_hz;
-            spot.utc = candidate.utc;
-            spot.loc = candidate.loc;
-            spot.comment = candidate.comment;
-            spot.rbn = candidate.rbn;
-            spot.band_name = candidate.band_name;
-            spot.radio_id = candidate.radio_id;
-            spot.radio_name = candidate.radio_name;
-            spot.log_id = candidate.log_id;
-            spot.exchange_fields = candidate.exchange_fields;
-            self.ids_by_time.retain(|current_id| *current_id != id);
-            self.ids_by_time.push_back(id);
+        if let Some(id) = self.id_by_key.get(&key).copied() {
+            let Some((changed, spot)) = self.spots_by_id.get_mut(&id).map(|spot| {
+                let changed = spot_visible_fields_changed(spot, &candidate);
+                spot.received_at = candidate.received_at;
+                spot.spot_type = candidate.spot_type;
+                spot.source = candidate.source;
+                spot.call_de = candidate.call_de;
+                spot.call_dx = candidate.call_dx;
+                spot.frequency_hz = candidate.frequency_hz;
+                spot.utc = candidate.utc;
+                spot.loc = candidate.loc;
+                spot.comment = candidate.comment;
+                spot.rbn = candidate.rbn;
+                spot.band_name = candidate.band_name;
+                spot.radio_id = candidate.radio_id;
+                spot.radio_name = candidate.radio_name;
+                spot.log_id = candidate.log_id;
+                spot.exchange_fields = candidate.exchange_fields;
+                (changed, spot.clone())
+            }) else {
+                unreachable!("band map key index points at missing spot")
+            };
+            self.reinsert_id_by_time(id);
             return if changed {
-                UpsertOutcome::Updated(spot.clone())
+                UpsertOutcome::Updated(spot)
             } else {
-                UpsertOutcome::Refreshed(spot.clone())
+                UpsertOutcome::Refreshed(spot)
             };
         }
 
@@ -539,11 +541,30 @@ impl BandMapSpotStore {
             log_id: candidate.log_id,
             exchange_fields: candidate.exchange_fields,
         };
-        self.ids_by_time.push_back(id);
         self.id_by_key.insert(key.clone(), id);
         self.key_by_id.insert(id, key);
         self.spots_by_id.insert(id, spot.clone());
+        self.insert_id_by_time(id);
         UpsertOutcome::Inserted(spot)
+    }
+
+    fn insert_id_by_time(&mut self, id: u64) {
+        let Some(received_at) = self.spots_by_id.get(&id).map(|spot| spot.received_at) else {
+            return;
+        };
+        let ids = self.ids_by_time.make_contiguous();
+        let index = ids.partition_point(|current_id| {
+            self.spots_by_id
+                .get(current_id)
+                .map(|spot| (spot.received_at, *current_id) <= (received_at, id))
+                .unwrap_or(false)
+        });
+        self.ids_by_time.insert(index, id);
+    }
+
+    fn reinsert_id_by_time(&mut self, id: u64) {
+        self.ids_by_time.retain(|current_id| *current_id != id);
+        self.insert_id_by_time(id);
     }
 
     fn spots(&self, log_id: Option<i64>) -> Vec<BandMapSpot> {
@@ -731,6 +752,7 @@ mod tests {
     use super::*;
     use crate::db::{build_contact, set_contact_adif};
     use serde_json::json;
+    use std::thread;
 
     fn test_bands() -> Arc<Vec<Band>> {
         Arc::new(vec![Band {
@@ -959,5 +981,52 @@ mod tests {
         manager.on_log_loaded(9, Arc::new(ContestScoringModule::default()), &mut contacts);
 
         assert!(manager.spots(Some(9)).is_empty());
+    }
+
+    #[test]
+    fn loaded_qso_spot_expires_after_only_remaining_lifetime() {
+        let manager = BandMapManager::new(test_bands(), Duration::from_secs(2));
+        let now = unix_timestamp_secs();
+        let mut contacts = vec![contact(9, "K1ABC", 14_074_000, now.saturating_sub(1), "SC")];
+        manager.on_log_loaded(9, Arc::new(ContestScoringModule::default()), &mut contacts);
+
+        assert_eq!(manager.spots(Some(9)).len(), 1);
+
+        thread::sleep(Duration::from_secs(3));
+        manager.prune_old_spots();
+
+        assert!(manager.spots(Some(9)).is_empty());
+    }
+
+    #[test]
+    fn prune_removes_old_spots_even_when_inserted_after_newer_ones() {
+        let manager = BandMapManager::new(test_bands(), Duration::from_secs(60));
+        let now = unix_timestamp_secs();
+        manager.upsert_local_spot(LocalSpotInput {
+            frequency_hz: 14_074_000,
+            call_dx: "K1NEW".to_string(),
+            comment: None,
+            radio_id: None,
+            radio_name: None,
+            log_id: Some(9),
+            exchange_fields: None,
+            received_at: Some(now),
+        });
+        manager.upsert_local_spot(LocalSpotInput {
+            frequency_hz: 14_075_000,
+            call_dx: "K1OLD".to_string(),
+            comment: None,
+            radio_id: None,
+            radio_name: None,
+            log_id: Some(9),
+            exchange_fields: None,
+            received_at: Some(now.saturating_sub(61)),
+        });
+
+        manager.prune_old_spots();
+
+        let spots = manager.spots(Some(9));
+        assert_eq!(spots.len(), 1);
+        assert_eq!(spots[0].call_dx, "K1NEW");
     }
 }
