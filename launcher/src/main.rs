@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 const DEFAULT_PORT: &str = "7300";
 const APP_WINDOW_SIZE: &str = "1200,800";
 const STOP_TIMEOUT: Duration = Duration::from_secs(3);
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 const LAUNCHER_ICON_PNG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../static/log73-icon-512.png"
@@ -77,6 +78,7 @@ struct Launcher {
     active_token: Option<u64>,
     next_token: u64,
     stop_in_progress: bool,
+    download_in_progress: Option<DownloadKind>,
     pending_close_window: Option<window::Id>,
 }
 
@@ -92,6 +94,7 @@ impl Default for Launcher {
             active_token: None,
             next_token: 1,
             stop_in_progress: false,
+            download_in_progress: None,
             pending_close_window: None,
         }
     }
@@ -110,11 +113,13 @@ impl Drop for Launcher {
 enum Screen {
     Main,
     Settings,
+    Updates,
 }
 
 #[derive(Debug, Clone)]
 enum Message {
     OpenSettingsPressed,
+    OpenUpdatesPressed,
     BackToMainPressed,
     SetDefaultsPressed,
     BackendPathChanged(String),
@@ -132,6 +137,9 @@ enum Message {
     OpenInBrowserPressed,
     OpenInAppModePressed,
     OpenActionFinished(ActionOutcome),
+    DownloadDxccPressed,
+    DownloadSuperCheckPartialPressed,
+    DownloadFinished(DownloadOutcome),
     WindowCloseRequested(window::Id),
     BackendExited(ProcessExit),
     StopAttemptFinished(StopOutcome),
@@ -140,6 +148,41 @@ enum Message {
 #[derive(Debug, Clone)]
 struct ActionOutcome {
     note: String,
+}
+
+#[derive(Debug, Clone)]
+struct DownloadOutcome {
+    kind: DownloadKind,
+    result: Result<PathBuf, String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DownloadKind {
+    Dxcc,
+    SuperCheckPartial,
+}
+
+impl DownloadKind {
+    fn label(self) -> &'static str {
+        match self {
+            DownloadKind::Dxcc => "DXCC/Country Database",
+            DownloadKind::SuperCheckPartial => "Super Check Partial Database",
+        }
+    }
+
+    fn file_name(self) -> &'static str {
+        match self {
+            DownloadKind::Dxcc => "cty.csv",
+            DownloadKind::SuperCheckPartial => "MASTER.SCP",
+        }
+    }
+
+    fn url(self) -> &'static str {
+        match self {
+            DownloadKind::Dxcc => "https://www.country-files.com/cty/cty.csv",
+            DownloadKind::SuperCheckPartial => "https://supercheckpartial.com/downloads/MASTER.SCP",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -352,7 +395,16 @@ fn update(state: &mut Launcher, message: Message) -> Task<Message> {
             state.screen = Screen::Settings;
             Task::none()
         }
+        Message::OpenUpdatesPressed => {
+            state.screen = Screen::Updates;
+            Task::none()
+        }
         Message::BackToMainPressed => {
+            if state.download_in_progress.is_some() {
+                state.status = "Download in progress; please wait.".to_string();
+                return Task::none();
+            }
+
             persist_settings_if_dirty(state);
             state.screen = Screen::Main;
             Task::none()
@@ -426,8 +478,29 @@ fn update(state: &mut Launcher, message: Message) -> Task<Message> {
             state.status = outcome.note;
             Task::none()
         }
+        Message::DownloadDxccPressed => start_download(state, DownloadKind::Dxcc),
+        Message::DownloadSuperCheckPartialPressed => {
+            start_download(state, DownloadKind::SuperCheckPartial)
+        }
+        Message::DownloadFinished(outcome) => {
+            if state.download_in_progress != Some(outcome.kind) {
+                return Task::none();
+            }
+
+            state.download_in_progress = None;
+            state.status = match outcome.result {
+                Ok(path) => format!("Downloaded {} to {}.", outcome.kind.label(), path.display()),
+                Err(error) => format!("Failed to download {}: {error}", outcome.kind.label()),
+            };
+            Task::none()
+        }
         Message::WindowCloseRequested(window_id) => {
             eprintln!("log73-launcher: window close requested");
+            if state.download_in_progress.is_some() {
+                state.status = "Download in progress; please wait before closing.".to_string();
+                return Task::none();
+            }
+
             persist_settings_if_dirty(state);
             state.pending_close_window = Some(window_id);
 
@@ -575,6 +648,28 @@ fn stop_backend(state: &mut Launcher) -> Task<Message> {
     )
 }
 
+fn start_download(state: &mut Launcher, kind: DownloadKind) -> Task<Message> {
+    if state.download_in_progress.is_some() {
+        state.status = "Download in progress; please wait.".to_string();
+        return Task::none();
+    }
+
+    persist_settings_if_dirty(state);
+
+    let data_dir = PathBuf::from(state.settings.data_dir.trim());
+    if data_dir.as_os_str().is_empty() {
+        state.status = "Data directory is required.".to_string();
+        return Task::none();
+    }
+
+    state.download_in_progress = Some(kind);
+    state.status = format!("Downloading {}...", kind.label());
+    Task::perform(
+        download_data_file(state.settings.clone(), kind),
+        Message::DownloadFinished,
+    )
+}
+
 fn handle_backend_exit(state: &mut Launcher, event: ProcessExit) -> Task<Message> {
     if state.active_token != Some(event.token) {
         return Task::none();
@@ -607,6 +702,84 @@ fn handle_stop_outcome(state: &mut Launcher, outcome: StopOutcome) -> Task<Messa
 
     state.status = outcome.note;
     Task::none()
+}
+
+async fn download_data_file(settings: LauncherSettings, kind: DownloadKind) -> DownloadOutcome {
+    DownloadOutcome {
+        kind,
+        result: download_data_file_inner(&settings, kind).await,
+    }
+}
+
+async fn download_data_file_inner(
+    settings: &LauncherSettings,
+    kind: DownloadKind,
+) -> Result<PathBuf, String> {
+    let data_dir = PathBuf::from(settings.data_dir.trim());
+    if data_dir.as_os_str().is_empty() {
+        return Err("data directory is empty".to_string());
+    }
+
+    fs::create_dir_all(&data_dir).map_err(|error| {
+        format!(
+            "failed to create data directory {}: {error}",
+            data_dir.display()
+        )
+    })?;
+
+    let destination = data_dir.join(kind.file_name());
+    let temporary = data_dir.join(format!(".{}.download", kind.file_name()));
+
+    eprintln!(
+        "log73-launcher: downloading {} from {} to {}",
+        kind.label(),
+        kind.url(),
+        destination.display()
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(DOWNLOAD_TIMEOUT)
+        .build()
+        .map_err(|error| format!("failed to initialize downloader: {error}"))?;
+    let response = client
+        .get(kind.url())
+        .send()
+        .await
+        .map_err(|error| format!("request failed: {error}"))?
+        .error_for_status()
+        .map_err(|error| format!("server returned error: {error}"))?;
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|error| format!("failed to read response: {error}"))?;
+
+    fs::write(&temporary, &bytes).map_err(|error| {
+        format!(
+            "failed to write temporary file {}: {error}",
+            temporary.display()
+        )
+    })?;
+
+    #[cfg(windows)]
+    if destination.exists() {
+        if let Err(error) = fs::remove_file(&destination) {
+            let _ = fs::remove_file(&temporary);
+            return Err(format!(
+                "failed to replace existing file {}: {error}",
+                destination.display()
+            ));
+        }
+    }
+
+    fs::rename(&temporary, &destination).map_err(|error| {
+        let _ = fs::remove_file(&temporary);
+        format!(
+            "failed to move downloaded file to {}: {error}",
+            destination.display()
+        )
+    })?;
+
+    Ok(destination)
 }
 
 async fn perform_open_action(settings: LauncherSettings, action: OpenAction) -> ActionOutcome {
@@ -895,6 +1068,7 @@ fn view(state: &Launcher) -> Element<'_, Message> {
     match state.screen {
         Screen::Main => view_main(state),
         Screen::Settings => view_settings(state),
+        Screen::Updates => view_updates(state),
     }
 }
 
@@ -904,6 +1078,7 @@ fn view_main(state: &Launcher) -> Element<'_, Message> {
     let can_stop = running && !state.stop_in_progress;
     let can_open_app = running && !state.stop_in_progress;
 
+    let updates_button = button("Updates").on_press(Message::OpenUpdatesPressed);
     let settings_button = button("Settings").on_press(Message::OpenSettingsPressed);
 
     let start_button = if can_start {
@@ -951,7 +1126,7 @@ fn view_main(state: &Launcher) -> Element<'_, Message> {
                 weight: font::Weight::Bold,
                 ..Font::DEFAULT
             }),
-        settings_button,
+        row![updates_button, settings_button].spacing(12),
         row![
             start_button,
             stop_button,
@@ -975,6 +1150,56 @@ fn view_main(state: &Launcher) -> Element<'_, Message> {
         .spacing(16)
         .align_y(iced::alignment::Vertical::Top)
         .padding(16);
+
+    container(content)
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .center_x(Length::Fill)
+        .center_y(Length::Fill)
+        .into()
+}
+
+fn view_updates(state: &Launcher) -> Element<'_, Message> {
+    let downloading = state.download_in_progress.is_some();
+
+    let dxcc_button = if downloading {
+        button("Download latest DXCC/Country Database")
+    } else {
+        button("Download latest DXCC/Country Database").on_press(Message::DownloadDxccPressed)
+    };
+
+    let super_check_partial_button = if downloading {
+        button("Download latest Super Check Partial Database")
+    } else {
+        button("Download latest Super Check Partial Database")
+            .on_press(Message::DownloadSuperCheckPartialPressed)
+    };
+
+    let back_button = if downloading {
+        button("Back")
+    } else {
+        button("Back").on_press(Message::BackToMainPressed)
+    };
+
+    let wait_message = match state.download_in_progress {
+        Some(kind) => format!("Downloading {}; please wait.", kind.label()),
+        None => "Downloads overwrite files in the configured data directory.".to_string(),
+    };
+
+    let content = column![
+        text("Updates"),
+        text(format!("Data directory: {}", state.settings.data_dir)),
+        text(wait_message),
+        dxcc_button,
+        super_check_partial_button,
+        back_button,
+        text(&state.status)
+            .width(Length::Fill)
+            .wrapping(iced::widget::text::Wrapping::Word),
+    ]
+    .spacing(12)
+    .padding(16)
+    .max_width(900);
 
     container(content)
         .width(Length::Fill)
@@ -1300,6 +1525,7 @@ mod tests {
             active_token: None,
             next_token: 1,
             stop_in_progress: false,
+            download_in_progress: None,
             pending_close_window: None,
         }
     }

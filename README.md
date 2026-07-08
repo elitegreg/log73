@@ -196,6 +196,7 @@ Launcher main screen controls:
 - Open log file in the OS default editor/viewer
 - Open app in the default browser
 - Open app in browser app mode (`--app`) with `1200x800` initial size
+- Updates screen to download latest `cty.csv` and `MASTER.SCP` into the data directory
 - Menu button to open launcher settings
 
 Launcher settings screen controls:

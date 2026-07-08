@@ -19,6 +19,7 @@ path = "src/main.rs"
 iced = { version = "0.13", features = ["tokio", "image"] }
 log73-paths = { path = "../paths" }
 open = "5"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
 shared_child = "1"
 tokio = { version = "1", features = ["rt", "time"] }
