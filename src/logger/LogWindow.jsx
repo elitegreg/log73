@@ -126,7 +126,8 @@ function exchangeValueForColumn(settings, column, entry, columnFieldMap) {
   const exchangeField = exchangeFieldForColumn(settings, column);
   if (!exchangeField) return null;
   const adifField = columnFieldMap[column] ?? exchangeField.adif;
-  return entry[adifField] ?? entry[column] ?? '';
+  const adif = entryAdif(entry);
+  return adif[adifField] ?? adif[column] ?? entry[adifField] ?? entry[column] ?? '';
 }
 
 function contactMode(entry, fallbackMode = 'CW') {
