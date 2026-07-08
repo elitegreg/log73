@@ -319,7 +319,7 @@
   display: flex;
   flex: 0 0 auto;
   flex-direction: column;
-  width: 190px;
+  width: 238px;
   max-height: 100%;
   overflow: hidden;
   border: 1px solid #000;
@@ -339,19 +339,21 @@
 .band-map-table-scroll {
   flex: 1 1 auto;
   min-height: 0;
+  overflow-x: auto;
   overflow-y: auto;
   background-color: white;
 }
 
 .band-map-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
-  table-layout: fixed;
+  table-layout: auto;
   background-color: white;
 }
 
 .band-map-vfo-col {
-  width: 24px;
+  width: 16px;
 }
 
 .band-map-frequency-col {
@@ -373,11 +375,14 @@
 }
 
 .band-map-vfo-marker {
-  text-align: center;
+  padding-left: 2px;
+  padding-right: 0;
+  text-align: right;
   font-weight: bold;
 }
 
 .band-map-frequency {
+  padding-left: 1px;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
