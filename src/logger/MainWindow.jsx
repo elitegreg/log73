@@ -43,6 +43,11 @@ import { useEsm } from './hooks/useEsm';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useMessageSending } from './hooks/useMessageSending';
 
+function dxccAdifNumber(dxccInfo) {
+  const dxccNumber = Number(dxccInfo?.adif);
+  return Number.isInteger(dxccNumber) && dxccNumber > 0 ? dxccNumber : null;
+}
+
 function MainWindow({
   settings,
   log,
@@ -262,21 +267,25 @@ function MainWindow({
     return entryRequestPreviousContactAutofill(values);
   }
 
-  const { completionMatches, currentDxccLabel, currentDupeAlertText } =
-    useCompletions({
-      bandMapSpotStore,
-      contacts,
-      settings,
-      activeCompletionField,
-      setActiveCompletionField,
-      debouncedCallSign,
-      callSign,
-      exchangeValues,
-      radioMode,
-      log,
-      currentContactFields,
-      supercheckpartialUpdate,
-    });
+  const {
+    completionMatches,
+    currentDxccInfo,
+    currentDxccLabel,
+    currentDupeAlertText,
+  } = useCompletions({
+    bandMapSpotStore,
+    contacts,
+    settings,
+    activeCompletionField,
+    setActiveCompletionField,
+    debouncedCallSign,
+    callSign,
+    exchangeValues,
+    radioMode,
+    log,
+    currentContactFields,
+    supercheckpartialUpdate,
+  });
 
   const {
     isCwTextDialogOpen,
@@ -472,6 +481,7 @@ function MainWindow({
 
     const timeOn = callSignEditedAtRef.current;
     const normalizedCallSign = callSign.trim().toUpperCase();
+    const dxccNumber = dxccAdifNumber(currentDxccInfo);
     const contact = {
       meta: {
         status: 'Pending',
@@ -489,6 +499,7 @@ function MainWindow({
         BAND: currentBand?.name ?? '',
         FREQ: radioFrequencyHz,
         MODE: adifModeForLoggerMode(radioMode),
+        ...(dxccNumber === null ? {} : { DXCC: dxccNumber }),
       },
     };
 

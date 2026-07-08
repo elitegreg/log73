@@ -38,7 +38,7 @@ This manual assumes a production-style install similar to:
 ~/.config/log73/
 ~/.local/share/log73/contest-rules/*.yaml
 ~/.local/share/log73/MASTER.SCP
-~/.local/share/log73/cty.dat
+~/.local/share/log73/cty.csv
 ~/.local/share/log73/log73.db
 ```
 
@@ -79,7 +79,7 @@ Current options:
 Startup assumptions:
 
 - Contest rules must load successfully for backend startup.
-- Missing `MASTER.SCP` or `cty.dat` does not necessarily stop startup, but those lookup features degrade.
+- Missing `MASTER.SCP` or `cty.csv` does not necessarily stop startup, but those lookup features degrade.
 
 ---
 

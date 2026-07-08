@@ -124,7 +124,7 @@ export function useCompletions({
           activeExchangeCompletionField,
           exchangeValues[activeExchangeCompletionField?.name],
         );
-  const currentDxccInfo = lookupDxcc(dxccData, debouncedCallSign);
+  const currentDxccInfo = lookupDxcc(dxccData, callSign);
   const currentDxccLabel = dxccLabel(currentDxccInfo);
   const currentDupeAlertText =
     callSign.trim() !== '' &&
@@ -136,6 +136,7 @@ export function useCompletions({
     activeCompletionField,
     setActiveCompletionField,
     completionMatches,
+    currentDxccInfo,
     currentDxccLabel,
     currentDupeAlertText,
   };

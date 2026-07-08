@@ -312,7 +312,7 @@ struct AppPaths {
     installed_contest_rules_dir: PathBuf,
     user_contest_rules_dir: PathBuf,
     master_scp_path: PathBuf,
-    cty_dat_path: PathBuf,
+    cty_csv_path: PathBuf,
     database_path: PathBuf,
 }
 
@@ -327,7 +327,7 @@ fn resolve_paths(cli: &Cli) -> AppPaths {
     let installed_contest_rules_dir = log73_paths::contest_rules_dir(&installed_data_dir);
     let user_contest_rules_dir = log73_paths::contest_rules_dir(&data_dir);
     let master_scp_path = data_file_path(&data_dir, &installed_data_dir, "MASTER.SCP");
-    let cty_dat_path = data_file_path(&data_dir, &installed_data_dir, "cty.dat");
+    let cty_csv_path = data_file_path(&data_dir, &installed_data_dir, "cty.csv");
     let database_path = log73_paths::database_path(&data_dir);
 
     AppPaths {
@@ -338,7 +338,7 @@ fn resolve_paths(cli: &Cli) -> AppPaths {
         installed_contest_rules_dir,
         user_contest_rules_dir,
         master_scp_path,
-        cty_dat_path,
+        cty_csv_path,
         database_path,
     }
 }
@@ -384,7 +384,7 @@ async fn main() {
         installed_contest_rules_dir = %paths.installed_contest_rules_dir.display(),
         user_contest_rules_dir = %paths.user_contest_rules_dir.display(),
         master_scp_path = %paths.master_scp_path.display(),
-        cty_dat_path = %paths.cty_dat_path.display(),
+        cty_csv_path = %paths.cty_csv_path.display(),
         database_path = %paths.database_path.display(),
         "using log73 paths"
     );
@@ -409,18 +409,18 @@ async fn main() {
         path = %paths.master_scp_path.display(),
         "loaded supercheckpartial callsigns"
     );
-    let dxcc = dxcc::DxccDatabase::load_file(&paths.cty_dat_path).unwrap_or_else(|error| {
+    let dxcc = dxcc::DxccDatabase::load_file(&paths.cty_csv_path).unwrap_or_else(|error| {
         warn!(
-            path = %paths.cty_dat_path.display(),
+            path = %paths.cty_csv_path.display(),
             %error,
-            "failed to load cty.dat; DXCC lookup will be unavailable"
+            "failed to load cty.csv; DXCC lookup will be unavailable"
         );
         dxcc::DxccDatabase::default()
     });
     info!(
         entities = dxcc.entity_count(),
         rules = dxcc.rule_count(),
-        path = %paths.cty_dat_path.display(),
+        path = %paths.cty_csv_path.display(),
         "loaded DXCC country data"
     );
     let db = Database::open(&paths.database_path).expect("failed to open log73 database");

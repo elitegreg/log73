@@ -50,6 +50,9 @@ export function lookupDxcc(database, callsign) {
   const normalizedCallsign = normalizeCallsign(callsign);
   if (!normalizedCallsign) return null;
 
+  const exactMatch = exactDxccRule(database, normalizedCallsign);
+  if (exactMatch) return dxccInfoForRule(exactMatch, database?.entities);
+
   const slashParts = splitSlashCallsign(normalizedCallsign);
   if (!slashParts) return lookupDxccDirect(database, normalizedCallsign);
 
@@ -67,15 +70,15 @@ export function lookupDxcc(database, callsign) {
 
 function lookupDxccDirect(database, callsign) {
   const normalizedCallsign = normalizeCallsign(callsign);
-  if (!normalizedCallsign || !callsignPrefix(normalizedCallsign)) return null;
+  if (!normalizedCallsign) return null;
+
+  const exactMatch = exactDxccRule(database, normalizedCallsign);
+  if (exactMatch) return dxccInfoForRule(exactMatch, database?.entities);
+
+  if (!callsignPrefix(normalizedCallsign)) return null;
 
   const rules = Array.isArray(database?.rules) ? database.rules : [];
   const entities = Array.isArray(database?.entities) ? database.entities : [];
-  const exactMatch = rules.find(
-    (rule) => rule?.exact === true && rule.pattern === normalizedCallsign,
-  );
-  if (exactMatch) return dxccInfoForRule(exactMatch, entities);
-
   let bestRule = null;
   for (const rule of rules) {
     if (rule?.exact === true) continue;
@@ -91,6 +94,21 @@ function lookupDxccDirect(database, callsign) {
   return bestRule ? dxccInfoForRule(bestRule, entities) : null;
 }
 
+function exactDxccRule(database, normalizedCallsign) {
+  const rules = Array.isArray(database?.rules) ? database.rules : [];
+  const entities = Array.isArray(database?.entities) ? database.entities : [];
+  let bestRule = null;
+  for (const rule of rules) {
+    if (rule?.exact !== true || rule.pattern !== normalizedCallsign) continue;
+    const entity = entities[rule.entity_index];
+    const bestEntity = entities[bestRule?.entity_index];
+    if (!bestRule || (entity?.waedc_cq_list && !bestEntity?.waedc_cq_list)) {
+      bestRule = rule;
+    }
+  }
+  return bestRule;
+}
+
 function splitSlashCallsign(callsign) {
   const slashIndex = callsign.indexOf('/');
   if (slashIndex <= 0 || slashIndex !== callsign.lastIndexOf('/')) return null;
@@ -103,7 +121,13 @@ function splitSlashCallsign(callsign) {
 }
 
 function isIgnoredSlashSuffix(part) {
-  return part === 'M' || part === 'P' || part === 'MM' || part === 'QRP' || /^\d$/.test(part);
+  return (
+    part === 'M' ||
+    part === 'P' ||
+    part === 'MM' ||
+    part === 'QRP' ||
+    /^\d$/.test(part)
+  );
 }
 
 export function dxccLabel(dxccInfo) {
@@ -121,6 +145,7 @@ function dxccInfoForRule(rule, entities) {
 
   return {
     country_name: entity.country_name,
+    adif: entity.adif,
     cq_zone: rule.cq_zone ?? entity.cq_zone,
     itu_zone: rule.itu_zone ?? entity.itu_zone,
     continent: rule.continent ?? entity.continent,
@@ -128,5 +153,6 @@ function dxccInfoForRule(rule, entities) {
     longitude: rule.longitude ?? entity.longitude,
     utc_offset: rule.utc_offset ?? entity.utc_offset,
     primary_prefix: entity.primary_prefix,
+    waedc_cq_list: Boolean(entity.waedc_cq_list),
   };
 }

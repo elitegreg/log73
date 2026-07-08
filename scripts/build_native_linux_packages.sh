@@ -57,7 +57,7 @@ mkdir -p \
 install -m 0755 "$backend_bin" "${package_root}/opt/log73/bin/log73-backend"
 install -m 0755 "$launcher_bin" "${package_root}/opt/log73/bin/log73-launcher"
 install -m 0644 data/MASTER.SCP "${package_root}/opt/log73/data/MASTER.SCP"
-install -m 0644 data/cty.dat "${package_root}/opt/log73/data/cty.dat"
+install -m 0644 data/cty.csv "${package_root}/opt/log73/data/cty.csv"
 cp -R data/contest-rules "${package_root}/opt/log73/data/contest-rules"
 find "${package_root}/opt/log73/data/contest-rules" -type f -exec chmod 0644 {} +
 install -m 0644 static/log73-icon-512.png \
