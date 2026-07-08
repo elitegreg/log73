@@ -1,5 +1,20 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { BAND_MAP_ROW_HEIGHT_PX, bandMapRows } from '../domain/bandMap';
+
+function contextMenuPositionStyle(contextMenu) {
+  const menuWidth = 120;
+  const menuHeight = 36;
+  const viewportWidth =
+    typeof window === 'undefined' ? menuWidth : window.innerWidth;
+  const viewportHeight =
+    typeof window === 'undefined' ? menuHeight : window.innerHeight;
+
+  return {
+    left: Math.max(0, Math.min(contextMenu.x, viewportWidth - menuWidth)),
+    top: Math.max(0, Math.min(contextMenu.y, viewportHeight - menuHeight)),
+  };
+}
 
 function BandMapWindow({
   spotStore,
@@ -14,6 +29,7 @@ function BandMapWindow({
   const userScrollIntentRef = useRef(false);
   const previousVfoTenthKhzRef = useRef(null);
   const previousVfoIndexRef = useRef(null);
+  const contextMenuOpenedAtRef = useRef(0);
   const [contextMenu, setContextMenu] = useState(null);
   const rows = useMemo(
     () => bandMapRows(spotStore, radioFrequencyHz),
@@ -65,16 +81,22 @@ function BandMapWindow({
   useEffect(() => {
     if (!contextMenu) return undefined;
 
-    function closeContextMenu() {
+    function closeContextMenu(event) {
+      if (
+        event?.type === 'click' &&
+        Date.now() - contextMenuOpenedAtRef.current < 250
+      ) {
+        return;
+      }
       setContextMenu(null);
     }
 
     window.addEventListener('click', closeContextMenu);
-    window.addEventListener('contextmenu', closeContextMenu);
+    window.addEventListener('keydown', closeContextMenu);
     window.addEventListener('blur', closeContextMenu);
     return () => {
       window.removeEventListener('click', closeContextMenu);
-      window.removeEventListener('contextmenu', closeContextMenu);
+      window.removeEventListener('keydown', closeContextMenu);
       window.removeEventListener('blur', closeContextMenu);
     };
   }, [contextMenu]);
@@ -113,6 +135,7 @@ function BandMapWindow({
     if (!onDeleteSpot || !spot) return;
     event.preventDefault();
     event.stopPropagation();
+    contextMenuOpenedAtRef.current = Date.now();
     setContextMenu({ x: event.clientX, y: event.clientY, spot });
   }
 
@@ -157,11 +180,11 @@ function BandMapWindow({
                       .filter(Boolean)
                       .join(' ')}
                     onClick={
-                      isClickableSpot ? () => onSpotClick(row.spot) : undefined
-                    }
-                    onContextMenu={
-                      row.type === 'spot'
-                        ? (event) => handleRowContextMenu(event, row.spot)
+                      isClickableSpot
+                        ? (event) => {
+                            if (event.button !== 0) return;
+                            onSpotClick(row.spot);
+                          }
                         : undefined
                     }
                     onKeyDown={
@@ -176,9 +199,36 @@ function BandMapWindow({
                     }
                     tabIndex={isClickableSpot ? 0 : undefined}
                   >
-                    <td className="band-map-vfo-marker">{row.marker}</td>
-                    <td className="band-map-frequency">{row.khz}</td>
-                    <td className="band-map-callsign">{row.callsign}</td>
+                    <td
+                      className="band-map-vfo-marker"
+                      onContextMenu={
+                        row.type === 'spot'
+                          ? (event) => handleRowContextMenu(event, row.spot)
+                          : undefined
+                      }
+                    >
+                      {row.marker}
+                    </td>
+                    <td
+                      className="band-map-frequency"
+                      onContextMenu={
+                        row.type === 'spot'
+                          ? (event) => handleRowContextMenu(event, row.spot)
+                          : undefined
+                      }
+                    >
+                      {row.khz}
+                    </td>
+                    <td
+                      className="band-map-callsign"
+                      onContextMenu={
+                        row.type === 'spot'
+                          ? (event) => handleRowContextMenu(event, row.spot)
+                          : undefined
+                      }
+                    >
+                      {row.callsign}
+                    </td>
                   </tr>
                 );
               })
@@ -186,35 +236,28 @@ function BandMapWindow({
           </tbody>
         </table>
       </div>
-      {contextMenu ? (
-        <div
-          role="menu"
-          aria-label="Band map spot actions"
-          style={{
-            position: 'fixed',
-            left: `${contextMenu.x}px`,
-            top: `${contextMenu.y}px`,
-            zIndex: 1000,
-            minWidth: '96px',
-            padding: '2px',
-            border: '1px solid #808080',
-            backgroundColor: '#f0f0f0',
-            boxShadow: '2px 2px 0 rgba(0, 0, 0, 0.25)',
-          }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button
-            type="button"
-            style={{ width: '100%' }}
-            onClick={() => {
-              onDeleteSpot?.(contextMenu.spot);
-              setContextMenu(null);
-            }}
-          >
-            Delete
-          </button>
-        </div>
-      ) : null}
+      {contextMenu && typeof document !== 'undefined'
+        ? createPortal(
+            <div
+              role="menu"
+              aria-label="Band map spot actions"
+              className="band-map-context-menu"
+              style={contextMenuPositionStyle(contextMenu)}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteSpot?.(contextMenu.spot);
+                  setContextMenu(null);
+                }}
+              >
+                Delete
+              </button>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

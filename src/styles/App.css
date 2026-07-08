@@ -406,6 +406,34 @@
   font-style: italic;
 }
 
+.band-map-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 120px;
+  border: 1px solid #404040;
+  background-color: white;
+  box-shadow: 2px 2px 6px rgba(0, 0, 0, 0.35);
+  padding: 2px;
+}
+
+.band-map-context-menu button {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 4px 8px;
+  color: #000;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.band-map-context-menu button:hover,
+.band-map-context-menu button:focus {
+  background-color: #2f6fd6;
+  color: white;
+}
+
 .log-title-bar {
   background-color: #0000ff; /* Blue title bar */
   color: white;
