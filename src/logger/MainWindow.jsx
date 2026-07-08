@@ -93,6 +93,9 @@ function MainWindow({
   onSerialContactLogged,
   onExit,
 }) {
+  const radioMode = radioState?.mode ?? 'CW';
+  const radioFrequencyHz =
+    radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
   const {
     callSign,
     setCallSign,
@@ -139,9 +142,6 @@ function MainWindow({
   });
   const setCwWpmRef = useRef(onSetCwWpm);
   const previousRadioFrequencyHzRef = useRef(null);
-  const radioMode = radioState?.mode ?? 'CW';
-  const radioFrequencyHz =
-    radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
   const allowedBands = settings?.allowed_bands ?? [];
   const bandCatalog = settings?.band_catalog ?? [];
   const currentBand = bandForFrequency(radioFrequencyHz, bandCatalog);
