@@ -33,6 +33,7 @@ function LoggerScreen() {
     return localStorage.getItem(BAND_MAP_ENABLED_STORAGE_KEY) === '1';
   });
   const loggerMainColumnRef = useRef(null);
+  const bandMapActivateClearRef = useRef(null);
   const [bandMapHeight, setBandMapHeight] = useState(null);
   const [supercheckpartialUpdate, setSupercheckpartialUpdate] = useState(null);
   const { notifyError, notifyOperationalError, notifyOfflineCachingDegraded } =
@@ -93,6 +94,7 @@ function LoggerScreen() {
     radioId: numericRadioId,
     sendRadioMessage,
     notifyOperationalError,
+    onBeforeActivateSpot: () => bandMapActivateClearRef.current?.(),
   });
 
   const {
@@ -303,6 +305,9 @@ function LoggerScreen() {
             onStoreCqFrequency={handleStoreCqFrequency}
             onMarkFrequency={handleMarkFrequency}
             onStoreBandMapSpot={handleStoreBandMapSpot}
+            onRegisterBandMapActivateClear={(clearEntryFields) => {
+              bandMapActivateClearRef.current = clearEntryFields;
+            }}
             onSetRadioFrequency={(frequencyHz) =>
               sendRadioMessage({
                 type: 'set_frequency',

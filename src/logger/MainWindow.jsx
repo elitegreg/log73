@@ -74,6 +74,7 @@ function MainWindow({
   onStoreCqFrequency,
   onMarkFrequency,
   onStoreBandMapSpot,
+  onRegisterBandMapActivateClear,
   onSetRadioFrequency,
   onSetRadioMode,
   onClearRit,
@@ -464,6 +465,11 @@ function MainWindow({
     callSignEditedAtRef.current = new Date();
     callSignRef.current?.focus();
   }
+
+  useEffect(() => {
+    onRegisterBandMapActivateClear?.(clearEntryFields);
+    return () => onRegisterBandMapActivateClear?.(null);
+  }, [onRegisterBandMapActivateClear, clearRitIfEnabled, radioMode, settings, log]);
 
   function logContact(force = false, values = exchangeValues) {
     if (!canLogContact(force, values)) {

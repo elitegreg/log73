@@ -21,6 +21,7 @@ export function useBandMap({
   radioId,
   sendRadioMessage,
   notifyOperationalError,
+  onBeforeActivateSpot,
 }) {
   const [bandMapSpotStore, setBandMapSpotStore] = useState(() =>
     createBandMapSpotStore(),
@@ -55,6 +56,7 @@ export function useBandMap({
     (spot) => {
       const frequencyHz = Number(spot?.frequency_hz);
       if (!frequencyHz) return;
+      onBeforeActivateSpot?.();
       sendRadioMessage?.({ type: 'set_frequency', frequency_hz: frequencyHz });
       const callsign = String(spot?.call_dx ?? '').trim();
       if (!callsign) return;
@@ -64,7 +66,7 @@ export function useBandMap({
         spot,
       });
     },
-    [sendRadioMessage],
+    [onBeforeActivateSpot, sendRadioMessage],
   );
 
   const handleStoreCqFrequency = useCallback(
