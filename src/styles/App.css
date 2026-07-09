@@ -439,6 +439,62 @@
   color: white;
 }
 
+.band-map-details-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background-color: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.band-map-details-dialog {
+  width: min(520px, 100%);
+  max-height: min(480px, calc(100vh - 32px));
+  border: 1px solid #404040;
+  background-color: white;
+  box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+}
+
+.band-map-details-dialog-header {
+  background-color: #0000ff;
+  color: white;
+  padding: 2px 5px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.band-map-details-dialog-body {
+  overflow: auto;
+  padding: 8px;
+}
+
+.band-map-details-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.band-map-details-table th,
+.band-map-details-table td {
+  border: 1px solid #808080;
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.band-map-details-table th {
+  width: 120px;
+  background-color: #d3d3d3;
+}
+
 .log-title-bar {
   background-color: #0000ff; /* Blue title bar */
   color: white;
