@@ -92,6 +92,7 @@ function LoggerScreen() {
     enabled: bandMapEnabled,
     logId: numericLogId,
     radioId: numericRadioId,
+    radioFrequencyHz: radioState?.frequency_hz,
     sendRadioMessage,
     notifyOperationalError,
     onBeforeActivateSpot: () => bandMapActivateClearRef.current?.(),

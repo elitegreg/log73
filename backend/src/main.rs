@@ -779,6 +779,18 @@ async fn handle_socket(
                         radio_id,
                         log_id,
                     ));
+                    if direct_tx
+                        .send(ServerMessage::BandMapSubscriptionReady)
+                        .await
+                        .is_err()
+                    {
+                        debug!(
+                            session_id,
+                            radio_id,
+                            "failed to queue bandmap subscription ready message; session closed"
+                        );
+                        break;
+                    }
                 }
             }
             Ok(ClientMessage::SetFrequency { frequency_hz }) => {
@@ -1053,20 +1065,25 @@ fn spawn_bandmap_websocket_subscription(
     radio_id: i64,
     log_id: Option<i64>,
 ) -> tokio::task::JoinHandle<()> {
+    let mut events = bandmap.subscribe();
     tokio::spawn(async move {
-        let mut events = bandmap.subscribe();
         loop {
             let message = match events.recv().await {
-                Ok(BandMapEvent::SpotUpserted(spot)) => {
+                Ok(BandMapEvent::SpotUpserted { sequence, spot }) => {
                     if !bandmap_spot_visible_for_log(&spot, log_id) {
-                        continue;
+                        ServerMessage::BandMapSequence { sequence }
+                    } else {
+                        ServerMessage::BandMapSpot { sequence, spot }
                     }
-                    ServerMessage::BandMapSpot { spot }
                 }
-                Ok(BandMapEvent::SpotDeleted { id }) => ServerMessage::BandMapSpotDeleted { id },
+                Ok(BandMapEvent::SpotDeleted { sequence, id }) => {
+                    ServerMessage::BandMapSpotDeleted { sequence, id }
+                }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     warn!(session_id = %session_id, radio_id, skipped, "websocket band map subscription lagged");
-                    continue;
+                    ServerMessage::BandMapSequence {
+                        sequence: bandmap.current_sequence(),
+                    }
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
             };
@@ -1099,7 +1116,7 @@ fn spawn_dxcluster_bandmap_bridge(dxcluster: DxClusterManager, bandmap: BandMapM
                     bandmap.upsert_dxcluster_spot(*spot);
                 }
                 Ok(DxClusterEvent::SpotDeleted { id }) => {
-                    let _ = id;
+                    bandmap.delete_dxcluster_spot(id);
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
                     warn!(skipped, "DX Cluster to band map bridge lagged");
@@ -1174,7 +1191,8 @@ async fn bandmap_spots(
     State(app_state): State<AppState>,
     Query(query): Query<BandMapSpotsQuery>,
 ) -> Json<serde_json::Value> {
-    Json(serde_json::json!({ "spots": app_state.bandmap.spots(query.log_id) }))
+    let (sequence, spots) = app_state.bandmap.snapshot(query.log_id);
+    Json(serde_json::json!({ "sequence": sequence, "spots": spots }))
 }
 
 #[derive(Debug, serde::Deserialize)]

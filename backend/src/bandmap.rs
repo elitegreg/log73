@@ -47,8 +47,14 @@ pub struct BandMapSpot {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum BandMapEvent {
-    SpotUpserted(Box<BandMapSpot>),
-    SpotDeleted { id: u64 },
+    SpotUpserted {
+        sequence: u64,
+        spot: Box<BandMapSpot>,
+    },
+    SpotDeleted {
+        sequence: u64,
+        id: u64,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +120,7 @@ enum BandMapDedupeKey {
 #[derive(Default)]
 struct BandMapSpotStore {
     next_id: u64,
+    next_sequence: u64,
     ids_by_time: VecDeque<u64>,
     spots_by_id: HashMap<u64, BandMapSpot>,
     id_by_key: HashMap<BandMapDedupeKey, u64>,
@@ -173,24 +180,53 @@ impl BandMapManager {
         self.prune_old_spots();
     }
 
+    pub fn snapshot(&self, log_id: Option<i64>) -> (u64, Vec<BandMapSpot>) {
+        let store = self
+            .inner
+            .store
+            .lock()
+            .expect("band map store mutex poisoned");
+        (store.current_sequence(), store.spots(log_id))
+    }
+
+    #[cfg(test)]
     pub fn spots(&self, log_id: Option<i64>) -> Vec<BandMapSpot> {
+        self.snapshot(log_id).1
+    }
+
+    pub fn current_sequence(&self) -> u64 {
         self.inner
             .store
             .lock()
             .expect("band map store mutex poisoned")
-            .spots(log_id)
+            .current_sequence()
     }
 
     pub fn delete_spot(&self, id: u64) -> bool {
-        let deleted = self
-            .inner
-            .store
-            .lock()
-            .expect("band map store mutex poisoned")
-            .remove(id);
-        if deleted {
-            let _ = self.inner.events.send(BandMapEvent::SpotDeleted { id });
-        }
+        let events = {
+            let mut store = self
+                .inner
+                .store
+                .lock()
+                .expect("band map store mutex poisoned");
+            store.remove(id)
+        };
+        let deleted = !events.is_empty();
+        self.broadcast_events(events);
+        deleted
+    }
+
+    pub fn delete_dxcluster_spot(&self, source_id: u64) -> bool {
+        let events = {
+            let mut store = self
+                .inner
+                .store
+                .lock()
+                .expect("band map store mutex poisoned");
+            store.remove_cluster_source_spot(source_id)
+        };
+        let deleted = !events.is_empty();
+        self.broadcast_events(events);
         deleted
     }
 
@@ -312,26 +348,29 @@ impl BandMapManager {
         candidate: BandMapSpotCandidate,
     ) -> BandMapSpot {
         let max_age = self.max_age();
-        let outcome = {
+        let (spot, events) = {
             let mut store = self
                 .inner
                 .store
                 .lock()
                 .expect("band map store mutex poisoned");
-            let _ = store.prune(max_age);
-            store.upsert(key, candidate)
+            let mut events = store.prune(max_age);
+            let outcome = store.upsert(key, candidate);
+            let spot = match outcome {
+                UpsertOutcome::Inserted(spot) | UpsertOutcome::Updated(spot) => {
+                    events.push(BandMapEvent::SpotUpserted {
+                        sequence: store.next_sequence(),
+                        spot: Box::new(spot.clone()),
+                    });
+                    spot
+                }
+                UpsertOutcome::Refreshed(spot) => spot,
+            };
+            (spot, events)
         };
 
-        match outcome {
-            UpsertOutcome::Inserted(spot) | UpsertOutcome::Updated(spot) => {
-                let _ = self
-                    .inner
-                    .events
-                    .send(BandMapEvent::SpotUpserted(Box::new(spot.clone())));
-                spot
-            }
-            UpsertOutcome::Refreshed(spot) => spot,
-        }
+        self.broadcast_events(events);
+        spot
     }
 
     fn sync_local_spots_for_log(&self, log_id: i64, contacts: &[Contact]) {
@@ -368,21 +407,23 @@ impl BandMapManager {
             }
         }
 
-        let (deleted_ids, upserted_spots) = {
+        let events = {
             let mut store = self
                 .inner
                 .store
                 .lock()
                 .expect("band map store mutex poisoned");
-            let mut deleted_ids = store.prune(max_age);
+            let mut events = store.prune(max_age);
             let existing_keys = store.local_keys_for_log(log_id);
             let desired_keys = desired.keys().cloned().collect::<HashSet<_>>();
-            let mut upserted_spots = Vec::new();
 
             for (key, candidate) in desired {
                 match store.upsert(key, candidate) {
                     UpsertOutcome::Inserted(spot) | UpsertOutcome::Updated(spot) => {
-                        upserted_spots.push(spot)
+                        events.push(BandMapEvent::SpotUpserted {
+                            sequence: store.next_sequence(),
+                            spot: Box::new(spot),
+                        });
                     }
                     UpsertOutcome::Refreshed(_) => {}
                 }
@@ -390,34 +431,30 @@ impl BandMapManager {
 
             for key in existing_keys.difference(&desired_keys) {
                 if let Some(id) = store.id_by_key.get(key).copied() {
-                    store.remove_by_id(id, &mut deleted_ids);
+                    store.remove_by_id(id, &mut events);
                 }
             }
 
-            (deleted_ids, upserted_spots)
+            events
         };
 
-        for id in deleted_ids {
-            let _ = self.inner.events.send(BandMapEvent::SpotDeleted { id });
-        }
-        for spot in upserted_spots {
-            let _ = self
-                .inner
-                .events
-                .send(BandMapEvent::SpotUpserted(Box::new(spot)));
+        self.broadcast_events(events);
+    }
+
+    fn broadcast_events(&self, events: Vec<BandMapEvent>) {
+        for event in events {
+            let _ = self.inner.events.send(event);
         }
     }
 
     fn prune_old_spots(&self) {
-        let deleted_ids = self
+        let events = self
             .inner
             .store
             .lock()
             .expect("band map store mutex poisoned")
             .prune(self.max_age());
-        for id in deleted_ids {
-            let _ = self.inner.events.send(BandMapEvent::SpotDeleted { id });
-        }
+        self.broadcast_events(events);
     }
 
     fn max_age(&self) -> Duration {
@@ -576,9 +613,18 @@ impl BandMapSpotStore {
             .collect()
     }
 
-    fn prune(&mut self, max_age: Duration) -> Vec<u64> {
+    fn current_sequence(&self) -> u64 {
+        self.next_sequence
+    }
+
+    fn next_sequence(&mut self) -> u64 {
+        self.next_sequence = self.next_sequence.saturating_add(1).max(1);
+        self.next_sequence
+    }
+
+    fn prune(&mut self, max_age: Duration) -> Vec<BandMapEvent> {
         let cutoff = cutoff_timestamp(max_age);
-        let mut deleted_ids = Vec::new();
+        let mut events = Vec::new();
 
         while let Some(id) = self.ids_by_time.front().copied() {
             let Some(spot) = self.spots_by_id.get(&id) else {
@@ -589,27 +635,45 @@ impl BandMapSpotStore {
                 break;
             }
             self.ids_by_time.pop_front();
-            self.remove_by_id(id, &mut deleted_ids);
+            self.remove_by_id(id, &mut events);
         }
 
-        deleted_ids
+        events
     }
 
-    fn remove(&mut self, id: u64) -> bool {
-        let mut deleted_ids = Vec::new();
+    fn remove(&mut self, id: u64) -> Vec<BandMapEvent> {
+        let mut events = Vec::new();
         self.ids_by_time.retain(|current_id| *current_id != id);
-        self.remove_by_id(id, &mut deleted_ids);
-        !deleted_ids.is_empty()
+        self.remove_by_id(id, &mut events);
+        events
     }
 
-    fn remove_by_id(&mut self, id: u64, deleted_ids: &mut Vec<u64>) {
+    fn remove_cluster_source_spot(&mut self, source_id: u64) -> Vec<BandMapEvent> {
+        let Some(id) = self
+            .id_by_key
+            .get(&BandMapDedupeKey::Cluster { source_id })
+            .copied()
+        else {
+            return Vec::new();
+        };
+
+        self.ids_by_time.retain(|current_id| *current_id != id);
+        let mut events = Vec::new();
+        self.remove_by_id(id, &mut events);
+        events
+    }
+
+    fn remove_by_id(&mut self, id: u64, events: &mut Vec<BandMapEvent>) {
         if self.spots_by_id.remove(&id).is_none() {
             return;
         }
         if let Some(key) = self.key_by_id.remove(&id) {
             self.id_by_key.remove(&key);
         }
-        deleted_ids.push(id);
+        events.push(BandMapEvent::SpotDeleted {
+            sequence: self.next_sequence(),
+            id,
+        });
     }
 
     fn local_keys_for_log(&self, log_id: i64) -> HashSet<BandMapDedupeKey> {
@@ -969,8 +1033,60 @@ mod tests {
         assert!(manager.delete_spot(spot.id));
         assert!(matches!(
             events.try_recv(),
-            Ok(BandMapEvent::SpotDeleted { id }) if id == spot.id
+            Ok(BandMapEvent::SpotDeleted { id, sequence: 2 }) if id == spot.id
         ));
+    }
+
+    #[test]
+    fn prune_during_upsert_emits_delete_event() {
+        let manager = BandMapManager::new(test_bands(), Duration::from_secs(60));
+        let old = unix_timestamp_secs().saturating_sub(61);
+        let mut events = manager.subscribe();
+
+        manager.upsert_local_spot(LocalSpotInput {
+            frequency_hz: 14_074_000,
+            call_dx: "K1OLD".to_string(),
+            comment: None,
+            radio_id: None,
+            radio_name: None,
+            log_id: Some(9),
+            exchange_fields: None,
+            received_at: Some(old),
+        });
+        assert!(matches!(
+            events.try_recv(),
+            Ok(BandMapEvent::SpotUpserted { sequence: 1, .. })
+        ));
+
+        manager.upsert_local_spot(LocalSpotInput {
+            frequency_hz: 14_075_000,
+            call_dx: "K1NEW".to_string(),
+            comment: None,
+            radio_id: None,
+            radio_name: None,
+            log_id: Some(9),
+            exchange_fields: None,
+            received_at: Some(unix_timestamp_secs()),
+        });
+
+        assert!(matches!(
+            events.try_recv(),
+            Ok(BandMapEvent::SpotDeleted { sequence: 2, .. })
+        ));
+        assert!(matches!(
+            events.try_recv(),
+            Ok(BandMapEvent::SpotUpserted { sequence: 3, .. })
+        ));
+    }
+
+    #[test]
+    fn delete_dxcluster_spot_removes_matching_bandmap_spot() {
+        let manager = BandMapManager::new(test_bands(), Duration::from_secs(60));
+        manager.upsert_dxcluster_spot(dx_spot(22, "K1ABC", 14_074_000));
+
+        assert!(manager.delete_dxcluster_spot(22));
+        assert!(manager.spots(None).is_empty());
+        assert!(!manager.delete_dxcluster_spot(22));
     }
 
     #[test]

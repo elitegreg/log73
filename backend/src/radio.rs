@@ -42,12 +42,20 @@ pub enum ServerMessage {
     DxClusterSpotDeleted {
         id: u64,
     },
+    #[serde(rename = "bandmap_subscription_ready")]
+    BandMapSubscriptionReady,
+    #[serde(rename = "bandmap_sequence")]
+    BandMapSequence {
+        sequence: u64,
+    },
     #[serde(rename = "bandmap_spot")]
     BandMapSpot {
+        sequence: u64,
         spot: Box<BandMapSpot>,
     },
     #[serde(rename = "bandmap_spot_deleted")]
     BandMapSpotDeleted {
+        sequence: u64,
         id: u64,
     },
 }
@@ -294,6 +302,7 @@ mod tests {
     #[test]
     fn serializes_bandmap_spot_server_message() {
         let message = ServerMessage::BandMapSpot {
+            sequence: 12,
             spot: Box::new(BandMapSpot {
                 id: 9,
                 received_at: 1_700_000_000,
@@ -316,19 +325,49 @@ mod tests {
         let json = serde_json::to_value(message).expect("bandmap spot should serialize");
 
         assert_eq!(json["type"], "bandmap_spot");
+        assert_eq!(json["sequence"], 12);
         assert_eq!(json["spot"]["id"], 9);
         assert_eq!(json["spot"]["spot_type"], "local");
     }
 
     #[test]
+    fn serializes_bandmap_subscription_ready_server_message() {
+        let json = serde_json::to_value(ServerMessage::BandMapSubscriptionReady)
+            .expect("bandmap ready should serialize");
+
+        assert_eq!(
+            json,
+            serde_json::json!({ "type": "bandmap_subscription_ready" })
+        );
+    }
+
+    #[test]
+    fn serializes_bandmap_sequence_server_message() {
+        let json = serde_json::to_value(ServerMessage::BandMapSequence { sequence: 44 })
+            .expect("bandmap sequence should serialize");
+
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "type": "bandmap_sequence",
+                "sequence": 44
+            })
+        );
+    }
+
+    #[test]
     fn serializes_bandmap_spot_deleted_server_message() {
-        let message = ServerMessage::BandMapSpotDeleted { id: 9 };
+        let message = ServerMessage::BandMapSpotDeleted {
+            sequence: 13,
+            id: 9,
+        };
         let json = serde_json::to_value(message).expect("bandmap delete should serialize");
 
         assert_eq!(
             json,
             serde_json::json!({
                 "type": "bandmap_spot_deleted",
+                "sequence": 13,
                 "id": 9
             })
         );

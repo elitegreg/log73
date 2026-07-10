@@ -3,22 +3,101 @@ import {
   bandMapSpots,
   deleteBandMapSpot,
   saveBandMapSpot,
-} from '../../lib/api';
+} from '../../lib/api.js';
 import {
   addBandMapSpot,
   createBandMapSpotStore,
   removeBandMapSpot,
-} from '../../domain/bandMap';
+} from '../../domain/bandMap.js';
 import {
   BAND_MAP_ENABLED_STORAGE_KEY,
   bandForFrequency,
-} from '../../logger/mainWindowHelpers';
+} from '../../logger/mainWindowHelpers.js';
+
+function normalizedBandMapSequence(value) {
+  const sequence = Number(value);
+  return Number.isInteger(sequence) && sequence > 0 ? sequence : 0;
+}
+
+export function isBandMapSequenceMessage(message) {
+  return (
+    message?.type === 'bandmap_spot' ||
+    message?.type === 'bandmap_spot_deleted' ||
+    message?.type === 'bandmap_sequence'
+  );
+}
+
+export function applyBandMapSequenceMessage({ store, sequence, message }) {
+  if (!isBandMapSequenceMessage(message)) {
+    return { store, sequence, applied: false, needsRefresh: false };
+  }
+
+  const messageSequence = normalizedBandMapSequence(message?.sequence);
+  if (!messageSequence || messageSequence <= sequence) {
+    return { store, sequence, applied: false, needsRefresh: false };
+  }
+  if (messageSequence !== sequence + 1) {
+    return {
+      store,
+      sequence,
+      applied: false,
+      needsRefresh: true,
+      messageSequence,
+    };
+  }
+
+  if (message.type === 'bandmap_spot') {
+    return {
+      store: addBandMapSpot(store, message.spot),
+      sequence: messageSequence,
+      applied: true,
+      needsRefresh: false,
+    };
+  }
+  if (message.type === 'bandmap_spot_deleted') {
+    return {
+      store: removeBandMapSpot(store, message.id),
+      sequence: messageSequence,
+      applied: true,
+      needsRefresh: false,
+    };
+  }
+
+  return {
+    store,
+    sequence: messageSequence,
+    applied: true,
+    needsRefresh: false,
+  };
+}
+
+export function visibleBandMapSpotStoreForCurrentBand({
+  store,
+  settings,
+  radioFrequencyHz,
+}) {
+  const baseStore = store ?? createBandMapSpotStore();
+  const allowedBands = settings?.allowed_bands ?? [];
+  const bandCatalog = settings?.band_catalog ?? [];
+  const currentBand = bandForFrequency(Number(radioFrequencyHz), bandCatalog);
+
+  if (!currentBand?.name) return createBandMapSpotStore();
+
+  return createBandMapSpotStore(
+    (baseStore.sortedSpots ?? []).filter((spot) => {
+      const band = bandForFrequency(Number(spot?.frequency_hz), bandCatalog);
+      if (!band || band.name !== currentBand.name) return false;
+      return allowedBands.length === 0 || allowedBands.includes(band.name);
+    }),
+  );
+}
 
 export function useBandMap({
   settings,
   enabled,
   logId,
   radioId,
+  radioFrequencyHz,
   sendRadioMessage,
   notifyOperationalError,
   onBeforeActivateSpot,
@@ -29,6 +108,13 @@ export function useBandMap({
   const [bandMapSelection, setBandMapSelection] = useState(null);
   const bandMapEnabledRef = useRef(false);
   const bandMapSelectionSequenceRef = useRef(0);
+  const bandMapSyncRef = useRef({
+    status: 'idle',
+    sequence: 0,
+    bufferedMessages: [],
+    refreshInFlight: false,
+    generation: 0,
+  });
 
   const sendBandMapSubscription = useCallback(
     (nextEnabled) => {
@@ -40,17 +126,87 @@ export function useBandMap({
     [sendRadioMessage],
   );
 
-  const loadBandMapSpots = useCallback(async () => {
-    const result = await bandMapSpots({ logId });
-    const spots = Array.isArray(result?.spots)
-      ? result.spots
-      : Array.isArray(result)
-        ? result
-        : [];
-    setBandMapSpotStore((currentStore) =>
-      spots.reduce(addBandMapSpot, currentStore),
-    );
-  }, [logId]);
+  const resetBandMapSync = useCallback((status) => {
+    const sync = bandMapSyncRef.current;
+    sync.status = status;
+    sync.sequence = 0;
+    sync.bufferedMessages = [];
+    sync.refreshInFlight = false;
+    sync.generation += 1;
+  }, []);
+
+  const warnBandMapSequenceGap = useCallback((reason, expectedSequence, result) => {
+    console.warn('[BandMap] WARNING: sequence gap detected; refreshing snapshot.', {
+      reason,
+      expectedSequence,
+      receivedSequence: result?.messageSequence ?? null,
+      currentSequence: expectedSequence - 1,
+      messageType: result?.message?.type ?? null,
+    });
+  }, []);
+
+  const refreshBandMapSnapshot = useCallback(
+    async (reason) => {
+      const sync = bandMapSyncRef.current;
+      if (!bandMapEnabledRef.current || sync.refreshInFlight) return;
+
+      sync.refreshInFlight = true;
+      sync.status = 'loading_snapshot';
+      const generation = sync.generation;
+
+      try {
+        const result = await bandMapSpots({ logId });
+        if (!bandMapEnabledRef.current) return;
+        if (bandMapSyncRef.current.generation !== generation) return;
+
+        const spots = Array.isArray(result?.spots)
+          ? result.spots
+          : Array.isArray(result)
+            ? result
+            : [];
+        let nextStore = createBandMapSpotStore(spots);
+        let nextSequence = normalizedBandMapSequence(result?.sequence);
+        const bufferedMessages = sync.bufferedMessages;
+        sync.bufferedMessages = [];
+
+        for (const message of bufferedMessages) {
+          const applied = applyBandMapSequenceMessage({
+            store: nextStore,
+            sequence: nextSequence,
+            message,
+          });
+          if (applied.needsRefresh) {
+            warnBandMapSequenceGap(reason, nextSequence + 1, {
+              ...applied,
+              message,
+            });
+            sync.refreshInFlight = false;
+            void refreshBandMapSnapshot('buffered_sequence_gap');
+            return;
+          }
+          nextStore = applied.store;
+          nextSequence = applied.sequence;
+        }
+
+        sync.sequence = nextSequence;
+        sync.status = 'live';
+        setBandMapSpotStore(nextStore);
+      } catch (error) {
+        if (bandMapSyncRef.current.generation !== generation) return;
+        sync.status = 'awaiting_ready';
+        notifyOperationalError(
+          'loadBandMapSpots',
+          'Unable to load band map spots.',
+          error,
+        );
+      } finally {
+        if (bandMapSyncRef.current.generation === generation) {
+          sync.refreshInFlight = false;
+        }
+      }
+    },
+    [logId, notifyOperationalError, warnBandMapSequenceGap],
+  );
 
   const handleActivateBandMapSpot = useCallback(
     (spot) => {
@@ -148,70 +304,67 @@ export function useBandMap({
     bandMapEnabledRef.current = enabled;
     if (enabled) {
       setBandMapSpotStore(createBandMapSpotStore());
+      resetBandMapSync('awaiting_ready');
+    } else {
+      resetBandMapSync('idle');
     }
     sendBandMapSubscription(enabled);
+  }, [enabled, resetBandMapSync, sendBandMapSubscription]);
 
-    if (!enabled) return undefined;
-
-    let isCancelled = false;
-    loadBandMapSpots().catch((error) => {
-      if (isCancelled) return;
-      notifyOperationalError(
-        'loadBandMapSpots',
-        'Unable to load band map spots.',
-        error,
-      );
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [
-    enabled,
-    loadBandMapSpots,
-    notifyOperationalError,
-    sendBandMapSubscription,
-  ]);
-
-  const visibleBandMapSpotStore = useMemo(() => {
-    const allowedBands = settings?.allowed_bands ?? [];
-    const bandCatalog = settings?.band_catalog ?? [];
-    if (allowedBands.length === 0) return bandMapSpotStore;
-
-    return createBandMapSpotStore(
-      (bandMapSpotStore?.sortedSpots ?? []).filter((spot) => {
-        const band = bandForFrequency(Number(spot?.frequency_hz), bandCatalog);
-        return band ? allowedBands.includes(band.name) : false;
+  const visibleBandMapSpotStore = useMemo(
+    () =>
+      visibleBandMapSpotStoreForCurrentBand({
+        store: bandMapSpotStore,
+        settings,
+        radioFrequencyHz,
       }),
-    );
-  }, [bandMapSpotStore, settings]);
+    [bandMapSpotStore, radioFrequencyHz, settings],
+  );
 
   const handleSocketOpenReload = useCallback(async () => {
     if (!bandMapEnabledRef.current) return;
     setBandMapSpotStore(createBandMapSpotStore());
-    try {
-      await loadBandMapSpots();
-      sendBandMapSubscription(true);
-    } catch (error) {
-      notifyOperationalError(
-        'reloadBandMapSpots',
-        'Unable to reload band map spots.',
-        error,
-      );
-    }
-  }, [loadBandMapSpots, notifyOperationalError, sendBandMapSubscription]);
+    resetBandMapSync('awaiting_ready');
+    sendBandMapSubscription(true);
+  }, [resetBandMapSync, sendBandMapSubscription]);
 
-  const handleSocketMessage = useCallback((message) => {
-    if (message.type === 'bandmap_spot') {
-      setBandMapSpotStore((currentStore) =>
-        addBandMapSpot(currentStore, message.spot),
-      );
-    } else if (message.type === 'bandmap_spot_deleted') {
-      setBandMapSpotStore((currentStore) =>
-        removeBandMapSpot(currentStore, message.id),
-      );
-    }
-  }, []);
+  const handleSocketMessage = useCallback(
+    (message) => {
+      if (message.type === 'bandmap_subscription_ready') {
+        if (!bandMapEnabledRef.current) return;
+        void refreshBandMapSnapshot('subscription_ready');
+        return;
+      }
+      if (!isBandMapSequenceMessage(message)) return;
+
+      const sync = bandMapSyncRef.current;
+      if (sync.status !== 'live') {
+        sync.bufferedMessages.push(message);
+        return;
+      }
+
+      setBandMapSpotStore((currentStore) => {
+        const result = applyBandMapSequenceMessage({
+          store: currentStore,
+          sequence: sync.sequence,
+          message,
+        });
+        if (result.needsRefresh) {
+          warnBandMapSequenceGap('live_sequence_gap', sync.sequence + 1, {
+            ...result,
+            message,
+          });
+          sync.status = 'loading_snapshot';
+          sync.bufferedMessages = [];
+          void refreshBandMapSnapshot('live_sequence_gap');
+          return currentStore;
+        }
+        sync.sequence = result.sequence;
+        return result.store;
+      });
+    },
+    [refreshBandMapSnapshot, warnBandMapSequenceGap],
+  );
 
   return {
     visibleBandMapSpotStore,
