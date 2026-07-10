@@ -237,7 +237,7 @@ impl Default for DxClusterManager {
 impl DxClusterSpotStore {
     fn add(&mut self, dx: DX) -> DxClusterSpot {
         let now = unix_timestamp_secs();
-        let call_dx = dx.call_dx.to_uppercase();
+        let call_dx = dx.call_dx.trim().to_uppercase();
         let rbn = parsed_rbn(&dx);
         let source = if rbn.is_some() { "rbn" } else { "dx" }.to_string();
         let new_dedupe_key = dedupe_key(dx.freq, &call_dx);
@@ -287,30 +287,18 @@ impl DxClusterSpotStore {
         spot
     }
 
-    fn find_duplicate_id(&mut self, key: &DxClusterDedupeKey) -> Option<u64> {
-        let mut candidate_keys = Vec::with_capacity(3);
-        candidate_keys.push(key.clone());
-        if let Some(previous) = key.frequency_tenth_khz.checked_sub(1) {
-            candidate_keys.push(DxClusterDedupeKey {
-                frequency_tenth_khz: previous,
-                call_dx: key.call_dx.clone(),
-            });
-        }
-        candidate_keys.push(DxClusterDedupeKey {
-            frequency_tenth_khz: key.frequency_tenth_khz.saturating_add(1),
-            call_dx: key.call_dx.clone(),
-        });
-
-        for candidate_key in candidate_keys {
-            if let Some(id) = self.ids_by_dedupe_key.get(&candidate_key).copied() {
-                if self.spots_by_id.contains_key(&id) {
-                    return Some(id);
-                }
-                self.ids_by_dedupe_key.remove(&candidate_key);
-            }
-        }
-
-        None
+    fn find_duplicate_id(&self, key: &DxClusterDedupeKey) -> Option<u64> {
+        self.ids_by_callsign.get(&key.call_dx).and_then(|ids| {
+            ids.iter().find_map(|id| {
+                let spot = self.spots_by_id.get(id)?;
+                let spot_key = dedupe_key(spot.frequency_hz, &spot.call_dx);
+                (spot_key
+                    .frequency_tenth_khz
+                    .abs_diff(key.frequency_tenth_khz)
+                    <= 1)
+                    .then_some(*id)
+            })
+        })
     }
 
     fn spots(&self) -> Vec<DxClusterSpot> {
@@ -675,6 +663,24 @@ mod tests {
         assert_eq!(spots.len(), 1);
         assert_eq!(spots[0].frequency_hz, 14_074_100);
         assert_eq!(spots[0].comment.as_deref(), Some("adjacent"));
+    }
+
+    #[tokio::test]
+    async fn deduplicates_rbn_spots_with_trimmed_callsign_and_adjacent_rounded_frequency() {
+        let manager = DxClusterManager::new();
+        manager
+            .add_dx_spot(dx_with_freq(" PY5WR ", 21_010_000), Duration::from_secs(60))
+            .await;
+        let mut newest = dx_with_freq("PY5WR", 21_010_100);
+        newest.comment = Some("newest".to_string());
+
+        manager.add_dx_spot(newest, Duration::from_secs(60)).await;
+
+        let spots = manager.spots().await;
+        assert_eq!(spots.len(), 1);
+        assert_eq!(spots[0].call_dx, "PY5WR");
+        assert_eq!(spots[0].frequency_hz, 21_010_100);
+        assert_eq!(spots[0].comment.as_deref(), Some("newest"));
     }
 
     #[tokio::test]
