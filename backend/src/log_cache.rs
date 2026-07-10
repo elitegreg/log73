@@ -1,5 +1,9 @@
 use crate::contest_rules::ContestRulesStore;
-use crate::db::{Contact, Database, contact_adif_value, contact_id};
+use crate::db::{
+    Contact, Database, contact_adif_value, contact_id, contact_meta_value, set_contact_adif,
+    set_contact_meta,
+};
+use crate::dxcc::DxccDatabase;
 use crate::scoring::{ContestScoringModule, ScoringModules};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -54,6 +58,7 @@ struct LogCacheInner {
     db: Database,
     contest_rules: ContestRulesStore,
     scoring_modules: ScoringModules,
+    dxcc: Arc<DxccDatabase>,
     logs: Mutex<HashMap<i64, CachedLog>>,
     processors: Mutex<Vec<Arc<dyn LogCacheProcessor>>>,
 }
@@ -70,12 +75,14 @@ impl LogCache {
         db: Database,
         contest_rules: ContestRulesStore,
         scoring_modules: ScoringModules,
+        dxcc: Arc<DxccDatabase>,
     ) -> Self {
         Self {
             inner: Arc::new(LogCacheInner {
                 db,
                 contest_rules,
                 scoring_modules,
+                dxcc,
                 logs: Mutex::new(HashMap::new()),
                 processors: Mutex::new(Vec::new()),
             }),
@@ -162,9 +169,10 @@ impl LogCache {
     pub async fn upsert_contacts(
         &self,
         log_id: i64,
-        contacts: Vec<Contact>,
+        mut contacts: Vec<Contact>,
     ) -> Result<LogCacheUpsertResult, String> {
         self.ensure_loaded(log_id).await?;
+        enrich_missing_dxcc(&self.inner.dxcc, &mut contacts);
 
         let committed_contacts = self
             .inner
@@ -331,9 +339,45 @@ impl LogCache {
             .contacts(log_id)
             .await
             .map_err(|error| error.to_string())?;
+        enrich_missing_dxcc(&self.inner.dxcc, &mut contacts);
         sort_contacts_desc(&mut contacts);
 
         Ok((module, contacts))
+    }
+}
+
+fn enrich_missing_dxcc(database: &DxccDatabase, contacts: &mut [Contact]) {
+    for contact in contacts {
+        let callsign = contact_adif_value(contact, "CALL")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|callsign| !callsign.is_empty());
+        let Some(callsign) = callsign else {
+            continue;
+        };
+
+        let dxcc = contact_adif_value(contact, "DXCC");
+        let dxcc_missing = dxcc.is_none_or(serde_json::Value::is_null);
+        let prefix_missing = contact_meta_value(contact, "DXCC_PREFIX")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(|prefix| prefix.trim().is_empty());
+        if !dxcc_missing && !prefix_missing {
+            continue;
+        }
+
+        let Some(info) = database.lookup(callsign) else {
+            continue;
+        };
+        if dxcc_missing {
+            set_contact_adif(contact, "DXCC", serde_json::Value::Number(info.adif.into()));
+        }
+        if prefix_missing && !info.primary_prefix.trim().is_empty() {
+            set_contact_meta(
+                contact,
+                "DXCC_PREFIX",
+                serde_json::Value::String(info.primary_prefix),
+            );
+        }
     }
 }
 

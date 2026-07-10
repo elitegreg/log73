@@ -74,6 +74,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
             CNTY TEXT,
             CQZ INTEGER,
             DXCC INTEGER,
+            DXCC_PREFIX TEXT,
             GRIDSQUARE TEXT,
             MY_CNTY TEXT,
             MY_CQ_ZONE INTEGER,

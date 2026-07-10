@@ -48,6 +48,11 @@ function dxccAdifNumber(dxccInfo) {
   return Number.isInteger(dxccNumber) && dxccNumber > 0 ? dxccNumber : null;
 }
 
+function dxccPrefix(dxccInfo) {
+  const prefix = String(dxccInfo?.primary_prefix ?? '').trim();
+  return prefix || null;
+}
+
 function MainWindow({
   settings,
   log,
@@ -488,12 +493,14 @@ function MainWindow({
     const timeOn = callSignEditedAtRef.current;
     const normalizedCallSign = callSign.trim().toUpperCase();
     const dxccNumber = dxccAdifNumber(currentDxccInfo);
+    const prefix = dxccPrefix(currentDxccInfo);
     const contact = {
       meta: {
         status: 'Pending',
         sessionId,
         logId,
         clientId: createContactId(timeOn, normalizedCallSign),
+        ...(prefix === null ? {} : { DXCC_PREFIX: prefix }),
         ...(force ? { force: true } : {}),
       },
       adif: {

@@ -1,6 +1,6 @@
 use super::contact::{
     Contact, build_contact, contact_adif, contact_adif_value, contact_id, contact_log_id,
-    frequency_hz, json_i64, json_string, set_contact_adif, set_contact_meta,
+    contact_meta_value, frequency_hz, json_i64, json_string, set_contact_adif, set_contact_meta,
 };
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -23,6 +23,7 @@ const QSO_COLUMNS: &[&str] = &[
     "CNTY",
     "CQZ",
     "DXCC",
+    "DXCC_PREFIX",
     "GRIDSQUARE",
     "MY_CNTY",
     "MY_CQ_ZONE",
@@ -69,69 +70,7 @@ INSERT INTO qsos (
     CNTY,
     CQZ,
     DXCC,
-    GRIDSQUARE,
-    MY_CNTY,
-    MY_CQ_ZONE,
-    MY_GRIDSQUARE,
-    MY_STATE,
-    MY_ARRL_SECT,
-    SRX,
-    SRX_STRING,
-    STATE,
-    STX,
-    STX_STRING,
-    TX_PWR,
-    JSON
-) VALUES (
-    ?1,
-    ?2,
-    ?3,
-    ?4,
-    ?5,
-    ?6,
-    ?7,
-    ?8,
-    ?9,
-    ?10,
-    ?11,
-    ?12,
-    ?13,
-    ?14,
-    ?15,
-    ?16,
-    ?17,
-    ?18,
-    ?19,
-    ?20,
-    ?21,
-    ?22,
-    ?23,
-    ?24,
-    ?25,
-    ?26,
-    ?27,
-    ?28
-)
-"#;
-
-const UPSERT_QSO_SQL: &str = r#"
-INSERT INTO qsos (
-    ID,
-    LOG_ID,
-    QSO_DATE_TIME_ON,
-    STATION_CALLSIGN,
-    OPERATOR,
-    CONTEST_ID,
-    CALL,
-    BAND,
-    FREQ,
-    MODE,
-    RST_SENT,
-    RST_RCVD,
-    ARRL_SECT,
-    CNTY,
-    CQZ,
-    DXCC,
+    DXCC_PREFIX,
     GRIDSQUARE,
     MY_CNTY,
     MY_CQ_ZONE,
@@ -176,6 +115,72 @@ INSERT INTO qsos (
     ?28,
     ?29
 )
+"#;
+
+const UPSERT_QSO_SQL: &str = r#"
+INSERT INTO qsos (
+    ID,
+    LOG_ID,
+    QSO_DATE_TIME_ON,
+    STATION_CALLSIGN,
+    OPERATOR,
+    CONTEST_ID,
+    CALL,
+    BAND,
+    FREQ,
+    MODE,
+    RST_SENT,
+    RST_RCVD,
+    ARRL_SECT,
+    CNTY,
+    CQZ,
+    DXCC,
+    DXCC_PREFIX,
+    GRIDSQUARE,
+    MY_CNTY,
+    MY_CQ_ZONE,
+    MY_GRIDSQUARE,
+    MY_STATE,
+    MY_ARRL_SECT,
+    SRX,
+    SRX_STRING,
+    STATE,
+    STX,
+    STX_STRING,
+    TX_PWR,
+    JSON
+) VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    ?8,
+    ?9,
+    ?10,
+    ?11,
+    ?12,
+    ?13,
+    ?14,
+    ?15,
+    ?16,
+    ?17,
+    ?18,
+    ?19,
+    ?20,
+    ?21,
+    ?22,
+    ?23,
+    ?24,
+    ?25,
+    ?26,
+    ?27,
+    ?28,
+    ?29,
+    ?30
+)
 ON CONFLICT(ID) DO UPDATE SET
     LOG_ID = excluded.LOG_ID,
     QSO_DATE_TIME_ON = excluded.QSO_DATE_TIME_ON,
@@ -192,6 +197,7 @@ ON CONFLICT(ID) DO UPDATE SET
     CNTY = excluded.CNTY,
     CQZ = excluded.CQZ,
     DXCC = excluded.DXCC,
+    DXCC_PREFIX = excluded.DXCC_PREFIX,
     GRIDSQUARE = excluded.GRIDSQUARE,
     MY_CNTY = excluded.MY_CNTY,
     MY_CQ_ZONE = excluded.MY_CQ_ZONE,
@@ -291,7 +297,8 @@ fn select_log_contest_id(connection: &Connection, log_id: i64) -> rusqlite::Resu
 
 pub(super) fn qso_column_for_adif(field_adif: &str) -> Option<&'static str> {
     QSO_COLUMNS.iter().copied().find(|column| {
-        !matches!(*column, "LOG_ID" | "JSON") && column.eq_ignore_ascii_case(field_adif)
+        !matches!(*column, "LOG_ID" | "JSON" | "DXCC_PREFIX")
+            && column.eq_ignore_ascii_case(field_adif)
     })
 }
 
@@ -333,6 +340,12 @@ fn contact_to_sql_values(contact: &Contact) -> Vec<SqlValue> {
             }
             if *column == "LOG_ID" {
                 return SqlValue::Integer(contact_log_id(contact).unwrap_or(1));
+            }
+            if *column == "DXCC_PREFIX" {
+                return contact_meta_value(contact, "DXCC_PREFIX")
+                    .and_then(|value| json_string(Some(value)))
+                    .map(SqlValue::Text)
+                    .unwrap_or(SqlValue::Null);
             }
             if *column == "QSO_DATE_TIME_ON" {
                 return json_i64(contact_adif_value(contact, "QSO_DATE_TIME_ON"))
@@ -405,6 +418,13 @@ fn row_to_contact(row: &rusqlite::Row<'_>) -> rusqlite::Result<Contact> {
 
     for column in QSO_COLUMNS {
         if *column == "JSON" || *column == "LOG_ID" {
+            continue;
+        }
+        if *column == "DXCC_PREFIX" {
+            let value: Option<String> = row.get(*column)?;
+            if let Some(value) = value {
+                meta.insert(column.to_string(), Value::String(value));
+            }
             continue;
         }
         if INTEGER_COLUMNS.contains(column) {

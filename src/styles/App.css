@@ -439,7 +439,8 @@
   color: white;
 }
 
-.band-map-details-dialog-overlay {
+.band-map-details-dialog-overlay,
+.log-details-dialog-overlay {
   position: fixed;
   inset: 0;
   z-index: 1000;
@@ -450,7 +451,8 @@
   padding: 16px;
 }
 
-.band-map-details-dialog {
+.band-map-details-dialog,
+.log-details-dialog {
   width: min(520px, 100%);
   max-height: min(480px, calc(100vh - 32px));
   border: 1px solid #404040;
@@ -460,7 +462,8 @@
   flex-direction: column;
 }
 
-.band-map-details-dialog-header {
+.band-map-details-dialog-header,
+.log-details-dialog-header {
   background-color: #0000ff;
   color: white;
   padding: 2px 5px;
@@ -470,7 +473,8 @@
   justify-content: space-between;
 }
 
-.band-map-details-dialog-body {
+.band-map-details-dialog-body,
+.log-details-dialog-body {
   overflow: auto;
   padding: 8px;
 }

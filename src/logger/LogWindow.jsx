@@ -37,6 +37,39 @@ function entryAdif(entry) {
   return entry?.adif ?? entry ?? {};
 }
 
+function formatDetailValue(key, value) {
+  if (
+    typeof value === 'number' &&
+    /(?:QSO_DATE_TIME_ON|TIME_ON|timeOnEpoch|timestamp|received_at)/i.test(key)
+  ) {
+    const milliseconds = value < 100000000000 ? value * 1000 : value;
+    const date = new Date(milliseconds);
+    if (!Number.isNaN(date.getTime())) {
+      return date.toISOString().replace('T', ' ').replace('Z', ' UTC');
+    }
+  }
+  if (value && typeof value === 'object') return JSON.stringify(value);
+  return String(value ?? '');
+}
+
+function detailRowsForContact(entry) {
+  return ['meta', 'adif']
+    .flatMap((section, sectionIndex) =>
+      Object.entries(section === 'meta' ? entryMeta(entry) : entryAdif(entry))
+        .map(([key, value]) => ({
+          key,
+          sectionIndex,
+          value: formatDetailValue(`${section}.${key}`, value),
+        }))
+        .filter(({ value }) => value.trim() !== ''),
+    )
+    .sort(
+      (left, right) =>
+        left.key.localeCompare(right.key) || left.sectionIndex - right.sectionIndex,
+    )
+    .map(({ key, value }) => [key, value]);
+}
+
 function qsoEpoch(entry) {
   const adif = entryAdif(entry);
   const meta = entryMeta(entry);
@@ -321,6 +354,7 @@ function LogWindow({
   );
   const [selectedKeys, setSelectedKeys] = useState(() => new Set());
   const [contextMenu, setContextMenu] = useState(null);
+  const [detailsContact, setDetailsContact] = useState(null);
   const [editingCell, setEditingCell] = useState(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(230);
@@ -492,6 +526,15 @@ function LogWindow({
       ),
     });
     setContextMenu(null);
+  }
+
+  function viewDetails() {
+    if (!contextMenu) return;
+    const contact = contacts.find(
+      (entry, index) => contactKey(entry, index) === contextMenu.contactKey,
+    );
+    setContextMenu(null);
+    if (contact) setDetailsContact(contact);
   }
 
   function deleteSelected() {
@@ -678,6 +721,9 @@ function LogWindow({
               style={contextMenuPositionStyle(contextMenu)}
               onClick={(event) => event.stopPropagation()}
             >
+              <button type="button" onClick={viewDetails}>
+                View details…
+              </button>
               <button
                 type="button"
                 disabled={
@@ -700,6 +746,49 @@ function LogWindow({
                   ? 'QSO'
                   : `${contextMenu.selectedCount} QSOs`}
               </button>
+            </div>,
+            document.body,
+          )
+        : null}
+      {detailsContact
+        ? createPortal(
+            <div
+              className="log-details-dialog-overlay"
+              onClick={() => setDetailsContact(null)}
+            >
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label="QSO details"
+                className="log-details-dialog"
+                onClick={(event) => event.stopPropagation()}
+              >
+                <div className="log-details-dialog-header">
+                  <strong>QSO Details</strong>
+                  <button
+                    className="title-button"
+                    type="button"
+                    aria-label="Close QSO details"
+                    onClick={() => setDetailsContact(null)}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="log-details-dialog-body">
+                  <table className="band-map-details-table">
+                    <tbody>
+                      {detailRowsForContact(detailsContact).map(
+                        ([label, value]) => (
+                          <tr key={label}>
+                            <th>{label}</th>
+                            <td>{value}</td>
+                          </tr>
+                        ),
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>,
             document.body,
           )
