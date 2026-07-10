@@ -16,7 +16,7 @@ name = "log73-launcher"
 path = "src/main.rs"
 
 [dependencies]
-iced = { version = "0.13", features = ["tokio", "image"] }
+iced = { version = "0.13", default-features = false, features = ["tiny-skia", "tokio", "image", "fira-sans"] }
 log73-paths = { path = "../paths" }
 open = "5"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
