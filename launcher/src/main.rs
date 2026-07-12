@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 const DEFAULT_PORT: &str = "7300";
-const APP_WINDOW_SIZE: &str = "1200,800";
+const APP_WINDOW_SIZE: &str = "1600,900";
 const STOP_TIMEOUT: Duration = Duration::from_secs(3);
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 const LAUNCHER_ICON_PNG: &[u8] = include_bytes!(concat!(
