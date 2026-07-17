@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { buildSentExchange, fieldDefault } from '../domain/contactFields';
+import { dxccContinent } from '../domain/dxcc';
 import { validateCallsign, validateExchangeField } from '../domain/validation';
 import {
   CW_WPM_STORAGE_KEY,
@@ -494,6 +495,7 @@ function MainWindow({
     const normalizedCallSign = callSign.trim().toUpperCase();
     const dxccNumber = dxccAdifNumber(currentDxccInfo);
     const prefix = dxccPrefix(currentDxccInfo);
+    const continent = dxccContinent(currentDxccInfo);
     const contact = {
       meta: {
         status: 'Pending',
@@ -513,6 +515,7 @@ function MainWindow({
         FREQ: radioFrequencyHz,
         MODE: adifModeForLoggerMode(radioMode),
         ...(dxccNumber === null ? {} : { DXCC: dxccNumber }),
+        ...(continent === null ? {} : { CONT: continent }),
       },
     };
 

@@ -114,6 +114,24 @@ pub struct QsoPoints {
     pub points: Option<i64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<QsoPointRule>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geography: Option<GeographyQsoPoints>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub category_band_param: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeographyQsoPoints {
+    pub country_field: String,
+    pub station_country_field: String,
+    pub continent_field: String,
+    pub station_continent_field: String,
+    pub same_country: i64,
+    pub different_country_north_america: i64,
+    pub different_country_same_continent: i64,
+    pub different_continent: i64,
+    #[serde(default)]
+    pub unresolved: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +144,8 @@ pub struct MultiplierRule {
     pub in_sets: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub valid_values: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_call_suffixes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -968,5 +988,40 @@ contests:
         );
         assert_eq!(cabrillo.export_fields.len(), 1);
         assert_eq!(cabrillo.export_fields[0].name, "EMAIL");
+    }
+
+    #[test]
+    fn bundled_cqww_rules_resolve_cw_and_ssb_variants() {
+        let yaml = include_str!("../../data/contest-rules/cqww.yaml");
+        let cw = resolve_yaml_contest(yaml, "CQ-WW-CW");
+        let ssb = resolve_yaml_contest(yaml, "CQ-WW-SSB");
+
+        assert_eq!(cw.allowed_modes, vec!["CW".to_string()]);
+        assert_eq!(ssb.allowed_modes, vec!["SSB".to_string()]);
+        assert_eq!(
+            cw.allowed_bands,
+            vec!["160m", "80m", "40m", "20m", "15m", "10m"]
+        );
+        assert_eq!(cw.multipliers.len(), 2);
+        assert_eq!(
+            cw.qso_points
+                .as_ref()
+                .and_then(|points| points.geography.as_ref())
+                .map(|geography| geography.country_field.as_str()),
+            Some("DXCC_PREFIX")
+        );
+        assert_eq!(
+            cw.qso_points
+                .as_ref()
+                .and_then(|points| points.category_band_param.as_deref()),
+            Some("CATEGORY-BAND")
+        );
+        assert_eq!(
+            ssb.cabrillo
+                .as_ref()
+                .and_then(|cabrillo| cabrillo.fixed_fields.first())
+                .map(|field| field.value.as_str()),
+            Some("SSB")
+        );
     }
 }

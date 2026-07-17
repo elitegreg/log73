@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   callsignFilterPrefix,
   callsignPrefix,
+  dxccContinent,
   dxccLabel,
   lookupDxcc,
   splitCallsign,
@@ -186,4 +187,9 @@ test('dxccLabel formats country and continent', () => {
     'Montenegro EU',
   );
   assert.equal(dxccLabel(null), '');
+});
+
+test('dxccContinent normalizes known continents and returns null when unknown', () => {
+  assert.equal(dxccContinent({ continent: ' eu ' }), 'EU');
+  assert.equal(dxccContinent(null), null);
 });

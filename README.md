@@ -508,6 +508,9 @@ CALL              worked station
 BAND              band name
 FREQ              frequency in Hz
 MODE              normalized mode
+CONT              worked station continent from the callsign lookup
+MY_DXCC           station callsign ADIF DXCC number
+MY_CONT           station callsign continent
 ```
 
 Important `meta` fields:
@@ -523,6 +526,8 @@ pts        scored QSO points
 mult       scored multipliers credited by this QSO
 bonus      scored bonus points credited by this QSO
 dupe       whether the QSO is currently a dupe
+DXCC_PREFIX     worked station DXCC/WAE primary prefix
+MY_DXCC_PREFIX  station callsign DXCC/WAE primary prefix
 ```
 
 Fields mapped to database columns are stored directly from `contact.adif` into `qsos`. Extra ADIF fields are serialized into the `JSON` column. `contact.meta` is transient and is not stored in the QSO JSON payload.
@@ -532,7 +537,7 @@ Committed contacts are loaded from the backend. Pending/updating contacts are ca
 ## Contest rules
 
 Contest rules are loaded from YAML files in `<data-dir>/contest-rules/` by default. In a source checkout, run the backend with `--data-dir ./data` to use `data/contest-rules/`.
-Scoring-related YAML settings live under a `scoring` block (`qso_points`, `dupe_key`, `multipliers`, `bonus_points`).
+Scoring-related YAML settings live under a `scoring` block (`qso_points`, `dupe_key`, `multipliers`, `bonus_points`). `qso_points.geography` can compare stamped worked/station country and continent fields, and `qso_points.category_band_param` can limit scoring to a Cabrillo category band. Multiplier rules may use `exclude_call_suffixes` for exclusions such as maritime-mobile calls.
 Contest-specific Cabrillo metadata lives under a `cabrillo` block (`fixed_fields`, `log_fields`, `export_fields`).
 ADIF export uses committed QSO data from the database and derives `QSO_DATE` and `TIME_ON` from the stored `QSO_DATE_TIME_ON` epoch.
 
@@ -541,6 +546,8 @@ Current contest rule IDs include:
 ```text
 ARRL-FIELD-DAY           ARRL Field Day
 CWT                      CWOps CWT
+CQ-WW-CW                 CQ World Wide DX Contest (CW)
+CQ-WW-SSB                CQ World Wide DX Contest (SSB)
 K1USNSST                 K1USN SST
 MST                      MST (Medium Speed Test)
 SC-QSO-PARTY             SC QSO Party out-of-state

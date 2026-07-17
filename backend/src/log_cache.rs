@@ -3,7 +3,7 @@ use crate::db::{
     Contact, Database, contact_adif_value, contact_id, contact_meta_value, set_contact_adif,
     set_contact_meta,
 };
-use crate::dxcc::DxccDatabase;
+use crate::dxcc::{DxccDatabase, DxccInfo};
 use crate::scoring::{ContestScoringModule, ScoringModules};
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -347,7 +347,44 @@ impl LogCache {
 }
 
 fn enrich_missing_dxcc(database: &DxccDatabase, contacts: &mut [Contact]) {
+    let mut station_info_by_callsign = HashMap::<String, Option<DxccInfo>>::new();
     for contact in contacts {
+        let station_callsign = contact_adif_value(contact, "STATION_CALLSIGN")
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|callsign| !callsign.is_empty())
+            .map(str::to_uppercase);
+        let station_info = station_callsign.as_deref().and_then(|callsign| {
+            station_info_by_callsign
+                .entry(callsign.to_string())
+                .or_insert_with(|| database.lookup(callsign))
+                .clone()
+        });
+        match station_info {
+            Some(info) => {
+                set_contact_adif(
+                    contact,
+                    "MY_DXCC",
+                    serde_json::Value::Number(info.adif.into()),
+                );
+                set_contact_adif(
+                    contact,
+                    "MY_CONT",
+                    serde_json::Value::String(info.continent),
+                );
+                set_contact_meta(
+                    contact,
+                    "MY_DXCC_PREFIX",
+                    serde_json::Value::String(info.primary_prefix),
+                );
+            }
+            None => {
+                set_contact_adif(contact, "MY_DXCC", serde_json::Value::Null);
+                set_contact_adif(contact, "MY_CONT", serde_json::Value::Null);
+                set_contact_meta(contact, "MY_DXCC_PREFIX", serde_json::Value::Null);
+            }
+        }
+
         let callsign = contact_adif_value(contact, "CALL")
             .and_then(serde_json::Value::as_str)
             .map(str::trim)
@@ -361,7 +398,10 @@ fn enrich_missing_dxcc(database: &DxccDatabase, contacts: &mut [Contact]) {
         let prefix_missing = contact_meta_value(contact, "DXCC_PREFIX")
             .and_then(serde_json::Value::as_str)
             .is_none_or(|prefix| prefix.trim().is_empty());
-        if !dxcc_missing && !prefix_missing {
+        let continent_missing = contact_adif_value(contact, "CONT")
+            .and_then(serde_json::Value::as_str)
+            .is_none_or(|continent| continent.trim().is_empty());
+        if !dxcc_missing && !prefix_missing && !continent_missing {
             continue;
         }
 
@@ -377,6 +417,9 @@ fn enrich_missing_dxcc(database: &DxccDatabase, contacts: &mut [Contact]) {
                 "DXCC_PREFIX",
                 serde_json::Value::String(info.primary_prefix),
             );
+        }
+        if continent_missing && !info.continent.trim().is_empty() {
+            set_contact_adif(contact, "CONT", serde_json::Value::String(info.continent));
         }
     }
 }
@@ -619,6 +662,43 @@ mod tests {
                 ("CALL".to_string(), json!(callsign)),
             ]),
         )
+    }
+
+    #[test]
+    fn dxcc_enrichment_stamps_station_geography_and_missing_worked_continent() {
+        let database = DxccDatabase::from_str(
+            "K,United States,291,NA,5,8,37.0,95.0,5.0,N W;\n\
+             F,France,227,EU,14,27,46.0,-2.0,-1.0,F;\n",
+        )
+        .expect("test CTY data should parse");
+        let mut contacts = vec![build_contact(
+            Map::new(),
+            Map::from_iter([
+                ("STATION_CALLSIGN".to_string(), json!("N0CALL")),
+                ("CALL".to_string(), json!("F1ABC")),
+            ]),
+        )];
+
+        enrich_missing_dxcc(&database, &mut contacts);
+
+        assert_eq!(
+            contact_adif_value(&contacts[0], "MY_DXCC"),
+            Some(&json!(291))
+        );
+        assert_eq!(
+            contact_adif_value(&contacts[0], "MY_CONT"),
+            Some(&json!("NA"))
+        );
+        assert_eq!(contact_adif_value(&contacts[0], "CONT"), Some(&json!("EU")));
+        assert_eq!(contact_adif_value(&contacts[0], "DXCC"), Some(&json!(227)));
+        assert_eq!(
+            contact_meta_value(&contacts[0], "MY_DXCC_PREFIX"),
+            Some(&json!("K"))
+        );
+        assert_eq!(
+            contact_meta_value(&contacts[0], "DXCC_PREFIX"),
+            Some(&json!("F"))
+        );
     }
 
     fn contact_ids(cached_log: &CachedLog) -> Vec<i64> {

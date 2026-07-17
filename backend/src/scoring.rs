@@ -94,6 +94,9 @@ impl ContestScoringModule {
     }
 
     pub fn qso_points_for(&self, contact: &Contact) -> i64 {
+        if !contact_in_category_band(&self.rules, &self.contest_params, contact) {
+            return 0;
+        }
         let Some(qso_points) = &self.rules.qso_points else {
             return 0;
         };
@@ -102,6 +105,9 @@ impl ContestScoringModule {
     }
 
     pub fn multiplier_keys_for(&self, contact: &Contact) -> Vec<String> {
+        if !contact_in_category_band(&self.rules, &self.contest_params, contact) {
+            return Vec::new();
+        }
         self.rules
             .multipliers
             .iter()
@@ -351,6 +357,35 @@ fn score_qso_points(
     contact: &Contact,
     rules: &ContestRules,
 ) -> Option<i64> {
+    if let Some(geography) = &qso_points.geography {
+        let Some(country) = field_value(contact, rules, &geography.country_field) else {
+            return Some(geography.unresolved);
+        };
+        let Some(station_country) = field_value(contact, rules, &geography.station_country_field)
+        else {
+            return Some(geography.unresolved);
+        };
+        let Some(continent) = field_value(contact, rules, &geography.continent_field) else {
+            return Some(geography.unresolved);
+        };
+        let Some(station_continent) =
+            field_value(contact, rules, &geography.station_continent_field)
+        else {
+            return Some(geography.unresolved);
+        };
+
+        if country == station_country {
+            return Some(geography.same_country);
+        }
+        if continent != station_continent {
+            return Some(geography.different_continent);
+        }
+        if continent == "NA" {
+            return Some(geography.different_country_north_america);
+        }
+        return Some(geography.different_country_same_continent);
+    }
+
     if let Some(points) = qso_points.points {
         return Some(points);
     }
@@ -393,6 +428,17 @@ fn multiplier_matches(
     contact: &Contact,
     rules: &ContestRules,
 ) -> bool {
+    let call = json_string(contact_adif_value(contact, "CALL"))
+        .unwrap_or_default()
+        .trim()
+        .to_uppercase();
+    if multiplier
+        .exclude_call_suffixes
+        .iter()
+        .any(|suffix| call.ends_with(&suffix.trim().to_uppercase()))
+    {
+        return false;
+    }
     let Some(value) = field_value(contact, rules, &multiplier.field) else {
         return false;
     };
@@ -406,6 +452,7 @@ fn multiplier_matches(
 
 fn field_value(contact: &Map<String, Value>, rules: &ContestRules, field: &str) -> Option<String> {
     json_string(contact_adif_value(contact, field))
+        .or_else(|| json_string(contact_meta_value(contact, field)))
         .or_else(|| {
             rules
                 .qso_column_fields
@@ -414,6 +461,36 @@ fn field_value(contact: &Map<String, Value>, rules: &ContestRules, field: &str) 
         })
         .map(|value| normalized_field_value(field, &value))
         .filter(|value| !value.is_empty())
+}
+
+fn contact_in_category_band(
+    rules: &ContestRules,
+    contest_params: &Value,
+    contact: &Contact,
+) -> bool {
+    let Some(param_name) = rules
+        .qso_points
+        .as_ref()
+        .and_then(|qso_points| qso_points.category_band_param.as_deref())
+    else {
+        return true;
+    };
+    let Some(category_band) = contest_params
+        .as_object()
+        .and_then(|params| params.get(param_name))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return true;
+    };
+    if category_band.eq_ignore_ascii_case("ALL") {
+        return true;
+    }
+    let Some(contact_band) = field_value(contact, rules, "BAND") else {
+        return false;
+    };
+    category_band.eq_ignore_ascii_case(&contact_band)
 }
 
 fn normalized_field_value(field: &str, value: &str) -> String {
@@ -923,7 +1000,8 @@ fn collect_changed_contacts(
 mod tests {
     use super::*;
     use crate::contest_rules::{
-        BonusPointRule, CabrilloRules, ContestParam, ContestRules, QsoPointRule, QsoPoints,
+        BonusPointRule, CabrilloRules, ContestParam, ContestRules, GeographyQsoPoints,
+        QsoPointRule, QsoPoints,
     };
     use serde_json::json;
     use std::collections::BTreeMap;
@@ -980,6 +1058,8 @@ mod tests {
         QsoPoints {
             points: Some(points),
             rules: Vec::new(),
+            geography: None,
+            category_band_param: None,
         }
     }
 
@@ -1002,6 +1082,8 @@ mod tests {
                     points: 2,
                 },
             ],
+            geography: None,
+            category_band_param: None,
         }
     }
 
@@ -1012,6 +1094,26 @@ mod tests {
             key: vec!["STATE".to_string()],
             in_sets: Vec::new(),
             valid_values: Vec::new(),
+            exclude_call_suffixes: Vec::new(),
+        }
+    }
+
+    fn geography_points() -> QsoPoints {
+        QsoPoints {
+            points: None,
+            rules: Vec::new(),
+            geography: Some(GeographyQsoPoints {
+                country_field: "DXCC_PREFIX".to_string(),
+                station_country_field: "MY_DXCC_PREFIX".to_string(),
+                continent_field: "CONT".to_string(),
+                station_continent_field: "MY_CONT".to_string(),
+                same_country: 0,
+                different_country_north_america: 2,
+                different_country_same_continent: 1,
+                different_continent: 3,
+                unresolved: 0,
+            }),
+            category_band_param: None,
         }
     }
 
@@ -1030,7 +1132,7 @@ mod tests {
         for (key, value) in fields {
             match key {
                 "id" | "logId" | "status" | "sessionId" | "clientId" | "force" | "error"
-                | "pts" | "mult" | "bonus" | "dupe" => {
+                | "pts" | "mult" | "bonus" | "dupe" | "DXCC_PREFIX" | "MY_DXCC_PREFIX" => {
                     meta.insert(key.to_string(), value);
                 }
                 _ => {
@@ -1072,6 +1174,112 @@ mod tests {
         assert_eq!(totals.score, 3);
         assert_eq!(contact_meta_value(&contacts[0], "pts"), Some(&json!(1)));
         assert_eq!(contact_meta_value(&contacts[1], "pts"), Some(&json!(2)));
+    }
+
+    #[test]
+    fn geography_points_use_only_stamped_contact_fields() {
+        let rules = test_rules(
+            geography_points(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let station = vec![("MY_DXCC_PREFIX", json!("K")), ("MY_CONT", json!("NA"))];
+        let mut contacts = vec![
+            contact(
+                station
+                    .clone()
+                    .into_iter()
+                    .chain([("DXCC_PREFIX", json!("K")), ("CONT", json!("NA"))])
+                    .collect(),
+            ),
+            contact(
+                station
+                    .clone()
+                    .into_iter()
+                    .chain([("DXCC_PREFIX", json!("VE")), ("CONT", json!("NA"))])
+                    .collect(),
+            ),
+            contact(
+                station
+                    .into_iter()
+                    .chain([("DXCC_PREFIX", json!("F")), ("CONT", json!("EU"))])
+                    .collect(),
+            ),
+            contact(vec![
+                ("MY_DXCC_PREFIX", json!("F")),
+                ("MY_CONT", json!("EU")),
+                ("DXCC_PREFIX", json!("DL")),
+                ("CONT", json!("EU")),
+            ]),
+            contact(vec![
+                ("MY_DXCC_PREFIX", json!("K")),
+                ("MY_CONT", json!("NA")),
+            ]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 6);
+        assert_eq!(contact_meta_value(&contacts[0], "pts"), Some(&json!(0)));
+        assert_eq!(contact_meta_value(&contacts[1], "pts"), Some(&json!(2)));
+        assert_eq!(contact_meta_value(&contacts[2], "pts"), Some(&json!(3)));
+        assert_eq!(contact_meta_value(&contacts[3], "pts"), Some(&json!(1)));
+        assert_eq!(contact_meta_value(&contacts[4], "pts"), Some(&json!(0)));
+    }
+
+    #[test]
+    fn category_band_limits_points_and_multipliers() {
+        let mut points = fixed_points(1);
+        points.category_band_param = Some("CATEGORY-BAND".to_string());
+        let rules = test_rules(
+            points,
+            Vec::new(),
+            vec![state_multiplier()],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = vec![
+            contact(vec![("BAND", json!("20m")), ("STATE", json!("SC"))]),
+            contact(vec![("BAND", json!("40m")), ("STATE", json!("NC"))]),
+        ];
+
+        let totals = score_contacts(&rules, json!({ "CATEGORY-BAND": "20M" }), &mut contacts);
+
+        assert_eq!(totals.qso_count, 2);
+        assert_eq!(totals.qso_points, 1);
+        assert_eq!(totals.multipliers, 1);
+        assert_eq!(totals.score, 1);
+    }
+
+    #[test]
+    fn multiplier_excludes_configured_callsign_suffixes() {
+        let mut country = state_multiplier();
+        country.name = "Country".to_string();
+        country.field = "DXCC_PREFIX".to_string();
+        country.key = vec!["DXCC_PREFIX".to_string(), "BAND".to_string()];
+        country.exclude_call_suffixes = vec!["/MM".to_string()];
+        let rules = test_rules(
+            fixed_points(1),
+            Vec::new(),
+            vec![country],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = vec![contact(vec![
+            ("CALL", json!("K1ABC/MM")),
+            ("BAND", json!("20m")),
+            ("DXCC_PREFIX", json!("K")),
+        ])];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 1);
+        assert_eq!(totals.multipliers, 0);
     }
 
     #[test]

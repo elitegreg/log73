@@ -419,7 +419,8 @@ mod tests {
     use crate::cw::DEFAULT_CW_MESSAGES;
     use crate::db::config::{DEFAULT_DXCLUSTER_MAX_AGE_MIN, DEFAULT_DXCLUSTER_PORT};
     use crate::db::contact::{
-        contact_adif_value, contact_id, contact_log_id, set_contact_adif, set_contact_meta,
+        contact_adif_value, contact_id, contact_log_id, contact_meta_value, set_contact_adif,
+        set_contact_meta,
     };
     use crate::db::models::LoginPasswordUpdate;
     use crate::voice_messages::DEFAULT_VOICE_MESSAGES;
@@ -862,6 +863,35 @@ mod tests {
         assert_eq!(
             contact_adif_value(&contacts[0], "CONTEST_ID").and_then(Value::as_str),
             Some("test-contest")
+        );
+    }
+
+    #[tokio::test]
+    async fn upsert_contacts_round_trips_geography_columns() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+        let mut contact = base_contact();
+        set_contact_adif(&mut contact, "CONT", json!("EU"));
+        set_contact_adif(&mut contact, "MY_DXCC", json!(291));
+        set_contact_adif(&mut contact, "MY_CONT", json!("NA"));
+        set_contact_meta(&mut contact, "DXCC_PREFIX", json!("F"));
+        set_contact_meta(&mut contact, "MY_DXCC_PREFIX", json!("K"));
+
+        let saved = database
+            .upsert_contacts(log.id, vec![contact])
+            .await
+            .expect("contact is inserted");
+
+        assert_eq!(contact_adif_value(&saved[0], "CONT"), Some(&json!("EU")));
+        assert_eq!(contact_adif_value(&saved[0], "MY_DXCC"), Some(&json!(291)));
+        assert_eq!(contact_adif_value(&saved[0], "MY_CONT"), Some(&json!("NA")));
+        assert_eq!(
+            contact_meta_value(&saved[0], "DXCC_PREFIX"),
+            Some(&json!("F"))
+        );
+        assert_eq!(
+            contact_meta_value(&saved[0], "MY_DXCC_PREFIX"),
+            Some(&json!("K"))
         );
     }
 

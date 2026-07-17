@@ -139,6 +139,13 @@ export function dxccLabel(dxccInfo) {
   return `${countryName} ${continent}`;
 }
 
+export function dxccContinent(dxccInfo) {
+  const continent = String(dxccInfo?.continent ?? '')
+    .trim()
+    .toUpperCase();
+  return continent || null;
+}
+
 function dxccInfoForRule(rule, entities) {
   const entity = entities?.[rule?.entity_index];
   if (!entity) return null;
