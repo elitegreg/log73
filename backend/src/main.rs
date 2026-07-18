@@ -1174,9 +1174,10 @@ async fn supercheckpartial_matches(
     State(app_state): State<AppState>,
     headers: HeaderMap,
 ) -> Response {
-    cached_json_response(
+    cached_json_response_with_cache_control(
         &headers,
         &serde_json::json!({ "callsigns": app_state.supercheckpartial.callsigns() }),
+        REVALIDATED_REFERENCE_DATA_CACHE_CONTROL,
     )
 }
 
@@ -1184,7 +1185,7 @@ async fn dxcc_data(State(app_state): State<AppState>, headers: HeaderMap) -> Res
     cached_json_response_with_cache_control(
         &headers,
         &serde_json::json!({ "dxcc": app_state.dxcc.as_ref() }),
-        DXCC_CACHE_CONTROL,
+        REVALIDATED_REFERENCE_DATA_CACHE_CONTROL,
     )
 }
 
@@ -2444,14 +2445,9 @@ fn websocket_log_event_for_client(
     }
 }
 
-const REFERENCE_DATA_CACHE_CONTROL: &str = "private, max-age=86400";
-// Keep the response body cached, but revalidate its ETag so an updated CTY
-// database is picked up after the backend restarts.
-const DXCC_CACHE_CONTROL: &str = "private, no-cache";
-
-fn cached_json_response<T: serde::Serialize>(request_headers: &HeaderMap, value: &T) -> Response {
-    cached_json_response_with_cache_control(request_headers, value, REFERENCE_DATA_CACHE_CONTROL)
-}
+// Keep reference-data response bodies cached, but revalidate their ETags so
+// CTY updates after a backend restart and dynamic SCP updates are picked up.
+const REVALIDATED_REFERENCE_DATA_CACHE_CONTROL: &str = "private, no-cache";
 
 fn cached_json_response_with_cache_control<T: serde::Serialize>(
     request_headers: &HeaderMap,
@@ -2607,33 +2603,46 @@ mod tests {
     }
 
     #[test]
-    fn cached_json_response_sets_private_cache_headers_and_etag() {
+    fn cached_json_response_sets_revalidation_cache_headers_and_etag() {
         let headers = HeaderMap::new();
-        let response = cached_json_response(&headers, &json!({ "ok": true }));
+        let response = cached_json_response_with_cache_control(
+            &headers,
+            &json!({ "ok": true }),
+            REVALIDATED_REFERENCE_DATA_CACHE_CONTROL,
+        );
 
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(
             response.headers().get(header::CACHE_CONTROL),
-            Some(&HeaderValue::from_static(REFERENCE_DATA_CACHE_CONTROL))
+            Some(&HeaderValue::from_static(
+                REVALIDATED_REFERENCE_DATA_CACHE_CONTROL
+            ))
         );
         assert!(response.headers().contains_key(header::ETAG));
     }
 
     #[test]
-    fn dxcc_cache_response_requires_revalidation() {
+    fn revalidated_reference_data_cache_response_requires_revalidation() {
         let headers = HeaderMap::new();
-        let response = cached_json_response_with_cache_control(
-            &headers,
-            &json!({ "dxcc": { "entities": [], "rules": [] } }),
-            DXCC_CACHE_CONTROL,
-        );
+        for value in [
+            json!({ "dxcc": { "entities": [], "rules": [] } }),
+            json!({ "callsigns": ["K1ABC"] }),
+        ] {
+            let response = cached_json_response_with_cache_control(
+                &headers,
+                &value,
+                REVALIDATED_REFERENCE_DATA_CACHE_CONTROL,
+            );
 
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CACHE_CONTROL),
-            Some(&HeaderValue::from_static(DXCC_CACHE_CONTROL))
-        );
-        assert!(response.headers().contains_key(header::ETAG));
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers().get(header::CACHE_CONTROL),
+                Some(&HeaderValue::from_static(
+                    REVALIDATED_REFERENCE_DATA_CACHE_CONTROL
+                ))
+            );
+            assert!(response.headers().contains_key(header::ETAG));
+        }
     }
 
     #[test]
@@ -2647,8 +2656,11 @@ mod tests {
             HeaderValue::from_str(&etag).expect("etag header should parse"),
         );
 
-        let response =
-            cached_json_response(&headers, &json!({ "ok": true, "callsigns": ["K1ABC"] }));
+        let response = cached_json_response_with_cache_control(
+            &headers,
+            &json!({ "ok": true, "callsigns": ["K1ABC"] }),
+            REVALIDATED_REFERENCE_DATA_CACHE_CONTROL,
+        );
 
         assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
         assert_eq!(
