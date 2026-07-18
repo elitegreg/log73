@@ -379,9 +379,8 @@ fn enrich_missing_dxcc(database: &DxccDatabase, contacts: &mut [Contact]) {
                 );
             }
             None => {
-                set_contact_adif(contact, "MY_DXCC", serde_json::Value::Null);
-                set_contact_adif(contact, "MY_CONT", serde_json::Value::Null);
-                set_contact_meta(contact, "MY_DXCC_PREFIX", serde_json::Value::Null);
+                // Keep values supplied by the client when the server's CTY
+                // database cannot resolve the station callsign.
             }
         }
 

@@ -1181,9 +1181,10 @@ async fn supercheckpartial_matches(
 }
 
 async fn dxcc_data(State(app_state): State<AppState>, headers: HeaderMap) -> Response {
-    cached_json_response(
+    cached_json_response_with_cache_control(
         &headers,
         &serde_json::json!({ "dxcc": app_state.dxcc.as_ref() }),
+        DXCC_CACHE_CONTROL,
     )
 }
 
@@ -2444,12 +2445,23 @@ fn websocket_log_event_for_client(
 }
 
 const REFERENCE_DATA_CACHE_CONTROL: &str = "private, max-age=86400";
+// Keep the response body cached, but revalidate its ETag so an updated CTY
+// database is picked up after the backend restarts.
+const DXCC_CACHE_CONTROL: &str = "private, no-cache";
 
 fn cached_json_response<T: serde::Serialize>(request_headers: &HeaderMap, value: &T) -> Response {
+    cached_json_response_with_cache_control(request_headers, value, REFERENCE_DATA_CACHE_CONTROL)
+}
+
+fn cached_json_response_with_cache_control<T: serde::Serialize>(
+    request_headers: &HeaderMap,
+    value: &T,
+    cache_control: &str,
+) -> Response {
     let body = serde_json::to_vec(value).expect("reference data should serialize");
     let etag = reference_data_etag(&body);
     let response = Response::builder()
-        .header(header::CACHE_CONTROL, REFERENCE_DATA_CACHE_CONTROL)
+        .header(header::CACHE_CONTROL, cache_control)
         .header(header::ETAG, &etag);
 
     if if_none_match_matches(request_headers, &etag) {
@@ -2603,6 +2615,23 @@ mod tests {
         assert_eq!(
             response.headers().get(header::CACHE_CONTROL),
             Some(&HeaderValue::from_static(REFERENCE_DATA_CACHE_CONTROL))
+        );
+        assert!(response.headers().contains_key(header::ETAG));
+    }
+
+    #[test]
+    fn dxcc_cache_response_requires_revalidation() {
+        let headers = HeaderMap::new();
+        let response = cached_json_response_with_cache_control(
+            &headers,
+            &json!({ "dxcc": { "entities": [], "rules": [] } }),
+            DXCC_CACHE_CONTROL,
+        );
+
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static(DXCC_CACHE_CONTROL))
         );
         assert!(response.headers().contains_key(header::ETAG));
     }

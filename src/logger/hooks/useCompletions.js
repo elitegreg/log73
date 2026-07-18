@@ -13,6 +13,7 @@ export function useCompletions({
   bandMapSpotStore,
   contacts,
   settings,
+  stationCallsign,
   activeCompletionField,
   setActiveCompletionField,
   debouncedCallSign,
@@ -125,6 +126,7 @@ export function useCompletions({
           exchangeValues[activeExchangeCompletionField?.name],
         );
   const currentDxccInfo = lookupDxcc(dxccData, callSign);
+  const stationDxccInfo = lookupDxcc(dxccData, stationCallsign);
   const currentDxccLabel = dxccLabel(currentDxccInfo);
   const currentDupeAlertText =
     callSign.trim() !== '' &&
@@ -137,6 +139,7 @@ export function useCompletions({
     setActiveCompletionField,
     completionMatches,
     currentDxccInfo,
+    stationDxccInfo,
     currentDxccLabel,
     currentDupeAlertText,
   };

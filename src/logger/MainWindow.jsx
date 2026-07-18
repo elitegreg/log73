@@ -277,12 +277,14 @@ function MainWindow({
   const {
     completionMatches,
     currentDxccInfo,
+    stationDxccInfo,
     currentDxccLabel,
     currentDupeAlertText,
   } = useCompletions({
     bandMapSpotStore,
     contacts,
     settings,
+    stationCallsign,
     activeCompletionField,
     setActiveCompletionField,
     debouncedCallSign,
@@ -496,6 +498,9 @@ function MainWindow({
     const dxccNumber = dxccAdifNumber(currentDxccInfo);
     const prefix = dxccPrefix(currentDxccInfo);
     const continent = dxccContinent(currentDxccInfo);
+    const myDxccNumber = dxccAdifNumber(stationDxccInfo);
+    const myPrefix = dxccPrefix(stationDxccInfo);
+    const myContinent = dxccContinent(stationDxccInfo);
     const contact = {
       meta: {
         status: 'Pending',
@@ -503,6 +508,7 @@ function MainWindow({
         logId,
         clientId: createContactId(timeOn, normalizedCallSign),
         ...(prefix === null ? {} : { DXCC_PREFIX: prefix }),
+        ...(myPrefix === null ? {} : { MY_DXCC_PREFIX: myPrefix }),
         ...(force ? { force: true } : {}),
       },
       adif: {
@@ -516,6 +522,8 @@ function MainWindow({
         MODE: adifModeForLoggerMode(radioMode),
         ...(dxccNumber === null ? {} : { DXCC: dxccNumber }),
         ...(continent === null ? {} : { CONT: continent }),
+        ...(myDxccNumber === null ? {} : { MY_DXCC: myDxccNumber }),
+        ...(myContinent === null ? {} : { MY_CONT: myContinent }),
       },
     };
 
