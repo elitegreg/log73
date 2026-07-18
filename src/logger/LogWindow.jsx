@@ -1,10 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import {
-  parseFieldType,
-  sanitizeCallsign,
-  sanitizeExchangeValue,
-} from '../domain/contactFields';
+import { parseFieldType } from '../domain/contactFields';
 import {
   epochFromLegacyQsoDateTime,
   formatUtcDateTime,
@@ -13,6 +9,7 @@ import {
 import { adifModeForLoggerMode } from '../domain/modes';
 import { validateExchangeField } from '../domain/validation';
 import { useNotifications } from '../lib/notificationsContext';
+import { sanitizeLogCellUpdate } from './logWindowHelpers';
 
 const READ_ONLY_COLUMNS = new Set(['Mult', 'Pts']);
 const COLUMN_PADDING_CHARS = 2;
@@ -250,12 +247,7 @@ function exchangeFieldForColumn(settings, column) {
 }
 
 function sanitizeUpdateInput(settings, column, value, radioMode) {
-  const exchangeField = exchangeFieldForColumn(settings, column);
-  if (exchangeField)
-    return sanitizeExchangeValue(exchangeField, value, radioMode);
-  if (column === 'Call') return sanitizeCallsign(value);
-  if (column === 'Mode') return String(value).toUpperCase();
-  return String(value).toUpperCase();
+  return sanitizeLogCellUpdate(settings?.exchange, column, value, radioMode);
 }
 
 function parseUpdateValue(settings, column, value, radioMode, entry = null) {
@@ -670,7 +662,7 @@ function LogWindow({
                                       settings,
                                       editingCell.column,
                                       event.target.value,
-                                      radioMode,
+                                      contactMode(entry, radioMode),
                                     ),
                                   })
                                 }
