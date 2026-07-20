@@ -11,18 +11,18 @@ pub(super) fn logger_state_from_cat_state(
     previous: Option<&RadioState>,
 ) -> Option<RadioState> {
     let frequency_hz = cat_state
-        .main_rx
-        .frequency
+        .main_rx()
+        .frequency()
         .map(|frequency| frequency.hz())
         .or_else(|| previous.map(|state| state.frequency_hz))?;
     let mode = cat_state
-        .main_rx
-        .mode
+        .main_rx()
+        .mode()
         .map(|mode| normalize_mode(&mode))
         .or_else(|| previous.map(|state| state.mode.clone()))?;
     let rit_offset_hz = cat_state
-        .rit_xit
-        .offset_hz
+        .rit_xit()
+        .rit_offset(radio_cat_rs::ReceiverPath::Main)
         .map(|offset| i32::from(offset.as_hz()))
         .or_else(|| previous.map(|state| state.rit_offset_hz))
         .unwrap_or(0);
@@ -74,8 +74,8 @@ pub(super) async fn apply_command(
                 .or_else(|| {
                     radio
                         .latest_state()
-                        .main_rx
-                        .frequency
+                        .main_rx()
+                        .frequency()
                         .map(|frequency| frequency.hz())
                 })
                 .unwrap_or(14_000_000);
@@ -237,10 +237,7 @@ mod tests {
             mode: "CW".to_string(),
             rit_offset_hz: 20,
         };
-        let cat_state = radio_cat_rs::RadioState {
-            connection: radio_cat_rs::ConnectionState::Disconnected,
-            ..Default::default()
-        };
+        let cat_state = radio_cat_rs::RadioState::default();
 
         assert_eq!(
             logger_state_from_cat_state(&cat_state, Some(&previous)),

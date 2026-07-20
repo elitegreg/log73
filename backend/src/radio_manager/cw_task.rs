@@ -455,7 +455,7 @@ impl CwController {
     }
 
     fn radio_logger_mode(&self) -> Option<String> {
-        match self.radio.latest_state().main_rx.mode {
+        match self.radio.latest_state().main_rx().mode() {
             Some(mode) => Some(crate::radio::normalize_mode(&mode)),
             None => {
                 warn!(
@@ -595,9 +595,8 @@ impl CwController {
         let mut saw_busy = self
             .radio
             .latest_state()
-            .keyer
-            .as_ref()
-            .and_then(|keyer| keyer.sending)
+            .keyer()
+            .and_then(|keyer| keyer.sending())
             == Some(true);
         if saw_busy {
             debug!(
@@ -622,7 +621,7 @@ impl CwController {
                                 || !update.fields.contains(&StateField::KeyerSending) {
                                 continue;
                             }
-                            match update.state.keyer.as_ref().and_then(|keyer| keyer.sending) {
+                            match update.state.keyer().and_then(|keyer| keyer.sending()) {
                                 Some(true) => {
                                     saw_busy = true;
                                     debug!(radio_id = self.radio_id, source = ?update.source, "radio-cat keyer reports sending");
@@ -638,7 +637,7 @@ impl CwController {
                         }
                         Err(broadcast::error::RecvError::Lagged(skipped)) => {
                             warn!(radio_id = self.radio_id, skipped, "lagged while waiting for radio-cat cw completion updates");
-                            match self.radio.latest_state().keyer.as_ref().and_then(|keyer| keyer.sending) {
+                            match self.radio.latest_state().keyer().and_then(|keyer| keyer.sending()) {
                                 Some(true) => {
                                     saw_busy = true;
                                     debug!(radio_id = self.radio_id, "radio-cat keyer still reports sending after lag");

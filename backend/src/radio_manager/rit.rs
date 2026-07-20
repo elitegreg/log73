@@ -83,8 +83,16 @@ mod tests {
 
         assert!(applied);
         let state = radio.latest_state();
-        assert_eq!(state.rit_xit.main_rit_enabled, Some(true));
-        assert_eq!(state.rit_xit.offset_hz, RitXitOffsetHz::new(125).ok());
+        assert_eq!(
+            state
+                .rit_xit()
+                .rit_enabled(radio_cat_rs::ReceiverPath::Main),
+            Some(true)
+        );
+        assert_eq!(
+            state.rit_xit().rit_offset(radio_cat_rs::ReceiverPath::Main),
+            RitXitOffsetHz::new(125).ok()
+        );
     }
 
     #[tokio::test]
@@ -99,7 +107,15 @@ mod tests {
 
         assert!(applied);
         let state = radio.latest_state();
-        assert_eq!(state.rit_xit.main_rit_enabled, Some(true));
-        assert_eq!(state.rit_xit.offset_hz, RitXitOffsetHz::new(250).ok());
+        assert_eq!(
+            state
+                .rit_xit()
+                .rit_enabled(radio_cat_rs::ReceiverPath::Main),
+            Some(true)
+        );
+        assert_eq!(
+            state.rit_xit().rit_offset(radio_cat_rs::ReceiverPath::Main),
+            RitXitOffsetHz::new(250).ok()
+        );
     }
 }

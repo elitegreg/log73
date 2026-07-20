@@ -6,8 +6,10 @@ use crate::db::RadioConfig;
 use crate::radio::{RadioCommand, RadioState, RadioStatus};
 use crate::voice_keyer::VoiceKeyer;
 use backon::{BackoffBuilder, ExponentialBuilder};
-use radio_cat_rs::{AsyncIoTransport, ConnectionState, Radio, RadioTask, TransportConfig};
-use radio_cat_rs::{RadioConfig as CatRadioConfig, RadioError};
+use radio_cat_rs::{
+    AsyncIoTransport, ConnectionState, Radio, RadioConfig as CatRadioConfig, RadioError,
+    RadioRegion, TransportConfig,
+};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
@@ -122,11 +124,9 @@ pub(super) async fn run_managed_radio(
 
         let ConnectedCatRadio {
             radio,
-            task,
             shared_cw_serial_keyer,
         } = connected;
         let mut radio_updates = radio.subscribe_updates();
-        let mut radio_task = tokio::spawn(async move { task.run().await });
         publish_cat_snapshot(
             config.id,
             radio.latest_state().as_ref(),
@@ -163,19 +163,8 @@ pub(super) async fn run_managed_radio(
             tokio::select! {
                 _ = &mut shutdown => {
                     shutdown_cw_task(cw_tx, cw_task).await;
-                    abort_radio_task(radio_task).await;
+                    radio.shutdown();
                     return;
-                }
-                result = &mut radio_task => {
-                    match result {
-                        Ok(Ok(())) => warn!(radio_id = config.id, "CAT radio task exited"),
-                        Ok(Err(error)) => warn!(radio_id = config.id, %error, "CAT radio task failed"),
-                        Err(error) => warn!(radio_id = config.id, %error, "CAT radio task join failed"),
-                    }
-                    set_radio_status(&current_status, &status_updates, false).await;
-                    reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
-                    shutdown_cw_task(cw_tx, cw_task).await;
-                    break;
                 }
                 update = radio_updates.recv() => {
                     match update {
@@ -195,8 +184,19 @@ pub(super) async fn run_managed_radio(
                                 &current,
                                 &updates,
                             ).await;
-                            if let Some(offset) = update.state.rit_xit.offset_hz {
+                            if let Some(offset) = update
+                                .state
+                                .rit_xit()
+                                .rit_offset(radio_cat_rs::ReceiverPath::Main)
+                            {
                                 last_rit_offset_hz = i32::from(offset.as_hz());
+                            }
+                            if matches!(update.state.connection(), ConnectionState::Error { .. }) {
+                                warn!(radio_id = config.id, "CAT radio entered an error state");
+                                reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
+                                shutdown_cw_task(cw_tx, cw_task).await;
+                                radio.shutdown();
+                                break;
                             }
                         }
                         Err(broadcast::error::RecvError::Lagged(skipped)) => {
@@ -215,7 +215,7 @@ pub(super) async fn run_managed_radio(
                             set_radio_status(&current_status, &status_updates, false).await;
                             reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
                             shutdown_cw_task(cw_tx, cw_task).await;
-                            abort_radio_task(radio_task).await;
+                            radio.shutdown();
                             break;
                         }
                     }
@@ -223,7 +223,7 @@ pub(super) async fn run_managed_radio(
                 command = commands.recv() => {
                     let Some(command) = command else {
                         shutdown_cw_task(cw_tx, cw_task).await;
-                        abort_radio_task(radio_task).await;
+                        radio.shutdown();
                         return;
                     };
                     debug!(radio_id = config.id, ?command, "received radio command");
@@ -254,7 +254,7 @@ pub(super) async fn run_managed_radio(
                             debug_radio_config(&new_config, "reloading active radio config");
                             set_radio_status(&current_status, &status_updates, false).await;
                             shutdown_cw_task(cw_tx, cw_task).await;
-                            abort_radio_task(radio_task).await;
+                            radio.shutdown();
                             config = *new_config;
                             break;
                         }
@@ -281,7 +281,7 @@ pub(super) async fn run_managed_radio(
                                     reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
                                     error!(radio_id = config.id, %error, "failed to apply radio command");
                                     shutdown_cw_task(cw_tx, cw_task).await;
-                                    abort_radio_task(radio_task).await;
+                                    radio.shutdown();
                                     break;
                                 }
                             }
@@ -303,11 +303,6 @@ pub(super) async fn run_managed_radio(
 async fn shutdown_cw_task(cw_tx: mpsc::Sender<CwTaskCommand>, cw_task: JoinHandle<()>) {
     let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
     let _ = cw_task.await;
-}
-
-async fn abort_radio_task(radio_task: JoinHandle<radio_cat_rs::Result<()>>) {
-    radio_task.abort();
-    let _ = radio_task.await;
 }
 
 async fn set_radio_status(
@@ -340,7 +335,7 @@ async fn publish_cat_snapshot(
     set_radio_status(
         current_status,
         status_updates,
-        matches!(cat_state.connection, ConnectionState::Ready),
+        matches!(cat_state.connection(), ConnectionState::Ready),
     )
     .await;
 
@@ -377,7 +372,6 @@ async fn publish_cat_snapshot(
 
 struct ConnectedCatRadio {
     radio: Radio,
-    task: RadioTask,
     shared_cw_serial_keyer: Option<CwSerialDevice>,
 }
 
@@ -404,8 +398,8 @@ async fn connect_cat_radio(config: RadioConfig) -> Result<ConnectedCatRadio, Str
         );
 
         let transport = AsyncIoTransport::new(io);
-        let (radio, task) = match Radio::build_with_transport(cat_config, transport).await {
-            Ok(result) => result,
+        let radio = match Radio::connect_with_transport(cat_config, transport).await {
+            Ok(radio) => radio,
             Err(error) => {
                 if let Err(close_error) = shared_cw_serial_keyer.close().await {
                     warn!(radio_id, %close_error, "failed to close shared serial CW keyer");
@@ -416,18 +410,16 @@ async fn connect_cat_radio(config: RadioConfig) -> Result<ConnectedCatRadio, Str
 
         return Ok(ConnectedCatRadio {
             radio,
-            task,
             shared_cw_serial_keyer: Some(shared_cw_serial_keyer),
         });
     }
 
-    let (radio, task) = Radio::build(cat_config)
+    let radio = Radio::connect(cat_config)
         .await
         .map_err(|error| error.to_string())?;
 
     Ok(ConnectedCatRadio {
         radio,
-        task,
         shared_cw_serial_keyer: None,
     })
 }
@@ -442,6 +434,7 @@ pub(super) fn uses_shared_cw_serial_port(config: &RadioConfig) -> bool {
 pub(super) fn cat_radio_config_for(config: &RadioConfig) -> Result<CatRadioConfig, String> {
     let mut cat_config = CatRadioConfig::new(config.radio_kind.trim())
         .with_transport(transport_config_for(config)?)
+        .with_region(RadioRegion::IaruRegion2)
         .with_options(config.options.clone());
 
     if config.radio_kind.trim().eq_ignore_ascii_case("dummy") {
@@ -591,6 +584,7 @@ mod tests {
         let config = test_config();
         let cat_config = cat_radio_config_for(&config).expect("config should build");
         assert!(matches!(cat_config.transport, TransportConfig::None));
+        assert_eq!(cat_config.region, Some(RadioRegion::IaruRegion2));
     }
 
     #[test]
