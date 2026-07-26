@@ -149,7 +149,7 @@ export function useEntryFields({
 
   function handleCallsignChange(
     event,
-    { stopRepeat, clearEsmState, esmRunCallsignAttempt },
+    { stopRepeat, updateEsmStateAfterCallsignEdit },
   ) {
     stopRepeat();
     const { selectionStart, selectionEnd } = event.target;
@@ -159,9 +159,7 @@ export function useEntryFields({
     };
     const sanitizedCallsign = sanitizeCallsign(event.target.value);
     const normalizedCallsign = sanitizedCallsign.trim().toUpperCase();
-    if (normalizedCallsign !== esmRunCallsignAttempt) {
-      clearEsmState();
-    }
+    updateEsmStateAfterCallsignEdit(normalizedCallsign);
     setCallSign(sanitizedCallsign);
     pendingPreviousContactAutofillRef.current = '';
     callsignFrequencyBaselineRef.current = normalizedCallsign

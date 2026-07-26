@@ -21,6 +21,7 @@ import {
   modeIsCw,
   modeIsPhone,
   esmEnterAction,
+  esmStateAfterCallsignEdit,
   bandForFrequency,
   bandByName,
   createContactId,
@@ -407,8 +408,15 @@ function MainWindow({
   function handleCallsignChange(event) {
     handleEntryCallsignChange(event, {
       stopRepeat,
-      clearEsmState,
-      esmRunCallsignAttempt,
+      updateEsmStateAfterCallsignEdit: (normalizedCallsign) => {
+        const nextState = esmStateAfterCallsignEdit({
+          callsign: normalizedCallsign,
+          runCallsignAttempt: esmRunCallsignAttempt,
+          exchangeSentCallsign: esmExchangeSentCallsign,
+        });
+        setEsmRunCallsignAttempt(nextState.runCallsignAttempt);
+        setEsmExchangeSentCallsign(nextState.exchangeSentCallsign);
+      },
     });
   }
 

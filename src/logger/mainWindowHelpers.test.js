@@ -15,6 +15,7 @@ import {
   cwActiveTimeoutMs,
   correctedEsmCallsignText,
   esmEnterAction,
+  esmStateAfterCallsignEdit,
   modeIsCw,
   nextCwWpm,
   isPageUpKey,
@@ -494,6 +495,49 @@ test('esmEnterAction follows run mode matrix states', () => {
       shouldLog: true,
       nextRunCallsignAttempt: 'KB1AWM',
       nextExchangeSentCallsign: 'KB1AWM',
+    },
+  );
+});
+
+test('esm callsign corrections preserve the callsign whose exchange was sent', () => {
+  assert.deepEqual(
+    esmStateAfterCallsignEdit({
+      callsign: 'W4MEL',
+      runCallsignAttempt: 'W4ME',
+      exchangeSentCallsign: 'W4ME',
+    }),
+    {
+      runCallsignAttempt: '',
+      exchangeSentCallsign: 'W4ME',
+    },
+  );
+  assert.deepEqual(
+    esmStateAfterCallsignEdit({
+      callsign: '',
+      runCallsignAttempt: 'W4ME',
+      exchangeSentCallsign: 'W4ME',
+    }),
+    {
+      runCallsignAttempt: '',
+      exchangeSentCallsign: '',
+    },
+  );
+
+  assert.deepEqual(
+    esmEnterAction({
+      esmEnabled: true,
+      operatingMode: 'Run',
+      callsign: 'W4MEL',
+      exchangeValid: true,
+      exchangeSentCallsign: 'W4ME',
+      runCallsignAttempt: '',
+    }),
+    {
+      keys: ['F3'],
+      correctionText: 'MEL',
+      shouldLog: true,
+      nextRunCallsignAttempt: 'W4MEL',
+      nextExchangeSentCallsign: 'W4MEL',
     },
   );
 });

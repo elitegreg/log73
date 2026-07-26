@@ -385,6 +385,32 @@ export function correctedEsmCallsignText(
   return normalizedCorrectedCallsign;
 }
 
+export function esmStateAfterCallsignEdit({
+  callsign,
+  runCallsignAttempt,
+  exchangeSentCallsign,
+}) {
+  const normalizedCallsign = String(callsign ?? '')
+    .trim()
+    .toUpperCase();
+  const normalizedRunCallsignAttempt = String(runCallsignAttempt ?? '')
+    .trim()
+    .toUpperCase();
+  const normalizedExchangeSentCallsign = String(exchangeSentCallsign ?? '')
+    .trim()
+    .toUpperCase();
+
+  return {
+    runCallsignAttempt:
+      normalizedCallsign === normalizedRunCallsignAttempt
+        ? normalizedRunCallsignAttempt
+        : '',
+    exchangeSentCallsign: normalizedCallsign
+      ? normalizedExchangeSentCallsign
+      : '',
+  };
+}
+
 export function esmEnterAction({
   esmEnabled,
   operatingMode,
