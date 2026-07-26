@@ -312,6 +312,7 @@ fn cabrillo_mode_token(mode: &str) -> &'static str {
     match mode.trim().to_uppercase().as_str() {
         "CW" | "CW-R" => "CW",
         "SSB" | "USB" | "LSB" | "FM" | "FMN" | "WFM" | "AM" | "PH" => "PH",
+        "RTTY" => "RY",
         _ => "DG",
     }
 }
@@ -668,7 +669,8 @@ mod tests {
             ("SSB", "PH"),
             ("FM", "PH"),
             ("AM", "PH"),
-            ("RTTY", "DG"),
+            ("RTTY", "RY"),
+            ("PKT", "DG"),
             ("FT8", "DG"),
             ("PSK", "DG"),
         ] {

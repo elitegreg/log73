@@ -34,8 +34,9 @@ test('mode helpers normalize and classify modes', () => {
   assert.equal(modeIsPhone('CW'), false);
 });
 
-test('adifModeForLoggerMode maps CW-R to CW', () => {
+test('adifModeForLoggerMode maps logger modes to ADIF modes', () => {
   assert.equal(adifModeForLoggerMode('CW'), 'CW');
   assert.equal(adifModeForLoggerMode('CW-R'), 'CW');
-  assert.equal(adifModeForLoggerMode('DATA'), 'DATA');
+  assert.equal(adifModeForLoggerMode('DATA'), 'PKT');
+  assert.equal(adifModeForLoggerMode('RTTY'), 'RTTY');
 });

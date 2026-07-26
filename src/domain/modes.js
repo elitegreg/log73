@@ -32,5 +32,7 @@ export function modeIsPhone(mode) {
 
 export function adifModeForLoggerMode(mode) {
   const normalizedMode = normalizeLoggerMode(mode);
-  return modeIsCw(normalizedMode) ? 'CW' : normalizedMode;
+  if (modeIsCw(normalizedMode)) return 'CW';
+  if (normalizedMode === 'DATA') return 'PKT';
+  return normalizedMode;
 }
