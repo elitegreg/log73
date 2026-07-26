@@ -40,6 +40,8 @@ pub struct RadioConfig {
     pub serial_port: String,
     pub serial_baud_rate: u32,
     pub options: String,
+    pub data_mode: String,
+    pub rtty_mode: String,
     pub cw_tuning_increment_hz: u32,
     pub ssb_tuning_increment_hz: u32,
     pub rit_clear_on_log: bool,
@@ -121,6 +123,10 @@ pub struct RadioPayload {
     pub serial_baud_rate: u32,
     #[serde(default)]
     pub options: String,
+    #[serde(default)]
+    pub data_mode: String,
+    #[serde(default)]
+    pub rtty_mode: String,
     #[serde(default = "default_cw_tuning_increment_hz")]
     pub cw_tuning_increment_hz: u32,
     #[serde(default = "default_ssb_tuning_increment_hz")]

@@ -38,11 +38,7 @@ test('availableModeOptions prefers backend-provided mode catalog', () => {
     'SSB',
     'FM',
     'AM',
-    'FT8',
-    'JT65',
-    'JT9',
-    'MFSK',
-    'PSK',
+    'DATA',
     'RTTY',
   ]);
 });
@@ -64,7 +60,7 @@ test('typedModeFromCallsignInput matches exact mode tokens only', () => {
   assert.equal(typedModeFromCallsignInput('cw', settings), 'CW');
   assert.equal(typedModeFromCallsignInput('cw-r', settings), 'CW-R');
   assert.equal(typedModeFromCallsignInput('cwr', settings), 'CW-R');
-  assert.equal(typedModeFromCallsignInput('ft8', settings), 'FT8');
+  assert.equal(typedModeFromCallsignInput('data', settings), 'DATA');
   assert.equal(typedModeFromCallsignInput('RTTY', settings), 'RTTY');
   assert.equal(typedModeFromCallsignInput(' fm ', {}), 'FM');
   assert.equal(typedModeFromCallsignInput('AM', settings), 'AM');
@@ -81,7 +77,7 @@ test('modeIsCw treats CW-R as CW', () => {
 
 test('callsign clear threshold distinguishes phone modes', () => {
   assert.equal(callsignClearThresholdHz('CW'), 100);
-  assert.equal(callsignClearThresholdHz('FT8'), 100);
+  assert.equal(callsignClearThresholdHz('DATA'), 100);
   assert.equal(callsignClearThresholdHz('SSB'), 200);
   assert.equal(callsignClearThresholdHz('FM'), 200);
 });
@@ -177,7 +173,7 @@ test('tuningIncrementHzForMode picks mode-specific configured values', () => {
     125,
   );
   assert.equal(tuningIncrementHzForMode({}, 'CW-R'), 20);
-  assert.equal(tuningIncrementHzForMode({}, 'FT8'), 100);
+  assert.equal(tuningIncrementHzForMode({}, 'DATA'), 100);
 });
 
 test('steppedFrequencyHz clamps values at 1 Hz minimum', () => {

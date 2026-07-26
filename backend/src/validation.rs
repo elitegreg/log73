@@ -102,6 +102,7 @@ pub fn validate_radio(payload: &RadioPayload) -> Result<(), String> {
     {
         return Err(format!("unsupported radio driver: {radio_kind}"));
     }
+    crate::modes::resolved_mode_mappings(radio_kind, &payload.data_mode, &payload.rtty_mode)?;
 
     let transport_kind = payload.transport_kind.trim().to_ascii_lowercase();
     if !matches!(transport_kind.as_str(), "none" | "tcp" | "serial") {
@@ -1298,6 +1299,8 @@ mod tests {
             serial_port: String::new(),
             serial_baud_rate: 115_200,
             options: String::new(),
+            data_mode: "DATA-USB".to_string(),
+            rtty_mode: "RTTY".to_string(),
             cw_tuning_increment_hz: db::DEFAULT_CW_TUNING_INCREMENT_HZ,
             ssb_tuning_increment_hz: db::DEFAULT_SSB_TUNING_INCREMENT_HZ,
             rit_clear_on_log: false,
@@ -1457,6 +1460,16 @@ mod tests {
     #[test]
     fn validates_tcp_radio_config() {
         assert!(validate_radio(&test_radio()).is_ok());
+    }
+
+    #[test]
+    fn rejects_radio_mode_mapping_outside_transmit_capabilities() {
+        let mut radio = test_radio();
+        radio.radio_kind = "elecraft-k2".to_string();
+        radio.data_mode = "WFM".to_string();
+
+        let error = validate_radio(&radio).expect_err("unsupported mapping should be rejected");
+        assert!(error.contains("not supported for transmit"));
     }
 
     #[test]

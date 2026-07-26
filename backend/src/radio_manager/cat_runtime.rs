@@ -130,6 +130,7 @@ pub(super) async fn run_managed_radio(
         publish_cat_snapshot(
             config.id,
             radio.latest_state().as_ref(),
+            &config,
             &current_status,
             &status_updates,
             &current,
@@ -179,6 +180,7 @@ pub(super) async fn run_managed_radio(
                             publish_cat_snapshot(
                                 config.id,
                                 update.state.as_ref(),
+                                &config,
                                 &current_status,
                                 &status_updates,
                                 &current,
@@ -204,6 +206,7 @@ pub(super) async fn run_managed_radio(
                             publish_cat_snapshot(
                                 config.id,
                                 radio.latest_state().as_ref(),
+                                &config,
                                 &current_status,
                                 &status_updates,
                                 &current,
@@ -271,18 +274,33 @@ pub(super) async fn run_managed_radio(
                                 last_rit_offset_hz,
                                 "applying CAT radio command"
                             );
-                            match apply_command(&radio, &current, command, &mut last_rit_offset_hz, bands.as_ref()).await {
+                            match apply_command(
+                                &radio,
+                                &current,
+                                command,
+                                &mut last_rit_offset_hz,
+                                bands.as_ref(),
+                                &config,
+                                &updates,
+                            ).await {
                                 Ok(()) => {}
                                 Err(error) if is_unsupported_capability(&error) => {
                                     warn!(radio_id = config.id, %error, "CAT radio command unsupported");
                                 }
-                                Err(error) => {
+                                Err(error) if command_error_requires_reconnect(&error) => {
                                     set_radio_status(&current_status, &status_updates, false).await;
                                     reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
                                     error!(radio_id = config.id, %error, "failed to apply radio command");
                                     shutdown_cw_task(cw_tx, cw_task).await;
                                     radio.shutdown();
                                     break;
+                                }
+                                Err(error) => {
+                                    warn!(
+                                        radio_id = config.id,
+                                        %error,
+                                        "CAT radio command failed without losing connection"
+                                    );
                                 }
                             }
                             if is_rit_command {
@@ -327,6 +345,7 @@ async fn set_radio_status(
 async fn publish_cat_snapshot(
     radio_id: i64,
     cat_state: &radio_cat_rs::RadioState,
+    config: &RadioConfig,
     current_status: &Arc<RwLock<RadioStatus>>,
     status_updates: &broadcast::Sender<RadioStatus>,
     current: &Arc<RwLock<Option<RadioState>>>,
@@ -340,7 +359,12 @@ async fn publish_cat_snapshot(
     .await;
 
     let previous = current.read().await.clone();
-    let Some(state) = logger_state_from_cat_state(cat_state, previous.as_ref()) else {
+    let Some(state) = logger_state_from_cat_state(
+        cat_state,
+        previous.as_ref(),
+        &config.data_mode,
+        &config.rtty_mode,
+    ) else {
         trace!(
             radio_id,
             "radio-cat state does not yet include logger-visible radio state"
@@ -522,6 +546,10 @@ fn is_unsupported_capability(error: &RadioError) -> bool {
     matches!(error, RadioError::UnsupportedCapability { .. })
 }
 
+fn command_error_requires_reconnect(error: &RadioError) -> bool {
+    error.is_transport() || matches!(error, RadioError::TaskStopped | RadioError::CommandCanceled)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -538,6 +566,8 @@ mod tests {
             serial_port: String::new(),
             serial_baud_rate: 115_200,
             options: String::new(),
+            data_mode: "DATA-USB".to_string(),
+            rtty_mode: "RTTY".to_string(),
             cw_tuning_increment_hz: 20,
             ssb_tuning_increment_hz: 100,
             rit_clear_on_log: false,
@@ -632,6 +662,30 @@ mod tests {
         config.cw_serial_port = "/dev/ttyUSB0".to_string();
 
         assert!(uses_shared_cw_serial_port(&config));
+    }
+
+    #[test]
+    fn only_connection_losing_command_errors_require_reconnect() {
+        assert!(command_error_requires_reconnect(&RadioError::Transport(
+            "closed".to_string()
+        )));
+        assert!(command_error_requires_reconnect(&RadioError::TaskStopped));
+        assert!(command_error_requires_reconnect(
+            &RadioError::CommandCanceled
+        ));
+        assert!(!command_error_requires_reconnect(&RadioError::Decode {
+            command: "kenwood-response",
+            message: "matched response was not decoded".to_string(),
+        }));
+        assert!(!command_error_requires_reconnect(
+            &RadioError::CommandRejected {
+                protocol: "kenwood",
+                reason: "radio rejected command",
+            }
+        ));
+        assert!(!command_error_requires_reconnect(&RadioError::Timeout {
+            command: "MD",
+        }));
     }
 
     #[test]

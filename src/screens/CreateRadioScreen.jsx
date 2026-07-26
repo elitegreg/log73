@@ -17,16 +17,42 @@ const DEFAULT_CW_SERIAL_BAUD_RATE = 9600;
 const DEFAULT_CW_SERIAL_LINE = 'dtr';
 const DEFAULT_CW_TUNING_INCREMENT_HZ = 20;
 const DEFAULT_SSB_TUNING_INCREMENT_HZ = 100;
+const DEFAULT_DATA_MODE = 'USB';
+const DEFAULT_RTTY_MODE = 'RTTY';
+
+function normalizeMode(value) {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase();
+}
 
 function normalizeRadioKinds(value) {
   return (Array.isArray(value) ? value : [])
     .map((kind) =>
       typeof kind === 'string'
-        ? { id: kind, display_name: kind, description: '' }
+        ? {
+            id: kind,
+            display_name: kind,
+            description: '',
+            transmit_modes: [],
+            default_data_mode: DEFAULT_DATA_MODE,
+            default_rtty_mode: DEFAULT_RTTY_MODE,
+          }
         : {
             id: String(kind?.id ?? '').trim(),
             display_name: String(kind?.display_name ?? kind?.id ?? '').trim(),
             description: String(kind?.description ?? '').trim(),
+            transmit_modes: [
+              ...new Set(
+                (Array.isArray(kind?.transmit_modes) ? kind.transmit_modes : [])
+                  .map(normalizeMode)
+                  .filter(Boolean),
+              ),
+            ],
+            default_data_mode:
+              normalizeMode(kind?.default_data_mode) || DEFAULT_DATA_MODE,
+            default_rtty_mode:
+              normalizeMode(kind?.default_rtty_mode) || DEFAULT_RTTY_MODE,
           },
     )
     .filter((kind) => kind.id);
@@ -79,6 +105,13 @@ function radioKindLabel(kind) {
     : kind.id;
 }
 
+function mappedModeOptions(radioKind, configuredMode) {
+  const modes = new Set(radioKind?.transmit_modes ?? []);
+  const normalizedConfiguredMode = normalizeMode(configuredMode);
+  if (normalizedConfiguredMode) modes.add(normalizedConfiguredMode);
+  return [...modes];
+}
+
 function serialPortOptions(serialPorts, serialPort) {
   const options = new Map(serialPorts.map((port) => [port.name, port]));
   if (serialPort && !options.has(serialPort)) {
@@ -106,6 +139,8 @@ function CreateRadioScreen() {
   const [serialPort, setSerialPort] = useState('');
   const [serialBaudRate, setSerialBaudRate] = useState(115200);
   const [options, setOptions] = useState('');
+  const [dataMode, setDataMode] = useState(DEFAULT_DATA_MODE);
+  const [rttyMode, setRttyMode] = useState(DEFAULT_RTTY_MODE);
   const [cwTuningIncrementHz, setCwTuningIncrementHz] = useState(
     DEFAULT_CW_TUNING_INCREMENT_HZ,
   );
@@ -138,6 +173,9 @@ function CreateRadioScreen() {
     useState('');
 
   const selectedRadioKind = radioKind || defaultRadioKind(radioKinds);
+  const selectedRadioKindDetails = radioKinds.find(
+    (kind) => kind.id === selectedRadioKind,
+  );
 
   const notifyOperationalError = useCallback(
     (source, fallback, error, details = {}) => {
@@ -253,7 +291,16 @@ function CreateRadioScreen() {
 
       if (!isEditing) {
         const nextRadioKind = defaultRadioKind(kinds);
+        const nextRadioKindDetails = kinds.find(
+          (kind) => kind.id === nextRadioKind,
+        );
         setRadioKind(nextRadioKind);
+        setDataMode(
+          nextRadioKindDetails?.default_data_mode ?? DEFAULT_DATA_MODE,
+        );
+        setRttyMode(
+          nextRadioKindDetails?.default_rtty_mode ?? DEFAULT_RTTY_MODE,
+        );
         setTransportKind(
           nextRadioKind === DEFAULT_RADIO_KIND
             ? DEFAULT_TRANSPORT_KIND
@@ -275,6 +322,17 @@ function CreateRadioScreen() {
       setSerialPort(radio.serial_port ?? '');
       setSerialBaudRate(radio.serial_baud_rate ?? 115200);
       setOptions(radio.options ?? '');
+      const savedRadioKind = kinds.find((kind) => kind.id === radio.radio_kind);
+      setDataMode(
+        normalizeMode(radio.data_mode) ||
+          savedRadioKind?.default_data_mode ||
+          DEFAULT_DATA_MODE,
+      );
+      setRttyMode(
+        normalizeMode(radio.rtty_mode) ||
+          savedRadioKind?.default_rtty_mode ||
+          DEFAULT_RTTY_MODE,
+      );
       setCwTuningIncrementHz(
         radio.cw_tuning_increment_hz ?? DEFAULT_CW_TUNING_INCREMENT_HZ,
       );
@@ -323,7 +381,9 @@ function CreateRadioScreen() {
         body: JSON.stringify({ cw_messages: cwMessages }),
       });
     } catch (error) {
-      setCwMessagesValidationMessage(errorMessage(error, 'CW messages are invalid.'));
+      setCwMessagesValidationMessage(
+        errorMessage(error, 'CW messages are invalid.'),
+      );
       notifyOperationalError(
         'CreateRadioScreen.validateCwMessages',
         'CW messages are invalid.',
@@ -363,6 +423,15 @@ function CreateRadioScreen() {
     window.open('/help/index.html', '_blank', 'noopener,noreferrer');
   }
 
+  function handleRadioKindChange(nextRadioKind) {
+    const nextRadioKindDetails = radioKinds.find(
+      (kind) => kind.id === nextRadioKind,
+    );
+    setRadioKind(nextRadioKind);
+    setDataMode(nextRadioKindDetails?.default_data_mode ?? DEFAULT_DATA_MODE);
+    setRttyMode(nextRadioKindDetails?.default_rtty_mode ?? DEFAULT_RTTY_MODE);
+  }
+
   async function saveRadio(event) {
     event.preventDefault();
     if (!(await validateCwMessages())) return;
@@ -380,6 +449,8 @@ function CreateRadioScreen() {
           serial_port: serialPort,
           serial_baud_rate: Number(serialBaudRate),
           options: options,
+          data_mode: dataMode,
+          rtty_mode: rttyMode,
           cw_tuning_increment_hz: Number(cwTuningIncrementHz),
           ssb_tuning_increment_hz: Number(ssbTuningIncrementHz),
           rit_clear_on_log: Boolean(ritClearOnLog),
@@ -432,7 +503,7 @@ function CreateRadioScreen() {
         Radio Type
         <select
           value={selectedRadioKind}
-          onChange={(event) => setRadioKind(event.target.value)}
+          onChange={(event) => handleRadioKindChange(event.target.value)}
           required
         >
           {radioKindOptions(radioKinds, selectedRadioKind).map((kind) => (
@@ -524,6 +595,34 @@ function CreateRadioScreen() {
           value={options}
           onChange={(event) => setOptions(event.target.value)}
         />
+      </label>
+      <label>
+        DATA Radio Mode
+        <select
+          value={dataMode}
+          onChange={(event) => setDataMode(event.target.value)}
+          required
+        >
+          {mappedModeOptions(selectedRadioKindDetails, dataMode).map((mode) => (
+            <option key={mode} value={mode}>
+              {mode}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        RTTY Radio Mode
+        <select
+          value={rttyMode}
+          onChange={(event) => setRttyMode(event.target.value)}
+          required
+        >
+          {mappedModeOptions(selectedRadioKindDetails, rttyMode).map((mode) => (
+            <option key={mode} value={mode}>
+              {mode}
+            </option>
+          ))}
+        </select>
       </label>
       <label>
         Tuning Increment (CW) in Hz

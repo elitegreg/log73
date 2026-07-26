@@ -16,18 +16,14 @@ test('LOGGER_MODE_OPTIONS lists concrete selectable modes', () => {
     'SSB',
     'FM',
     'AM',
-    'FT8',
-    'JT65',
-    'JT9',
-    'MFSK',
-    'PSK',
+    'DATA',
     'RTTY',
   ]);
 });
 
 test('mode helpers normalize and classify modes', () => {
   assert.equal(normalizeLoggerMode(' cw-r '), 'CW-R');
-  assert.equal(isSelectableMode('FT8'), true);
+  assert.equal(isSelectableMode('DATA'), true);
   assert.equal(isSelectableMode('AM'), true);
   assert.equal(modeIsCw('CW'), true);
   assert.equal(modeIsCw('cw-r'), true);
@@ -41,5 +37,5 @@ test('mode helpers normalize and classify modes', () => {
 test('adifModeForLoggerMode maps CW-R to CW', () => {
   assert.equal(adifModeForLoggerMode('CW'), 'CW');
   assert.equal(adifModeForLoggerMode('CW-R'), 'CW');
-  assert.equal(adifModeForLoggerMode('FT8'), 'FT8');
+  assert.equal(adifModeForLoggerMode('DATA'), 'DATA');
 });

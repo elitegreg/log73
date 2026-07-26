@@ -10,7 +10,7 @@ pub(super) fn normalized_optional_device_id(value: Option<&str>) -> Option<Strin
 
 pub(super) fn db_radios(connection: &Connection) -> rusqlite::Result<Vec<RadioConfig>> {
     let mut statement = connection.prepare(
-        "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES FROM radios ORDER BY ID",
+        "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES FROM radios ORDER BY ID",
     )?;
     let rows = statement.query_map([], row_to_radio)?;
     rows.collect()
@@ -21,7 +21,7 @@ pub(super) fn db_create_radio(
     radio: RadioPayload,
 ) -> rusqlite::Result<RadioConfig> {
     connection.execute(
-        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         params![
             radio.name.trim(),
             radio.radio_kind.trim(),
@@ -31,6 +31,8 @@ pub(super) fn db_create_radio(
             radio.serial_port.trim(),
             radio.serial_baud_rate,
             radio.options,
+            radio.data_mode,
+            radio.rtty_mode,
             radio.cw_tuning_increment_hz,
             radio.ssb_tuning_increment_hz,
             radio.rit_clear_on_log,
@@ -55,7 +57,7 @@ pub(super) fn db_update_radio(
     radio: RadioPayload,
 ) -> rusqlite::Result<Option<RadioConfig>> {
     let updated = connection.execute(
-        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, OPTIONS = ?8, CW_TUNING_INCREMENT_HZ = ?9, SSB_TUNING_INCREMENT_HZ = ?10, RIT_CLEAR_ON_LOG = ?11, VOICE_INPUT_DEVICE_ID = ?12, VOICE_OUTPUT_DEVICE_ID = ?13, CW_KEYER_TYPE = ?14, WINKEYER_SERIAL_PORT = ?15, CW_SERIAL_PORT = ?16, CW_SERIAL_BAUD_RATE = ?17, CW_SERIAL_LINE = ?18, CW_MESSAGES = ?19, VOICE_MESSAGES = ?20 WHERE ID = ?21",
+        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, OPTIONS = ?8, DATA_MODE = ?9, RTTY_MODE = ?10, CW_TUNING_INCREMENT_HZ = ?11, SSB_TUNING_INCREMENT_HZ = ?12, RIT_CLEAR_ON_LOG = ?13, VOICE_INPUT_DEVICE_ID = ?14, VOICE_OUTPUT_DEVICE_ID = ?15, CW_KEYER_TYPE = ?16, WINKEYER_SERIAL_PORT = ?17, CW_SERIAL_PORT = ?18, CW_SERIAL_BAUD_RATE = ?19, CW_SERIAL_LINE = ?20, CW_MESSAGES = ?21, VOICE_MESSAGES = ?22 WHERE ID = ?23",
         params![
             radio.name.trim(),
             radio.radio_kind.trim(),
@@ -65,6 +67,8 @@ pub(super) fn db_update_radio(
             radio.serial_port.trim(),
             radio.serial_baud_rate,
             radio.options,
+            radio.data_mode,
+            radio.rtty_mode,
             radio.cw_tuning_increment_hz,
             radio.ssb_tuning_increment_hz,
             radio.rit_clear_on_log,
@@ -96,7 +100,7 @@ pub(super) fn select_radio(
 ) -> rusqlite::Result<Option<RadioConfig>> {
     connection
         .query_row(
-            "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES FROM radios WHERE ID = ?1",
+            "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES FROM radios WHERE ID = ?1",
             params![id],
             row_to_radio,
         )
@@ -121,6 +125,8 @@ fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioConfig> {
         serial_port: row.get("SERIAL_PORT")?,
         serial_baud_rate: serial_baud_rate as u32,
         options: row.get("OPTIONS")?,
+        data_mode: row.get("DATA_MODE")?,
+        rtty_mode: row.get("RTTY_MODE")?,
         cw_tuning_increment_hz: cw_tuning_increment_hz as u32,
         ssb_tuning_increment_hz: ssb_tuning_increment_hz as u32,
         rit_clear_on_log: row.get("RIT_CLEAR_ON_LOG")?,

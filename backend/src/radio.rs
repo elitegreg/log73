@@ -162,15 +162,31 @@ pub fn normalize_mode(mode: &Mode) -> String {
         Mode::CwReverse => "CW-R".to_string(),
         Mode::Fm | Mode::Wfm => "FM".to_string(),
         Mode::Am => "AM".to_string(),
-        Mode::Rtty
-        | Mode::RttyReverse
-        | Mode::Psk
+        Mode::Rtty | Mode::RttyReverse => "RTTY".to_string(),
+        Mode::Psk
         | Mode::PskReverse
         | Mode::DataLsb
         | Mode::DataUsb
         | Mode::DataFm
         | Mode::DataAm
-        | Mode::DigitalVoice => "RTTY".to_string(),
+        | Mode::DigitalVoice => "DATA".to_string(),
+    }
+}
+
+pub fn logger_mode_from_cat_mode(
+    mode: &Mode,
+    previous_logger_mode: Option<&str>,
+    data_mode: &str,
+    rtty_mode: &str,
+) -> String {
+    match previous_logger_mode.map(|mode| mode.trim().to_uppercase()) {
+        Some(previous) if previous == "DATA" && configured_mode_is(data_mode, mode) => {
+            "DATA".to_string()
+        }
+        Some(previous) if previous == "RTTY" && configured_mode_is(rtty_mode, mode) => {
+            "RTTY".to_string()
+        }
+        _ => normalize_mode(mode),
     }
 }
 
@@ -178,6 +194,8 @@ pub fn mode_candidates_for_request(
     requested: &str,
     frequency_hz: u64,
     bands: &[Band],
+    data_mode: &str,
+    rtty_mode: &str,
 ) -> Vec<Mode> {
     match requested.trim().to_uppercase().as_str() {
         "CW" => vec![Mode::Cw],
@@ -185,8 +203,8 @@ pub fn mode_candidates_for_request(
         "FM" => vec![Mode::Fm],
         "AM" => vec![Mode::Am],
         "SSB" => vec![ssb_mode_for_frequency(frequency_hz, bands)],
-        "FT8" | "JT65" | "JT9" | "MFSK" | "PSK" => vec![Mode::DataUsb, Mode::Rtty],
-        "RTTY" => vec![Mode::Rtty, Mode::DataUsb],
+        "DATA" => data_mode.parse().into_iter().collect(),
+        "RTTY" => rtty_mode.parse().into_iter().collect(),
         _ => Vec::new(),
     }
 }
@@ -205,6 +223,12 @@ fn ssb_mode_for_frequency(frequency_hz: u64, bands: &[Band]) -> Mode {
         Some("LSB") => Mode::Lsb,
         _ => Mode::Usb,
     }
+}
+
+fn configured_mode_is(configured_mode: &str, observed_mode: &Mode) -> bool {
+    configured_mode
+        .parse::<Mode>()
+        .is_ok_and(|mode| mode == *observed_mode)
 }
 
 #[cfg(test)]
@@ -557,34 +581,55 @@ mod tests {
     fn normalizes_cat_modes_to_logger_modes() {
         assert_eq!(normalize_mode(&Mode::Usb), "SSB");
         assert_eq!(normalize_mode(&Mode::CwReverse), "CW-R");
-        assert_eq!(normalize_mode(&Mode::DataFm), "RTTY");
+        assert_eq!(normalize_mode(&Mode::DataFm), "DATA");
         assert_eq!(normalize_mode(&Mode::Am), "AM");
-        assert_eq!(normalize_mode(&Mode::DataUsb), "RTTY");
-        assert_eq!(normalize_mode(&Mode::Psk), "RTTY");
-        assert_eq!(normalize_mode(&Mode::DigitalVoice), "RTTY");
+        assert_eq!(normalize_mode(&Mode::DataUsb), "DATA");
+        assert_eq!(normalize_mode(&Mode::Psk), "DATA");
+        assert_eq!(normalize_mode(&Mode::DigitalVoice), "DATA");
+        assert_eq!(normalize_mode(&Mode::RttyReverse), "RTTY");
     }
 
     #[test]
-    fn mode_candidates_for_request_use_fallbacks() {
+    fn mode_candidates_for_request_use_configured_digital_mappings() {
         assert_eq!(
-            mode_candidates_for_request("CW", 14_000_000, &test_bands()),
+            mode_candidates_for_request("CW", 14_000_000, &test_bands(), "DATA-USB", "RTTY"),
             vec![Mode::Cw]
         );
         assert_eq!(
-            mode_candidates_for_request("CW-R", 14_000_000, &test_bands()),
+            mode_candidates_for_request("CW-R", 14_000_000, &test_bands(), "DATA-USB", "RTTY"),
             vec![Mode::CwReverse, Mode::Cw]
         );
         assert_eq!(
-            mode_candidates_for_request("FT8", 14_000_000, &test_bands()),
-            vec![Mode::DataUsb, Mode::Rtty]
+            mode_candidates_for_request("DATA", 14_000_000, &test_bands(), "USB", "DATA-USB"),
+            vec![Mode::Usb]
         );
         assert_eq!(
-            mode_candidates_for_request("RTTY", 14_000_000, &test_bands()),
-            vec![Mode::Rtty, Mode::DataUsb]
+            mode_candidates_for_request("RTTY", 14_000_000, &test_bands(), "USB", "DATA-USB"),
+            vec![Mode::DataUsb]
         );
         assert_eq!(
-            mode_candidates_for_request("AM", 14_000_000, &test_bands()),
+            mode_candidates_for_request("AM", 14_000_000, &test_bands(), "DATA-USB", "RTTY"),
             vec![Mode::Am]
+        );
+    }
+
+    #[test]
+    fn mapped_mode_preserves_matching_digital_logger_state_only() {
+        assert_eq!(
+            logger_mode_from_cat_mode(&Mode::Usb, Some("DATA"), "USB", "RTTY"),
+            "DATA"
+        );
+        assert_eq!(
+            logger_mode_from_cat_mode(&Mode::Usb, Some("RTTY"), "DATA-USB", "USB"),
+            "RTTY"
+        );
+        assert_eq!(
+            logger_mode_from_cat_mode(&Mode::Usb, Some("SSB"), "USB", "USB"),
+            "SSB"
+        );
+        assert_eq!(
+            logger_mode_from_cat_mode(&Mode::Usb, Some("CW"), "USB", "USB"),
+            "SSB"
         );
     }
 
@@ -600,11 +645,11 @@ mod tests {
     #[test]
     fn ssb_request_uses_band_dependent_sideband() {
         assert_eq!(
-            mode_candidates_for_request("SSB", 7_200_000, &test_bands()),
+            mode_candidates_for_request("SSB", 7_200_000, &test_bands(), "DATA-USB", "RTTY"),
             vec![Mode::Lsb]
         );
         assert_eq!(
-            mode_candidates_for_request("SSB", 14_200_000, &test_bands()),
+            mode_candidates_for_request("SSB", 14_200_000, &test_bands(), "DATA-USB", "RTTY"),
             vec![Mode::Usb]
         );
     }

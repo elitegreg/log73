@@ -784,6 +784,8 @@ mod tests {
             serial_port: String::new(),
             serial_baud_rate: 115_200,
             options: String::new(),
+            data_mode: "DATA-USB".to_string(),
+            rtty_mode: "RTTY".to_string(),
             cw_tuning_increment_hz: crate::db::DEFAULT_CW_TUNING_INCREMENT_HZ,
             ssb_tuning_increment_hz: crate::db::DEFAULT_SSB_TUNING_INCREMENT_HZ,
             rit_clear_on_log: false,
@@ -1188,6 +1190,8 @@ mod tests {
         assert_eq!(radio.serial_port, "");
         assert_eq!(radio.serial_baud_rate, 115_200);
         assert_eq!(radio.options, "");
+        assert_eq!(radio.data_mode, "DATA-USB");
+        assert_eq!(radio.rtty_mode, "RTTY");
         assert_eq!(
             radio.cw_tuning_increment_hz,
             crate::db::DEFAULT_CW_TUNING_INCREMENT_HZ

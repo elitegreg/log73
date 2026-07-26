@@ -1033,6 +1033,8 @@ mod tests {
             serial_port: String::new(),
             serial_baud_rate: 115_200,
             options: String::new(),
+            data_mode: "DATA-USB".to_string(),
+            rtty_mode: "RTTY".to_string(),
             cw_tuning_increment_hz: 20,
             ssb_tuning_increment_hz: 100,
             rit_clear_on_log: false,

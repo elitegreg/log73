@@ -1968,16 +1968,28 @@ struct RadioKindOption {
     id: &'static str,
     display_name: &'static str,
     description: &'static str,
+    transmit_modes: Vec<String>,
+    default_data_mode: String,
+    default_rtty_mode: String,
 }
 
 async fn radio_kinds() -> Json<Vec<RadioKindOption>> {
     Json(
         supported_drivers()
             .iter()
-            .map(|driver| RadioKindOption {
-                id: driver.id,
-                display_name: driver.display_name,
-                description: driver.description,
+            .map(|driver| {
+                let transmit_modes = modes::transmit_modes_for_radio_kind(driver.id)
+                    .expect("registered radio driver capabilities should be valid");
+                let default_data_mode = modes::default_data_mode(transmit_modes);
+                let default_rtty_mode = modes::default_rtty_mode(transmit_modes);
+                RadioKindOption {
+                    id: driver.id,
+                    display_name: driver.display_name,
+                    description: driver.description,
+                    transmit_modes: transmit_modes.iter().map(ToString::to_string).collect(),
+                    default_data_mode: default_data_mode.to_string(),
+                    default_rtty_mode: default_rtty_mode.to_string(),
+                }
             })
             .collect(),
     )
@@ -2090,8 +2102,11 @@ async fn validate_voice_messages(
 
 async fn create_radio(
     State(app_state): State<AppState>,
-    Json(payload): Json<RadioPayload>,
+    Json(mut payload): Json<RadioPayload>,
 ) -> Json<serde_json::Value> {
+    if let Err(error) = resolve_radio_mode_mappings(&mut payload) {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
     debug!(payload = %debug_payload_log(&payload), "create radio POST body");
     if let Err(error) = validation::validate_radio(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
@@ -2117,8 +2132,11 @@ async fn create_radio(
 async fn update_radio(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-    Json(payload): Json<RadioPayload>,
+    Json(mut payload): Json<RadioPayload>,
 ) -> Json<serde_json::Value> {
+    if let Err(error) = resolve_radio_mode_mappings(&mut payload) {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
     debug!(id, payload = %debug_payload_log(&payload), "update radio PUT body");
     if let Err(error) = validation::validate_radio(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
@@ -2156,6 +2174,14 @@ async fn update_radio(
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
+}
+
+fn resolve_radio_mode_mappings(payload: &mut RadioPayload) -> Result<(), String> {
+    let (data_mode, rtty_mode) =
+        modes::resolved_mode_mappings(&payload.radio_kind, &payload.data_mode, &payload.rtty_mode)?;
+    payload.data_mode = data_mode;
+    payload.rtty_mode = rtty_mode;
+    Ok(())
 }
 
 async fn delete_radio(

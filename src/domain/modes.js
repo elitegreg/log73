@@ -4,11 +4,7 @@ export const LOGGER_MODE_OPTIONS = [
   'SSB',
   'FM',
   'AM',
-  'FT8',
-  'JT65',
-  'JT9',
-  'MFSK',
-  'PSK',
+  'DATA',
   'RTTY',
 ];
 
