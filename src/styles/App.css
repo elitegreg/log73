@@ -160,7 +160,8 @@
 }
 
 .entry-fields input.invalid-field,
-.log-cell-editor.invalid-field {
+.log-cell-editor.invalid-field,
+.operator-callsign-prompt-input.invalid-field {
   border-color: var(--invalid-border-color);
   background-color: var(--invalid-background-color);
   color: var(--invalid-text-color);
@@ -441,7 +442,7 @@
 
 .band-map-details-dialog-overlay,
 .log-details-dialog-overlay,
-.transmitter-id-dialog-overlay {
+.logger-prompt-dialog-overlay {
   position: fixed;
   inset: 0;
   z-index: 1000;
@@ -454,7 +455,7 @@
 
 .band-map-details-dialog,
 .log-details-dialog,
-.transmitter-id-dialog {
+.logger-prompt-dialog {
   width: min(520px, 100%);
   max-height: min(480px, calc(100vh - 32px));
   border: 1px solid #404040;
@@ -464,22 +465,34 @@
   flex-direction: column;
 }
 
-.transmitter-id-dialog {
+.logger-prompt-dialog {
   width: min(420px, 100%);
   padding: 16px;
   gap: 12px;
 }
 
-.transmitter-id-dialog-question {
+.logger-prompt-dialog-question {
   font-weight: bold;
   text-align: center;
 }
 
-.transmitter-id-dialog-actions {
+.logger-prompt-dialog-actions {
   display: flex;
   justify-content: center;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.operator-callsign-prompt-input {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+  text-transform: uppercase;
+}
+
+.operator-callsign-prompt-error {
+  color: var(--invalid-text-color);
+  text-align: center;
 }
 
 .band-map-details-dialog-header,

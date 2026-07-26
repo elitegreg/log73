@@ -8,19 +8,17 @@ function TransmitterIdPrompt({ prompt, onSelect }) {
   }, [prompt]);
 
   return (
-    <div className="transmitter-id-dialog-overlay">
+    <div className="logger-prompt-dialog-overlay">
       <div
-        className="transmitter-id-dialog"
+        className="logger-prompt-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="Transmitter selection"
       >
         {prompt.question ? (
-          <div className="transmitter-id-dialog-question">
-            {prompt.question}
-          </div>
+          <div className="logger-prompt-dialog-question">{prompt.question}</div>
         ) : null}
-        <div className="transmitter-id-dialog-actions">
+        <div className="logger-prompt-dialog-actions">
           {prompt.options.map((option, index) => (
             <button
               className="cmd-btn primary"

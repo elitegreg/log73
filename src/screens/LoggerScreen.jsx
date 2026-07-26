@@ -4,6 +4,7 @@ import { apiJson } from '../lib/api';
 import BandMapWindow from '../logger/BandMapWindow';
 import LogWindow from '../logger/LogWindow';
 import MainWindow from '../logger/MainWindow';
+import OperatorCallsignPrompt from '../logger/OperatorCallsignPrompt';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { BAND_MAP_ENABLED_STORAGE_KEY } from '../logger/mainWindowHelpers';
 import { cabrilloTransmitterPrompt } from '../domain/cabrilloTransmitter';
@@ -48,6 +49,8 @@ function LoggerScreen() {
     radio,
     messageLabels,
     operatorCallsign,
+    isOperatorPromptOpen,
+    acceptOperatorCallsign,
     isContextLoading,
   } = useLoggerContext(numericLogId, numericRadioId, {
     notifyOperationalError,
@@ -287,14 +290,7 @@ function LoggerScreen() {
 
   return (
     <div className="app-container">
-      {isTransmitterSelectionPending ? (
-        <TransmitterIdPrompt
-          prompt={transmitterPrompt}
-          onSelect={(id) =>
-            setTransmitterSelection({ key: transmitterPromptKey, id })
-          }
-        />
-      ) : (
+      {!isTransmitterSelectionPending ? (
         <div className="logger-workspace">
           {loggerImageSrc ? (
             <div className="logger-image-panel" aria-hidden="true">
@@ -395,7 +391,20 @@ function LoggerScreen() {
             />
           ) : null}
         </div>
-      )}
+      ) : null}
+      {isOperatorPromptOpen ? (
+        <OperatorCallsignPrompt
+          callsign={operatorCallsign}
+          onAccept={acceptOperatorCallsign}
+        />
+      ) : isTransmitterSelectionPending ? (
+        <TransmitterIdPrompt
+          prompt={transmitterPrompt}
+          onSelect={(id) =>
+            setTransmitterSelection({ key: transmitterPromptKey, id })
+          }
+        />
+      ) : null}
       {isSocketDebugPanelEnabled && (
         <div
           style={{

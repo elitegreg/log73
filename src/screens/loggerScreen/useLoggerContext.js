@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiJson } from '../../lib/api';
 
 function normalizeBand(band) {
@@ -14,24 +14,24 @@ function normalizeBand(band) {
 
 let promptedOperatorCallsign;
 
-function promptForOperatorCallsign(defaultCallsign) {
-  const enteredCallsign = window.prompt(
-    'Operator Callsign',
-    promptedOperatorCallsign ?? defaultCallsign,
-  );
-  if (enteredCallsign === null)
-    return promptedOperatorCallsign ?? defaultCallsign;
-  promptedOperatorCallsign = enteredCallsign.toUpperCase();
-  return promptedOperatorCallsign;
-}
-
 export function useLoggerContext(logId, radioId, { notifyOperationalError }) {
   const [settings, setSettings] = useState(null);
   const [log, setLog] = useState(null);
   const [radio, setRadio] = useState(null);
   const [messageLabels, setMessageLabels] = useState(null);
   const [operatorCallsign, setOperatorCallsign] = useState('');
+  const [isOperatorPromptOpen, setIsOperatorPromptOpen] = useState(false);
   const [isContextLoading, setIsContextLoading] = useState(true);
+  const operatorCallsignRef = useRef('');
+
+  const acceptOperatorCallsign = useCallback((callsign) => {
+    promptedOperatorCallsign = String(callsign ?? '')
+      .trim()
+      .toUpperCase();
+    operatorCallsignRef.current = promptedOperatorCallsign;
+    setOperatorCallsign(promptedOperatorCallsign);
+    setIsOperatorPromptOpen(false);
+  }, []);
 
   useEffect(() => {
     let isCancelled = false;
@@ -69,10 +69,13 @@ export function useLoggerContext(logId, radioId, { notifyOperationalError }) {
       setLog(loadedLog);
       setRadio(loadedRadio);
       setMessageLabels(loadedMessageLabels);
-      setOperatorCallsign(
-        (current) =>
-          current || promptForOperatorCallsign(loadedLog.station_callsign),
-      );
+      if (!operatorCallsignRef.current) {
+        const defaultCallsign =
+          promptedOperatorCallsign ?? loadedLog.station_callsign;
+        operatorCallsignRef.current = defaultCallsign;
+        setOperatorCallsign(defaultCallsign);
+        setIsOperatorPromptOpen(true);
+      }
     }
 
     const loadContextPromise = loadContext();
@@ -102,9 +105,7 @@ export function useLoggerContext(logId, radioId, { notifyOperationalError }) {
         event.key.toLowerCase() === 'o'
       ) {
         event.preventDefault();
-        setOperatorCallsign(
-          promptForOperatorCallsign(log?.station_callsign ?? ''),
-        );
+        if (log) setIsOperatorPromptOpen(true);
       }
     }
     window.addEventListener('keydown', handleKeyDown);
@@ -117,7 +118,8 @@ export function useLoggerContext(logId, radioId, { notifyOperationalError }) {
     radio,
     messageLabels,
     operatorCallsign,
-    setOperatorCallsign,
+    isOperatorPromptOpen,
+    acceptOperatorCallsign,
     isContextLoading,
   };
 }
