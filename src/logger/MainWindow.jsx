@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { buildSentExchange, fieldDefault } from '../domain/contactFields';
+import { cabrilloTransmitterAdif } from '../domain/cabrilloTransmitter';
 import { dxccContinent } from '../domain/dxcc';
 import { validateCallsign, validateExchangeField } from '../domain/validation';
 import {
@@ -64,6 +65,7 @@ function MainWindow({
   lastContact = null,
   stationCallsign,
   operatorCallsign,
+  cabrilloTransmitterId,
   radioState,
   backendSocketStatus,
   catStatus,
@@ -477,7 +479,13 @@ function MainWindow({
   useEffect(() => {
     onRegisterBandMapActivateClear?.(clearEntryFields);
     return () => onRegisterBandMapActivateClear?.(null);
-  }, [onRegisterBandMapActivateClear, clearRitIfEnabled, radioMode, settings, log]);
+  }, [
+    onRegisterBandMapActivateClear,
+    clearRitIfEnabled,
+    radioMode,
+    settings,
+    log,
+  ]);
 
   function logContact(force = false, values = exchangeValues) {
     if (!canLogContact(force, values)) {
@@ -524,6 +532,7 @@ function MainWindow({
         ...(continent === null ? {} : { CONT: continent }),
         ...(myDxccNumber === null ? {} : { MY_DXCC: myDxccNumber }),
         ...(myContinent === null ? {} : { MY_CONT: myContinent }),
+        ...cabrilloTransmitterAdif(cabrilloTransmitterId),
       },
     };
 

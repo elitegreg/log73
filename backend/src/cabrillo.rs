@@ -220,8 +220,59 @@ fn render_qso_line(rules: &ContestRules, log: &Log, contact: &Contact) -> Result
     parts.extend(sent_fields);
     parts.push(their_callsign);
     parts.extend(received_fields);
+    if uses_transmitter_id(rules, log) {
+        parts.push(
+            contact_i64(contact_adif_value(contact, "APP_LOG73_TX_ID"))
+                .unwrap_or(0)
+                .to_string(),
+        );
+    }
 
     Ok(parts.join(" "))
+}
+
+fn uses_transmitter_id(rules: &ContestRules, log: &Log) -> bool {
+    let Some(cabrillo) = &rules.cabrillo else {
+        return false;
+    };
+    let Some(log_values) = log.contest_params.as_object() else {
+        return false;
+    };
+    let operator = cabrillo_header_value(cabrillo, log_values, "CATEGORY-OPERATOR");
+    if operator.as_deref() != Some("MULTI-OP") {
+        return false;
+    }
+
+    let transmitter = cabrillo_header_value(cabrillo, log_values, "CATEGORY-TRANSMITTER");
+    match transmitter.as_deref() {
+        Some("TWO") => true,
+        Some("ONE") => cabrillo
+            .log_fields
+            .iter()
+            .find(|field| normalized_tag(&field.name) == "CATEGORY-TRANSMITTER")
+            .is_some_and(|field| field.multi_single_has_mult_transmitter),
+        _ => false,
+    }
+}
+
+fn cabrillo_header_value(
+    cabrillo: &crate::contest_rules::CabrilloRules,
+    log_values: &Map<String, Value>,
+    name: &str,
+) -> Option<String> {
+    cabrillo
+        .fixed_fields
+        .iter()
+        .find(|field| normalized_tag(&field.name) == name)
+        .map(|field| field.value.trim().to_uppercase())
+        .or_else(|| {
+            cabrillo
+                .log_fields
+                .iter()
+                .find(|field| normalized_tag(&field.name) == name)
+                .and_then(|field| parameter_value(log_values, field))
+                .map(|value| value.trim().to_uppercase())
+        })
 }
 
 fn exchange_token(field: &ExchangeField, log: &Log, contact: &Contact) -> Result<String, String> {
@@ -398,6 +449,7 @@ mod tests {
                     help_text: None,
                     max_lines: None,
                     preserve_case: None,
+                    multi_single_has_mult_transmitter: false,
                 }],
                 export_fields: vec![
                     ContestParam {
@@ -413,6 +465,7 @@ mod tests {
                         help_text: None,
                         max_lines: None,
                         preserve_case: Some(true),
+                        multi_single_has_mult_transmitter: false,
                     },
                     ContestParam {
                         name: "ADDRESS".to_string(),
@@ -427,6 +480,7 @@ mod tests {
                         help_text: None,
                         max_lines: Some(6),
                         preserve_case: Some(true),
+                        multi_single_has_mult_transmitter: false,
                     },
                 ],
             }),
@@ -473,6 +527,50 @@ mod tests {
         )
     }
 
+    fn category_param(name: &str, multi_single_has_mult_transmitter: bool) -> ContestParam {
+        ContestParam {
+            name: name.to_string(),
+            label: name.to_string(),
+            field_type: "String:16".to_string(),
+            required: None,
+            regex: None,
+            default: None,
+            in_sets: Vec::new(),
+            valid_values: Vec::new(),
+            widget: Some("select".to_string()),
+            help_text: None,
+            max_lines: None,
+            preserve_case: None,
+            multi_single_has_mult_transmitter,
+        }
+    }
+
+    fn categorized_rules(multi_single_has_mult_transmitter: bool) -> ContestRules {
+        let mut rules = test_rules();
+        let cabrillo = rules.cabrillo.as_mut().expect("Cabrillo rules");
+        cabrillo
+            .log_fields
+            .push(category_param("CATEGORY-OPERATOR", false));
+        cabrillo.log_fields.push(category_param(
+            "CATEGORY-TRANSMITTER",
+            multi_single_has_mult_transmitter,
+        ));
+        rules
+    }
+
+    fn categorized_log(operator: &str, transmitter: &str) -> Log {
+        let mut log = test_log();
+        log.contest_params["CATEGORY-OPERATOR"] = json!(operator);
+        log.contest_params["CATEGORY-TRANSMITTER"] = json!(transmitter);
+        log
+    }
+
+    fn qso_line(text: &str) -> &str {
+        text.lines()
+            .find(|line| line.starts_with("QSO:"))
+            .expect("rendered log should contain a QSO")
+    }
+
     #[test]
     fn render_log_emits_required_headers_and_qsos() {
         let text = render_log(
@@ -504,6 +602,62 @@ mod tests {
         assert!(lines.contains(&"OPERATORS: K1ABC"));
         assert!(lines.iter().any(|line| line.starts_with("QSO: 14250 PH ")));
         assert!(text.ends_with("\r\n"));
+    }
+
+    #[test]
+    fn multi_two_qso_uses_stored_transmitter_id() {
+        let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
+        crate::db::set_contact_adif(&mut contact, "APP_LOG73_TX_ID", json!("1"));
+
+        let text = render_log(
+            &categorized_rules(false),
+            &categorized_log("MULTI-OP", "TWO"),
+            &[contact],
+            &json!({}),
+            1,
+        )
+        .expect("export should render");
+
+        assert!(qso_line(&text).ends_with(" NC 1"));
+    }
+
+    #[test]
+    fn flagged_multi_single_qso_defaults_missing_transmitter_id_to_zero() {
+        let text = render_log(
+            &categorized_rules(true),
+            &categorized_log("MULTI-OP", "ONE"),
+            &[test_contact("K1ABC", "W1AW", 1_700_000_000)],
+            &json!({}),
+            1,
+        )
+        .expect("export should render");
+
+        assert!(qso_line(&text).ends_with(" NC 0"));
+    }
+
+    #[test]
+    fn ineligible_categories_omit_transmitter_id() {
+        for (operator, transmitter, flagged) in [
+            ("MULTI-OP", "ONE", false),
+            ("SINGLE-OP", "TWO", true),
+            ("MULTI-OP", "UNLIMITED", true),
+        ] {
+            let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
+            crate::db::set_contact_adif(&mut contact, "APP_LOG73_TX_ID", json!(1));
+            let text = render_log(
+                &categorized_rules(flagged),
+                &categorized_log(operator, transmitter),
+                &[contact],
+                &json!({}),
+                1,
+            )
+            .expect("export should render");
+
+            assert!(
+                qso_line(&text).ends_with(" NC"),
+                "{operator}/{transmitter} unexpectedly emitted a transmitter ID"
+            );
+        }
     }
 
     #[test]

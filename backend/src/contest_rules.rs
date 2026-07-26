@@ -7,6 +7,10 @@ use std::{
 };
 use tracing::info;
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValueSet {
     pub name: String,
@@ -58,6 +62,8 @@ pub struct ContestParam {
     pub max_lines: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preserve_case: Option<bool>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub multi_single_has_mult_transmitter: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -513,6 +519,7 @@ fn ensure_serial_batch_size_param(contest: &mut ContestRules) {
         ),
         max_lines: None,
         preserve_case: None,
+        multi_single_has_mult_transmitter: false,
     });
 }
 
@@ -1003,6 +1010,34 @@ contests:
             vec!["160m", "80m", "40m", "20m", "15m", "10m"]
         );
         assert_eq!(cw.multipliers.len(), 2);
+        let transmitter_field = cw
+            .cabrillo
+            .as_ref()
+            .and_then(|cabrillo| {
+                cabrillo
+                    .log_fields
+                    .iter()
+                    .find(|field| field.name == "CATEGORY-TRANSMITTER")
+            })
+            .expect("CQWW should define CATEGORY-TRANSMITTER");
+        assert!(transmitter_field.multi_single_has_mult_transmitter);
+        assert_eq!(
+            serde_json::to_value(transmitter_field)
+                .expect("field should serialize")
+                .get("multi_single_has_mult_transmitter"),
+            Some(&Value::Bool(true))
+        );
+        assert!(
+            ssb.cabrillo
+                .as_ref()
+                .and_then(|cabrillo| {
+                    cabrillo
+                        .log_fields
+                        .iter()
+                        .find(|field| field.name == "CATEGORY-TRANSMITTER")
+                })
+                .is_some_and(|field| field.multi_single_has_mult_transmitter)
+        );
         assert_eq!(
             cw.qso_points
                 .as_ref()

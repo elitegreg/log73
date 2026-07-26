@@ -6,6 +6,8 @@ import LogWindow from '../logger/LogWindow';
 import MainWindow from '../logger/MainWindow';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { BAND_MAP_ENABLED_STORAGE_KEY } from '../logger/mainWindowHelpers';
+import { cabrilloTransmitterPrompt } from '../domain/cabrilloTransmitter';
+import TransmitterIdPrompt from '../logger/TransmitterIdPrompt';
 import {
   contactAdif,
   contactIdentifier,
@@ -29,6 +31,7 @@ function LoggerScreen() {
   const numericLogId = Number(logId);
   const numericRadioId = Number(radioId);
   const [sessionId] = useState(getSessionId);
+  const [transmitterSelection, setTransmitterSelection] = useState(null);
   const [bandMapEnabled, setBandMapEnabled] = useState(() => {
     return localStorage.getItem(BAND_MAP_ENABLED_STORAGE_KEY) === '1';
   });
@@ -128,6 +131,17 @@ function LoggerScreen() {
     });
 
   const loggerImageSrc = useLoggerImage();
+  const transmitterPrompt = cabrilloTransmitterPrompt(settings, log);
+  const transmitterPromptKey = transmitterPrompt
+    ? `${numericLogId}:${transmitterPrompt.kind}`
+    : null;
+  const cabrilloTransmitterId =
+    transmitterPromptKey !== null &&
+    transmitterSelection?.key === transmitterPromptKey
+      ? transmitterSelection.id
+      : null;
+  const isTransmitterSelectionPending =
+    transmitterPromptKey !== null && cabrilloTransmitterId === null;
 
   const handleBackendSocketMessage = useCallback(
     (message) => {
@@ -273,105 +287,115 @@ function LoggerScreen() {
 
   return (
     <div className="app-container">
-      <div className="logger-workspace">
-        {loggerImageSrc ? (
-          <div className="logger-image-panel" aria-hidden="true">
-            <img className="logger-side-image" src={loggerImageSrc} alt="" />
+      {isTransmitterSelectionPending ? (
+        <TransmitterIdPrompt
+          prompt={transmitterPrompt}
+          onSelect={(id) =>
+            setTransmitterSelection({ key: transmitterPromptKey, id })
+          }
+        />
+      ) : (
+        <div className="logger-workspace">
+          {loggerImageSrc ? (
+            <div className="logger-image-panel" aria-hidden="true">
+              <img className="logger-side-image" src={loggerImageSrc} alt="" />
+            </div>
+          ) : null}
+          <div className="logger-main-column" ref={loggerMainColumnRef}>
+            <MainWindow
+              settings={settings}
+              log={log}
+              radio={radio}
+              isContextLoading={isContextLoading}
+              contactsLoadState={contactsLoadState}
+              contacts={visibleContacts}
+              lastContact={allContacts[0] ?? null}
+              stationCallsign={log?.station_callsign ?? ''}
+              operatorCallsign={operatorCallsign}
+              cabrilloTransmitterId={cabrilloTransmitterId}
+              radioState={radioState}
+              backendSocketStatus={backendSocketStatus}
+              catStatus={catStatus}
+              messageLabels={messageLabels}
+              messageSentEvent={messageSentEvent}
+              sessionId={sessionId}
+              logId={numericLogId}
+              bandMapEnabled={bandMapEnabled}
+              bandMapSpotStore={visibleBandMapSpotStore}
+              bandMapSelection={bandMapSelection}
+              supercheckpartialUpdate={supercheckpartialUpdate}
+              onSetBandMapEnabled={setBandMapEnabled}
+              onActivateBandMapSpot={handleActivateBandMapSpot}
+              onStoreCqFrequency={handleStoreCqFrequency}
+              onMarkFrequency={handleMarkFrequency}
+              onStoreBandMapSpot={handleStoreBandMapSpot}
+              onRegisterBandMapActivateClear={(clearEntryFields) => {
+                bandMapActivateClearRef.current = clearEntryFields;
+              }}
+              onSetRadioFrequency={(frequencyHz) =>
+                sendRadioMessage({
+                  type: 'set_frequency',
+                  frequency_hz: frequencyHz,
+                })
+              }
+              onSetRadioMode={(mode) =>
+                sendRadioMessage({ type: 'set_mode', mode })
+              }
+              onClearRit={() => sendRadioMessage({ type: 'rit_clear' })}
+              onIncrementRit={(hz) =>
+                sendRadioMessage({ type: 'rit_increment', hz })
+              }
+              onDecrementRit={(hz) =>
+                sendRadioMessage({ type: 'rit_decrement', hz })
+              }
+              onSendMessage={(payload) =>
+                sendRadioMessage({ type: 'send_message', ...payload })
+              }
+              onSendCwText={(payload) =>
+                sendRadioMessage({ type: 'send_cw_text', ...payload })
+              }
+              onSendDxClusterSpot={(payload) =>
+                sendRadioMessage({ type: 'send_dxcluster_spot', ...payload })
+              }
+              onStopKeying={() => sendRadioMessage({ type: 'stop_keying' })}
+              onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}
+              onDebouncedCallsignChange={handleDebouncedCallsignChange}
+              onLogContact={(contact) => {
+                setAllContacts((currentContacts) =>
+                  sortContacts([...currentContacts, contact]),
+                );
+              }}
+              onRescore={handleRescore}
+              isRescoreLoading={false}
+              scoreSummary={scoreSummary}
+              serialAllocation={serialAllocationStatus}
+              onSerialContactLogged={handleSerialContactLogged}
+              onExit={exitLogger}
+            />
+            <LogWindow
+              settings={settings}
+              contacts={visibleContacts}
+              log={log}
+              contactsLoadState={contactsLoadState}
+              radioMode={radioState?.mode ?? 'CW'}
+              onDeleteContacts={deleteContacts}
+              onUpdateContacts={updateContacts}
+              hasMoreContacts={hasMoreContacts}
+              isLoadingMoreContacts={isLoadingMoreContacts}
+              onLoadMoreContacts={loadMoreContacts}
+            />
           </div>
-        ) : null}
-        <div className="logger-main-column" ref={loggerMainColumnRef}>
-          <MainWindow
-            settings={settings}
-            log={log}
-            radio={radio}
-            isContextLoading={isContextLoading}
-            contactsLoadState={contactsLoadState}
-            contacts={visibleContacts}
-            lastContact={allContacts[0] ?? null}
-            stationCallsign={log?.station_callsign ?? ''}
-            operatorCallsign={operatorCallsign}
-            radioState={radioState}
-            backendSocketStatus={backendSocketStatus}
-            catStatus={catStatus}
-            messageLabels={messageLabels}
-            messageSentEvent={messageSentEvent}
-            sessionId={sessionId}
-            logId={numericLogId}
-            bandMapEnabled={bandMapEnabled}
-            bandMapSpotStore={visibleBandMapSpotStore}
-            bandMapSelection={bandMapSelection}
-            supercheckpartialUpdate={supercheckpartialUpdate}
-            onSetBandMapEnabled={setBandMapEnabled}
-            onActivateBandMapSpot={handleActivateBandMapSpot}
-            onStoreCqFrequency={handleStoreCqFrequency}
-            onMarkFrequency={handleMarkFrequency}
-            onStoreBandMapSpot={handleStoreBandMapSpot}
-            onRegisterBandMapActivateClear={(clearEntryFields) => {
-              bandMapActivateClearRef.current = clearEntryFields;
-            }}
-            onSetRadioFrequency={(frequencyHz) =>
-              sendRadioMessage({
-                type: 'set_frequency',
-                frequency_hz: frequencyHz,
-              })
-            }
-            onSetRadioMode={(mode) =>
-              sendRadioMessage({ type: 'set_mode', mode })
-            }
-            onClearRit={() => sendRadioMessage({ type: 'rit_clear' })}
-            onIncrementRit={(hz) =>
-              sendRadioMessage({ type: 'rit_increment', hz })
-            }
-            onDecrementRit={(hz) =>
-              sendRadioMessage({ type: 'rit_decrement', hz })
-            }
-            onSendMessage={(payload) =>
-              sendRadioMessage({ type: 'send_message', ...payload })
-            }
-            onSendCwText={(payload) =>
-              sendRadioMessage({ type: 'send_cw_text', ...payload })
-            }
-            onSendDxClusterSpot={(payload) =>
-              sendRadioMessage({ type: 'send_dxcluster_spot', ...payload })
-            }
-            onStopKeying={() => sendRadioMessage({ type: 'stop_keying' })}
-            onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}
-            onDebouncedCallsignChange={handleDebouncedCallsignChange}
-            onLogContact={(contact) => {
-              setAllContacts((currentContacts) =>
-                sortContacts([...currentContacts, contact]),
-              );
-            }}
-            onRescore={handleRescore}
-            isRescoreLoading={false}
-            scoreSummary={scoreSummary}
-            serialAllocation={serialAllocationStatus}
-            onSerialContactLogged={handleSerialContactLogged}
-            onExit={exitLogger}
-          />
-          <LogWindow
-            settings={settings}
-            contacts={visibleContacts}
-            log={log}
-            contactsLoadState={contactsLoadState}
-            radioMode={radioState?.mode ?? 'CW'}
-            onDeleteContacts={deleteContacts}
-            onUpdateContacts={updateContacts}
-            hasMoreContacts={hasMoreContacts}
-            isLoadingMoreContacts={isLoadingMoreContacts}
-            onLoadMoreContacts={loadMoreContacts}
-          />
+          {bandMapEnabled ? (
+            <BandMapWindow
+              spotStore={visibleBandMapSpotStore}
+              radioFrequencyHz={radioState?.frequency_hz}
+              height={bandMapHeight}
+              onSpotClick={handleActivateBandMapSpot}
+              onDeleteSpot={handleDeleteBandMapSpot}
+            />
+          ) : null}
         </div>
-        {bandMapEnabled ? (
-          <BandMapWindow
-            spotStore={visibleBandMapSpotStore}
-            radioFrequencyHz={radioState?.frequency_hz}
-            height={bandMapHeight}
-            onSpotClick={handleActivateBandMapSpot}
-            onDeleteSpot={handleDeleteBandMapSpot}
-          />
-        ) : null}
-      </div>
+      )}
       {isSocketDebugPanelEnabled && (
         <div
           style={{

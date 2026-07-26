@@ -67,7 +67,7 @@ contests:
           label: 'Category Transmitter'
           type: 'String:16'
           widget: 'select'
-          valid_values: ['ONE', 'TWO', 'UNLIMITED']
+          valid_values: ['ONE', 'UNLIMITED']
       export_fields:
         - name: 'CLUB'
           label: 'Club'

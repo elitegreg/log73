@@ -1047,6 +1047,7 @@ mod tests {
                     help_text: None,
                     max_lines: None,
                     preserve_case: None,
+                    multi_single_has_mult_transmitter: false,
                 }],
                 export_fields: Vec::new(),
             }),

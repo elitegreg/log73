@@ -94,12 +94,19 @@ contests:
           widget: 'select'
           default: 'LOW'
           valid_values: ['HIGH', 'LOW', 'QRP']
+        - name: 'CATEGORY-STATION'
+          label: 'Category Station'
+          type: 'String:16'
+          widget: 'select'
+          default: 'FIXED'
+          valid_values: ['FIXED', 'DISTRIBUTED', 'MOBILE']
         - name: 'CATEGORY-TRANSMITTER'
           label: 'Category Transmitter'
           type: 'String:16'
           widget: 'select'
           default: 'ONE'
-          valid_values: ['ONE', 'UNLIMITED']
+          valid_values: ['ONE', 'TWO', 'UNLIMITED']
+          multi_single_has_mult_transmitter: true
         - name: 'CATEGORY-OVERLAY'
           label: 'Category Overlay'
           type: 'String:16'
