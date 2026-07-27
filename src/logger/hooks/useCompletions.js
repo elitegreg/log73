@@ -4,7 +4,7 @@ import {
   exchangeCompletionMatches,
 } from '../../domain/completions';
 import { dxccLabel, lookupDxcc } from '../../domain/dxcc';
-import { dupeAlertText } from '../../domain/dupes';
+import { dupeAlertTextForAdif } from '../../domain/dupes';
 import { dxcc, supercheckpartial } from '../../lib/api';
 import { SUPERCHECKPARTIAL_MIN_QUERY_LENGTH } from '../mainWindowHelpers';
 import { mergeSupercheckpartialCallsigns } from '../supercheckpartialCache';
@@ -131,7 +131,7 @@ export function useCompletions({
   const currentDupeAlertText =
     callSign.trim() !== '' &&
     debouncedCallSign.trim().toUpperCase() === callSign.trim().toUpperCase()
-      ? dupeAlertText(settings, currentContactFields(), contacts)
+      ? dupeAlertTextForAdif(settings, currentContactFields(), contacts)
       : '';
 
   return {

@@ -84,3 +84,11 @@ export function dupeAlertText(settings, currentContact, historicContacts) {
 
   return alertText;
 }
+
+export function dupeAlertTextForAdif(
+  settings,
+  currentAdif,
+  historicContacts,
+) {
+  return dupeAlertText(settings, { adif: currentAdif }, historicContacts);
+}

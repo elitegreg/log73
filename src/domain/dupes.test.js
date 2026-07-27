@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { dupeAlertText } from './dupes.js';
+import { dupeAlertText, dupeAlertTextForAdif } from './dupes.js';
 
 const settings = {
   dupe_key: ['CALL', 'BAND', 'MODE', 'SRX_STRING'],
@@ -34,6 +34,36 @@ test('dupeAlertText detects exact dupes', () => {
 
   assert.equal(
     dupeAlertText(settings, currentContact, historicContacts),
+    'Dupe',
+  );
+});
+
+test('dupeAlertTextForAdif detects a live Field Day entry against logged contacts', () => {
+  const fieldDaySettings = {
+    dupe_key: ['CALL', 'BAND', 'MODE'],
+    qso_column_fields: {},
+  };
+  const currentAdif = {
+    CALL: 'W4MEL',
+    BAND: '40m',
+    FREQ: 7000000,
+    MODE: 'CW',
+  };
+  const historicContacts = [
+    contact({
+      CALL: 'W4MEL',
+      BAND: '40m',
+      FREQ: 7000000,
+      MODE: 'CW',
+    }),
+  ];
+
+  assert.equal(
+    dupeAlertTextForAdif(
+      fieldDaySettings,
+      currentAdif,
+      historicContacts,
+    ),
     'Dupe',
   );
 });

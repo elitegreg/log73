@@ -191,19 +191,14 @@ export function useMessageSending({
         : currentMessageFields(exchangeValues);
 
     stopRepeat();
-    // Submit each ESM key as its own request.  In particular, CW radios
-    // handle the F5 -> F2 sequence reliably when it follows the same path as
-    // two manual function-key presses, rather than as one combined message.
-    const requestIds = keys
-      .map((key) => sendMessageKeys([key], messageModeKey, values))
-      .filter(Boolean);
-    if (requestIds.length === 0) return;
+    const requestId = sendMessageKeys(keys, messageModeKey, values);
+    if (!requestId) return;
     if (keys.includes('F2')) {
       markEsmExchangeSentForCurrentCallsign();
     }
     if (shouldRepeatF1) {
       repeatActiveRef.current = true;
-      repeatRequestIdRef.current = requestIds[0];
+      repeatRequestIdRef.current = requestId;
     }
   }
 
