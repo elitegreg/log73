@@ -548,6 +548,8 @@ ARRL-FIELD-DAY           ARRL Field Day
 CWT                      CWOps CWT
 CQ-WW-CW                 CQ World Wide DX Contest (CW)
 CQ-WW-SSB                CQ World Wide DX Contest (SSB)
+HI-QSO-PARTY             Hawaii QSO Party outside Hawaii
+HI-QSO-PARTY (In State)  Hawaii QSO Party in Hawaii
 K1USNSST                 K1USN SST
 MDC-QSO-PARTY            Maryland-DC QSO Party outside MDC
 MDC-QSO-PARTY (In State) Maryland-DC QSO Party in Maryland/DC
@@ -560,6 +562,8 @@ Log creation dynamically requests required rule parameters where needed:
 
 - `ARRL-FIELD-DAY`: `Class`, `Section`
 - `CWT`: `NAME`, `EXCHANGE`
+- `HI-QSO-PARTY`: `Location`
+- `HI-QSO-PARTY (In State)`: `District`
 - `K1USNSST`: `NAME`, `QTH`
 - `MDC-QSO-PARTY`: `Location`
 - `MDC-QSO-PARTY (In State)`: `Jurisdiction`
@@ -567,7 +571,7 @@ Log creation dynamically requests required rule parameters where needed:
 - `SC-QSO-PARTY`: `State`
 - `SC-QSO-PARTY (In State)`: `County`
 
-Those values populate fixed sent exchange fields in the logger. Contests with a sent `Serial` exchange field also get a `SERIAL_BATCH_SIZE` parameter, defaulting to 10; the backend reserves durable serial ranges by log id and field, the browser refills after 90% of the batch is consumed, and the logger blocks logging if no reserved serial is available. The previous `BERK` default is no longer used. The SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
+Those values populate fixed sent exchange fields in the logger. Contests with a sent `Serial` exchange field also get a `SERIAL_BATCH_SIZE` parameter, defaulting to 10; the backend reserves durable serial ranges by log id and field, the browser refills after 90% of the batch is consumed, and the logger blocks logging if no reserved serial is available. The previous `BERK` default is no longer used. The HI, MDC, and SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
 For `SC-QSO-PARTY (In State)`, the received value is labeled `Exchange` because it may be a county, state/province, or `DX`.
 
 ## UI themes

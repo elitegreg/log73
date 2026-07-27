@@ -1387,6 +1387,67 @@ contests:
     }
 
     #[test]
+    fn bundled_hi_qso_party_rules_resolve_both_locations() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let in_state = store
+            .get("HI-QSO-PARTY (In State)")
+            .expect("in-state Hawaii QSO Party rules should load");
+        let outside = store
+            .get("HI-QSO-PARTY")
+            .expect("outside-Hawaii QSO Party rules should load");
+
+        let districts = in_state
+            .define
+            .iter()
+            .find(|value_set| value_set.name == "Hawaii Districts")
+            .expect("Hawaii districts should exist");
+        assert_eq!(districts.values.len(), 14);
+        assert!(districts.values.contains(&"HIL".to_string()));
+        assert!(districts.values.contains(&"LNI".to_string()));
+        assert!(districts.values.contains(&"WHN".to_string()));
+
+        let states = in_state
+            .define
+            .iter()
+            .find(|value_set| value_set.name == "States")
+            .expect("states should exist");
+        assert!(!states.values.contains(&"HI".to_string()));
+        assert!(states.values.contains(&"AK".to_string()));
+
+        assert_eq!(in_state.allowed_modes, vec!["CW", "SSB"]);
+        assert_eq!(in_state.log_params[0].name, "District");
+        assert_eq!(outside.log_params[0].name, "Location");
+        assert_eq!(
+            outside.multipliers[0].key,
+            vec!["SRX_STRING".to_string(), "BAND".to_string()]
+        );
+
+        let received = outside
+            .exchange
+            .iter()
+            .find(|field| field.name == "District")
+            .expect("outside-Hawaii received district should exist");
+        assert_eq!(received.valid_values.len(), 14);
+
+        for rules in [in_state, outside] {
+            let cabrillo = rules
+                .cabrillo
+                .as_ref()
+                .expect("Hawaii QSO Party Cabrillo rules should exist");
+            assert_eq!(cabrillo.contest_id.as_deref(), Some("HI-QSO-PARTY"));
+            let transmitter = cabrillo
+                .log_fields
+                .iter()
+                .find(|field| field.name == "CATEGORY-TRANSMITTER")
+                .expect("category transmitter should exist");
+            assert_eq!(transmitter.default, Some(Value::String("ONE".to_string())));
+            assert_eq!(transmitter.valid_values, vec!["ONE", "UNLIMITED"]);
+        }
+    }
+
+    #[test]
     fn bundled_mdc_qso_party_rules_resolve_both_locations() {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir.as_path()])

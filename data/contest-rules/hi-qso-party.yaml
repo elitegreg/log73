@@ -1,0 +1,243 @@
+contests:
+  - id: 'HI-QSO-PARTY (In State)'
+    display_name: 'Hawaii QSO Party (In State)'
+    allowed_bands: [160, 80, 40, 20, 15, 10]
+    allowed_modes: ['CW', 'SSB']
+    scoring:
+      qso_points:
+        rules:
+          - when:
+              field: 'MODE'
+              values: ['SSB']
+            points: 2
+          - points: 3
+      dupe_key:
+        - 'CALL'
+        - 'BAND'
+        - 'MODE'
+        - 'STX_STRING'
+        - 'SRX_STRING'
+      multipliers:
+        - name: 'Hawaii District'
+          field: 'SRX_STRING'
+          key: ['SRX_STRING']
+          in_sets: ['Hawaii Districts']
+        - name: 'State/Province'
+          field: 'SRX_STRING'
+          key: ['SRX_STRING']
+          in_sets:
+            - States
+            - 'Washington DC'
+            - 'Canadian Provinces'
+        - name: 'DXCC Country'
+          field: 'DXCC'
+          key: ['DXCC']
+          exclude_values: ['1', '6', '110', '291']
+    cabrillo:
+      contest_id: 'HI-QSO-PARTY'
+      fixed_fields:
+        - name: 'CATEGORY-BAND'
+          value: 'ALL'
+      log_fields:
+        - name: 'CATEGORY-MODE'
+          label: 'Category Mode'
+          type: 'String:16'
+          widget: 'select'
+          default: 'MIXED'
+          valid_values: ['CW', 'SSB', 'MIXED']
+        - name: 'CATEGORY-OPERATOR'
+          label: 'Category Operator'
+          type: 'String:16'
+          widget: 'select'
+          default: 'SINGLE-OP'
+          valid_values: ['SINGLE-OP', 'MULTI-OP', 'CHECKLOG']
+        - name: 'CATEGORY-POWER'
+          label: 'Category Power'
+          type: 'String:16'
+          widget: 'select'
+          default: 'LOW'
+          valid_values: ['HIGH', 'LOW', 'QRP']
+        - name: 'CATEGORY-TRANSMITTER'
+          label: 'Category Transmitter'
+          type: 'String:16'
+          widget: 'select'
+          default: 'ONE'
+          valid_values: ['ONE', 'UNLIMITED']
+      export_fields:
+        - name: 'CLUB'
+          label: 'Club'
+          type: 'String:75'
+          required: false
+          preserve_case: true
+        - name: 'EMAIL'
+          label: 'Email'
+          type: 'String:75'
+          regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
+          preserve_case: true
+        - name: 'LOCATION'
+          label: 'Location'
+          type: 'String:32'
+          help_text: 'Hawaii district, state, province, or country.'
+        - name: 'NAME'
+          label: 'Name'
+          type: 'String:75'
+          preserve_case: true
+        - name: 'ADDRESS'
+          label: 'Address'
+          type: 'String:45'
+          widget: 'textarea'
+          max_lines: 6
+          preserve_case: true
+        - name: 'SOAPBOX'
+          label: 'Soapbox'
+          type: 'String:75'
+          widget: 'textarea'
+          required: false
+          preserve_case: true
+    define:
+      - name: 'DX'
+        values: ['DX']
+      - name: 'Hawaii Districts'
+        values:
+          - HIL
+          - HON
+          - KAL
+          - KAU
+          - KOH
+          - KON
+          - LHN
+          - LNI
+          - MAU
+          - MOL
+          - NII
+          - PRL
+          - VOL
+          - WHN
+      - name: 'States'
+        values_from_file: us_states.dat
+        exclude: ['HI']
+      - name: 'Washington DC'
+        values: ['DC']
+      - name: 'Canadian Provinces'
+        values_from_file: canadian_provices.dat
+    log_params:
+      - name: 'District'
+        label: 'Hawaii District'
+        type: 'String:3'
+        required: true
+        in_sets: ['Hawaii Districts']
+    exchange:
+      - name: 'RST(s)'
+        type: 'RST'
+        adif: 'RST_SENT'
+        default: 599
+        is_sent: true
+      - name: 'District'
+        type: 'String:3'
+        adif: 'STX_STRING'
+        fixed: true
+        source_param: 'District'
+        is_sent: true
+        in_sets: ['Hawaii Districts']
+      - name: 'RST(r)'
+        type: 'RST'
+        adif: 'RST_RCVD'
+        default: 599
+        is_sent: false
+      - name: 'Exchange'
+        type: 'String:3'
+        adif: 'SRX_STRING'
+        is_sent: false
+        in_sets:
+          - 'Hawaii Districts'
+          - States
+          - 'Washington DC'
+          - 'Canadian Provinces'
+          - DX
+    qso_columns:
+      - 'RST(s)'
+      - 'RST(r)'
+      - 'Exchange'
+      - 'Mult'
+      - 'Pts'
+      - 'Op'
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'RST(s)': 'RST_SENT'
+      District: 'STX_STRING'
+      'RST(r)': 'RST_RCVD'
+      Exchange: 'SRX_STRING'
+    metadata:
+      source: 'https://www.hawaiiqsoparty.org/rules-page/'
+      notes: 'Digital modes and grid-square exchanges are intentionally not supported.'
+
+  - id: 'HI-QSO-PARTY'
+    extends: 'HI-QSO-PARTY (In State)'
+    display_name: 'Hawaii QSO Party'
+    scoring:
+      multipliers:
+        - name: 'Hawaii District'
+          field: 'SRX_STRING'
+          key:
+            - 'SRX_STRING'
+            - 'BAND'
+          in_sets: ['Hawaii Districts']
+    log_params:
+      - name: 'Location'
+        label: 'State, Province, or DX'
+        type: 'String:2'
+        required: true
+        in_sets:
+          - States
+          - 'Washington DC'
+          - 'Canadian Provinces'
+          - DX
+    exchange:
+      - name: 'RST(s)'
+        type: 'RST'
+        adif: 'RST_SENT'
+        default: 599
+        is_sent: true
+      - name: 'Location'
+        type: 'String:2'
+        adif: 'STX_STRING'
+        fixed: true
+        source_param: 'Location'
+        is_sent: true
+        in_sets:
+          - States
+          - 'Washington DC'
+          - 'Canadian Provinces'
+          - DX
+      - name: 'RST(r)'
+        type: 'RST'
+        adif: 'RST_RCVD'
+        default: 599
+        is_sent: false
+      - name: 'District'
+        type: 'String:3'
+        adif: 'SRX_STRING'
+        is_sent: false
+        in_sets: ['Hawaii Districts']
+    qso_columns:
+      - 'RST(s)'
+      - 'RST(r)'
+      - 'District'
+      - 'Mult'
+      - 'Pts'
+      - 'Op'
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'RST(s)': 'RST_SENT'
+      Location: 'STX_STRING'
+      'RST(r)': 'RST_RCVD'
+      District: 'SRX_STRING'
+    metadata:
+      source: 'https://www.hawaiiqsoparty.org/rules-page/'
+      notes: 'Outside-Hawaii stations may score only Hawaii contacts; digital modes and grid-square exchanges are intentionally not supported.'

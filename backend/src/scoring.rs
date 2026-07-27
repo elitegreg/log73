@@ -1617,6 +1617,84 @@ mod tests {
     }
 
     #[test]
+    fn bundled_outside_hi_rules_score_modes_districts_per_band_and_dupes() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store
+            .get("HI-QSO-PARTY")
+            .expect("outside-Hawaii rules should load");
+        let mut contacts = [
+            ("KH6AAA", "20m", "CW", "HIL"),
+            ("KH6AAA", "20m", "CW", "HIL"),
+            ("KH6AAA", "20m", "CW", "KON"),
+            ("KH6BBB", "40m", "SSB", "HIL"),
+            ("KH6CCC", "20m", "SSB", "HIL"),
+        ]
+        .into_iter()
+        .map(|(call, band, mode, district)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!(mode)),
+                ("STX_STRING", json!("CA")),
+                ("SRX_STRING", json!(district)),
+            ])
+        })
+        .collect::<Vec<_>>();
+
+        let totals = score_contacts(rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 10);
+        assert_eq!(totals.multipliers, 3);
+        assert_eq!(totals.score, 30);
+        assert_eq!(contact_meta_value(&contacts[1], "dupe"), Some(&json!(true)));
+        assert_eq!(
+            contact_meta_value(&contacts[2], "dupe"),
+            Some(&json!(false))
+        );
+    }
+
+    #[test]
+    fn bundled_in_state_hi_rules_score_location_and_dxcc_multipliers_once() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store
+            .get("HI-QSO-PARTY (In State)")
+            .expect("in-state Hawaii rules should load");
+        let mut contacts = [
+            ("KH6AAA", "20m", "CW", "HIL", 110),
+            ("KH6BBB", "40m", "SSB", "HIL", 110),
+            ("K1ABC", "20m", "CW", "CA", 291),
+            ("W3ABC", "20m", "CW", "DC", 291),
+            ("VE3ABC", "20m", "CW", "ON", 1),
+            ("DL1ABC", "20m", "CW", "DX", 230),
+            ("F1ABC", "20m", "CW", "DX", 227),
+            ("KL7ABC", "20m", "CW", "AK", 6),
+            ("KH6CCC", "20m", "CW", "KON", 110),
+        ]
+        .into_iter()
+        .map(|(call, band, mode, exchange, dxcc)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!(mode)),
+                ("STX_STRING", json!("MAU")),
+                ("SRX_STRING", json!(exchange)),
+                ("DXCC", json!(dxcc)),
+            ])
+        })
+        .collect::<Vec<_>>();
+
+        let totals = score_contacts(rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 26);
+        assert_eq!(totals.multipliers, 8);
+        assert_eq!(totals.score, 208);
+    }
+
+    #[test]
     fn bundled_in_state_mdc_rules_combine_jurisdiction_state_province_and_dxcc_multipliers() {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
