@@ -1739,6 +1739,71 @@ mod tests {
     }
 
     #[test]
+    fn bundled_oh_qso_party_rules_score_modes_and_mobile_locations() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let in_state = store
+            .get("OH-QSO-PARTY (In State)")
+            .expect("in-state Ohio rules should load");
+        let outside = store
+            .get("OH-QSO-PARTY")
+            .expect("outside-Ohio rules should load");
+
+        let mut in_state_contacts = [
+            ("K1AAA", "20m", "CW", "FRAN", "MD"),
+            ("K1AAA", "20m", "CW", "FRAN", "MD"),
+            ("K1AAA", "20m", "CW", "DELA", "MD"),
+            ("K1BBB", "40m", "SSB", "DELA", "MD"),
+            ("K8CCC", "20m", "CW", "DELA", "ADAM"),
+        ]
+        .into_iter()
+        .map(|(call, band, mode, sent, received)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!(mode)),
+                ("STX_STRING", json!(sent)),
+                ("SRX_STRING", json!(received)),
+            ])
+        })
+        .collect::<Vec<_>>();
+        let in_state_totals = score_contacts(in_state, Value::Null, &mut in_state_contacts);
+        assert_eq!(in_state_totals.qso_points, 7);
+        assert_eq!(in_state_totals.multipliers, 3);
+        assert_eq!(in_state_totals.score, 21);
+        assert_eq!(
+            contact_meta_value(&in_state_contacts[1], "dupe"),
+            Some(&json!(true))
+        );
+        assert_eq!(
+            contact_meta_value(&in_state_contacts[2], "dupe"),
+            Some(&json!(false))
+        );
+
+        let mut outside_contacts = [
+            ("K8AAA", "20m", "CW", "PA", "ADAM"),
+            ("K8AAA", "20m", "CW", "WV", "ADAM"),
+            ("K8BBB", "40m", "SSB", "WV", "ADAM"),
+        ]
+        .into_iter()
+        .map(|(call, band, mode, sent, received)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!(mode)),
+                ("STX_STRING", json!(sent)),
+                ("SRX_STRING", json!(received)),
+            ])
+        })
+        .collect::<Vec<_>>();
+        let outside_totals = score_contacts(outside, Value::Null, &mut outside_contacts);
+        assert_eq!(outside_totals.qso_points, 5);
+        assert_eq!(outside_totals.multipliers, 2);
+        assert_eq!(outside_totals.score, 10);
+    }
+
+    #[test]
     fn duplicate_qsos_score_zero() {
         let rules = test_rules(
             fixed_points(2),

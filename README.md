@@ -554,6 +554,8 @@ K1USNSST                 K1USN SST
 MDC-QSO-PARTY            Maryland-DC QSO Party outside MDC
 MDC-QSO-PARTY (In State) Maryland-DC QSO Party in Maryland/DC
 MST                      MST (Medium Speed Test)
+OH-QSO-PARTY             Ohio QSO Party out-of-state
+OH-QSO-PARTY (In State)  Ohio QSO Party in Ohio
 SC-QSO-PARTY             SC QSO Party out-of-state
 SC-QSO-PARTY (In State)  SC QSO Party in-state
 ```
@@ -568,10 +570,12 @@ Log creation dynamically requests required rule parameters where needed:
 - `MDC-QSO-PARTY`: `Location`
 - `MDC-QSO-PARTY (In State)`: `Jurisdiction`
 - `MST`: `SERIAL_BATCH_SIZE`
+- `OH-QSO-PARTY`: `Location`
+- `OH-QSO-PARTY (In State)`: `County`
 - `SC-QSO-PARTY`: `State`
 - `SC-QSO-PARTY (In State)`: `County`
 
-Those values populate fixed sent exchange fields in the logger. Contests with a sent `Serial` exchange field also get a `SERIAL_BATCH_SIZE` parameter, defaulting to 10; the backend reserves durable serial ranges by log id and field, the browser refills after 90% of the batch is consumed, and the logger blocks logging if no reserved serial is available. The previous `BERK` default is no longer used. The HI, MDC, and SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
+Those values seed sent exchange fields in the logger, which are fixed unless a contest permits a mobile location change. Contests with a sent `Serial` exchange field also get a `SERIAL_BATCH_SIZE` parameter, defaulting to 10; the backend reserves durable serial ranges by log id and field, the browser refills after 90% of the batch is consumed, and the logger blocks logging if no reserved serial is available. The previous `BERK` default is no longer used. The HI, MDC, and SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
 For `SC-QSO-PARTY (In State)`, the received value is labeled `Exchange` because it may be a county, state/province, or `DX`.
 
 ## UI themes

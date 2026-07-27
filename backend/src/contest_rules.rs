@@ -1524,6 +1524,52 @@ contests:
     }
 
     #[test]
+    fn bundled_oh_qso_party_rules_resolve_both_locations() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let in_state = store
+            .get("OH-QSO-PARTY (In State)")
+            .expect("in-state Ohio QSO Party rules should load");
+        let outside = store
+            .get("OH-QSO-PARTY")
+            .expect("outside-Ohio QSO Party rules should load");
+
+        let counties = in_state
+            .define
+            .iter()
+            .find(|value_set| value_set.name == "Ohio Counties")
+            .expect("Ohio Counties should exist");
+        assert_eq!(counties.values.len(), 88);
+        assert!(counties.values.contains(&"ADAM".to_string()));
+        assert!(counties.values.contains(&"WYAN".to_string()));
+
+        let states = in_state
+            .define
+            .iter()
+            .find(|value_set| value_set.name == "States")
+            .expect("States should exist");
+        assert!(!states.values.contains(&"OH".to_string()));
+        assert!(!states.values.contains(&"DC".to_string()));
+        assert!(states.values.contains(&"MD".to_string()));
+
+        assert_eq!(in_state.allowed_modes, vec!["CW", "SSB"]);
+        assert_eq!(in_state.log_params[0].name, "County");
+        assert_eq!(outside.log_params[0].name, "Location");
+        assert_eq!(in_state.exchange[1].fixed, None);
+        assert_eq!(outside.exchange[1].fixed, None);
+        assert_eq!(outside.multipliers.len(), 1);
+        assert_eq!(outside.multipliers[0].key, vec!["SRX_STRING", "MODE"]);
+        assert_eq!(
+            in_state
+                .cabrillo
+                .as_ref()
+                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
+            Some("OH-QSO-PARTY")
+        );
+    }
+
+    #[test]
     fn bundled_arrl_field_day_uses_parameter_multiplier() {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir.as_path()])

@@ -1,0 +1,216 @@
+contests:
+  - id: 'OH-QSO-PARTY (In State)'
+    display_name: 'Ohio QSO Party (In State)'
+    allowed_bands: [160, 80, 40, 20, 15, 10]
+    allowed_modes: ['CW', 'SSB']
+    scoring:
+      qso_points:
+        rules:
+          - when:
+              field: 'MODE'
+              values: ['SSB']
+            points: 1
+          - points: 2
+      dupe_key: ['CALL', 'BAND', 'MODE', 'STX_STRING', 'SRX_STRING']
+      multipliers:
+        - name: 'Ohio County'
+          field: 'SRX_STRING'
+          key: ['SRX_STRING', 'MODE']
+          in_sets: ['Ohio Counties']
+        - name: 'State/Province/DX'
+          field: 'SRX_STRING'
+          key: ['SRX_STRING', 'MODE']
+          in_sets: ['States', 'Canadian Provinces', 'DX']
+    cabrillo:
+      contest_id: 'OH-QSO-PARTY'
+    define:
+      - name: 'DX'
+        values: ['DX']
+      - name: 'Ohio Counties'
+        values:
+          - ADAM
+          - ALLE
+          - ASHL
+          - ASHT
+          - ATHE
+          - AUGL
+          - BELM
+          - BROW
+          - BUTL
+          - CARR
+          - CHAM
+          - CLAR
+          - CLER
+          - CLIN
+          - COLU
+          - COSH
+          - CRAW
+          - CUYA
+          - DARK
+          - DEFI
+          - DELA
+          - ERIE
+          - FAIR
+          - FAYE
+          - FRAN
+          - FULT
+          - GALL
+          - GEAU
+          - GREE
+          - GUER
+          - HAMI
+          - HANC
+          - HARD
+          - HARR
+          - HENR
+          - HIGH
+          - HOCK
+          - HOLM
+          - HURO
+          - JACK
+          - JEFF
+          - KNOX
+          - LAKE
+          - LAWR
+          - LICK
+          - LOGA
+          - LORA
+          - LUCA
+          - MADI
+          - MAHO
+          - MARI
+          - MEDI
+          - MEIG
+          - MERC
+          - MIAM
+          - MONR
+          - MONT
+          - MORG
+          - MORR
+          - MUSK
+          - NOBL
+          - OTTA
+          - PAUL
+          - PERR
+          - PICK
+          - PIKE
+          - PORT
+          - PREB
+          - PUTN
+          - RICH
+          - ROSS
+          - SAND
+          - SCIO
+          - SENE
+          - SHEL
+          - STAR
+          - SUMM
+          - TRUM
+          - TUSC
+          - UNIO
+          - VANW
+          - VINT
+          - WARR
+          - WASH
+          - WAYN
+          - WILL
+          - WOOD
+          - WYAN
+      - name: 'States'
+        values_from_file: us_states.dat
+        exclude: ['OH']
+      - name: 'Canadian Provinces'
+        values:
+          ['NL', 'PE', 'NS', 'NB', 'QC', 'ON', 'MB', 'SK', 'AB', 'BC', 'NT']
+    log_params:
+      - name: 'County'
+        label: 'Ohio County'
+        type: 'String:4'
+        required: true
+        in_sets: ['Ohio Counties']
+    exchange:
+      - name: 'RST(s)'
+        type: 'RST'
+        adif: 'RST_SENT'
+        default: 599
+        is_sent: true
+      - name: 'County'
+        type: 'String:4'
+        adif: 'STX_STRING'
+        source_param: 'County'
+        is_sent: true
+        in_sets: ['Ohio Counties']
+      - name: 'RST(r)'
+        type: 'RST'
+        adif: 'RST_RCVD'
+        default: 599
+        is_sent: false
+      - name: 'Exchange'
+        type: 'String:4'
+        adif: 'SRX_STRING'
+        is_sent: false
+        in_sets: ['Ohio Counties', 'States', 'Canadian Provinces', 'DX']
+    qso_columns: ['RST(s)', 'RST(r)', 'Exchange', 'Mult', 'Pts', 'Op']
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'RST(s)': 'RST_SENT'
+      County: 'STX_STRING'
+      'RST(r)': 'RST_RCVD'
+      Exchange: 'SRX_STRING'
+    metadata:
+      source: 'https://www.ohqp.org/index.php/rules/'
+      notes: 'CW and SSB only. County remains editable so Ohio mobile and rover stations can record each activated county.'
+
+  - id: 'OH-QSO-PARTY'
+    extends: 'OH-QSO-PARTY (In State)'
+    display_name: 'Ohio QSO Party'
+    scoring:
+      multipliers:
+        - name: 'Ohio County'
+          field: 'SRX_STRING'
+          key: ['SRX_STRING', 'MODE']
+          in_sets: ['Ohio Counties']
+    log_params:
+      - name: 'Location'
+        label: 'State, Province, or DX'
+        type: 'String:2'
+        required: true
+        in_sets: ['States', 'Canadian Provinces', 'DX']
+    exchange:
+      - name: 'RST(s)'
+        type: 'RST'
+        adif: 'RST_SENT'
+        default: 599
+        is_sent: true
+      - name: 'Location'
+        type: 'String:2'
+        adif: 'STX_STRING'
+        source_param: 'Location'
+        is_sent: true
+        in_sets: ['States', 'Canadian Provinces', 'DX']
+      - name: 'RST(r)'
+        type: 'RST'
+        adif: 'RST_RCVD'
+        default: 599
+        is_sent: false
+      - name: 'County'
+        type: 'String:4'
+        adif: 'SRX_STRING'
+        is_sent: false
+        in_sets: ['Ohio Counties']
+    qso_columns: ['RST(s)', 'RST(r)', 'County', 'Mult', 'Pts', 'Op']
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'RST(s)': 'RST_SENT'
+      Location: 'STX_STRING'
+      'RST(r)': 'RST_RCVD'
+      County: 'SRX_STRING'
+    metadata:
+      source: 'https://www.ohqp.org/index.php/rules/'
+      notes: 'Outside-Ohio stations may score only Ohio county contacts. Location remains editable for mobile stations.'

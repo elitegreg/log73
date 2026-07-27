@@ -367,9 +367,12 @@ fn contact_i64(value: Option<&Value>) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contest_rules::{CabrilloFixedField, CabrilloRules, ContestParam};
+    use crate::contest_rules::{
+        CabrilloFixedField, CabrilloRules, ContestParam, ContestRulesStore,
+    };
     use serde_json::json;
     use std::collections::BTreeMap;
+    use std::path::PathBuf;
 
     fn test_rules() -> ContestRules {
         ContestRules {
@@ -632,6 +635,32 @@ mod tests {
         .expect("export should render");
 
         assert!(text.lines().any(|line| line == "CONTEST: MDC-QSO-PARTY"));
+    }
+
+    #[test]
+    fn ohio_qso_party_exports_the_required_ten_qso_fields() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store
+            .get("OH-QSO-PARTY")
+            .expect("Ohio QSO Party rules should load");
+        let mut log = test_log();
+        log.contest_id = "OH-QSO-PARTY".to_string();
+        log.contest_params = json!({ "Location": "PA" });
+        let mut contact = test_contact("K1ABC", "K8MAD", 1_700_000_000);
+        crate::db::set_contact_adif(&mut contact, "STX_STRING", json!("PA"));
+        crate::db::set_contact_adif(&mut contact, "SRX_STRING", json!("ADAM"));
+
+        let text = render_log(rules, &log, &[contact], &json!({}), 1)
+            .expect("Ohio QSO Party Cabrillo should render");
+        assert!(text.lines().any(|line| line == "CONTEST: OH-QSO-PARTY"));
+        let fields = qso_line(&text).split_whitespace().collect::<Vec<_>>();
+        assert_eq!(fields.len(), 11);
+        assert_eq!(fields[0], "QSO:");
+        assert_eq!(fields[2], "PH");
+        assert_eq!(fields[8], "K8MAD");
+        assert_eq!(fields[10], "ADAM");
     }
 
     #[test]
