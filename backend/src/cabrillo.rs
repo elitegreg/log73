@@ -57,7 +57,11 @@ pub fn render_log(
     let mut lines = vec![format!("START-OF-LOG: {START_OF_LOG_VERSION}")];
     append_header_line(&mut lines, "CREATED-BY", CREATED_BY_VALUE)?;
     append_header_line(&mut lines, "CALLSIGN", log.station_callsign.trim())?;
-    append_header_line(&mut lines, "CONTEST", &log.contest_id)?;
+    append_header_line(
+        &mut lines,
+        "CONTEST",
+        cabrillo.contest_id.as_deref().unwrap_or(&log.contest_id),
+    )?;
     append_header_line(&mut lines, "CLAIMED-SCORE", &claimed_score.to_string())?;
 
     for field in &cabrillo.fixed_fields {
@@ -431,8 +435,10 @@ mod tests {
             dupe_key: Vec::new(),
             multipliers: Vec::new(),
             bonus_points: Vec::new(),
-            power_multiplier: Vec::new(),
+            param_multipliers: Vec::new(),
+            multiplier_count_bonus_points: Vec::new(),
             cabrillo: Some(CabrilloRules {
+                contest_id: None,
                 fixed_fields: vec![CabrilloFixedField {
                     name: "CATEGORY-BAND".to_string(),
                     value: "ALL".to_string(),
@@ -603,6 +609,29 @@ mod tests {
         assert!(lines.contains(&"OPERATORS: K1ABC"));
         assert!(lines.iter().any(|line| line.starts_with("QSO: 14250 PH ")));
         assert!(text.ends_with("\r\n"));
+    }
+
+    #[test]
+    fn render_log_uses_configured_cabrillo_contest_id() {
+        let mut rules = test_rules();
+        rules.cabrillo.as_mut().expect("Cabrillo rules").contest_id =
+            Some("MDC-QSO-PARTY".to_string());
+        let mut log = test_log();
+        log.contest_id = "MDC-QSO-PARTY (In State)".to_string();
+
+        let text = render_log(
+            &rules,
+            &log,
+            &[test_contact("K1ABC", "W1AW", 1_700_000_000)],
+            &json!({
+                "NAME": "Greg",
+                "ADDRESS": "123 Main St"
+            }),
+            1,
+        )
+        .expect("export should render");
+
+        assert!(text.lines().any(|line| line == "CONTEST: MDC-QSO-PARTY"));
     }
 
     #[test]

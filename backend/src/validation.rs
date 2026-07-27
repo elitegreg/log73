@@ -943,7 +943,11 @@ fn validate_exchange_field(
         &field.name,
         &field.field_type,
         &value,
-        &field.valid_values,
+        if field.in_sets.iter().any(|set_name| set_name == "*") {
+            &[]
+        } else {
+            &field.valid_values
+        },
         field.regex.as_deref(),
         radio_mode,
     )
@@ -1267,7 +1271,8 @@ mod tests {
             dupe_key: Vec::new(),
             multipliers: Vec::new(),
             bonus_points: Vec::new(),
-            power_multiplier: Vec::new(),
+            param_multipliers: Vec::new(),
+            multiplier_count_bonus_points: Vec::new(),
             cabrillo: None,
             metadata: None,
         }
@@ -1431,6 +1436,34 @@ mod tests {
         let rules = test_rules();
         let mut contact = test_contact();
         contact.insert("RST_RCVD".to_string(), json!(59));
+        assert!(validate_contact(&rules, &test_bands(), 1, &contact).is_err());
+    }
+
+    #[test]
+    fn wildcard_exchange_set_allows_free_form_values_within_field_length() {
+        let mut rules = test_rules();
+        rules.exchange[0].name = "Location".to_string();
+        rules.exchange[0].field_type = "String:16".to_string();
+        rules.exchange[0].adif = "SRX_STRING".to_string();
+        rules.exchange[0].in_sets = vec!["States".to_string(), "*".to_string()];
+        rules.exchange[0].valid_values = vec!["SC".to_string(), "NC".to_string()];
+
+        let mut contact = test_contact();
+        {
+            let adif = contact
+                .get_mut("adif")
+                .and_then(Value::as_object_mut)
+                .expect("contact adif should be an object");
+            adif.remove("RST_RCVD");
+            adif.insert("SRX_STRING".to_string(), json!("FREDERICK COUNTY"));
+        }
+        assert!(validate_contact(&rules, &test_bands(), 1, &contact).is_ok());
+
+        contact
+            .get_mut("adif")
+            .and_then(Value::as_object_mut)
+            .expect("contact adif should be an object")
+            .insert("SRX_STRING".to_string(), json!("SEVENTEEN CHARACT"));
         assert!(validate_contact(&rules, &test_bands(), 1, &contact).is_err());
     }
 

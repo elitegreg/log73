@@ -1,44 +1,66 @@
 contests:
-  - id: 'SC-QSO-PARTY (In State)'
-    display_name: 'SC QSO Party (In State)'
-    allowed_bands: [160, 80, 40, 20, 15, 10, 6, 2]
-    allowed_modes: ['SSB', 'FM', 'CW']
+  - id: 'MDC-QSO-PARTY (In State)'
+    display_name: 'Maryland-DC QSO Party (In State)'
+    allowed_bands: [160, 80, 40, 20, 15, 10]
+    allowed_modes: ['CW', 'SSB', 'FM']
     scoring:
       qso_points:
         rules:
           - when:
-              field: 'Exchange'
-              in_set: 'Counties'
-            points: 2
-          - points: 4
+              field: 'MODE'
+              values: ['SSB', 'FM']
+            points: 1
+          - points: 3
       dupe_key:
         - 'CALL'
         - 'BAND'
-        - 'MODE'
+        - 'MODE_CLASS'
         - 'STX_STRING'
         - 'SRX_STRING'
       multipliers:
-        - name: 'Exchange'
+        - name: 'County'
           field: 'SRX_STRING'
           key:
             - 'SRX_STRING'
             - 'STX_STRING'
-            - 'BAND'
-            - 'MODE'
-          in_sets: ['Counties', 'States']
+          in_sets: ['Counties']
+        - name: 'State'
+          field: 'SRX_STRING'
+          key:
+            - 'SRX_STRING'
+            - 'STX_STRING'
+          in_sets: ['States', 'Canadian Provinces']
+        - name: 'DXCC Country'
+          field: 'DXCC'
+          key: ['DXCC']
+          exclude_values: ['1', '6', '110', '291']
       bonus_points:
         - name: 'Bonus Station'
           field: 'CALL'
-          key:
-            - 'CALL'
-            - 'BAND'
-            - 'MODE'
-            - 'STX_STRING'
+          key: ['CALL']
           values:
-            W4CAE: 350
-            WW4SF: 250
-            K4YTZ: 250
+            W3VPR: 50
+      param_multipliers:
+        - param: 'CATEGORY-POWER'
+          values:
+            HIGH: 1
+            LOW: 2
+            QRP: 3
+        - param: 'CATEGORY-STATION'
+          values:
+            CLUB: 1
+            ROVER: 4
+            PORTABLE: 3
+            MOBILE: 2
+            FIXED: 1
+      multiplier_count_bonus_points:
+        - name: 'County Bonus'
+          multiplier: 'County'
+          thresholds:
+            13: 250
+            25: 500
     cabrillo:
+      contest_id: 'MDC-QSO-PARTY'
       fixed_fields:
         - name: 'CATEGORY-BAND'
           value: 'ALL'
@@ -47,26 +69,31 @@ contests:
           label: 'Category Mode'
           type: 'String:16'
           widget: 'select'
-          valid_values: ['CW', 'FM', 'SSB', 'MIXED']
+          default: 'MIXED'
+          valid_values: ['CW', 'SSB', 'MIXED']
         - name: 'CATEGORY-OPERATOR'
           label: 'Category Operator'
           type: 'String:16'
           widget: 'select'
+          default: 'SINGLE-OP'
           valid_values: ['SINGLE-OP', 'MULTI-OP', 'CHECKLOG']
         - name: 'CATEGORY-POWER'
           label: 'Category Power'
           type: 'String:16'
           widget: 'select'
+          default: 'LOW'
           valid_values: ['HIGH', 'LOW', 'QRP']
         - name: 'CATEGORY-STATION'
           label: 'Category Station'
           type: 'String:16'
           widget: 'select'
-          valid_values: ['FIXED', 'MOBILE', 'PORTABLE']
+          default: 'FIXED'
+          valid_values: ['CLUB', 'ROVER', 'PORTABLE', 'MOBILE', 'FIXED']
         - name: 'CATEGORY-TRANSMITTER'
           label: 'Category Transmitter'
           type: 'String:16'
           widget: 'select'
+          default: 'ONE'
           valid_values: ['ONE', 'UNLIMITED']
       export_fields:
         - name: 'CLUB'
@@ -82,7 +109,7 @@ contests:
         - name: 'LOCATION'
           label: 'Location'
           type: 'String:32'
-          help_text: 'State, province, county or DX'
+          help_text: 'Maryland/DC jurisdiction, state, province, or country.'
         - name: 'NAME'
           label: 'Name'
           type: 'String:75'
@@ -105,97 +132,61 @@ contests:
           - DX
       - name: 'Counties'
         values:
-          - ABBE
-          - AIKE
-          - ALLE
-          - ANDE
-          - BAMB
-          - BARN
-          - BEAU
-          - BERK
-          - CHOU
-          - CHAR
-          - CHES
-          - CHFD
-          - CKEE
-          - CLRN
-          - COLL
-          - DARL
-          - DILL
-          - DORC
-          - EDGE
-          - FAIR
-          - FLOR
-          - GEOR
-          - GRWD
-          - GVIL
-          - HAMP
-          - HORR
-          - JASP
-          - KERS
-          - LAUR
-          - LEE
-          - LEXI
-          - LNCS
-          - MARI
-          - MARL
-          - MCOR
-          - NEWB
-          - OCON
-          - ORNG
-          - PICK
-          - RICH
-          - SALU
-          - SPAR
-          - SUMT
-          - UNIO
-          - WILL
-          - YORK
+          - ALY
+          - ANA
+          - BAL
+          - BCT
+          - CLV
+          - CLN
+          - CRL
+          - CEC
+          - CHS
+          - DRC
+          - FRD
+          - GAR
+          - HFD
+          - HWD
+          - KEN
+          - MON
+          - PGE
+          - QAN
+          - STM
+          - SMR
+          - TAL
+          - WAS
+          - WIC
+          - WRC
+          - WDC
       - name: 'States'
         values_from_file: us_states.dat
-        exclude: ['SC']
+        exclude: ['MD']
       - name: 'Canadian Provinces'
         values_from_file: canadian_provices.dat
-      - name: 'Washington DC'
-        values: ['DC']
     log_params:
       - name: 'County'
         label: 'County'
-        type: 'String:4'
+        type: 'String:3'
         required: true
         in_sets: ['Counties']
     exchange:
-      - name: 'RST(s)'
-        type: 'RST'
-        adif: 'RST_SENT'
-        default: 599
-        is_sent: true
       - name: 'County'
-        type: 'String:4'
+        type: 'String:3'
         adif: 'STX_STRING'
         fixed: true
         source_param: 'County'
         is_sent: true
         in_sets: ['Counties']
-      - name: 'RST(r)'
-        type: 'RST'
-        adif: 'RST_RCVD'
-        default: 599
-        is_sent: false
-      - name: 'Exchange'
-        type: 'String:4'
+      - name: 'Location'
+        type: 'String:16'
         adif: 'SRX_STRING'
         is_sent: false
         in_sets:
           - Counties
           - States
-          - 'Washington DC'
           - 'Canadian Provinces'
-          - DX
+          - '*'
     qso_columns:
-      - 'RST(s)'
-      - 'RST(r)'
-      - 'Exchange'
+      - 'Location'
       - 'Mult'
       - 'Pts'
       - 'Op'
@@ -204,57 +195,41 @@ contests:
       Mode: 'MODE'
       Call: 'CALL'
       Op: 'OPERATOR'
-      'RST(s)': 'RST_SENT'
       County: 'STX_STRING'
-      'RST(r)': 'RST_RCVD'
-      Exchange: 'SRX_STRING'
+      Location: 'SRX_STRING'
+    metadata:
+      source: 'https://www.w3vpr.org/sites/default/files/mdcqsoparty/Documents/Maryland-DC_QSO_Party_Rules_2020-03-04.pdf'
+      notes: 'The received exchange is an MDC jurisdiction, US state, Canadian province/territory, or country.'
 
-  - id: 'SC-QSO-PARTY'
-    extends: 'SC-QSO-PARTY (In State)'
-    display_name: 'SC QSO Party'
+  - id: 'MDC-QSO-PARTY'
+    extends: 'MDC-QSO-PARTY (In State)'
+    display_name: 'Maryland-DC QSO Party'
     scoring:
-      qso_points:
-        points: 2
+      multipliers:
+        - name: 'County'
+          field: 'SRX_STRING'
+          key:
+            - 'SRX_STRING'
+            - 'STX_STRING'
+          in_sets: ['Counties']
     log_params:
-      - name: 'State'
-        label: 'State'
-        type: 'String:4'
+      - name: 'Location'
+        label: 'State, Province, or Country'
+        type: 'String:16'
         required: true
-        in_sets:
-          - States
-          - 'Washington DC'
-          - 'Canadian Provinces'
-          - DX
     exchange:
-      - name: 'RST(s)'
-        type: 'RST'
-        adif: 'RST_SENT'
-        default: 599
-        is_sent: true
-      - name: 'State'
-        type: 'String:4'
+      - name: 'Location'
+        type: 'String:16'
         adif: 'STX_STRING'
         fixed: true
-        source_param: 'State'
+        source_param: 'Location'
         is_sent: true
-        in_sets:
-          - States
-          - 'Washington DC'
-          - 'Canadian Provinces'
-          - DX
-      - name: 'RST(r)'
-        type: 'RST'
-        adif: 'RST_RCVD'
-        default: 599
-        is_sent: false
       - name: 'County'
-        type: 'String:4'
+        type: 'String:3'
         adif: 'SRX_STRING'
         is_sent: false
         in_sets: ['Counties']
     qso_columns:
-      - 'RST(s)'
-      - 'RST(r)'
       - 'County'
       - 'Mult'
       - 'Pts'
@@ -264,7 +239,8 @@ contests:
       Mode: 'MODE'
       Call: 'CALL'
       Op: 'OPERATOR'
-      'RST(s)': 'RST_SENT'
-      State: 'STX_STRING'
-      'RST(r)': 'RST_RCVD'
+      Location: 'STX_STRING'
       County: 'SRX_STRING'
+    metadata:
+      source: 'https://www.w3vpr.org/sites/default/files/mdcqsoparty/Documents/Maryland-DC_QSO_Party_Rules_2020-03-04.pdf'
+      notes: 'Outside-MDC stations may score only contacts with the 25 Maryland/DC jurisdictions.'

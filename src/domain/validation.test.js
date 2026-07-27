@@ -83,6 +83,17 @@ test('validateExchangeField validates configured values case-insensitively', () 
   assert.equal(validateExchangeField(field, 'GA').ok, false);
 });
 
+test('validateExchangeField wildcard sets allow free-form values', () => {
+  const field = {
+    name: 'Location',
+    type: 'String:16',
+    in_sets: ['States', '*'],
+    valid_values: ['SC', 'NC'],
+  };
+  assert.equal(validateExchangeField(field, 'sc').ok, true);
+  assert.equal(validateExchangeField(field, 'Somewhere').ok, true);
+});
+
 test('validateExchangeField validates regex patterns', () => {
   const field = { name: 'Class', type: 'String:3', regex: '^\\d+[A-F]$' };
   assert.equal(validateExchangeField(field, '1A').ok, true);

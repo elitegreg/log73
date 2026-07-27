@@ -40,7 +40,7 @@ pub struct ContestScoringModule {
     rules: ContestRules,
     #[allow(dead_code)]
     contest_params: Value,
-    power_multiplier: i64,
+    score_factor: i64,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -58,16 +58,17 @@ pub struct ContestScorer {
     dupe_keys: HashMap<String, usize>,
     multiplier_keys: HashSet<String>,
     bonus_keys: HashSet<String>,
+    direct_bonus_points: i64,
     totals: ScoreTotals,
 }
 
 impl ContestScoringModule {
     fn new(rules: ContestRules, contest_params: Value) -> Self {
-        let power_multiplier = power_multiplier_for(&rules, &contest_params);
+        let score_factor = score_factor_for(&rules, &contest_params);
         Self {
             rules,
             contest_params,
-            power_multiplier,
+            score_factor,
         }
     }
 
@@ -82,8 +83,8 @@ impl ContestScoringModule {
         !self.rules.multipliers.is_empty()
     }
 
-    pub fn power_multiplier(&self) -> i64 {
-        self.power_multiplier
+    pub fn score_factor(&self) -> i64 {
+        self.score_factor
     }
 
     pub fn dupe_key_for(&self, contact: &Contact) -> Option<String> {
@@ -143,6 +144,31 @@ impl ContestScoringModule {
         }
         keys
     }
+
+    fn multiplier_count_bonus_points<'a, I>(&self, multiplier_keys: I) -> i64
+    where
+        I: IntoIterator<Item = &'a String>,
+    {
+        let multiplier_keys = multiplier_keys.into_iter().collect::<Vec<_>>();
+        self.rules
+            .multiplier_count_bonus_points
+            .iter()
+            .map(|bonus| {
+                let prefix = format!("{}:", bonus.multiplier.trim().to_uppercase());
+                let count = multiplier_keys
+                    .iter()
+                    .filter(|key| key.starts_with(&prefix))
+                    .count();
+                bonus
+                    .thresholds
+                    .iter()
+                    .filter(|(threshold, _)| **threshold <= count)
+                    .next_back()
+                    .map(|(_, points)| *points)
+                    .unwrap_or(0)
+            })
+            .sum()
+    }
 }
 
 impl Default for ContestScoringModule {
@@ -162,12 +188,13 @@ impl Default for ContestScoringModule {
                 dupe_key: Vec::new(),
                 multipliers: Vec::new(),
                 bonus_points: Vec::new(),
-                power_multiplier: Vec::new(),
+                param_multipliers: Vec::new(),
+                multiplier_count_bonus_points: Vec::new(),
                 cabrillo: None,
                 metadata: None,
             },
             contest_params: Value::Null,
-            power_multiplier: 1,
+            score_factor: 1,
         }
     }
 }
@@ -177,6 +204,7 @@ impl ContestScorer {
         self.dupe_keys.clear();
         self.multiplier_keys.clear();
         self.bonus_keys.clear();
+        self.direct_bonus_points = 0;
         self.totals = ScoreTotals::default();
     }
 
@@ -196,7 +224,7 @@ impl ContestScorer {
 
         self.totals.qso_points += points;
         self.totals.multipliers += mults;
-        self.totals.bonus_points += bonus;
+        self.direct_bonus_points += bonus;
         self.recalculate_score();
 
         set_contact_meta(contact, "pts", Value::Number(points.into()));
@@ -212,7 +240,7 @@ impl ContestScorer {
         self.totals.qso_count = self.totals.qso_count.saturating_sub(1);
         self.totals.qso_points -= scored_i64(contact, "pts");
         self.totals.multipliers -= scored_i64(contact, "mult");
-        self.totals.bonus_points -= scored_i64(contact, "bonus");
+        self.direct_bonus_points -= scored_i64(contact, "bonus");
         self.remove_dupe_key(contact);
         self.recalculate_score();
         self.totals.clone()
@@ -233,9 +261,12 @@ impl ContestScorer {
         } else {
             1
         };
-        self.totals.score =
-            self.totals.qso_points * multiplier_factor * self.module.power_multiplier()
-                + self.totals.bonus_points;
+        self.totals.bonus_points = self.direct_bonus_points
+            + self
+                .module
+                .multiplier_count_bonus_points(self.multiplier_keys.iter());
+        self.totals.score = self.totals.qso_points * multiplier_factor * self.module.score_factor()
+            + self.totals.bonus_points;
     }
 
     fn is_dupe(&mut self, contact: &Contact) -> bool {
@@ -301,47 +332,31 @@ pub fn score_contacts(
     scorer.totals()
 }
 
-fn power_multiplier_for(rules: &ContestRules, contest_params: &Value) -> i64 {
-    if rules.power_multiplier.is_empty() {
-        return 1;
-    }
-
-    let Some(category_power_values) = rules
-        .cabrillo
-        .as_ref()
-        .and_then(|cabrillo| {
-            cabrillo
-                .log_fields
-                .iter()
-                .find(|field| field.name.eq_ignore_ascii_case("CATEGORY-POWER"))
-        })
-        .map(|field| &field.valid_values)
-    else {
-        return 1;
-    };
-
-    let Some(selected_power) = contest_params
-        .as_object()
-        .and_then(|params| params.get("CATEGORY-POWER"))
-        .and_then(Value::as_str)
-        .map(str::trim)
-    else {
-        return 1;
-    };
-
-    let Some(index) = category_power_values
-        .iter()
-        .position(|value| value.eq_ignore_ascii_case(selected_power))
-    else {
-        return 1;
-    };
-
+fn score_factor_for(rules: &ContestRules, contest_params: &Value) -> i64 {
     rules
-        .power_multiplier
-        .get(index)
-        .copied()
-        .filter(|value| *value > 0)
-        .unwrap_or(1)
+        .param_multipliers
+        .iter()
+        .map(|multiplier| {
+            let selected = contest_params
+                .as_object()
+                .and_then(|params| {
+                    params
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(&multiplier.param))
+                })
+                .and_then(|(_, value)| value.as_str())
+                .map(str::trim);
+            let Some(selected) = selected else {
+                return 1;
+            };
+            multiplier
+                .values
+                .iter()
+                .find(|(value, _)| value.eq_ignore_ascii_case(selected))
+                .map(|(_, factor)| *factor)
+                .unwrap_or(1)
+        })
+        .product()
 }
 
 fn scoring_key(contact: &Contact, rules: &ContestRules, fields: &[String]) -> String {
@@ -442,6 +457,13 @@ fn multiplier_matches(
     let Some(value) = field_value(contact, rules, &multiplier.field) else {
         return false;
     };
+    if multiplier
+        .exclude_values
+        .iter()
+        .any(|excluded| excluded.eq_ignore_ascii_case(&value))
+    {
+        return false;
+    }
 
     multiplier.valid_values.is_empty()
         || multiplier
@@ -451,6 +473,14 @@ fn multiplier_matches(
 }
 
 fn field_value(contact: &Map<String, Value>, rules: &ContestRules, field: &str) -> Option<String> {
+    if field.eq_ignore_ascii_case("MODE_CLASS") {
+        let mode = json_string(contact_adif_value(contact, "MODE"))?;
+        return Some(match mode.trim().to_uppercase().as_str() {
+            "CW" | "CW-R" => "CW".to_string(),
+            "SSB" | "FM" | "AM" => "PHONE".to_string(),
+            other => other.to_string(),
+        });
+    }
     json_string(contact_adif_value(contact, field))
         .or_else(|| json_string(contact_meta_value(contact, field)))
         .or_else(|| {
@@ -546,6 +576,7 @@ pub struct IncrementalScoreTracker {
 struct IncrementalLogState {
     module: Arc<ContestScoringModule>,
     totals: ScoreTotals,
+    direct_bonus_points: i64,
     dupe_counts: HashMap<String, usize>,
     dupe_owners: HashMap<String, i64>,
     multiplier_owners: HashMap<String, i64>,
@@ -671,6 +702,7 @@ impl IncrementalLogState {
         Self {
             module,
             totals: ScoreTotals::default(),
+            direct_bonus_points: 0,
             dupe_counts: HashMap::new(),
             dupe_owners: HashMap::new(),
             multiplier_owners: HashMap::new(),
@@ -681,6 +713,7 @@ impl IncrementalLogState {
     fn reset(&mut self, module: Arc<ContestScoringModule>, contacts: &mut [Contact]) {
         self.module = module;
         self.totals = ScoreTotals::default();
+        self.direct_bonus_points = 0;
         self.dupe_counts.clear();
         self.dupe_owners.clear();
         self.multiplier_owners.clear();
@@ -715,7 +748,7 @@ impl IncrementalLogState {
         let (points, mults, bonus) = self.score_non_dupe_contact(contact, contact_id);
         self.totals.qso_points += points;
         self.totals.multipliers += mults;
-        self.totals.bonus_points += bonus;
+        self.direct_bonus_points += bonus;
         set_contact_score_fields(contact, points, mults, bonus, false);
 
         self.recalculate_score();
@@ -731,7 +764,7 @@ impl IncrementalLogState {
         self.totals.qso_count = self.totals.qso_count.saturating_sub(1);
         self.totals.qso_points -= scored_i64(deleted_contact, "pts");
         self.totals.multipliers -= scored_i64(deleted_contact, "mult");
-        self.totals.bonus_points -= scored_i64(deleted_contact, "bonus");
+        self.direct_bonus_points -= scored_i64(deleted_contact, "bonus");
 
         let deleted_contact_id = contact_id_for(deleted_contact);
         let deleted_dupe_key = self.module.dupe_key_for(deleted_contact);
@@ -812,7 +845,7 @@ impl IncrementalLogState {
 
             self.bonus_owners.insert(bonus_key, contact_id);
             increment_contact_score_field(&mut contacts[index], "bonus", points);
-            self.totals.bonus_points += points;
+            self.direct_bonus_points += points;
             changed_contact_ids.insert(contact_id);
         }
 
@@ -836,7 +869,7 @@ impl IncrementalLogState {
         let (points, mults, bonus) = self.score_non_dupe_contact(contact, contact_id);
         self.totals.qso_points += points;
         self.totals.multipliers += mults;
-        self.totals.bonus_points += bonus;
+        self.direct_bonus_points += bonus;
         set_contact_score_fields(contact, points, mults, bonus, false);
 
         if let Some(contact_id) = contact_id {
@@ -947,9 +980,12 @@ impl IncrementalLogState {
         } else {
             1
         };
-        self.totals.score =
-            self.totals.qso_points * multiplier_factor * self.module.power_multiplier()
-                + self.totals.bonus_points;
+        self.totals.bonus_points = self.direct_bonus_points
+            + self
+                .module
+                .multiplier_count_bonus_points(self.multiplier_owners.keys());
+        self.totals.score = self.totals.qso_points * multiplier_factor * self.module.score_factor()
+            + self.totals.bonus_points;
     }
 }
 
@@ -1000,20 +1036,25 @@ fn collect_changed_contacts(
 mod tests {
     use super::*;
     use crate::contest_rules::{
-        BonusPointRule, CabrilloRules, ContestParam, ContestRules, GeographyQsoPoints,
-        QsoPointRule, QsoPoints,
+        BonusPointRule, CabrilloRules, ContestParam, ContestRules, ContestRulesStore,
+        GeographyQsoPoints, MultiplierCountBonusRule, ParamMultiplierRule, QsoPointRule, QsoPoints,
     };
     use serde_json::json;
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, path::PathBuf};
 
     fn test_rules(
         qso_points: QsoPoints,
         dupe_key: Vec<&str>,
         multipliers: Vec<MultiplierRule>,
         bonus_points: Vec<BonusPointRule>,
-        power_multiplier: Vec<i64>,
+        score_factors: Vec<i64>,
         category_power_values: Vec<&str>,
     ) -> ContestRules {
+        let factor_values = category_power_values
+            .iter()
+            .zip(score_factors)
+            .map(|(value, factor)| ((*value).to_string(), factor))
+            .collect::<BTreeMap<_, _>>();
         ContestRules {
             contest: "TEST".to_string(),
             display_name: "Test".to_string(),
@@ -1028,8 +1069,16 @@ mod tests {
             dupe_key: dupe_key.into_iter().map(str::to_string).collect(),
             multipliers,
             bonus_points,
-            power_multiplier,
+            param_multipliers: (!factor_values.is_empty())
+                .then_some(ParamMultiplierRule {
+                    param: "CATEGORY-POWER".to_string(),
+                    values: factor_values,
+                })
+                .into_iter()
+                .collect(),
+            multiplier_count_bonus_points: Vec::new(),
             cabrillo: (!category_power_values.is_empty()).then_some(CabrilloRules {
+                contest_id: None,
                 fixed_fields: Vec::new(),
                 log_fields: vec![ContestParam {
                     name: "CATEGORY-POWER".to_string(),
@@ -1096,6 +1145,7 @@ mod tests {
             in_sets: Vec::new(),
             valid_values: Vec::new(),
             exclude_call_suffixes: Vec::new(),
+            exclude_values: Vec::new(),
         }
     }
 
@@ -1310,7 +1360,7 @@ mod tests {
     }
 
     #[test]
-    fn power_multiplier_scales_score_as_separate_multiplier() {
+    fn parameter_multiplier_scales_score_as_separate_multiplier() {
         let rules = test_rules(
             fixed_points(1),
             Vec::new(),
@@ -1338,7 +1388,7 @@ mod tests {
     }
 
     #[test]
-    fn power_multiplier_defaults_to_one_when_not_configured() {
+    fn parameter_multiplier_defaults_to_one_when_not_configured() {
         let rules = test_rules(
             fixed_points(2),
             Vec::new(),
@@ -1362,7 +1412,7 @@ mod tests {
     }
 
     #[test]
-    fn power_multiplier_defaults_to_one_for_invalid_value() {
+    fn parameter_multiplier_defaults_to_one_for_invalid_value() {
         let rules = test_rules(
             fixed_points(2),
             Vec::new(),
@@ -1383,6 +1433,231 @@ mod tests {
 
         assert_eq!(totals.qso_points, 2);
         assert_eq!(totals.score, 2);
+    }
+
+    #[test]
+    fn parameter_multipliers_are_combined() {
+        let mut rules = test_rules(
+            fixed_points(1),
+            Vec::new(),
+            vec![state_multiplier()],
+            Vec::new(),
+            vec![1, 2, 3],
+            vec!["HIGH", "LOW", "QRP"],
+        );
+        rules.param_multipliers.push(ParamMultiplierRule {
+            param: "CATEGORY-STATION".to_string(),
+            values: BTreeMap::from([
+                ("FIXED".to_string(), 1),
+                ("MOBILE".to_string(), 2),
+                ("ROVER".to_string(), 4),
+            ]),
+        });
+        let mut contacts = vec![
+            contact(vec![("STATE", json!("SC"))]),
+            contact(vec![("STATE", json!("NC"))]),
+        ];
+
+        let totals = score_contacts(
+            &rules,
+            json!({
+                "CATEGORY-POWER": "LOW",
+                "CATEGORY-STATION": "ROVER"
+            }),
+            &mut contacts,
+        );
+
+        assert_eq!(totals.qso_points, 2);
+        assert_eq!(totals.multipliers, 2);
+        assert_eq!(totals.score, 32);
+    }
+
+    #[test]
+    fn mode_class_groups_phone_modes_for_dupes() {
+        let rules = test_rules(
+            fixed_points(1),
+            vec!["CALL", "BAND", "MODE_CLASS"],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = vec![
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("SSB")),
+            ]),
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("FM")),
+            ]),
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW-R")),
+            ]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 2);
+        assert_eq!(
+            contact_meta_value(&contacts[0], "dupe"),
+            Some(&json!(false))
+        );
+        assert_eq!(contact_meta_value(&contacts[1], "dupe"), Some(&json!(true)));
+        assert_eq!(
+            contact_meta_value(&contacts[2], "dupe"),
+            Some(&json!(false))
+        );
+    }
+
+    #[test]
+    fn multiplier_excludes_configured_values() {
+        let mut country = state_multiplier();
+        country.name = "Country".to_string();
+        country.field = "DXCC".to_string();
+        country.key = vec!["DXCC".to_string()];
+        country.exclude_values = vec!["1".to_string(), "291".to_string()];
+        let rules = test_rules(
+            fixed_points(1),
+            Vec::new(),
+            vec![country],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = vec![
+            contact(vec![("DXCC", json!(291))]),
+            contact(vec![("DXCC", json!(1))]),
+            contact(vec![("DXCC", json!(230))]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.multipliers, 1);
+        assert_eq!(totals.score, 3);
+    }
+
+    #[test]
+    fn multiplier_count_bonus_uses_only_highest_reached_threshold() {
+        let mut rules = test_rules(
+            fixed_points(1),
+            Vec::new(),
+            vec![state_multiplier()],
+            vec![bonus_station(50)],
+            Vec::new(),
+            Vec::new(),
+        );
+        rules
+            .multiplier_count_bonus_points
+            .push(MultiplierCountBonusRule {
+                name: "State Sweep".to_string(),
+                multiplier: "State".to_string(),
+                thresholds: BTreeMap::from([(2, 250), (3, 500)]),
+            });
+        let mut contacts = vec![
+            contact(vec![("CALL", json!("W4CAE")), ("STATE", json!("SC"))]),
+            contact(vec![("CALL", json!("K1ABC")), ("STATE", json!("NC"))]),
+            contact(vec![("CALL", json!("K1XYZ")), ("STATE", json!("GA"))]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 3);
+        assert_eq!(totals.multipliers, 3);
+        assert_eq!(totals.bonus_points, 550);
+        assert_eq!(totals.score, 559);
+        assert_eq!(contact_meta_value(&contacts[0], "bonus"), Some(&json!(50)));
+        assert_eq!(contact_meta_value(&contacts[1], "bonus"), Some(&json!(0)));
+        assert_eq!(contact_meta_value(&contacts[2], "bonus"), Some(&json!(0)));
+    }
+
+    #[test]
+    fn bundled_outside_mdc_rules_score_category_factors_and_jurisdiction_bonus() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store
+            .get("MDC-QSO-PARTY")
+            .expect("outside-MDC rules should load");
+        let jurisdictions = [
+            "ALY", "ANA", "BAL", "BCT", "CLV", "CLN", "CRL", "CEC", "CHS", "DRC", "FRD", "GAR",
+            "HFD",
+        ];
+        let mut contacts = jurisdictions
+            .iter()
+            .enumerate()
+            .map(|(index, jurisdiction)| {
+                contact(vec![
+                    ("CALL", json!(if index == 0 { "W3VPR" } else { "K1ABC" })),
+                    ("BAND", json!("20m")),
+                    ("MODE", json!("CW")),
+                    ("STX_STRING", json!("VA")),
+                    ("SRX_STRING", json!(jurisdiction)),
+                ])
+            })
+            .collect::<Vec<_>>();
+
+        let totals = score_contacts(
+            rules,
+            json!({
+                "CATEGORY-POWER": "QRP",
+                "CATEGORY-STATION": "ROVER"
+            }),
+            &mut contacts,
+        );
+
+        assert_eq!(totals.qso_points, 39);
+        assert_eq!(totals.multipliers, 13);
+        assert_eq!(totals.bonus_points, 300);
+        assert_eq!(totals.score, 6_384);
+    }
+
+    #[test]
+    fn bundled_in_state_mdc_rules_combine_jurisdiction_state_province_and_dxcc_multipliers() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store
+            .get("MDC-QSO-PARTY (In State)")
+            .expect("in-state MDC rules should load");
+        let mut contacts = [
+            ("K1ALY", "ALY", 291),
+            ("K1NC", "NC", 291),
+            ("VE3ABC", "ON", 1),
+            ("DL1ABC", "DL", 230),
+            ("KH6ABC", "HI", 110),
+            ("K1MD", "MD", 291),
+        ]
+        .into_iter()
+        .map(|(call, exchange, dxcc)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+                ("STX_STRING", json!("ANA")),
+                ("SRX_STRING", json!(exchange)),
+                ("DXCC", json!(dxcc)),
+            ])
+        })
+        .collect::<Vec<_>>();
+
+        let totals = score_contacts(
+            rules,
+            json!({
+                "CATEGORY-POWER": "HIGH",
+                "CATEGORY-STATION": "FIXED"
+            }),
+            &mut contacts,
+        );
+
+        assert_eq!(totals.qso_points, 18);
+        assert_eq!(totals.multipliers, 5);
+        assert_eq!(totals.bonus_points, 0);
+        assert_eq!(totals.score, 90);
     }
 
     #[test]
@@ -1570,6 +1845,62 @@ mod tests {
         assert_eq!(totals.qso_points, 2);
         assert_eq!(totals.multipliers, 2);
         assert_eq!(totals.score, 4);
+    }
+
+    #[test]
+    fn incremental_tracker_recalculates_multiplier_count_bonus_after_delete() {
+        let mut rules = test_rules(
+            fixed_points(1),
+            vec!["CALL", "BAND", "MODE"],
+            vec![state_multiplier()],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        rules
+            .multiplier_count_bonus_points
+            .push(MultiplierCountBonusRule {
+                name: "State Sweep".to_string(),
+                multiplier: "State".to_string(),
+                thresholds: BTreeMap::from([(2, 250), (3, 500)]),
+            });
+        let module = Arc::new(ContestScoringModule::new(rules, Value::Null));
+        let tracker = IncrementalScoreTracker::new();
+        let mut contacts = vec![
+            contact(vec![
+                ("id", json!(1)),
+                ("CALL", json!("K1AAA")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+                ("STATE", json!("SC")),
+            ]),
+            contact(vec![
+                ("id", json!(2)),
+                ("CALL", json!("K1BBB")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+                ("STATE", json!("NC")),
+            ]),
+            contact(vec![
+                ("id", json!(3)),
+                ("CALL", json!("K1CCC")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+                ("STATE", json!("GA")),
+            ]),
+        ];
+
+        tracker.on_log_loaded(9, Arc::clone(&module), &mut contacts);
+        let totals = tracker.totals(9).expect("totals should exist");
+        assert_eq!(totals.bonus_points, 500);
+        assert_eq!(totals.score, 509);
+
+        let deleted = contacts.remove(2);
+        tracker.on_contact_deleted(9, module, &mut contacts, &deleted);
+
+        let totals = tracker.totals(9).expect("totals should exist");
+        assert_eq!(totals.bonus_points, 250);
+        assert_eq!(totals.score, 254);
     }
 
     fn contact_by_id(contacts: &[Contact], id: i64) -> Contact {

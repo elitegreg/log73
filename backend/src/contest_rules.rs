@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::{
     collections::BTreeMap,
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
 use tracing::info;
 
@@ -74,6 +74,8 @@ pub struct CabrilloFixedField {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CabrilloRules {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contest_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fixed_fields: Vec<CabrilloFixedField>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -152,6 +154,8 @@ pub struct MultiplierRule {
     pub valid_values: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_call_suffixes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_values: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,6 +165,19 @@ pub struct BonusPointRule {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub key: Vec<String>,
     pub values: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParamMultiplierRule {
+    pub param: String,
+    pub values: BTreeMap<String, i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultiplierCountBonusRule {
+    pub name: String,
+    pub multiplier: String,
+    pub thresholds: BTreeMap<usize, i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,7 +203,9 @@ pub struct ContestRules {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub bonus_points: Vec<BonusPointRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub power_multiplier: Vec<i64>,
+    pub param_multipliers: Vec<ParamMultiplierRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub multiplier_count_bonus_points: Vec<MultiplierCountBonusRule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cabrillo: Option<CabrilloRules>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -218,6 +237,7 @@ enum AllowedBandValue {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawContestRules {
     id: String,
     #[serde(default)]
@@ -229,7 +249,7 @@ struct RawContestRules {
     #[serde(default)]
     allowed_modes: Option<Vec<String>>,
     #[serde(default)]
-    define: Option<Vec<ValueSet>>,
+    define: Option<Vec<RawValueSet>>,
     #[serde(default)]
     exchange: Option<Vec<ExchangeField>>,
     #[serde(default)]
@@ -251,13 +271,28 @@ struct RawContestRules {
     #[serde(default)]
     bonus_points: Option<Vec<BonusPointRule>>,
     #[serde(default)]
-    power_multiplier: Option<Vec<i64>>,
+    param_multipliers: Option<Vec<ParamMultiplierRule>>,
+    #[serde(default)]
+    multiplier_count_bonus_points: Option<Vec<MultiplierCountBonusRule>>,
     #[serde(default)]
     metadata: Option<ContestMetadata>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+struct RawValueSet {
+    name: String,
+    #[serde(default)]
+    values: Option<Vec<String>>,
+    #[serde(default)]
+    values_from_file: Option<PathBuf>,
+    #[serde(default)]
+    exclude: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 struct RawCabrilloRules {
+    #[serde(default)]
+    contest_id: Option<String>,
     #[serde(default)]
     fixed_fields: Option<Vec<CabrilloFixedField>>,
     #[serde(default)]
@@ -267,6 +302,7 @@ struct RawCabrilloRules {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawScoringRules {
     #[serde(default)]
     qso_points: Option<QsoPoints>,
@@ -277,7 +313,9 @@ struct RawScoringRules {
     #[serde(default)]
     bonus_points: Option<Vec<BonusPointRule>>,
     #[serde(default)]
-    power_multiplier: Option<Vec<i64>>,
+    param_multipliers: Option<Vec<ParamMultiplierRule>>,
+    #[serde(default)]
+    multiplier_count_bonus_points: Option<Vec<MultiplierCountBonusRule>>,
 }
 
 fn allowed_band_name(value: &AllowedBandValue) -> String {
@@ -316,7 +354,13 @@ impl ContestRulesStore {
         let mut contests = BTreeMap::new();
         let ids = raw_contests.keys().cloned().collect::<Vec<_>>();
         for id in ids {
-            let contest = resolve_contest(&id, &raw_contests, &mut contests, &mut Vec::new())?;
+            let contest = resolve_contest(
+                &id,
+                &raw_contests,
+                &search_paths,
+                &mut contests,
+                &mut Vec::new(),
+            )?;
             contests.insert(id, contest);
         }
 
@@ -418,6 +462,99 @@ fn format_paths(paths: &[PathBuf]) -> String {
         .join(", ")
 }
 
+fn value_set_file_path(file_name: &Path, search_paths: &[PathBuf]) -> Result<PathBuf, String> {
+    if file_name.is_absolute()
+        || file_name.components().count() != 1
+        || !matches!(file_name.components().next(), Some(Component::Normal(_)))
+    {
+        return Err(format!(
+            "value-set file must be a file name within contest-rules directories: {}",
+            file_name.display()
+        ));
+    }
+
+    for directory in search_paths.iter().rev() {
+        let candidate = directory.join(file_name);
+        match fs::metadata(&candidate) {
+            Ok(metadata) if metadata.is_file() => return Ok(candidate),
+            Ok(_) => {
+                return Err(format!(
+                    "value-set file is not a regular file: {}",
+                    candidate.display()
+                ));
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "unable to inspect value-set file {}: {error}",
+                    candidate.display()
+                ));
+            }
+        }
+    }
+
+    Err(format!(
+        "value-set file {} not found in contest rules directories: {}",
+        file_name.display(),
+        format_paths(search_paths)
+    ))
+}
+
+fn resolve_value_set(raw: &RawValueSet, search_paths: &[PathBuf]) -> Result<ValueSet, String> {
+    let values = match (&raw.values, &raw.values_from_file) {
+        (Some(_), Some(file_name)) => {
+            return Err(format!(
+                "value set {} defines both values and values_from_file ({})",
+                raw.name,
+                file_name.display()
+            ));
+        }
+        (Some(values), None) => values.clone(),
+        (None, Some(file_name)) => {
+            let path = value_set_file_path(file_name, search_paths)?;
+            fs::read_to_string(&path)
+                .map_err(|error| {
+                    format!("unable to read value-set file {}: {error}", path.display())
+                })?
+                .lines()
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && !value.starts_with('#'))
+                .map(str::to_string)
+                .collect()
+        }
+        (None, None) => {
+            return Err(format!(
+                "value set {} must define values or values_from_file",
+                raw.name
+            ));
+        }
+    };
+    let excluded = raw
+        .exclude
+        .iter()
+        .map(|value| value.trim())
+        .collect::<Vec<_>>();
+
+    Ok(ValueSet {
+        name: raw.name.clone(),
+        values: values
+            .into_iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty() && !excluded.contains(&value.as_str()))
+            .collect(),
+    })
+}
+
+fn resolve_value_sets(
+    raw_sets: &[RawValueSet],
+    search_paths: &[PathBuf],
+) -> Result<Vec<ValueSet>, String> {
+    raw_sets
+        .iter()
+        .map(|raw| resolve_value_set(raw, search_paths))
+        .collect()
+}
+
 fn apply_defines(current: &mut Vec<ValueSet>, updates: &[ValueSet]) {
     for update in updates {
         if let Some(existing) = current
@@ -434,6 +571,9 @@ fn apply_defines(current: &mut Vec<ValueSet>, updates: &[ValueSet]) {
 fn defined_values(define: &[ValueSet], in_sets: &[String]) -> Result<Vec<String>, String> {
     let mut values = Vec::new();
     for set_name in in_sets {
+        if set_name == "*" {
+            continue;
+        }
         let value_set = define
             .iter()
             .find(|value_set| &value_set.name == set_name)
@@ -548,13 +688,19 @@ fn apply_scoring_rules(contest: &mut ContestRules, scoring: &RawScoringRules) {
     if let Some(bonus_points) = &scoring.bonus_points {
         contest.bonus_points = bonus_points.clone();
     }
-    if let Some(power_multiplier) = &scoring.power_multiplier {
-        contest.power_multiplier = power_multiplier.clone();
+    if let Some(param_multipliers) = &scoring.param_multipliers {
+        contest.param_multipliers = param_multipliers.clone();
+    }
+    if let Some(multiplier_count_bonus_points) = &scoring.multiplier_count_bonus_points {
+        contest.multiplier_count_bonus_points = multiplier_count_bonus_points.clone();
     }
 }
 
 fn apply_cabrillo_rules(contest: &mut ContestRules, cabrillo: &RawCabrilloRules) {
     let current = contest.cabrillo.get_or_insert_with(CabrilloRules::default);
+    if let Some(contest_id) = &cabrillo.contest_id {
+        current.contest_id = Some(contest_id.clone());
+    }
     if let Some(fixed_fields) = &cabrillo.fixed_fields {
         current.fixed_fields = fixed_fields.clone();
     }
@@ -597,9 +743,88 @@ fn resolve_in_sets(contest: &mut ContestRules) -> Result<(), String> {
     Ok(())
 }
 
+fn scoring_param<'a>(contest: &'a ContestRules, name: &str) -> Option<&'a ContestParam> {
+    contest
+        .log_params
+        .iter()
+        .chain(
+            contest
+                .cabrillo
+                .iter()
+                .flat_map(|cabrillo| cabrillo.log_fields.iter()),
+        )
+        .find(|param| param.name.eq_ignore_ascii_case(name))
+}
+
+fn validate_scoring_config(contest: &ContestRules) -> Result<(), String> {
+    for multiplier in &contest.param_multipliers {
+        let param = scoring_param(contest, &multiplier.param).ok_or_else(|| {
+            format!(
+                "param_multipliers references unknown log parameter: {}",
+                multiplier.param
+            )
+        })?;
+        if multiplier.values.is_empty() {
+            return Err(format!(
+                "param_multipliers for {} must define at least one value",
+                multiplier.param
+            ));
+        }
+        for (value, factor) in &multiplier.values {
+            if *factor <= 0 {
+                return Err(format!(
+                    "param_multipliers factor for {}={} must be positive",
+                    multiplier.param, value
+                ));
+            }
+            if !param.valid_values.is_empty()
+                && !param
+                    .valid_values
+                    .iter()
+                    .any(|valid| valid.eq_ignore_ascii_case(value))
+            {
+                return Err(format!(
+                    "param_multipliers value {} is not valid for {}",
+                    value, multiplier.param
+                ));
+            }
+        }
+    }
+
+    for bonus in &contest.multiplier_count_bonus_points {
+        if !contest
+            .multipliers
+            .iter()
+            .any(|multiplier| multiplier.name.eq_ignore_ascii_case(&bonus.multiplier))
+        {
+            return Err(format!(
+                "multiplier_count_bonus_points references unknown multiplier: {}",
+                bonus.multiplier
+            ));
+        }
+        if bonus.thresholds.is_empty() {
+            return Err(format!(
+                "multiplier_count_bonus_points {} must define at least one threshold",
+                bonus.name
+            ));
+        }
+        for (threshold, points) in &bonus.thresholds {
+            if *threshold == 0 || *points <= 0 {
+                return Err(format!(
+                    "multiplier_count_bonus_points {} thresholds and points must be positive",
+                    bonus.name
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 fn resolve_contest(
     id: &str,
     raw_contests: &BTreeMap<String, RawContestRules>,
+    search_paths: &[PathBuf],
     resolved: &mut BTreeMap<String, ContestRules>,
     stack: &mut Vec<String>,
 ) -> Result<ContestRules, String> {
@@ -619,7 +844,7 @@ fn resolve_contest(
     stack.push(id.to_string());
 
     let mut contest = if let Some(parent_id) = &raw.extends {
-        resolve_contest(parent_id, raw_contests, resolved, stack)?
+        resolve_contest(parent_id, raw_contests, search_paths, resolved, stack)?
     } else {
         ContestRules {
             contest: id.to_string(),
@@ -635,7 +860,8 @@ fn resolve_contest(
             dupe_key: Vec::new(),
             multipliers: Vec::new(),
             bonus_points: Vec::new(),
-            power_multiplier: Vec::new(),
+            param_multipliers: Vec::new(),
+            multiplier_count_bonus_points: Vec::new(),
             cabrillo: None,
             metadata: None,
         }
@@ -654,7 +880,8 @@ fn resolve_contest(
         contest.allowed_modes = allowed_modes.clone();
     }
     if let Some(define) = &raw.define {
-        apply_defines(&mut contest.define, define);
+        let define = resolve_value_sets(define, search_paths)?;
+        apply_defines(&mut contest.define, &define);
     }
     if let Some(exchange) = &raw.exchange {
         contest.exchange = exchange.clone();
@@ -678,7 +905,8 @@ fn resolve_contest(
             dupe_key: raw.dupe_key.clone(),
             multipliers: raw.multipliers.clone(),
             bonus_points: raw.bonus_points.clone(),
-            power_multiplier: raw.power_multiplier.clone(),
+            param_multipliers: raw.param_multipliers.clone(),
+            multiplier_count_bonus_points: raw.multiplier_count_bonus_points.clone(),
         },
     );
     if let Some(scoring) = &raw.scoring {
@@ -690,6 +918,7 @@ fn resolve_contest(
 
     ensure_serial_batch_size_param(&mut contest);
     resolve_in_sets(&mut contest)?;
+    validate_scoring_config(&contest)?;
     prepend_standard_qso_columns(&mut contest);
 
     stack.pop();
@@ -747,8 +976,14 @@ mod tests {
             .map(|contest| (contest.id.clone(), contest))
             .collect::<BTreeMap<_, _>>();
 
-        resolve_contest(id, &raw_contests, &mut BTreeMap::new(), &mut Vec::new())
-            .expect("contest should resolve")
+        resolve_contest(
+            id,
+            &raw_contests,
+            &[],
+            &mut BTreeMap::new(),
+            &mut Vec::new(),
+        )
+        .expect("contest should resolve")
     }
 
     #[test]
@@ -808,6 +1043,91 @@ contests:
         );
         assert!(store.get("INSTALLED_ONLY").is_some());
         assert!(store.get("USER_ONLY").is_some());
+    }
+
+    #[test]
+    fn file_backed_value_sets_use_user_data_and_apply_exclusions() {
+        let installed = TestDir::new();
+        let user = TestDir::new();
+
+        write_rules_file(
+            installed.path(),
+            "contest.yaml",
+            r#"
+contests:
+  - id: TEST
+    allowed_bands: [20]
+    allowed_modes: ['CW']
+    define:
+      - name: Sections
+        values_from_file: sections.dat
+        exclude: ['SC']
+    exchange:
+      - name: Section
+        type: 'String:3'
+        adif: 'SRX_STRING'
+        is_sent: false
+        in_sets: ['Sections']
+    qso_columns: []
+    qso_column_fields: {}
+"#,
+        );
+        fs::write(installed.path().join("sections.dat"), "AA\nSC\n")
+            .expect("installed data file should be written");
+        fs::write(user.path().join("sections.dat"), "BB\nSC\n\n# comment\n")
+            .expect("user data file should be written");
+
+        let store = ContestRulesStore::load_dirs([installed.path(), user.path()])
+            .expect("rules should load");
+        let contest = store.get("TEST").expect("test contest should load");
+
+        assert_eq!(contest.define[0].values, vec!["BB".to_string()]);
+        assert_eq!(contest.exchange[0].valid_values, vec!["BB".to_string()]);
+    }
+
+    #[test]
+    fn file_backed_value_sets_report_missing_and_unsafe_files() {
+        let rules = TestDir::new();
+        write_rules_file(
+            rules.path(),
+            "contest.yaml",
+            r#"
+contests:
+  - id: MISSING
+    allowed_bands: [20]
+    allowed_modes: ['CW']
+    define:
+      - name: Sections
+        values_from_file: missing.dat
+    exchange: []
+    qso_columns: []
+    qso_column_fields: {}
+"#,
+        );
+        let error = ContestRulesStore::load_dirs([rules.path()])
+            .expect_err("a missing value-set file should fail loading");
+        assert!(error.contains("missing.dat"));
+        assert!(error.contains("not found"));
+
+        write_rules_file(
+            rules.path(),
+            "contest.yaml",
+            r#"
+contests:
+  - id: UNSAFE
+    allowed_bands: [20]
+    allowed_modes: ['CW']
+    define:
+      - name: Sections
+        values_from_file: ../outside.dat
+    exchange: []
+    qso_columns: []
+    qso_column_fields: {}
+"#,
+        );
+        let error = ContestRulesStore::load_dirs([rules.path()])
+            .expect_err("a path outside contest-rules should fail loading");
+        assert!(error.contains("must be a file name"));
     }
 
     #[test]
@@ -890,7 +1210,23 @@ contests:
           key: ['CALL']
           values:
             W1AW: 100
-      power_multiplier: [1, 2, 5]
+      param_multipliers:
+        - param: 'CATEGORY-POWER'
+          values:
+            HIGH: 1
+            LOW: 2
+            QRP: 5
+      multiplier_count_bonus_points:
+        - name: 'Section Sweep'
+          multiplier: 'Section'
+          thresholds:
+            2: 100
+    cabrillo:
+      log_fields:
+        - name: 'CATEGORY-POWER'
+          label: 'Category Power'
+          type: 'String:16'
+          valid_values: ['HIGH', 'LOW', 'QRP']
 "#,
             "TEST",
         );
@@ -914,7 +1250,34 @@ contests:
         assert_eq!(contest.multipliers[0].valid_values, vec!["SC".to_string()]);
         assert_eq!(contest.bonus_points.len(), 1);
         assert_eq!(contest.bonus_points[0].values.get("W1AW"), Some(&100));
-        assert_eq!(contest.power_multiplier, vec![1, 2, 5]);
+        assert_eq!(contest.param_multipliers.len(), 1);
+        assert_eq!(contest.param_multipliers[0].values.get("LOW"), Some(&2));
+        assert_eq!(contest.multiplier_count_bonus_points.len(), 1);
+    }
+
+    #[test]
+    fn removed_power_multiplier_is_rejected() {
+        let rules = TestDir::new();
+        write_rules_file(
+            rules.path(),
+            "contest.yaml",
+            r#"
+contests:
+  - id: TEST
+    allowed_bands: [20]
+    allowed_modes: ['CW']
+    exchange: []
+    qso_columns: []
+    qso_column_fields: {}
+    scoring:
+      power_multiplier: [1, 2, 5]
+"#,
+        );
+
+        let error = ContestRulesStore::load_dirs([rules.path()])
+            .expect_err("removed power_multiplier should fail loading");
+        assert!(error.contains("power_multiplier"));
+        assert!(error.contains("unknown field"));
     }
 
     #[test]
@@ -995,6 +1358,128 @@ contests:
         );
         assert_eq!(cabrillo.export_fields.len(), 1);
         assert_eq!(cabrillo.export_fields[0].name, "EMAIL");
+    }
+
+    #[test]
+    fn bundled_sc_qso_party_rules_resolve_file_backed_value_sets() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let contest = store
+            .get("SC-QSO-PARTY")
+            .expect("SC QSO Party rules should load");
+
+        let states = contest
+            .define
+            .iter()
+            .find(|value_set| value_set.name == "States")
+            .expect("States value set should exist");
+        assert!(states.values.contains(&"AL".to_string()));
+        assert!(!states.values.contains(&"SC".to_string()));
+
+        let received_state = contest
+            .exchange
+            .iter()
+            .find(|field| field.name == "State")
+            .expect("received State exchange field should exist");
+        assert!(received_state.valid_values.contains(&"DC".to_string()));
+        assert!(received_state.valid_values.contains(&"AB".to_string()));
+    }
+
+    #[test]
+    fn bundled_mdc_qso_party_rules_resolve_both_locations() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let in_state = store
+            .get("MDC-QSO-PARTY (In State)")
+            .expect("in-state MDC QSO Party rules should load");
+        let outside = store
+            .get("MDC-QSO-PARTY")
+            .expect("outside-MDC QSO Party rules should load");
+
+        let jurisdictions = in_state
+            .define
+            .iter()
+            .find(|value_set| value_set.name == "Counties")
+            .expect("Counties should exist");
+        assert_eq!(jurisdictions.values.len(), 25);
+        assert!(jurisdictions.values.contains(&"BAL".to_string()));
+        assert!(jurisdictions.values.contains(&"BCT".to_string()));
+        assert!(jurisdictions.values.contains(&"WDC".to_string()));
+
+        let states = in_state
+            .define
+            .iter()
+            .find(|value_set| value_set.name == "States")
+            .expect("states should exist");
+        assert!(!states.values.contains(&"MD".to_string()));
+        assert!(states.values.contains(&"AK".to_string()));
+        assert!(states.values.contains(&"HI".to_string()));
+
+        assert_eq!(in_state.param_multipliers.len(), 2);
+        assert_eq!(in_state.param_multipliers[0].values.get("QRP"), Some(&3));
+        assert_eq!(in_state.param_multipliers[1].values.get("ROVER"), Some(&4));
+        assert_eq!(in_state.multiplier_count_bonus_points.len(), 1);
+        assert_eq!(
+            in_state.multiplier_count_bonus_points[0]
+                .thresholds
+                .get(&25),
+            Some(&500)
+        );
+        assert_eq!(
+            in_state
+                .cabrillo
+                .as_ref()
+                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
+            Some("MDC-QSO-PARTY")
+        );
+
+        assert_eq!(outside.multipliers.len(), 1);
+        assert_eq!(outside.multipliers[0].name, "County");
+        assert_eq!(outside.log_params[0].name, "Location");
+        let in_state_received = in_state
+            .exchange
+            .iter()
+            .find(|field| field.name == "Location" && !field.is_sent)
+            .expect("in-state MDC received location should exist");
+        assert_eq!(in_state_received.field_type, "String:16");
+        assert!(
+            in_state_received
+                .in_sets
+                .iter()
+                .any(|set_name| set_name == "*")
+        );
+        assert!(in_state_received.valid_values.contains(&"BAL".to_string()));
+        assert!(in_state_received.valid_values.contains(&"SC".to_string()));
+        assert!(in_state_received.valid_values.contains(&"SK".to_string()));
+        assert!(!in_state_received.valid_values.contains(&"DX".to_string()));
+        let received = outside
+            .exchange
+            .iter()
+            .find(|field| field.name == "County")
+            .expect("outside-MDC received county should exist");
+        assert_eq!(received.valid_values.len(), 25);
+    }
+
+    #[test]
+    fn bundled_arrl_field_day_uses_parameter_multiplier() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let contest = store
+            .get("ARRL-FIELD-DAY")
+            .expect("ARRL Field Day rules should load");
+
+        assert_eq!(contest.param_multipliers.len(), 1);
+        assert_eq!(
+            contest.param_multipliers[0].values,
+            BTreeMap::from([
+                ("HIGH".to_string(), 1),
+                ("LOW".to_string(), 2),
+                ("QRP".to_string(), 5),
+            ])
+        );
     }
 
     #[test]

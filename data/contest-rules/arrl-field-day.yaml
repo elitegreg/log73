@@ -15,7 +15,12 @@ contests:
         - 'CALL'
         - 'BAND'
         - 'MODE'
-      power_multiplier: [1, 2, 5]
+      param_multipliers:
+        - param: 'CATEGORY-POWER'
+          values:
+            HIGH: 1
+            LOW: 2
+            QRP: 5
     cabrillo:
       fixed_fields:
         - name: 'CATEGORY-BAND'
@@ -78,93 +83,10 @@ contests:
       - name: 'DX'
         values:
           - DX
-      - name: 'Sections'
-        values:
-          - AL
-          - AK
-          - AB
-          - AR
-          - AZ
-          - BC
-          - CO
-          - CT
-          - DE
-          - EB
-          - EMA
-          - ENY
-          - EPA
-          - EWA
-          - GA
-          - GH
-          - ID
-          - IL
-          - IN
-          - IA
-          - KS
-          - KY
-          - LAX
-          - LA
-          - ME
-          - MB
-          - MDC
-          - MI
-          - MN
-          - MS
-          - MO
-          - MT
-          - NE
-          - NV
-          - NB
-          - NH
-          - NM
-          - NLI
-          - NL
-          - NC
-          - ND
-          - NTX
-          - NFL
-          - NNJ
-          - NNY
-          - NS
-          - OH
-          - OK
-          - ONE
-          - ONN
-          - ONS
-          - ORG
-          - OR
-          - PAC
-          - PE
-          - PR
-          - QC
-          - RI
-          - SV
-          - SDG
-          - SF
-          - SJV
-          - SB
-          - SCV
-          - SK
-          - SC
-          - SD
-          - STX
-          - SFL
-          - SNJ
-          - TN
-          - TER
-          - VI
-          - UT
-          - VT
-          - VA
-          - WCF
-          - WTX
-          - WV
-          - WMA
-          - WNY
-          - WPA
-          - WWA
-          - WI
-          - WY
+      - name: 'ARRL Sections'
+        values_from_file: arrl_sections.dat
+      - name: 'RAC Sections'
+        values_from_file: rac_sections.dat
     log_params:
       - name: 'Class'
         label: 'Class'
@@ -175,7 +97,7 @@ contests:
         label: 'Section'
         type: 'String:3'
         required: true
-        in_sets: ['Sections']
+        in_sets: ['ARRL Sections', 'RAC Sections']
     exchange:
       - name: 'Class(s)'
         type: 'String:3'
@@ -190,7 +112,7 @@ contests:
         fixed: true
         source_param: 'Section'
         is_sent: true
-        in_sets: ['Sections', 'DX']
+        in_sets: ['ARRL Sections', 'RAC Sections', 'DX']
       - name: 'Class'
         type: 'String:3'
         adif: 'SRX_STRING'
@@ -200,7 +122,7 @@ contests:
         type: 'String:3'
         adif: 'ARRL_SECT'
         is_sent: false
-        in_sets: ['Sections', 'DX']
+        in_sets: ['ARRL Sections', 'RAC Sections', 'DX']
     qso_columns:
       - 'Class'
       - 'Section'
