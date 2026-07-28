@@ -1,0 +1,330 @@
+contests:
+  - id: 'ARRL-10'
+    display_name: 'ARRL 10-Meter Contest'
+    allowed_bands: [10]
+    allowed_modes: ['CW', 'SSB']
+    define:
+      - name: 'US States'
+        values_from_file: us_states.dat
+      - name: 'District of Columbia'
+        values: ['DC']
+      - name: 'ARRL 10 Canadian Multipliers'
+        values:
+          [
+            'AB',
+            'BC',
+            'LB',
+            'MB',
+            'NB',
+            'NF',
+            'NS',
+            'NT',
+            'NU',
+            'ON',
+            'PE',
+            'QC',
+            'SK',
+            'YT',
+          ]
+      - name: 'ARRL 10 Mexican Multipliers'
+        values:
+          [
+            'AGS',
+            'BAC',
+            'BCS',
+            'CAM',
+            'CHI',
+            'CHH',
+            'CMX',
+            'COA',
+            'COL',
+            'DGO',
+            'EMX',
+            'GTO',
+            'GRO',
+            'HGO',
+            'JAL',
+            'MIC',
+            'MOR',
+            'NAY',
+            'NLE',
+            'OAX',
+            'PUE',
+            'QRO',
+            'QUI',
+            'SLP',
+            'SIN',
+            'SON',
+            'TAB',
+            'TAM',
+            'TLX',
+            'VER',
+            'YUC',
+            'ZAC',
+          ]
+      - name: 'ARRL 10 W/VE/XE DXCC'
+        values: ['1', '6', '50', '110', '291']
+      - name: 'ITU Regions'
+        values: ['1', '2', '3']
+    scoring:
+      qso_points:
+        rules:
+          - when:
+              field: 'MODE_CLASS'
+              values: ['PHONE']
+            points: 2
+          - when:
+              field: 'MODE_CLASS'
+              values: ['CW']
+            points: 4
+      dupe_key: ['CALL', 'MODE_CLASS']
+      multipliers:
+        - name: 'Location'
+          field: 'SRX_STRING'
+          key: ['SRX_STRING', 'MODE_CLASS']
+          in_sets:
+            [
+              'US States',
+              'District of Columbia',
+              'ARRL 10 Canadian Multipliers',
+              'ARRL 10 Mexican Multipliers',
+            ]
+          when:
+            field: 'DXCC'
+            in_sets: ['ARRL 10 W/VE/XE DXCC']
+          when_all:
+            - field: 'CALL'
+              exclude_suffixes: ['/MM']
+        - name: 'DXCC Entity'
+          field: 'DXCC'
+          key: ['DXCC', 'MODE_CLASS']
+          when:
+            field: 'DXCC'
+            exclude_in_sets: ['ARRL 10 W/VE/XE DXCC']
+          when_all:
+            - field: 'CALL'
+              exclude_suffixes: ['/MM']
+        - name: 'ITU Region'
+          field: 'SRX_STRING'
+          key: ['SRX_STRING', 'MODE_CLASS']
+          in_sets: ['ITU Regions']
+          when:
+            field: 'CALL'
+            suffixes: ['/MM']
+    log_params:
+      - name: 'Location'
+        label: 'State, Province, or Mexican State'
+        type: 'String:3'
+        required: true
+        in_sets:
+          [
+            'US States',
+            'District of Columbia',
+            'ARRL 10 Canadian Multipliers',
+            'ARRL 10 Mexican Multipliers',
+          ]
+    exchange:
+      - name: 'RST(s)'
+        type: 'RST'
+        adif: 'RST_SENT'
+        default: 599
+        is_sent: true
+      - name: 'Location(s)'
+        type: 'String:3'
+        adif: 'STX_STRING'
+        fixed: true
+        source_param: 'Location'
+        in_sets:
+          [
+            'US States',
+            'District of Columbia',
+            'ARRL 10 Canadian Multipliers',
+            'ARRL 10 Mexican Multipliers',
+          ]
+        is_sent: true
+      - name: 'RST(r)'
+        type: 'RST'
+        adif: 'RST_RCVD'
+        default: 599
+        is_sent: false
+      - name: 'Location'
+        type: 'String:4'
+        adif: 'SRX_STRING'
+        regex: '^\d{1,4}$'
+        valid_values_or_regex: true
+        in_sets:
+          [
+            'US States',
+            'District of Columbia',
+            'ARRL 10 Canadian Multipliers',
+            'ARRL 10 Mexican Multipliers',
+            'ITU Regions',
+          ]
+        is_sent: false
+    qso_columns: ['RST(r)', 'Location', 'Mult', 'Pts', 'Op']
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'RST(s)': 'RST_SENT'
+      'Location(s)': 'STX_STRING'
+      'RST(r)': 'RST_RCVD'
+      Location: 'SRX_STRING'
+    cabrillo:
+      contest_id: 'ARRL-10'
+      fixed_fields:
+        - name: 'CATEGORY-BAND'
+          value: '10M'
+      log_fields:
+        - name: 'CATEGORY-OPERATOR'
+          label: 'Category Operator'
+          type: 'String:24'
+          widget: 'select'
+          default: 'SINGLE-OP'
+          valid_values:
+            ['SINGLE-OP', 'SINGLE-OP-UNLIMITED', 'MULTI-OP', 'CHECKLOG']
+        - name: 'CATEGORY-ASSISTED'
+          label: 'Category Assisted'
+          type: 'String:16'
+          widget: 'select'
+          default: 'NON-ASSISTED'
+          valid_values: ['ASSISTED', 'NON-ASSISTED']
+        - name: 'CATEGORY-POWER'
+          label: 'Category Power'
+          type: 'String:16'
+          widget: 'select'
+          default: 'LOW'
+          valid_values: ['QRP', 'LOW', 'HIGH']
+        - name: 'CATEGORY-MODE'
+          label: 'Category Mode'
+          type: 'String:16'
+          widget: 'select'
+          default: 'MIXED'
+          valid_values: ['MIXED', 'CW', 'SSB']
+        - name: 'CATEGORY-TRANSMITTER'
+          label: 'Category Transmitter'
+          type: 'String:16'
+          widget: 'select'
+          default: 'ONE'
+          valid_values: ['ONE']
+        - name: 'CATEGORY-OVERLAY'
+          label: 'Category Overlay'
+          type: 'String:24'
+          widget: 'select'
+          required: false
+          valid_values: ['LIMITED-ANTENNAS']
+      export_fields:
+        - name: 'LOCATION'
+          label: 'Location'
+          type: 'String:32'
+          required: false
+          help_text: 'State, province, Mexican state, or DXCC entity.'
+        - name: 'CLUB'
+          label: 'Club'
+          type: 'String:75'
+          required: false
+          preserve_case: true
+        - name: 'EMAIL'
+          label: 'Email'
+          type: 'String:75'
+          required: false
+          regex: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$'
+          preserve_case: true
+        - name: 'NAME'
+          label: 'Name'
+          type: 'String:75'
+          required: false
+          preserve_case: true
+        - name: 'ADDRESS'
+          label: 'Address'
+          type: 'String:45'
+          widget: 'textarea'
+          max_lines: 6
+          required: false
+          preserve_case: true
+        - name: 'SOAPBOX'
+          label: 'Soapbox'
+          type: 'String:75'
+          widget: 'textarea'
+          required: false
+          preserve_case: true
+    metadata:
+      source: 'https://www.arrl.org/files/file/Contest%20Rules%20PDFs/2026/10%20Meter%20Rules%20v%202_0%20-%202026.pdf'
+      notes: 'CW and Phone on 10 meters only. Contacts count once per mode; operating and category restrictions remain operator-enforced.'
+
+  - id: 'ARRL-10 (DX)'
+    extends: 'ARRL-10'
+    display_name: 'ARRL 10-Meter Contest (DX)'
+    log_params: []
+    exchange:
+      - name: 'RST(s)'
+        type: 'RST'
+        adif: 'RST_SENT'
+        default: 599
+        is_sent: true
+      - name: 'Serial(s)'
+        type: 'Serial:4'
+        adif: 'STX'
+        is_sent: true
+      - name: 'RST(r)'
+        type: 'RST'
+        adif: 'RST_RCVD'
+        default: 599
+        is_sent: false
+      - name: 'Location'
+        type: 'String:4'
+        adif: 'SRX_STRING'
+        regex: '^\d{1,4}$'
+        valid_values_or_regex: true
+        in_sets:
+          [
+            'US States',
+            'District of Columbia',
+            'ARRL 10 Canadian Multipliers',
+            'ARRL 10 Mexican Multipliers',
+            'ITU Regions',
+          ]
+        is_sent: false
+
+  - id: 'ARRL-10 (/MM)'
+    extends: 'ARRL-10'
+    display_name: 'ARRL 10-Meter Contest (/MM)'
+    log_params:
+      - name: 'ITU Region'
+        label: 'ITU Region'
+        type: 'String:1'
+        required: true
+        in_sets: ['ITU Regions']
+    exchange:
+      - name: 'RST(s)'
+        type: 'RST'
+        adif: 'RST_SENT'
+        default: 599
+        is_sent: true
+      - name: 'ITU Region(s)'
+        type: 'String:1'
+        adif: 'APP_LOG73_STX_ITU_REGION'
+        fixed: true
+        source_param: 'ITU Region'
+        in_sets: ['ITU Regions']
+        is_sent: true
+      - name: 'RST(r)'
+        type: 'RST'
+        adif: 'RST_RCVD'
+        default: 599
+        is_sent: false
+      - name: 'Location'
+        type: 'String:4'
+        adif: 'SRX_STRING'
+        regex: '^\d{1,4}$'
+        valid_values_or_regex: true
+        in_sets:
+          [
+            'US States',
+            'District of Columbia',
+            'ARRL 10 Canadian Multipliers',
+            'ARRL 10 Mexican Multipliers',
+            'ITU Regions',
+          ]
+        is_sent: false

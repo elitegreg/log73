@@ -431,6 +431,16 @@ fn condition_matches(
     let Some(value) = field_value(contact, rules, &condition.field) else {
         return false;
     };
+    let suffix_value = json_string(contact_adif_value(contact, &condition.field))
+        .or_else(|| json_string(contact_meta_value(contact, &condition.field)))
+        .or_else(|| {
+            rules
+                .qso_column_fields
+                .get(&condition.field)
+                .and_then(|adif| json_string(contact_adif_value(contact, adif)))
+        })
+        .map(|value| value.trim().to_uppercase())
+        .unwrap_or_else(|| value.clone());
 
     let valid_values = condition
         .valid_values
@@ -439,7 +449,26 @@ fn condition_matches(
         .map(|value| value.to_uppercase())
         .collect::<HashSet<_>>();
 
-    valid_values.is_empty() || valid_values.contains(&value)
+    let excluded_values = condition
+        .excluded_valid_values
+        .iter()
+        .chain(condition.exclude_values.iter())
+        .map(|value| value.to_uppercase())
+        .collect::<HashSet<_>>();
+    let suffixes_match = condition.suffixes.is_empty()
+        || condition
+            .suffixes
+            .iter()
+            .any(|suffix| suffix_value.ends_with(&suffix.trim().to_uppercase()));
+    let excluded_suffix_matches = condition
+        .exclude_suffixes
+        .iter()
+        .any(|suffix| suffix_value.ends_with(&suffix.trim().to_uppercase()));
+
+    (valid_values.is_empty() || valid_values.contains(&value))
+        && !excluded_values.contains(&value)
+        && suffixes_match
+        && !excluded_suffix_matches
 }
 
 fn multiplier_matches(
@@ -462,6 +491,13 @@ fn multiplier_matches(
         .when
         .as_ref()
         .is_some_and(|condition| !condition_matches(condition, contact, rules))
+    {
+        return false;
+    }
+    if !multiplier
+        .when_all
+        .iter()
+        .all(|condition| condition_matches(condition, contact, rules))
     {
         return false;
     }
@@ -1135,6 +1171,11 @@ mod tests {
                         in_sets: Vec::new(),
                         values: vec!["SSB".to_string()],
                         valid_values: Vec::new(),
+                        exclude_in_sets: Vec::new(),
+                        exclude_values: Vec::new(),
+                        excluded_valid_values: Vec::new(),
+                        suffixes: Vec::new(),
+                        exclude_suffixes: Vec::new(),
                     }),
                     when_all: Vec::new(),
                     points: 1,
@@ -1158,6 +1199,7 @@ mod tests {
             in_sets: Vec::new(),
             valid_values: Vec::new(),
             when: None,
+            when_all: Vec::new(),
             exclude_call_suffixes: Vec::new(),
             exclude_values: Vec::new(),
             fixed_key: None,
@@ -1243,6 +1285,53 @@ mod tests {
     }
 
     #[test]
+    fn bundled_arrl_10_scores_per_mode_and_classifies_multiplier_types() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store.get("ARRL-10").expect("ARRL-10 rules should load");
+        let mut contacts = vec![
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(291)),
+                ("SRX_STRING", json!("CT")),
+            ]),
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("MODE", json!("SSB")),
+                ("DXCC", json!(291)),
+                ("SRX_STRING", json!("CT")),
+            ]),
+            contact(vec![
+                ("CALL", json!("DL1ABC")),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(230)),
+                ("SRX_STRING", json!(12)),
+            ]),
+            contact(vec![
+                ("CALL", json!("F1ABC/MM")),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(230)),
+                ("SRX_STRING", json!(2)),
+            ]),
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(291)),
+                ("SRX_STRING", json!("CT")),
+            ]),
+        ];
+
+        let totals = score_contacts(rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 14);
+        assert_eq!(totals.multipliers, 4);
+        assert_eq!(totals.score, 56);
+        assert_eq!(contact_meta_value(&contacts[4], "dupe"), Some(&json!(true)));
+    }
+
+    #[test]
     fn conditional_point_rules_distinguish_arrl_160_domestic_and_dx_contacts() {
         let domestic = || ScoringCondition {
             field: "DXCC".to_string(),
@@ -1250,6 +1339,11 @@ mod tests {
             in_sets: Vec::new(),
             values: vec!["1".to_string(), "291".to_string()],
             valid_values: Vec::new(),
+            exclude_in_sets: Vec::new(),
+            exclude_values: Vec::new(),
+            excluded_valid_values: Vec::new(),
+            suffixes: Vec::new(),
+            exclude_suffixes: Vec::new(),
         };
         let station_domestic = || ScoringCondition {
             field: "MY_DXCC".to_string(),

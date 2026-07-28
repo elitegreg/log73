@@ -450,9 +450,7 @@ function MainWindow({
     return (
       Boolean(settings?.exchange) &&
       callSign.trim() !== '' &&
-      settings.exchange.every(
-        (field) => exchangeValidation(field, values).ok,
-      )
+      settings.exchange.every((field) => exchangeValidation(field, values).ok)
     );
   }
 

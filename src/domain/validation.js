@@ -32,30 +32,38 @@ function validateSingleValue(field, value, radioMode) {
   const allowsAnyValue = (field?.in_sets ?? []).some(
     (setName) => String(setName).trim() === '*',
   );
-  if (!allowsAnyValue && (field?.valid_values ?? []).length > 0) {
-    const matches = field.valid_values.some(
+  const hasValidValues =
+    !allowsAnyValue && (field?.valid_values ?? []).length > 0;
+  const matchesValidValue =
+    !hasValidValues ||
+    field.valid_values.some(
       (validValue) => String(validValue).toUpperCase() === normalizedValue,
     );
-    if (!matches) {
-      return {
-        ok: false,
-        error: `${label} must be one of the configured values.`,
-      };
-    }
-  }
 
+  let matchesRegex = true;
   if (field?.regex) {
     try {
       const regex = new RegExp(field.regex);
-      if (!regex.test(trimmedValue)) {
-        return { ok: false, error: `${label} is invalid.` };
-      }
+      matchesRegex = regex.test(trimmedValue);
     } catch {
       return {
         ok: false,
         error: `${label} has an invalid validation pattern.`,
       };
     }
+  }
+
+  const validationMatches =
+    hasValidValues && field?.regex && field?.valid_values_or_regex === true
+      ? matchesValidValue || matchesRegex
+      : matchesValidValue && matchesRegex;
+  if (!validationMatches) {
+    return {
+      ok: false,
+      error: hasValidValues
+        ? `${label} must be one of the configured values.`
+        : `${label} is invalid.`,
+    };
   }
 
   return { ok: true, error: '' };
@@ -155,9 +163,7 @@ export function validateExchangeField(
 ) {
   const condition = field?.only_when;
   if (condition) {
-    const conditionValue = String(
-      conditionFields?.[condition.field] ?? '',
-    )
+    const conditionValue = String(conditionFields?.[condition.field] ?? '')
       .trim()
       .toUpperCase();
     const candidates = [

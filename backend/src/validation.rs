@@ -694,6 +694,7 @@ fn validate_contest_param(param: &ContestParam, value: Option<&Value>) -> Result
                 line,
                 &param.valid_values,
                 param.regex.as_deref(),
+                false,
                 "CW",
             )?;
         }
@@ -710,6 +711,7 @@ fn validate_contest_param(param: &ContestParam, value: Option<&Value>) -> Result
         &value,
         &param.valid_values,
         param.regex.as_deref(),
+        false,
         "CW",
     )
 }
@@ -957,6 +959,7 @@ fn validate_exchange_field(
             &field.valid_values
         },
         field.regex.as_deref(),
+        field.valid_values_or_regex,
         radio_mode,
     )
 }
@@ -989,6 +992,7 @@ fn validate_typed_field(
     value: &str,
     valid_values: &[String],
     pattern: Option<&str>,
+    valid_values_or_regex: bool,
     radio_mode: &str,
 ) -> Result<(), String> {
     let normalized_value = value.trim().to_uppercase();
@@ -1019,23 +1023,29 @@ fn validate_typed_field(
         return Err(format!("{label} must be numeric"));
     }
 
-    if !valid_values.is_empty()
-        && !valid_values
+    let matches_valid_value = valid_values.is_empty()
+        || valid_values
             .iter()
-            .any(|valid_value| valid_value.eq_ignore_ascii_case(&normalized_value))
-    {
+            .any(|valid_value| valid_value.eq_ignore_ascii_case(&normalized_value));
+    let matches_regex = if let Some(pattern) = pattern {
+        let regex = compiled_regex(pattern)
+            .map_err(|error| format!("invalid regex for {label}: {error}"))?;
+        regex.is_match(&normalized_value)
+    } else {
+        true
+    };
+    let validation_matches = if valid_values.is_empty() || pattern.is_none() {
+        matches_valid_value && matches_regex
+    } else if valid_values_or_regex {
+        matches_valid_value || matches_regex
+    } else {
+        matches_valid_value && matches_regex
+    };
+    if !validation_matches {
         return Err(format!(
             "{label} must be one of: {}",
             valid_values.join(", ")
         ));
-    }
-
-    if let Some(pattern) = pattern {
-        let regex = compiled_regex(pattern)
-            .map_err(|error| format!("invalid regex for {label}: {error}"))?;
-        if !regex.is_match(&normalized_value) {
-            return Err(format!("{label} is invalid"));
-        }
     }
 
     Ok(())
@@ -1290,6 +1300,7 @@ mod tests {
                 default: None,
                 source_param: None,
                 regex: None,
+                valid_values_or_regex: false,
                 in_sets: Vec::new(),
                 valid_values: Vec::new(),
                 serial_scope: Default::default(),
@@ -1355,20 +1366,38 @@ mod tests {
 
     #[test]
     fn validates_typed_fields_like_frontend() {
-        assert!(validate_typed_field("RST", "RST", "599", &[], None, "CW").is_ok());
-        assert!(validate_typed_field("RST", "RST", "599", &[], None, "CW-R").is_ok());
-        assert!(validate_typed_field("RST", "RST", "59", &[], None, "CW").is_err());
-        assert!(validate_typed_field("Serial", "Numeric:3", "123", &[], None, "CW").is_ok());
-        assert!(validate_typed_field("Serial", "Serial:3", "123", &[], None, "CW").is_ok());
-        assert!(validate_typed_field("Serial", "Numeric:3", "12A", &[], None, "CW").is_err());
-        assert!(validate_typed_field("Serial", "Serial:3", "12A", &[], None, "CW").is_err());
+        assert!(validate_typed_field("RST", "RST", "599", &[], None, false, "CW").is_ok());
+        assert!(validate_typed_field("RST", "RST", "599", &[], None, false, "CW-R").is_ok());
+        assert!(validate_typed_field("RST", "RST", "59", &[], None, false, "CW").is_err());
+        assert!(validate_typed_field("Serial", "Numeric:3", "123", &[], None, false, "CW").is_ok());
+        assert!(validate_typed_field("Serial", "Serial:3", "123", &[], None, false, "CW").is_ok());
         assert!(
-            validate_typed_field("Section", "String:3", "SC", &["SC".to_string()], None, "CW")
-                .is_ok()
+            validate_typed_field("Serial", "Numeric:3", "12A", &[], None, false, "CW").is_err()
+        );
+        assert!(validate_typed_field("Serial", "Serial:3", "12A", &[], None, false, "CW").is_err());
+        assert!(
+            validate_typed_field(
+                "Section",
+                "String:3",
+                "SC",
+                &["SC".to_string()],
+                None,
+                false,
+                "CW"
+            )
+            .is_ok()
         );
         assert!(
-            validate_typed_field("Section", "String:3", "GA", &["SC".to_string()], None, "CW")
-                .is_err()
+            validate_typed_field(
+                "Section",
+                "String:3",
+                "GA",
+                &["SC".to_string()],
+                None,
+                false,
+                "CW"
+            )
+            .is_err()
         );
     }
 
@@ -1378,18 +1407,63 @@ mod tests {
         let pattern = "^(?:SC|NC|GA|VA)$";
 
         assert!(
-            validate_typed_field("Section", "String:3", "SC", &[], Some(pattern), "CW").is_ok()
+            validate_typed_field("Section", "String:3", "SC", &[], Some(pattern), false, "CW")
+                .is_ok()
         );
         assert!(
-            validate_typed_field("Section", "String:3", "NC", &[], Some(pattern), "CW").is_ok()
+            validate_typed_field("Section", "String:3", "NC", &[], Some(pattern), false, "CW")
+                .is_ok()
         );
 
         assert!(compiled_regex_cache_size() > baseline);
     }
 
     #[test]
+    fn typed_field_can_accept_a_configured_value_or_regex() {
+        let values = ["CT".to_string(), "CMX".to_string(), "1".to_string()];
+        let pattern = r"^\d{1,4}$";
+
+        assert!(
+            validate_typed_field(
+                "Location",
+                "String:4",
+                "CMX",
+                &values,
+                Some(pattern),
+                true,
+                "CW"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_typed_field(
+                "Location",
+                "String:4",
+                "1234",
+                &values,
+                Some(pattern),
+                true,
+                "CW"
+            )
+            .is_ok()
+        );
+        assert!(
+            validate_typed_field(
+                "Location",
+                "String:4",
+                "ZZ",
+                &values,
+                Some(pattern),
+                true,
+                "CW"
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
     fn typed_field_reports_invalid_regex_patterns() {
-        let error = validate_typed_field("Section", "String:3", "SC", &[], Some("("), "CW")
+        let error = validate_typed_field("Section", "String:3", "SC", &[], Some("("), false, "CW")
             .expect_err("invalid regex should be rejected");
 
         assert!(error.starts_with("invalid regex for Section:"));
@@ -1485,6 +1559,11 @@ mod tests {
             in_sets: Vec::new(),
             values: vec!["1".to_string(), "291".to_string()],
             valid_values: Vec::new(),
+            exclude_in_sets: Vec::new(),
+            exclude_values: Vec::new(),
+            excluded_valid_values: Vec::new(),
+            suffixes: Vec::new(),
+            exclude_suffixes: Vec::new(),
         });
 
         let mut domestic = test_contact();

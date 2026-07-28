@@ -31,6 +31,10 @@ pub struct ExchangeField {
     pub source_param: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub regex: Option<String>,
+    /// Accept a configured value or a value matching `regex`, rather than
+    /// requiring both when both validators are present.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub valid_values_or_regex: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub in_sets: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -127,6 +131,16 @@ pub struct ScoringCondition {
     pub values: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub valid_values: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_in_sets: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_values: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excluded_valid_values: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub suffixes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude_suffixes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,6 +190,8 @@ pub struct MultiplierRule {
     pub valid_values: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<ScoringCondition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub when_all: Vec<ScoringCondition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_call_suffixes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -626,6 +642,9 @@ fn resolve_scoring_condition_in_sets(
     if !in_sets.is_empty() {
         condition.valid_values = defined_values(define, &in_sets)?;
     }
+    if !condition.exclude_in_sets.is_empty() {
+        condition.excluded_valid_values = defined_values(define, &condition.exclude_in_sets)?;
+    }
     Ok(())
 }
 
@@ -730,6 +749,9 @@ fn resolve_in_sets(contest: &mut ContestRules) -> Result<(), String> {
             multiplier.valid_values = defined_values(&contest.define, &multiplier.in_sets)?;
         }
         if let Some(condition) = &mut multiplier.when {
+            resolve_scoring_condition_in_sets(&contest.define, condition)?;
+        }
+        for condition in &mut multiplier.when_all {
             resolve_scoring_condition_in_sets(&contest.define, condition)?;
         }
     }
@@ -1837,6 +1859,60 @@ contests:
                 .as_ref()
                 .map(|condition| condition.valid_values.len()),
             Some(15)
+        );
+    }
+
+    #[test]
+    fn bundled_arrl_10_rules_resolve_station_profiles_and_locations() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let domestic = store.get("ARRL-10").expect("ARRL-10 rules should load");
+        let dx = store
+            .get("ARRL-10 (DX)")
+            .expect("ARRL-10 DX rules should load");
+        let maritime = store
+            .get("ARRL-10 (/MM)")
+            .expect("ARRL-10 maritime rules should load");
+
+        assert_eq!(domestic.allowed_bands, ["10m"]);
+        assert_eq!(domestic.dupe_key, ["CALL", "MODE_CLASS"]);
+        assert!(
+            domestic.log_params[0]
+                .valid_values
+                .contains(&"DC".to_string())
+        );
+        assert!(
+            domestic.log_params[0]
+                .valid_values
+                .contains(&"LB".to_string())
+        );
+        assert!(
+            domestic.log_params[0]
+                .valid_values
+                .contains(&"CMX".to_string())
+        );
+        assert!(dx.log_params.is_empty());
+        assert_eq!(dx.exchange[1].adif, "STX");
+        assert_eq!(maritime.log_params[0].name, "ITU Region");
+        assert_eq!(maritime.exchange[1].adif, "APP_LOG73_STX_ITU_REGION");
+        for profile in [domestic, dx, maritime] {
+            let received = profile
+                .exchange
+                .iter()
+                .filter(|field| !field.is_sent)
+                .collect::<Vec<_>>();
+            assert_eq!(received.len(), 2);
+            assert_eq!(received[0].name, "RST(r)");
+            assert_eq!(received[1].name, "Location");
+            assert!(received[1].valid_values_or_regex);
+            assert!(received[1].valid_values.contains(&"CMX".to_string()));
+            assert!(received[1].valid_values.contains(&"2".to_string()));
+        }
+        assert_eq!(domestic.multipliers[0].key, ["SRX_STRING", "MODE_CLASS"]);
+        assert_eq!(
+            domestic.multipliers[2].when.as_ref().unwrap().suffixes,
+            ["/MM"]
         );
     }
 

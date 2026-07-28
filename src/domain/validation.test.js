@@ -102,6 +102,20 @@ test('validateExchangeField validates configured values case-insensitively', () 
   assert.equal(validateExchangeField(field, 'GA').ok, false);
 });
 
+test('validateConfiguredField accepts configured values or an alternate regex', () => {
+  const field = {
+    name: 'Location',
+    type: 'String:4',
+    valid_values: ['CT', 'CMX', '1', '2', '3'],
+    regex: '^\\d{1,4}$',
+    valid_values_or_regex: true,
+  };
+  assert.equal(validateConfiguredField(field, 'cmx').ok, true);
+  assert.equal(validateConfiguredField(field, '1234').ok, true);
+  assert.equal(validateConfiguredField(field, 'ZZ').ok, false);
+  assert.equal(validateConfiguredField(field, '12345').ok, false);
+});
+
 test('validateExchangeField wildcard sets allow free-form values', () => {
   const field = {
     name: 'Location',
