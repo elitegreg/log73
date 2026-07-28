@@ -2234,6 +2234,58 @@ mod tests {
         assert_eq!(contact_meta_value(&contacts[1], "dupe"), Some(&json!(true)));
     }
 
+    #[test]
+    fn bundled_na_sprint_ssb_scores_na_and_dx_entries() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let north_america = store
+            .get("NA-SPRINT-SSB (North America)")
+            .expect("North America NA Sprint rules should load");
+        let dx = store
+            .get("NA-SPRINT-SSB (DX)")
+            .expect("DX NA Sprint rules should load");
+
+        let mut north_america_contacts = [
+            ("DL1ABC", "20m", "DX"),
+            ("VE3ABC", "40m", "ON"),
+            ("XE1ABC", "80m", "XE"),
+        ]
+        .into_iter()
+        .map(|(call, band, qth)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!("SSB")),
+                ("STX_STRING", json!("MA")),
+                ("SRX_STRING", json!(qth)),
+            ])
+        })
+        .collect::<Vec<_>>();
+        let north_america_totals =
+            score_contacts(north_america, Value::Null, &mut north_america_contacts);
+        assert_eq!(north_america_totals.qso_points, 3);
+        assert_eq!(north_america_totals.multipliers, 2);
+        assert_eq!(north_america_totals.score, 6);
+
+        let mut dx_contacts = [("K1ABC", "20m", "MA"), ("VE3ABC", "40m", "ON")]
+            .into_iter()
+            .map(|(call, band, qth)| {
+                contact(vec![
+                    ("CALL", json!(call)),
+                    ("BAND", json!(band)),
+                    ("MODE", json!("SSB")),
+                    ("STX_STRING", json!("DX")),
+                    ("SRX_STRING", json!(qth)),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let dx_totals = score_contacts(dx, Value::Null, &mut dx_contacts);
+        assert_eq!(dx_totals.qso_points, 2);
+        assert_eq!(dx_totals.multipliers, 2);
+        assert_eq!(dx_totals.score, 4);
+    }
+
     fn contact_by_id(contacts: &[Contact], id: i64) -> Contact {
         contacts
             .iter()

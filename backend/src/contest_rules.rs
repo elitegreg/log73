@@ -1751,4 +1751,59 @@ contests:
             Some("ARRL-SS-SSB")
         );
     }
+
+    #[test]
+    fn bundled_na_sprint_ssb_rules_resolve_na_and_dx_variants() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let north_america = store
+            .get("NA-SPRINT-SSB (North America)")
+            .expect("North America NA Sprint rules should load");
+        let dx = store
+            .get("NA-SPRINT-SSB (DX)")
+            .expect("DX NA Sprint rules should load");
+
+        assert_eq!(north_america.allowed_bands, ["80m", "40m", "20m"]);
+        assert_eq!(north_america.allowed_modes, ["SSB"]);
+        assert_eq!(north_america.dupe_key, ["CALL", "BAND"]);
+        assert_eq!(north_america.multipliers[0].valid_values.len(), 106);
+        assert!(
+            north_america.multipliers[0]
+                .valid_values
+                .contains(&"FO/C".to_string())
+        );
+
+        let north_america_received = north_america
+            .exchange
+            .iter()
+            .find(|field| field.name == "QTH" && !field.is_sent)
+            .expect("North America received QTH should exist");
+        assert!(
+            north_america_received
+                .valid_values
+                .contains(&"DX".to_string())
+        );
+
+        let dx_received = dx
+            .exchange
+            .iter()
+            .find(|field| field.name == "QTH" && !field.is_sent)
+            .expect("DX received QTH should exist");
+        assert!(!dx_received.valid_values.contains(&"DX".to_string()));
+        assert!(dx_received.valid_values.contains(&"MA".to_string()));
+        assert_eq!(
+            dx.qso_points
+                .as_ref()
+                .and_then(|points| points.rules.first())
+                .map(|rule| rule.points),
+            Some(1)
+        );
+        assert_eq!(
+            dx.cabrillo
+                .as_ref()
+                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
+            Some("NA-SPRINT-SSB")
+        );
+    }
 }
