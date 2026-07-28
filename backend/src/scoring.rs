@@ -2334,6 +2334,57 @@ mod tests {
         assert_eq!(dx_totals.score, 1);
     }
 
+    #[test]
+    fn bundled_naqp_scores_per_band_and_excludes_dx_entries() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let north_america = store
+            .get("NAQP-CW (North America)")
+            .expect("North America NAQP CW rules should load");
+        let dx = store
+            .get("NAQP-CW (DX)")
+            .expect("DX NAQP CW rules should load");
+
+        let mut north_america_contacts = [
+            ("DL1ABC", "20m", "DX"),
+            ("VE3ABC", "20m", "ON"),
+            ("VE3ABC", "40m", "ON"),
+            ("VE3ABC", "40m", "ON"),
+        ]
+        .into_iter()
+        .map(|(call, band, qth)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!("CW")),
+                ("SRX_STRING", json!(qth)),
+            ])
+        })
+        .collect::<Vec<_>>();
+        let north_america_totals =
+            score_contacts(north_america, Value::Null, &mut north_america_contacts);
+        assert_eq!(north_america_totals.qso_points, 3);
+        assert_eq!(north_america_totals.multipliers, 2);
+        assert_eq!(north_america_totals.score, 6);
+
+        let mut dx_contacts = [("K1ABC", "20m", "MA"), ("DL1ABC", "40m", "DX")]
+            .into_iter()
+            .map(|(call, band, qth)| {
+                contact(vec![
+                    ("CALL", json!(call)),
+                    ("BAND", json!(band)),
+                    ("MODE", json!("CW")),
+                    ("SRX_STRING", json!(qth)),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let dx_totals = score_contacts(dx, Value::Null, &mut dx_contacts);
+        assert_eq!(dx_totals.qso_points, 1);
+        assert_eq!(dx_totals.multipliers, 1);
+        assert_eq!(dx_totals.score, 1);
+    }
+
     fn contact_by_id(contacts: &[Contact], id: i64) -> Contact {
         contacts
             .iter()

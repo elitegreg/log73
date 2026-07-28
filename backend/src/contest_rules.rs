@@ -1866,4 +1866,63 @@ contests:
             })
         );
     }
+
+    #[test]
+    fn bundled_naqp_rules_resolve_cw_and_ssb_na_and_dx_variants() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let cw_north_america = store
+            .get("NAQP-CW (North America)")
+            .expect("North America NAQP CW rules should load");
+        let cw_dx = store
+            .get("NAQP-CW (DX)")
+            .expect("DX NAQP CW rules should load");
+        let ssb_north_america = store
+            .get("NAQP-SSB (North America)")
+            .expect("North America NAQP SSB rules should load");
+        let ssb_dx = store
+            .get("NAQP-SSB (DX)")
+            .expect("DX NAQP SSB rules should load");
+
+        assert_eq!(
+            cw_north_america.allowed_bands,
+            ["160m", "80m", "40m", "20m", "15m", "10m"]
+        );
+        assert_eq!(cw_north_america.allowed_modes, ["CW"]);
+        assert_eq!(ssb_north_america.allowed_modes, ["SSB"]);
+        assert_eq!(cw_north_america.dupe_key, ["CALL", "BAND"]);
+        assert_eq!(cw_north_america.multipliers[0].key, ["SRX_STRING", "BAND"]);
+        assert!(
+            cw_north_america.multipliers[0]
+                .valid_values
+                .contains(&"VP9".to_string())
+        );
+        assert!(cw_dx.log_params.is_empty());
+        assert_eq!(cw_dx.exchange.len(), 3);
+        assert_eq!(ssb_dx.exchange.len(), 3);
+        assert_eq!(
+            cw_north_america
+                .cabrillo
+                .as_ref()
+                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
+            Some("NAQP-CW")
+        );
+        assert_eq!(
+            ssb_north_america
+                .cabrillo
+                .as_ref()
+                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
+            Some("NAQP-SSB")
+        );
+        assert!(
+            ssb_north_america
+                .cabrillo
+                .as_ref()
+                .expect("Cabrillo rules")
+                .fixed_fields
+                .iter()
+                .any(|field| field.name == "CATEGORY-BAND" && field.value == "ALL")
+        );
+    }
 }

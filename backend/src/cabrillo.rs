@@ -783,6 +783,43 @@ mod tests {
     }
 
     #[test]
+    fn naqp_cw_exports_multi_two_headers_and_exchange_order() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store
+            .get("NAQP-CW (North America)")
+            .expect("North America NAQP CW rules should load");
+        let mut log = test_log();
+        log.contest_id = "NAQP-CW (North America)".to_string();
+        log.contest_params = json!({
+            "QTH": "MA",
+            "NAME": "Scott",
+            "LOCATION": "MA",
+            "CATEGORY-OPERATOR": "MULTI-OP",
+            "CATEGORY-ASSISTED": "ASSISTED",
+            "CATEGORY-POWER": "LOW",
+            "CATEGORY-TRANSMITTER": "TWO"
+        });
+        let mut contact = test_contact("K1ABC", "VE3ABC", 1_700_000_000);
+        crate::db::set_contact_adif(&mut contact, "MY_NAME", json!("SCOTT"));
+        crate::db::set_contact_adif(&mut contact, "STX_STRING", json!("MA"));
+        crate::db::set_contact_adif(&mut contact, "NAME", json!("TIM"));
+        crate::db::set_contact_adif(&mut contact, "SRX_STRING", json!("ON"));
+        crate::db::set_contact_adif(&mut contact, "APP_LOG73_TX_ID", json!(1));
+
+        let text = render_log(rules, &log, &[contact], &json!({}), 2)
+            .expect("NAQP CW Cabrillo should render");
+
+        assert!(text.lines().any(|line| line == "CONTEST: NAQP-CW"));
+        assert!(text.lines().any(|line| line == "CATEGORY-BAND: ALL"));
+        assert!(text.lines().any(|line| line == "CATEGORY-MODE: CW"));
+        assert!(text.lines().any(|line| line == "CATEGORY-TRANSMITTER: TWO"));
+        let fields = qso_line(&text).split_whitespace().collect::<Vec<_>>();
+        assert_eq!(&fields[6..], ["SCOTT", "MA", "VE3ABC", "TIM", "ON", "1"]);
+    }
+
+    #[test]
     fn multi_two_qso_uses_stored_transmitter_id() {
         let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
         crate::db::set_contact_adif(&mut contact, "APP_LOG73_TX_ID", json!("1"));
