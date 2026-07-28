@@ -1766,6 +1766,68 @@ mod tests {
     }
 
     #[test]
+    fn bundled_tn_qso_party_rules_score_bands_locations_and_bonus_station() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let in_state = store
+            .get("TN-QSO-PARTY (In State)")
+            .expect("in-state Tennessee rules should load");
+        let outside = store
+            .get("TN-QSO-PARTY")
+            .expect("outside-Tennessee rules should load");
+
+        let mut in_state_contacts = [
+            ("K4TCG", "20m", "CW", "ANDE", "BEDF", 291),
+            ("K4TCG", "20m", "SSB", "ANDE", "BEDF", 291),
+            ("K1ABC", "20m", "CW", "ANDE", "NC", 291),
+            ("VE3ABC", "20m", "CW", "ANDE", "ON", 1),
+            ("DL1ABC", "20m", "CW", "ANDE", "DL", 230),
+            ("KL7ABC", "20m", "CW", "ANDE", "AK", 6),
+        ]
+        .into_iter()
+        .map(|(call, band, mode, sent, received, dxcc)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!(mode)),
+                ("STX_STRING", json!(sent)),
+                ("SRX_STRING", json!(received)),
+                ("DXCC", json!(dxcc)),
+            ])
+        })
+        .collect::<Vec<_>>();
+        let in_state_totals = score_contacts(in_state, Value::Null, &mut in_state_contacts);
+        assert_eq!(in_state_totals.qso_points, 18);
+        assert_eq!(in_state_totals.multipliers, 5);
+        assert_eq!(in_state_totals.bonus_points, 200);
+        assert_eq!(in_state_totals.score, 290);
+
+        let mut outside_contacts = [
+            ("W4AAA", "20m", "CW", "GA", "ANDE"),
+            ("W4AAA", "20m", "SSB", "GA", "ANDE"),
+            ("W4BBB", "40m", "CW", "GA", "ANDE"),
+            ("K4TCG", "20m", "CW", "GA", "BEDF"),
+        ]
+        .into_iter()
+        .map(|(call, band, mode, sent, received)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!(mode)),
+                ("STX_STRING", json!(sent)),
+                ("SRX_STRING", json!(received)),
+            ])
+        })
+        .collect::<Vec<_>>();
+        let outside_totals = score_contacts(outside, Value::Null, &mut outside_contacts);
+        assert_eq!(outside_totals.qso_points, 12);
+        assert_eq!(outside_totals.multipliers, 3);
+        assert_eq!(outside_totals.bonus_points, 100);
+        assert_eq!(outside_totals.score, 136);
+    }
+
+    #[test]
     fn bundled_ks_qso_party_rules_score_county_changes_and_bonus_station() {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir.as_path()])

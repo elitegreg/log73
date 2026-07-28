@@ -558,6 +558,8 @@ OH-QSO-PARTY             Ohio QSO Party out-of-state
 OH-QSO-PARTY (In State)  Ohio QSO Party in Ohio
 SC-QSO-PARTY             SC QSO Party out-of-state
 SC-QSO-PARTY (In State)  SC QSO Party in-state
+TN-QSO-PARTY             Tennessee QSO Party out-of-state
+TN-QSO-PARTY (In State)  Tennessee QSO Party in-state
 ```
 
 Log creation dynamically requests required rule parameters where needed:
@@ -574,6 +576,8 @@ Log creation dynamically requests required rule parameters where needed:
 - `OH-QSO-PARTY (In State)`: `County`
 - `SC-QSO-PARTY`: `State`
 - `SC-QSO-PARTY (In State)`: `County`
+- `TN-QSO-PARTY`: `Location`
+- `TN-QSO-PARTY (In State)`: `County`
 
 Those values seed sent exchange fields in the logger, which are fixed unless a contest permits a mobile location change. Contests with a sent `Serial` exchange field also get a `SERIAL_BATCH_SIZE` parameter, defaulting to 10; the backend reserves durable serial ranges by log id and field, the browser refills after 90% of the batch is consumed, and the logger blocks logging if no reserved serial is available. The previous `BERK` default is no longer used. The HI, MDC, and SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
 For `SC-QSO-PARTY (In State)`, the received value is labeled `Exchange` because it may be a county, state/province, or `DX`.

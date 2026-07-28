@@ -1527,6 +1527,72 @@ contests:
     }
 
     #[test]
+    fn bundled_tn_qso_party_rules_resolve_both_locations() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let in_state = store
+            .get("TN-QSO-PARTY (In State)")
+            .expect("in-state Tennessee QSO Party rules should load");
+        let outside = store
+            .get("TN-QSO-PARTY")
+            .expect("outside-Tennessee QSO Party rules should load");
+
+        let counties = in_state
+            .define
+            .iter()
+            .find(|value_set| value_set.name == "Tennessee Counties")
+            .expect("Tennessee Counties should exist");
+        assert_eq!(counties.values.len(), 95);
+        assert!(counties.values.contains(&"ANDE".to_string()));
+        assert!(counties.values.contains(&"WILS".to_string()));
+
+        let states = in_state
+            .define
+            .iter()
+            .find(|value_set| value_set.name == "States")
+            .expect("States should exist");
+        assert!(!states.values.contains(&"TN".to_string()));
+        assert!(states.values.contains(&"AK".to_string()));
+        assert!(states.values.contains(&"HI".to_string()));
+
+        assert_eq!(in_state.allowed_modes, vec!["CW", "SSB"]);
+        let sent_county = in_state
+            .exchange
+            .iter()
+            .find(|field| field.name == "County" && field.is_sent)
+            .expect("in-state sent county should exist");
+        assert_eq!(sent_county.fixed, Some(true));
+
+        let received_location = in_state
+            .exchange
+            .iter()
+            .find(|field| field.name == "Location" && !field.is_sent)
+            .expect("in-state received location should exist");
+        assert_eq!(received_location.field_type, "String:4");
+        assert!(
+            received_location
+                .in_sets
+                .iter()
+                .any(|set_name| set_name == "*")
+        );
+        assert!(received_location.valid_values.contains(&"ANDE".to_string()));
+        assert!(received_location.valid_values.contains(&"SC".to_string()));
+        assert!(received_location.valid_values.contains(&"SK".to_string()));
+
+        assert_eq!(outside.log_params[0].name, "Location");
+        assert_eq!(outside.log_params[0].field_type, "String:4");
+        assert!(
+            outside.log_params[0]
+                .in_sets
+                .iter()
+                .any(|set_name| set_name == "*")
+        );
+        assert_eq!(outside.multipliers.len(), 1);
+        assert_eq!(outside.multipliers[0].name, "Tennessee County");
+    }
+
+    #[test]
     fn bundled_oh_qso_party_rules_resolve_both_locations() {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
