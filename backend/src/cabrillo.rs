@@ -664,6 +664,43 @@ mod tests {
     }
 
     #[test]
+    fn arrl_sweepstakes_exports_serial_precedence_check_and_section() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store
+            .get("ARRL-SS-CW")
+            .expect("ARRL Sweepstakes CW rules should load");
+        let mut log = test_log();
+        log.contest_id = "ARRL-SS-CW".to_string();
+        log.contest_params = json!({
+            "Precedence": "A",
+            "Check": "79",
+            "Section": "SC"
+        });
+        let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
+        crate::db::set_contact_adif(&mut contact, "STX", json!(123));
+        crate::db::set_contact_adif(&mut contact, "STX_STRING", json!("A"));
+        crate::db::set_contact_adif(&mut contact, "MY_CHECK", json!("79"));
+        crate::db::set_contact_adif(&mut contact, "MY_ARRL_SECT", json!("SC"));
+        crate::db::set_contact_adif(&mut contact, "SRX", json!(43));
+        crate::db::set_contact_adif(&mut contact, "SRX_STRING", json!("M"));
+        crate::db::set_contact_adif(&mut contact, "CHECK", json!("31"));
+        crate::db::set_contact_adif(&mut contact, "ARRL_SECT", json!("CT"));
+
+        let text = render_log(rules, &log, &[contact], &json!({}), 2)
+            .expect("ARRL Sweepstakes Cabrillo should render");
+        assert!(text.lines().any(|line| line == "CONTEST: ARRL-SS-CW"));
+        assert!(text.lines().any(|line| line == "CATEGORY-MODE: CW"));
+        let fields = qso_line(&text).split_whitespace().collect::<Vec<_>>();
+        assert_eq!(fields.len(), 15);
+        assert_eq!(
+            &fields[6..],
+            ["123", "A", "79", "SC", "W1AW", "43", "M", "31", "CT"]
+        );
+    }
+
+    #[test]
     fn multi_two_qso_uses_stored_transmitter_id() {
         let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
         crate::db::set_contact_adif(&mut contact, "APP_LOG73_TX_ID", json!("1"));

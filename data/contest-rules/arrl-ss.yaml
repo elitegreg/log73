@@ -1,0 +1,148 @@
+contests:
+  - id: 'ARRL-SS-CW'
+    display_name: 'ARRL November Sweepstakes (CW)'
+    allowed_bands: [160, 80, 40, 20, 15, 10]
+    allowed_modes: ['CW']
+    scoring:
+      qso_points:
+        points: 2
+      dupe_key: ['CALL']
+      multipliers:
+        - name: 'ARRL/RAC Section'
+          field: 'ARRL_SECT'
+          key: ['ARRL_SECT']
+          in_sets: ['ARRL Sections', 'RAC Sections']
+    define:
+      - name: 'ARRL Sections'
+        values_from_file: arrl_sections.dat
+      - name: 'RAC Sections'
+        values_from_file: rac_sections.dat
+    log_params:
+      - name: 'Precedence'
+        label: 'Precedence'
+        type: 'String:1'
+        required: true
+        valid_values: ['A', 'B', 'M', 'Q', 'S', 'U']
+        help_text: 'Q=single-op QRP, A=single-op low, B=single-op high, U=single-op unlimited, M=multioperator, S=school club.'
+      - name: 'Check'
+        label: 'Check'
+        type: 'String:2'
+        required: true
+        regex: '^\d{2}$'
+        help_text: 'Last two digits of the year the operator or station was first licensed.'
+      - name: 'Section'
+        label: 'ARRL/RAC Section'
+        type: 'String:3'
+        required: true
+        in_sets: ['ARRL Sections', 'RAC Sections']
+    exchange:
+      - name: 'Serial(s)'
+        type: 'Serial:4'
+        adif: 'STX'
+        is_sent: true
+      - name: 'Precedence(s)'
+        type: 'String:1'
+        adif: 'STX_STRING'
+        fixed: true
+        source_param: 'Precedence'
+        valid_values: ['A', 'B', 'M', 'Q', 'S', 'U']
+        is_sent: true
+      - name: 'Check(s)'
+        type: 'String:2'
+        adif: 'MY_CHECK'
+        fixed: true
+        source_param: 'Check'
+        regex: '^\d{2}$'
+        is_sent: true
+      - name: 'Section(s)'
+        type: 'String:3'
+        adif: 'MY_ARRL_SECT'
+        fixed: true
+        source_param: 'Section'
+        in_sets: ['ARRL Sections', 'RAC Sections']
+        is_sent: true
+      - name: 'Serial'
+        type: 'Serial:4'
+        adif: 'SRX'
+        is_sent: false
+      - name: 'Precedence'
+        type: 'String:1'
+        adif: 'SRX_STRING'
+        valid_values: ['A', 'B', 'M', 'Q', 'S', 'U']
+        is_sent: false
+      - name: 'Check'
+        type: 'String:2'
+        adif: 'CHECK'
+        regex: '^\d{2}$'
+        is_sent: false
+      - name: 'Section'
+        type: 'String:3'
+        adif: 'ARRL_SECT'
+        in_sets: ['ARRL Sections', 'RAC Sections']
+        is_sent: false
+    qso_columns: ['Serial', 'Precedence', 'Check', 'Section', 'Mult', 'Pts', 'Op']
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'Serial(s)': 'STX'
+      'Precedence(s)': 'STX_STRING'
+      'Check(s)': 'MY_CHECK'
+      'Section(s)': 'MY_ARRL_SECT'
+      Serial: 'SRX'
+      Precedence: 'SRX_STRING'
+      Check: 'CHECK'
+      Section: 'ARRL_SECT'
+    cabrillo:
+      contest_id: 'ARRL-SS-CW'
+      fixed_fields:
+        - name: 'CATEGORY-MODE'
+          value: 'CW'
+      log_fields:
+        - name: 'CATEGORY-OPERATOR'
+          label: 'Category Operator'
+          type: 'String:16'
+          widget: 'select'
+          required: false
+          valid_values: ['SINGLE-OP', 'MULTI-OP', 'SCHOOL']
+        - name: 'CATEGORY-ASSISTED'
+          label: 'Category Assisted'
+          type: 'String:16'
+          widget: 'select'
+          required: false
+          valid_values: ['ASSISTED', 'NON-ASSISTED']
+        - name: 'CATEGORY-POWER'
+          label: 'Category Power'
+          type: 'String:16'
+          widget: 'select'
+          required: false
+          valid_values: ['HIGH', 'LOW', 'QRP']
+        - name: 'CATEGORY-TRANSMITTER'
+          label: 'Category Transmitter'
+          type: 'String:16'
+          widget: 'select'
+          required: false
+          valid_values: ['ONE']
+        - name: 'CATEGORY-OVERLAY'
+          label: 'Category Overlay'
+          type: 'String:16'
+          widget: 'select'
+          required: false
+          valid_values: ['LIMITED-ANTENNAS']
+    metadata:
+      source: 'https://contests.arrl.org/ContestRules/SS-Rules.pdf'
+      notes: 'CW only. Each station may be worked once regardless of band. The callsign is included automatically in Cabrillo QSO records between the sent and received exchanges.'
+
+  - id: 'ARRL-SS-SSB'
+    extends: 'ARRL-SS-CW'
+    display_name: 'ARRL November Sweepstakes (SSB)'
+    allowed_modes: ['SSB']
+    cabrillo:
+      contest_id: 'ARRL-SS-SSB'
+      fixed_fields:
+        - name: 'CATEGORY-MODE'
+          value: 'SSB'
+    metadata:
+      source: 'https://contests.arrl.org/ContestRules/SS-Rules.pdf'
+      notes: 'SSB only. Each station may be worked once regardless of band. The callsign is included automatically in Cabrillo QSO records between the sent and received exchanges.'

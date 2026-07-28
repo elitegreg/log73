@@ -2199,6 +2199,41 @@ mod tests {
         assert_eq!(totals.score, 254);
     }
 
+    #[test]
+    fn bundled_arrl_sweepstakes_scores_sections_once_and_dupes_calls_across_bands() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store
+            .get("ARRL-SS-CW")
+            .expect("ARRL Sweepstakes CW rules should load");
+        let mut contacts = vec![
+            contact(vec![
+                ("CALL", json!("W1AW")),
+                ("BAND", json!("20m")),
+                ("ARRL_SECT", json!("CT")),
+            ]),
+            contact(vec![
+                ("CALL", json!("W1AW")),
+                ("BAND", json!("40m")),
+                ("ARRL_SECT", json!("CT")),
+            ]),
+            contact(vec![
+                ("CALL", json!("VE3ABC")),
+                ("BAND", json!("20m")),
+                ("ARRL_SECT", json!("ONE")),
+            ]),
+        ];
+
+        let totals = score_contacts(rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_count, 3);
+        assert_eq!(totals.qso_points, 4);
+        assert_eq!(totals.multipliers, 2);
+        assert_eq!(totals.score, 8);
+        assert_eq!(contact_meta_value(&contacts[1], "dupe"), Some(&json!(true)));
+    }
+
     fn contact_by_id(contacts: &[Contact], id: i64) -> Contact {
         contacts
             .iter()

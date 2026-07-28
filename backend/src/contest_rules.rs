@@ -1720,4 +1720,35 @@ contests:
             Some("SSB")
         );
     }
+
+    #[test]
+    fn bundled_arrl_sweepstakes_rules_resolve_cw_and_ssb_variants() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let cw = store
+            .get("ARRL-SS-CW")
+            .expect("ARRL Sweepstakes CW rules should load");
+        let ssb = store
+            .get("ARRL-SS-SSB")
+            .expect("ARRL Sweepstakes SSB rules should load");
+
+        assert_eq!(cw.allowed_modes, ["CW"]);
+        assert_eq!(ssb.allowed_modes, ["SSB"]);
+        assert_eq!(cw.dupe_key, ["CALL"]);
+        assert_eq!(
+            cw.qso_points.as_ref().and_then(|points| points.points),
+            Some(2)
+        );
+        assert_eq!(cw.multipliers[0].valid_values.len(), 85);
+        assert_eq!(cw.exchange[0].field_type, "Serial:4");
+        assert_eq!(cw.exchange[0].adif, "STX");
+        assert_eq!(cw.exchange[4].adif, "SRX");
+        assert_eq!(
+            ssb.cabrillo
+                .as_ref()
+                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
+            Some("ARRL-SS-SSB")
+        );
+    }
 }
