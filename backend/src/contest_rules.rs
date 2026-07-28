@@ -156,6 +156,9 @@ pub struct MultiplierRule {
     pub exclude_call_suffixes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_values: Vec<String>,
+    /// An optional literal used to collapse every matching contact into one multiplier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

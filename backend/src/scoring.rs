@@ -114,11 +114,11 @@ impl ContestScoringModule {
             .iter()
             .filter(|multiplier| multiplier_matches(multiplier, contact, &self.rules))
             .map(|multiplier| {
-                format!(
-                    "{}:{}",
-                    multiplier.name.to_uppercase(),
-                    scoring_key(contact, &self.rules, &multiplier.key)
-                )
+                let key = multiplier
+                    .fixed_key
+                    .clone()
+                    .unwrap_or_else(|| scoring_key(contact, &self.rules, &multiplier.key));
+                format!("{}:{}", multiplier.name.to_uppercase(), key)
             })
             .collect()
     }
@@ -1146,6 +1146,7 @@ mod tests {
             valid_values: Vec::new(),
             exclude_call_suffixes: Vec::new(),
             exclude_values: Vec::new(),
+            fixed_key: None,
         }
     }
 
@@ -1357,6 +1358,32 @@ mod tests {
         assert_eq!(contact_meta_value(&contacts[0], "mult"), Some(&json!(1)));
         assert_eq!(contact_meta_value(&contacts[1], "mult"), Some(&json!(1)));
         assert_eq!(contact_meta_value(&contacts[2], "mult"), Some(&json!(0)));
+    }
+
+    #[test]
+    fn fixed_multiplier_key_collapses_matching_values() {
+        let mut county = state_multiplier();
+        county.name = "Kansas".to_string();
+        county.field = "COUNTY".to_string();
+        county.key = vec!["COUNTY".to_string()];
+        county.fixed_key = Some("KS".to_string());
+        let rules = test_rules(
+            fixed_points(1),
+            Vec::new(),
+            vec![county],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = vec![
+            contact(vec![("COUNTY", json!("ALL"))]),
+            contact(vec![("COUNTY", json!("WYA"))]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.multipliers, 1);
+        assert_eq!(totals.score, 2);
     }
 
     #[test]
@@ -1736,6 +1763,70 @@ mod tests {
         assert_eq!(totals.multipliers, 5);
         assert_eq!(totals.bonus_points, 0);
         assert_eq!(totals.score, 90);
+    }
+
+    #[test]
+    fn bundled_ks_qso_party_rules_score_county_changes_and_bonus_station() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let in_state = store
+            .get("KS-QSO-PARTY (In State)")
+            .expect("in-state Kansas rules should load");
+        let outside = store
+            .get("KS-QSO-PARTY")
+            .expect("outside-Kansas rules should load");
+
+        let mut in_state_contacts = [
+            ("K0MO", "20m", "CW", "ALL", "MO"),
+            ("W0WYA", "20m", "CW", "ALL", "WYA"),
+            ("W0ALL", "20m", "SSB", "ALL", "ALL"),
+            ("K0MO", "20m", "CW", "WYA", "MO"),
+            ("KS0KS", "40m", "SSB", "WYA", "DX"),
+        ]
+        .into_iter()
+        .map(|(call, band, mode, sent, received)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!(mode)),
+                ("STX_STRING", json!(sent)),
+                ("SRX_STRING", json!(received)),
+            ])
+        })
+        .collect::<Vec<_>>();
+
+        let in_state_totals = score_contacts(in_state, Value::Null, &mut in_state_contacts);
+        assert_eq!(in_state_totals.qso_points, 13);
+        assert_eq!(in_state_totals.multipliers, 3);
+        assert_eq!(in_state_totals.bonus_points, 100);
+        assert_eq!(in_state_totals.score, 139);
+        assert_eq!(
+            contact_meta_value(&in_state_contacts[3], "dupe"),
+            Some(&json!(false))
+        );
+
+        let mut outside_contacts = [
+            ("W0ALL", "20m", "CW", "MO", "ALL"),
+            ("W0WYA", "20m", "CW", "MO", "WYA"),
+            ("W0ALL", "20m", "SSB", "MO", "ALL"),
+        ]
+        .into_iter()
+        .map(|(call, band, mode, sent, received)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!(mode)),
+                ("STX_STRING", json!(sent)),
+                ("SRX_STRING", json!(received)),
+            ])
+        })
+        .collect::<Vec<_>>();
+
+        let outside_totals = score_contacts(outside, Value::Null, &mut outside_contacts);
+        assert_eq!(outside_totals.qso_points, 8);
+        assert_eq!(outside_totals.multipliers, 2);
+        assert_eq!(outside_totals.score, 16);
     }
 
     #[test]
