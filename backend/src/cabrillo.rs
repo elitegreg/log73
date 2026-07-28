@@ -741,6 +741,48 @@ mod tests {
     }
 
     #[test]
+    fn na_sprint_cw_exports_required_headers_and_exchange_order() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store
+            .get("NA-SPRINT-CW (North America)")
+            .expect("North America NA Sprint CW rules should load");
+        let mut log = test_log();
+        log.contest_id = "NA-SPRINT-CW (North America)".to_string();
+        log.contest_params = json!({
+            "QTH": "MA",
+            "NAME": "Scott",
+            "LOCATION": "MA",
+            "CATEGORY-OPERATOR": "SINGLE-OP",
+            "CATEGORY-POWER": "LOW"
+        });
+        let mut contact = test_contact("K1ABC", "VE3ABC", 1_700_000_000);
+        crate::db::set_contact_adif(&mut contact, "STX", json!(1));
+        crate::db::set_contact_adif(&mut contact, "MY_NAME", json!("SCOTT"));
+        crate::db::set_contact_adif(&mut contact, "STX_STRING", json!("MA"));
+        crate::db::set_contact_adif(&mut contact, "SRX", json!(2));
+        crate::db::set_contact_adif(&mut contact, "NAME", json!("TIM"));
+        crate::db::set_contact_adif(&mut contact, "SRX_STRING", json!("ON"));
+
+        let text = render_log(rules, &log, &[contact], &json!({}), 2)
+            .expect("NA Sprint CW Cabrillo should render");
+
+        assert!(text.lines().any(|line| line == "CONTEST: NA-SPRINT-CW"));
+        assert!(text.lines().any(|line| line == "CATEGORY-BAND: ALL"));
+        assert!(text.lines().any(|line| line == "CATEGORY-MODE: CW"));
+        assert!(
+            text.lines()
+                .any(|line| line == "CATEGORY-ASSISTED: NON-ASSISTED")
+        );
+        let fields = qso_line(&text).split_whitespace().collect::<Vec<_>>();
+        assert_eq!(
+            &fields[6..],
+            ["1", "SCOTT", "MA", "VE3ABC", "2", "TIM", "ON"]
+        );
+    }
+
+    #[test]
     fn multi_two_qso_uses_stored_transmitter_id() {
         let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
         crate::db::set_contact_adif(&mut contact, "APP_LOG73_TX_ID", json!("1"));

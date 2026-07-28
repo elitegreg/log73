@@ -1806,4 +1806,64 @@ contests:
             Some("NA-SPRINT-SSB")
         );
     }
+
+    #[test]
+    fn bundled_na_sprint_cw_rules_resolve_na_and_dx_variants() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let north_america = store
+            .get("NA-SPRINT-CW (North America)")
+            .expect("North America NA Sprint CW rules should load");
+        let dx = store
+            .get("NA-SPRINT-CW (DX)")
+            .expect("DX NA Sprint CW rules should load");
+
+        assert_eq!(north_america.allowed_bands, ["80m", "40m", "20m"]);
+        assert_eq!(north_america.allowed_modes, ["CW"]);
+        assert_eq!(north_america.dupe_key, ["CALL", "BAND"]);
+        assert!(
+            north_america.multipliers[0]
+                .valid_values
+                .contains(&"4U1UN".to_string())
+        );
+        assert!(
+            north_america.multipliers[0]
+                .valid_values
+                .contains(&"VP9".to_string())
+        );
+
+        let north_america_received = north_america
+            .exchange
+            .iter()
+            .find(|field| field.name == "QTH" && !field.is_sent)
+            .expect("North America received QTH should exist");
+        assert!(
+            north_america_received
+                .valid_values
+                .contains(&"DX".to_string())
+        );
+
+        let dx_received = dx
+            .exchange
+            .iter()
+            .find(|field| field.name == "QTH" && !field.is_sent)
+            .expect("DX received QTH should exist");
+        assert!(!dx_received.valid_values.contains(&"DX".to_string()));
+        assert!(dx_received.valid_values.contains(&"MA".to_string()));
+        assert_eq!(
+            dx.qso_points
+                .as_ref()
+                .and_then(|points| points.rules.first())
+                .map(|rule| rule.points),
+            Some(1)
+        );
+        let cabrillo = north_america.cabrillo.as_ref().expect("Cabrillo rules");
+        assert_eq!(cabrillo.contest_id.as_deref(), Some("NA-SPRINT-CW"));
+        assert!(
+            cabrillo.fixed_fields.iter().any(|field| {
+                field.name == "CATEGORY-ASSISTED" && field.value == "NON-ASSISTED"
+            })
+        );
+    }
 }
