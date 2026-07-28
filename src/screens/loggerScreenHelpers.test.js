@@ -2,15 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   committedBackendContact,
-  appendSerialRange,
   getSessionId,
+  loadUnusedSerial,
   mergeContact,
-  reserveNextSerial,
   saveLocalContacts,
-  saveSerialAllocation,
-  serialBatchSize,
-  serialRangesRemaining,
-  serialRefillRemainingThreshold,
+  saveUnusedSerial,
+  serialAllocationStorageKey,
   SESSION_STORAGE_KEY,
   sortContacts,
   sortContactsByCallsignThenTime,
@@ -76,18 +73,28 @@ test('sortContactsByCallsignThenTime uses contact id as a final tie breaker', ()
   );
 });
 
-test('serial allocation helpers reserve ranges and calculate threshold', () => {
-  const allocation = appendSerialRange({ ranges: [] }, 10, 12);
-  assert.equal(serialRangesRemaining(allocation), 3);
+test('unused serial helpers persist one reserved value', () => {
+  const storage = new Map();
+  globalThis.localStorage = {
+    getItem(key) {
+      return storage.get(key) ?? null;
+    },
+    setItem(key, value) {
+      storage.set(key, value);
+    },
+    removeItem(key) {
+      storage.delete(key);
+    },
+  };
 
-  const first = reserveNextSerial(allocation);
-  assert.equal(first.serial, 10);
-  assert.equal(serialRangesRemaining(first.allocation), 2);
+  const key = serialAllocationStorageKey(7, 'STX', 'instance-1');
+  assert.equal(saveUnusedSerial(7, 'STX', 'instance-1', 42), true);
+  assert.equal(JSON.parse(storage.get(key)).serial, 42);
+  assert.equal(loadUnusedSerial(7, 'STX', 'instance-1'), 42);
 
-  assert.equal(serialBatchSize({ SERIAL_BATCH_SIZE: '25' }), 25);
-  assert.equal(serialBatchSize({ SERIAL_BATCH_SIZE: '0' }), 1);
-  assert.equal(serialRefillRemainingThreshold(10), 1);
-  assert.equal(serialRefillRemainingThreshold(100), 10);
+  assert.equal(saveUnusedSerial(7, 'STX', 'instance-1', null), true);
+  assert.equal(storage.has(key), false);
+  assert.equal(loadUnusedSerial(7, 'STX', 'instance-1'), null);
 });
 
 test('committedBackendContact assigns meta.clientId from meta.id', () => {
@@ -225,7 +232,7 @@ test('saveLocalContacts catches storage write failures and reports once', async 
   assert.equal(fetchCalls[0].url, '/api/client-errors');
 });
 
-test('saveSerialAllocation catches storage write failures and reports once', async () => {
+test('saveUnusedSerial catches storage write failures and reports once', async () => {
   const fetchCalls = [];
   globalThis.window = {
     location: { href: 'https://example.test/logger' },
@@ -244,10 +251,8 @@ test('saveSerialAllocation catches storage write failures and reports once', asy
     },
   };
 
-  const resultA = saveSerialAllocation(7, 'STX', 'instance-1', {
-    ranges: [{ next: 10, end: 12 }],
-  });
-  const resultB = saveSerialAllocation(7, 'STX', 'instance-1', { ranges: [] });
+  const resultA = saveUnusedSerial(7, 'STX', 'instance-1', 10);
+  const resultB = saveUnusedSerial(7, 'STX', 'instance-1', 11);
   await Promise.resolve();
 
   assert.equal(resultA, false);

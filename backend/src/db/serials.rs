@@ -3,20 +3,14 @@ use super::models::SerialAllocation;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::Value;
 
-pub(super) fn db_allocate_serials(
+pub(super) fn db_allocate_serial(
     connection: &mut Connection,
     log_id: i64,
     field_adif: &str,
-    count: i64,
 ) -> rusqlite::Result<SerialAllocation> {
     if log_id <= 0 {
         return Err(rusqlite::Error::InvalidParameterName(
             "log id must be positive".to_string(),
-        ));
-    }
-    if count <= 0 {
-        return Err(rusqlite::Error::InvalidParameterName(
-            "serial allocation count must be positive".to_string(),
         ));
     }
     let field_adif = field_adif.trim();
@@ -37,14 +31,11 @@ pub(super) fn db_allocate_serials(
             |row| row.get::<_, i64>(0),
         )
         .optional()?;
-    let start = stored_next
+    let serial = stored_next
         .unwrap_or(committed_next)
         .max(committed_next)
         .max(1);
-    let end = start.checked_add(count - 1).ok_or_else(|| {
-        rusqlite::Error::InvalidParameterName("serial allocation overflow".to_string())
-    })?;
-    let next_serial = end.checked_add(1).ok_or_else(|| {
+    let next_serial = serial.checked_add(1).ok_or_else(|| {
         rusqlite::Error::InvalidParameterName("serial allocation overflow".to_string())
     })?;
 
@@ -58,9 +49,7 @@ pub(super) fn db_allocate_serials(
     Ok(SerialAllocation {
         log_id,
         field_adif: field_adif.to_string(),
-        start,
-        end,
-        count,
+        serial,
     })
 }
 
@@ -146,7 +135,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn allocate_serials_reuses_larger_of_stored_and_committed_next_values() {
+    async fn allocate_serial_reuses_larger_of_stored_and_committed_next_values() {
         let database = test_database();
         let log_id = create_test_log(&database).await;
 
@@ -158,15 +147,15 @@ mod tests {
             .expect("contact is inserted");
 
         let first = database
-            .allocate_serials(log_id, "STX".to_string(), 3)
+            .allocate_serial(log_id, "STX".to_string())
             .await
-            .expect("serials allocated");
-        assert_eq!((first.start, first.end), (43, 45));
+            .expect("serial allocated");
+        assert_eq!(first.serial, 43);
 
         let second = database
-            .allocate_serials(log_id, "STX".to_string(), 2)
+            .allocate_serial(log_id, "STX".to_string())
             .await
-            .expect("next serials allocated");
-        assert_eq!((second.start, second.end), (46, 47));
+            .expect("next serial allocated");
+        assert_eq!(second.serial, 44);
     }
 }

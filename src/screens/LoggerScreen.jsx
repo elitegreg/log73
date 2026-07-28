@@ -6,7 +6,10 @@ import LogWindow from '../logger/LogWindow';
 import MainWindow from '../logger/MainWindow';
 import OperatorCallsignPrompt from '../logger/OperatorCallsignPrompt';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
-import { BAND_MAP_ENABLED_STORAGE_KEY } from '../logger/mainWindowHelpers';
+import {
+  BAND_MAP_ENABLED_STORAGE_KEY,
+  bandForFrequency,
+} from '../logger/mainWindowHelpers';
 import { cabrilloTransmitterPrompt } from '../domain/cabrilloTransmitter';
 import TransmitterIdPrompt from '../logger/TransmitterIdPrompt';
 import {
@@ -125,13 +128,24 @@ function LoggerScreen() {
     notifyOfflineCachingDegraded,
   });
 
-  const { serialAllocationStatus, handleSerialContactLogged } =
-    useSerialAllocator({
-      settings,
-      log,
-      numericLogId,
-      notifyOfflineCachingDegraded,
-    });
+  const {
+    serialAllocationStatus,
+    handleSerialContactLogged,
+    refreshSerialState,
+  } = useSerialAllocator({
+    settings,
+    numericLogId,
+    currentBandName:
+      bandForFrequency(radioState?.frequency_hz, settings?.band_catalog ?? [])
+        ?.name ?? null,
+    contacts: allContacts,
+    notifyOfflineCachingDegraded,
+  });
+
+  const handleLoggerSocketOpen = useCallback(async () => {
+    refreshSerialState();
+    await handleSocketOpenReload();
+  }, [handleSocketOpenReload, refreshSerialState]);
 
   const loggerImageSrc = useLoggerImage();
   const transmitterPrompt = cabrilloTransmitterPrompt(settings, log);
@@ -149,6 +163,9 @@ function LoggerScreen() {
   const handleBackendSocketMessage = useCallback(
     (message) => {
       handleSocketMessage(message);
+      if (message.type === 'log_entry') {
+        handleSerialContactLogged(message.contact);
+      }
       if (message.type === 'supercheckpartial_update') {
         setSupercheckpartialUpdate({
           sequence: Date.now(),
@@ -156,10 +173,10 @@ function LoggerScreen() {
         });
       }
     },
-    [handleSocketMessage],
+    [handleSerialContactLogged, handleSocketMessage],
   );
 
-  socketOpenHandlerRef.current = handleSocketOpenReload;
+  socketOpenHandlerRef.current = handleLoggerSocketOpen;
   socketMessageHandlerRef.current = handleBackendSocketMessage;
   remoteContactHandlerRef.current = upsertRemoteContact;
   remoteContactDeletedHandlerRef.current = removeRemoteContact;

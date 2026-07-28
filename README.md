@@ -304,6 +304,7 @@ GET    /api/logs/:id/qso-count
 GET    /api/logs/:id/stats
 POST   /api/logs/:id/adif
 POST   /api/logs/:id/cabrillo
+GET    /api/logs/:id/serial-allocation?field_adif=<field>
 POST   /api/logs/:id/serial-allocation
 
 GET    /api/logs/:log_id/contacts
@@ -399,7 +400,7 @@ Important schema notes:
 - `logs` stores log name, contest id, station callsign, and contest parameter JSON.
 - `radios` stores radio driver, CAT transport settings, keyer settings, sound device ids, and CW/voice message text.
 - `qsos.LOG_ID` references `logs.ID`.
-- `log_serial_state` stores durable next-serial counters by log id and sent serial ADIF field.
+- `log_serial_state` stores durable one-at-a-time reservations for multi-transmitter global serial fields.
 - `idx_qsos_log_id` indexes `qsos(LOG_ID)`.
 - Foreign keys are enabled.
 - Tables are SQLite `STRICT` tables.
@@ -571,7 +572,6 @@ Log creation dynamically requests required rule parameters where needed:
 - `K1USNSST`: `NAME`, `QTH`
 - `MDC-QSO-PARTY`: `Location`
 - `MDC-QSO-PARTY (In State)`: `Jurisdiction`
-- `MST`: `SERIAL_BATCH_SIZE`
 - `OH-QSO-PARTY`: `Location`
 - `OH-QSO-PARTY (In State)`: `County`
 - `SC-QSO-PARTY`: `State`
@@ -579,7 +579,7 @@ Log creation dynamically requests required rule parameters where needed:
 - `TN-QSO-PARTY`: `Location`
 - `TN-QSO-PARTY (In State)`: `County`
 
-Those values seed sent exchange fields in the logger, which are fixed unless a contest permits a mobile location change. Contests with a sent `Serial` exchange field also get a `SERIAL_BATCH_SIZE` parameter, defaulting to 10; the backend reserves durable serial ranges by log id and field, the browser refills after 90% of the batch is consumed, and the logger blocks logging if no reserved serial is available. The previous `BERK` default is no longer used. The HI, MDC, and SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
+Those values seed sent exchange fields in the logger, which are fixed unless a contest permits a mobile location change. Sent `Serial` fields are global by default and may set `serial_scope: band` for independent per-band counters. The backend derives initial serials from committed contacts, and logger clients advance them from local and websocket contact events. Only global serials used with a `CATEGORY-TRANSMITTER` value other than `ONE` are reserved; those reservations contain exactly one serial and an unused value is cached in browser local storage. The HI, MDC, and SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
 For `SC-QSO-PARTY (In State)`, the received value is labeled `Exchange` because it may be a county, state/province, or `DX`.
 
 ## UI themes

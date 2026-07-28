@@ -14,6 +14,7 @@ import {
   cwActionFromTemplate,
   cwActiveTimeoutMs,
   correctedEsmCallsignText,
+  exchangeDefaults,
   esmEnterAction,
   esmStateAfterCallsignEdit,
   modeIsCw,
@@ -27,6 +28,48 @@ import {
   steppedFrequencyHz,
   typedModeFromCallsignInput,
 } from './mainWindowHelpers.js';
+
+test('exchangeDefaults uses the allocated sent serial and leaves received serial blank', () => {
+  const settings = {
+    exchange: [
+      { name: 'Serial(s)', type: 'Serial:4', adif: 'STX', is_sent: true },
+      { name: 'Serial', type: 'Serial:4', adif: 'SRX', is_sent: false },
+    ],
+  };
+
+  assert.deepEqual(
+    exchangeDefaults(
+      settings,
+      'CW',
+      {},
+      {
+        required: true,
+        fieldAdif: 'stx',
+        current: 12,
+      },
+    ),
+    {
+      'Serial(s)': '12',
+      Serial: '',
+    },
+  );
+  assert.deepEqual(
+    exchangeDefaults(
+      settings,
+      'CW',
+      {},
+      {
+        required: true,
+        fieldAdif: 'STX',
+        current: null,
+      },
+    ),
+    {
+      'Serial(s)': '',
+      Serial: '',
+    },
+  );
+});
 
 test('availableModeOptions prefers backend-provided mode catalog', () => {
   assert.deepEqual(availableModeOptions({ mode_catalog: ['CW', 'RTTY'] }), [

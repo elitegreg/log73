@@ -13,7 +13,7 @@ use super::models::{
 };
 use super::radios::{db_create_radio, db_delete_radio, db_radios, db_update_radio, select_radio};
 use super::schema::initialize_schema;
-use super::serials::db_allocate_serials;
+use super::serials::db_allocate_serial;
 use crate::bands::Band;
 use rusqlite::Connection;
 use std::path::Path;
@@ -98,10 +98,9 @@ enum DbCommand {
         id: i64,
         response: oneshot::Sender<rusqlite::Result<Option<i64>>>,
     },
-    AllocateSerials {
+    AllocateSerial {
         log_id: i64,
         field_adif: String,
-        count: i64,
         response: oneshot::Sender<rusqlite::Result<SerialAllocation>>,
     },
     DeleteContact {
@@ -297,16 +296,14 @@ impl Database {
             .await
     }
 
-    pub async fn allocate_serials(
+    pub async fn allocate_serial(
         &self,
         log_id: i64,
         field_adif: String,
-        count: i64,
     ) -> rusqlite::Result<SerialAllocation> {
-        self.call(|response| DbCommand::AllocateSerials {
+        self.call(|response| DbCommand::AllocateSerial {
             log_id,
             field_adif,
-            count,
             response,
         })
         .await
@@ -393,18 +390,12 @@ fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbComm
             DbCommand::ContactLogId { id, response } => {
                 let _ = response.send(select_contact_log_id(&connection, id));
             }
-            DbCommand::AllocateSerials {
+            DbCommand::AllocateSerial {
                 log_id,
                 field_adif,
-                count,
                 response,
             } => {
-                let _ = response.send(db_allocate_serials(
-                    &mut connection,
-                    log_id,
-                    &field_adif,
-                    count,
-                ));
+                let _ = response.send(db_allocate_serial(&mut connection, log_id, &field_adif));
             }
             DbCommand::DeleteContact { id, response } => {
                 let _ = response.send(db_delete_contact(&connection, id));
@@ -916,7 +907,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn allocate_serials_reserves_ranges_by_log_and_field() {
+    async fn allocate_serial_reserves_one_value_by_log_and_field() {
         let database = test_database();
         let first_log = create_test_log(&database).await;
         let second_log = database
@@ -930,30 +921,30 @@ mod tests {
             .expect("second log is created");
 
         let first = database
-            .allocate_serials(first_log.id, "STX".to_string(), 10)
+            .allocate_serial(first_log.id, "STX".to_string())
             .await
-            .expect("serials are allocated");
+            .expect("serial is allocated");
         let second = database
-            .allocate_serials(first_log.id, "STX".to_string(), 10)
+            .allocate_serial(first_log.id, "STX".to_string())
             .await
-            .expect("next serials are allocated");
+            .expect("next serial is allocated");
         let other_log = database
-            .allocate_serials(second_log.id, "STX".to_string(), 10)
+            .allocate_serial(second_log.id, "STX".to_string())
             .await
-            .expect("other log serials are allocated");
+            .expect("other log serial is allocated");
         let other_field = database
-            .allocate_serials(first_log.id, "CUSTOM_SERIAL".to_string(), 3)
+            .allocate_serial(first_log.id, "CUSTOM_SERIAL".to_string())
             .await
-            .expect("other field serials are allocated");
+            .expect("other field serial is allocated");
 
-        assert_eq!((first.start, first.end), (1, 10));
-        assert_eq!((second.start, second.end), (11, 20));
-        assert_eq!((other_log.start, other_log.end), (1, 10));
-        assert_eq!((other_field.start, other_field.end), (1, 3));
+        assert_eq!(first.serial, 1);
+        assert_eq!(second.serial, 2);
+        assert_eq!(other_log.serial, 1);
+        assert_eq!(other_field.serial, 1);
     }
 
     #[tokio::test]
-    async fn allocate_serials_starts_after_committed_column_or_json_serials() {
+    async fn allocate_serial_starts_after_committed_column_or_json_serials() {
         let database = test_database();
         let log = create_test_log(&database).await;
         let mut stx_contact = base_contact();
@@ -967,16 +958,16 @@ mod tests {
             .expect("contacts are inserted");
 
         let stx = database
-            .allocate_serials(log.id, "STX".to_string(), 5)
+            .allocate_serial(log.id, "STX".to_string())
             .await
-            .expect("STX serials are allocated");
+            .expect("STX serial is allocated");
         let custom = database
-            .allocate_serials(log.id, "CUSTOM_SERIAL".to_string(), 5)
+            .allocate_serial(log.id, "CUSTOM_SERIAL".to_string())
             .await
-            .expect("custom serials are allocated");
+            .expect("custom serial is allocated");
 
-        assert_eq!((stx.start, stx.end), (43, 47));
-        assert_eq!((custom.start, custom.end), (78, 82));
+        assert_eq!(stx.serial, 43);
+        assert_eq!(custom.serial, 78);
     }
 
     #[tokio::test]

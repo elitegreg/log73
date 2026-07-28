@@ -481,7 +481,12 @@ function MainWindow({
     pendingBandMapTuneFrequencyRef.current = null;
     pendingPreviousContactAutofillRef.current = '';
     setExchangeValues(
-      exchangeDefaults(settings, radioMode, log?.contest_params ?? {}),
+      exchangeDefaults(
+        settings,
+        radioMode,
+        log?.contest_params ?? {},
+        serialAllocation,
+      ),
     );
     clearEsmState();
     callSignEditedAtRef.current = new Date();
@@ -497,6 +502,7 @@ function MainWindow({
     radioMode,
     settings,
     log,
+    serialAllocation,
   ]);
 
   function logContact(force = false, values = exchangeValues) {
@@ -556,7 +562,7 @@ function MainWindow({
 
     onLogContact?.(contact);
     if (serialAllocation?.required) {
-      onSerialContactLogged?.();
+      onSerialContactLogged?.(contact);
     }
     clearEntryFields();
     return true;

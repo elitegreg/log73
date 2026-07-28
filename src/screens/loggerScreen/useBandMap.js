@@ -19,6 +19,22 @@ function normalizedBandMapSequence(value) {
   return Number.isInteger(sequence) && sequence > 0 ? sequence : 0;
 }
 
+export function bandMapExchangeFieldsWithoutSerials(exchangeFields) {
+  if (
+    !exchangeFields ||
+    typeof exchangeFields !== 'object' ||
+    Array.isArray(exchangeFields)
+  ) {
+    return exchangeFields;
+  }
+
+  return Object.fromEntries(
+    Object.entries(exchangeFields).filter(
+      ([field]) => !['STX', 'SRX'].includes(String(field).trim().toUpperCase()),
+    ),
+  );
+}
+
 export function isBandMapSequenceMessage(message) {
   return (
     message?.type === 'bandmap_spot' ||
@@ -267,6 +283,9 @@ export function useBandMap({
       try {
         await saveBandMapSpot({
           ...payload,
+          exchange_fields: bandMapExchangeFieldsWithoutSerials(
+            payload.exchange_fields,
+          ),
           radio_id: payload.radio_id ?? radioId,
           log_id: payload.log_id ?? logId,
         });

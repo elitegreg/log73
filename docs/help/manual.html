@@ -461,9 +461,12 @@
     </ul>
     <h3 id="serial-allocation-context">Serial allocation context</h3>
     <p>
-      If a contest uses a sent serial exchange field, serial allocation is
-      managed by backend reservations and client refill behavior. The operator
-      can be blocked from logging if no reserved serial is available.
+      For a sent serial exchange, the backend supplies the initial next value
+      and the logger advances it as local or websocket contacts are observed.
+      Serial fields are global unless the rule sets
+      <code>serial_scope: band</code>. Only multi-transmitter global serials
+      reserve values, one at a time; an unused reservation is cached in browser
+      local storage. Logging is blocked while a required serial is unavailable.
     </p>
     <hr />
     <h2 id="creatingediting-radios-with-validation-details">

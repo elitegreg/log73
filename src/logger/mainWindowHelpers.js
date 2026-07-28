@@ -56,13 +56,44 @@ export const PHONE_CALLSIGN_CLEAR_THRESHOLD_HZ = 200;
 
 const PHONE_MODES = new Set(['SSB', 'FM', 'AM']);
 
-export function exchangeDefaults(settings, radioMode, contestParams = {}) {
-  return Object.fromEntries(
+export function exchangeDefaults(
+  settings,
+  radioMode,
+  contestParams = {},
+  serialAllocation = null,
+) {
+  const defaults = Object.fromEntries(
     (settings?.exchange ?? []).map((field) => [
       field.name,
       fieldDefault(field, radioMode, contestParams),
     ]),
   );
+
+  if (
+    !serialAllocation?.required ||
+    !serialAllocation.fieldAdif ||
+    serialAllocation.current === null ||
+    serialAllocation.current === undefined
+  ) {
+    return defaults;
+  }
+
+  const serialField = (settings?.exchange ?? []).find(
+    (field) =>
+      field.is_sent &&
+      String(field.adif).toUpperCase() ===
+        String(serialAllocation.fieldAdif).toUpperCase() &&
+      parseFieldType(field.type, radioMode).kind === 'SERIAL',
+  );
+  if (serialField) {
+    defaults[serialField.name] = sanitizeExchangeValue(
+      serialField,
+      serialAllocation.current,
+      radioMode,
+    );
+  }
+
+  return defaults;
 }
 
 function normalizedAutofillCallsign(value) {

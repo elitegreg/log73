@@ -9,6 +9,7 @@ import {
 import { createBandMapSpotStore } from '../domain/bandMap.js';
 import {
   applyBandMapSequenceMessage,
+  bandMapExchangeFieldsWithoutSerials,
   isBandMapSequenceMessage,
   visibleBandMapSpotStoreForCurrentBand,
 } from './loggerScreen/useBandMap.js';
@@ -18,7 +19,10 @@ import {
   nextContactToCommit,
 } from './loggerScreen/contactsOutboxState.js';
 import {
-  shouldRequestSerialRefill,
+  currentSerialForBand,
+  mergeSerialStates,
+  serialStateAfterContact,
+  serialStateFromBackend,
   unavailableSerialMessage,
 } from './loggerScreen/serialAllocatorState.js';
 
@@ -184,6 +188,26 @@ test('band map sequence helpers apply live updates and detect gaps', () => {
   assert.equal(gap.messageSequence, 3);
 });
 
+test('band map storage excludes sent and received serial fields', () => {
+  const exchangeFields = {
+    CALL: 'K1ABC',
+    STX: '123',
+    srx: '456',
+    ARRL_SECT: 'SC',
+  };
+
+  assert.deepEqual(bandMapExchangeFieldsWithoutSerials(exchangeFields), {
+    CALL: 'K1ABC',
+    ARRL_SECT: 'SC',
+  });
+  assert.deepEqual(exchangeFields, {
+    CALL: 'K1ABC',
+    STX: '123',
+    srx: '456',
+    ARRL_SECT: 'SC',
+  });
+});
+
 test('band map sequence helper removes spots and accepts sequence-only updates', () => {
   const withSpot = createBandMapSpotStore([
     {
@@ -268,26 +292,56 @@ test('band map visible store returns no spots when current band is unknown', () 
   assert.equal(visible.sortedSpots.length, 0);
 });
 
-test('serial allocator state detects refill boundaries and user-facing messages', () => {
-  assert.equal(
-    shouldRequestSerialRefill({ current: null, remaining: 5, threshold: 1 }),
-    true,
-  );
-  assert.equal(
-    shouldRequestSerialRefill({ current: 10, remaining: 1, threshold: 1 }),
-    true,
-  );
-  assert.equal(
-    shouldRequestSerialRefill({ current: 10, remaining: 2, threshold: 1 }),
-    false,
-  );
+test('serial allocator state advances global serials from observed contacts', () => {
+  const initial = serialStateFromBackend({
+    field_adif: 'STX',
+    scope: 'global',
+    reservation_required: false,
+    next: 123,
+  });
+  const unchanged = serialStateAfterContact(initial, {
+    adif: { STX: 122, BAND: '20m' },
+  });
+  const advanced = serialStateAfterContact(unchanged, {
+    adif: { STX: 123, BAND: '20m' },
+  });
 
+  assert.equal(unchanged, initial);
+  assert.equal(currentSerialForBand(advanced, '20m'), 124);
+});
+
+test('serial allocator state advances only the observed band for per-band serials', () => {
+  const initial = serialStateFromBackend({
+    field_adif: 'STX',
+    scope: 'band',
+    reservation_required: false,
+    next_by_band: { '20m': 67, '15m': 9 },
+  });
+  const advanced = serialStateAfterContact(initial, {
+    adif: { STX: '67', BAND: '20M' },
+  });
+
+  assert.equal(currentSerialForBand(advanced, '20m'), 68);
+  assert.equal(currentSerialForBand(advanced, '15m'), 9);
   assert.equal(
-    unavailableSerialMessage(null, 0),
-    'No serial numbers are currently available. Retrying backend allocation.',
+    unavailableSerialMessage('band', null),
+    'No serial number is available because the radio is outside a contest band.',
   );
-  assert.equal(
-    unavailableSerialMessage(44, 3),
-    'Serial number refill failed; 3 reserved serial numbers remain.',
-  );
+});
+
+test('serial state reconnect merge does not regress locally observed values', () => {
+  const backend = serialStateFromBackend({
+    field_adif: 'STX',
+    scope: 'band',
+    next_by_band: { '20m': 67, '15m': 9 },
+  });
+  const observed = serialStateFromBackend({
+    field_adif: 'STX',
+    scope: 'band',
+    next_by_band: { '20m': 68, '15m': 8 },
+  });
+
+  const merged = mergeSerialStates(backend, observed);
+  assert.equal(currentSerialForBand(merged, '20m'), 68);
+  assert.equal(currentSerialForBand(merged, '15m'), 9);
 });

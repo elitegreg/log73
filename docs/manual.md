@@ -162,7 +162,7 @@ Configure Log73 includes:
 
 ### Serial allocation context
 
-If a contest uses a sent serial exchange field, serial allocation is managed by backend reservations and client refill behavior. The operator can be blocked from logging if no reserved serial is available.
+For a sent serial exchange, the backend supplies the initial next value and the logger advances it as local or websocket contacts are observed. Serial fields are global unless the rule sets `serial_scope: band`. Only multi-transmitter global serials reserve values, one at a time; an unused reservation is cached in browser local storage. Logging is blocked while a required serial is unavailable.
 
 ---
 

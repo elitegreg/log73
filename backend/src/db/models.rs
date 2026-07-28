@@ -60,9 +60,7 @@ pub struct RadioConfig {
 pub struct SerialAllocation {
     pub log_id: i64,
     pub field_adif: String,
-    pub start: i64,
-    pub end: i64,
-    pub count: i64,
+    pub serial: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]

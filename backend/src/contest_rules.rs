@@ -35,11 +35,27 @@ pub struct ExchangeField {
     pub in_sets: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub valid_values: Vec<String>,
+    #[serde(default, skip_serializing_if = "SerialScope::is_global")]
+    pub serial_scope: SerialScope,
     /// When set, this exchange is required only for matching contacts and must
     /// otherwise be blank.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub only_when: Option<ScoringCondition>,
     pub is_sent: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SerialScope {
+    #[default]
+    Global,
+    Band,
+}
+
+impl SerialScope {
+    fn is_global(&self) -> bool {
+        *self == Self::Global
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -614,8 +630,6 @@ fn resolve_scoring_condition_in_sets(
 }
 
 const STANDARD_QSO_COLUMNS: &[&str] = &["Date/Time (UTC)", "Freq", "Mode", "Call"];
-const SERIAL_BATCH_SIZE_PARAM: &str = "SERIAL_BATCH_SIZE";
-const DEFAULT_SERIAL_BATCH_SIZE: i64 = 10;
 
 fn prepend_standard_qso_columns(contest: &mut ContestRules) {
     let existing = contest.qso_columns.clone();
@@ -637,41 +651,6 @@ fn field_type_kind(field_type: &str) -> String {
         .unwrap_or("STRING")
         .trim()
         .to_uppercase()
-}
-
-fn is_sent_serial_field(field: &ExchangeField) -> bool {
-    field.is_sent && field_type_kind(&field.field_type) == "SERIAL"
-}
-
-fn ensure_serial_batch_size_param(contest: &mut ContestRules) {
-    if !contest.exchange.iter().any(is_sent_serial_field) {
-        return;
-    }
-    if contest
-        .log_params
-        .iter()
-        .any(|param| param.name == SERIAL_BATCH_SIZE_PARAM)
-    {
-        return;
-    }
-
-    contest.log_params.push(ContestParam {
-        name: SERIAL_BATCH_SIZE_PARAM.to_string(),
-        label: "Serial Batch Size".to_string(),
-        field_type: "Numeric:4".to_string(),
-        required: Some(true),
-        regex: None,
-        default: Some(Value::from(DEFAULT_SERIAL_BATCH_SIZE)),
-        in_sets: Vec::new(),
-        valid_values: Vec::new(),
-        widget: None,
-        help_text: Some(
-            "How many sent serial numbers to reserve at a time for offline logging.".to_string(),
-        ),
-        max_lines: None,
-        preserve_case: None,
-        multi_single_has_mult_transmitter: false,
-    });
 }
 
 fn apply_field_valid_values(
@@ -777,6 +756,17 @@ fn scoring_param<'a>(contest: &'a ContestRules, name: &str) -> Option<&'a Contes
 }
 
 fn validate_scoring_config(contest: &ContestRules) -> Result<(), String> {
+    for field in &contest.exchange {
+        if field.serial_scope != SerialScope::Global
+            && field_type_kind(&field.field_type) != "SERIAL"
+        {
+            return Err(format!(
+                "exchange field {} sets serial_scope but is not a Serial field",
+                field.name
+            ));
+        }
+    }
+
     for multiplier in &contest.param_multipliers {
         let param = scoring_param(contest, &multiplier.param).ok_or_else(|| {
             format!(
@@ -936,7 +926,6 @@ fn resolve_contest(
         contest.metadata = Some(metadata.clone());
     }
 
-    ensure_serial_batch_size_param(&mut contest);
     resolve_in_sets(&mut contest)?;
     validate_scoring_config(&contest)?;
     prepend_standard_qso_columns(&mut contest);
@@ -1004,6 +993,46 @@ mod tests {
             &mut Vec::new(),
         )
         .expect("contest should resolve")
+    }
+
+    #[test]
+    fn serial_scope_defaults_global_and_accepts_band_scope() {
+        let global = resolve_yaml_contest(
+            r#"
+contests:
+  - id: GLOBAL
+    allowed_bands: [20]
+    allowed_modes: ['CW']
+    exchange:
+      - name: Serial
+        type: 'Serial:4'
+        adif: 'STX'
+        is_sent: true
+    qso_columns: []
+    qso_column_fields: {}
+"#,
+            "GLOBAL",
+        );
+        assert_eq!(global.exchange[0].serial_scope, SerialScope::Global);
+
+        let per_band = resolve_yaml_contest(
+            r#"
+contests:
+  - id: PER-BAND
+    allowed_bands: [20, 15]
+    allowed_modes: ['CW']
+    exchange:
+      - name: Serial
+        type: 'Serial:4'
+        serial_scope: 'band'
+        adif: 'STX'
+        is_sent: true
+    qso_columns: []
+    qso_column_fields: {}
+"#,
+            "PER-BAND",
+        );
+        assert_eq!(per_band.exchange[0].serial_scope, SerialScope::Band);
     }
 
     #[test]
@@ -1761,6 +1790,19 @@ contests:
         assert_eq!(cw.exchange[0].field_type, "Serial:4");
         assert_eq!(cw.exchange[0].adif, "STX");
         assert_eq!(cw.exchange[4].adif, "SRX");
+        assert!(
+            cw.log_params
+                .iter()
+                .all(|param| param.name != "SERIAL_BATCH_SIZE")
+        );
+        assert!(
+            store
+                .get("MST")
+                .expect("MST rules should load")
+                .log_params
+                .iter()
+                .all(|param| param.name != "SERIAL_BATCH_SIZE")
+        );
         assert_eq!(
             ssb.cabrillo
                 .as_ref()

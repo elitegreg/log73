@@ -1,64 +1,52 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiJson } from '../../lib/api';
 import { reportClientErrorLater } from '../../lib/errorReporting';
 import {
   SERIAL_ALLOCATION_RETRY_DELAY_MS,
-  appendSerialRange,
   getSerialInstanceId,
-  loadSerialAllocation,
-  reserveNextSerial,
-  saveSerialAllocation,
+  loadUnusedSerial,
+  saveUnusedSerial,
   sentSerialField,
-  serialBatchSize,
-  serialRangesRemaining,
-  serialRefillRemainingThreshold,
 } from '../loggerScreenHelpers.js';
 import {
-  shouldRequestSerialRefill,
+  currentSerialForBand,
+  mergeSerialStates,
+  serialStateAfterContact,
+  serialStateFromBackend,
   unavailableSerialMessage,
 } from './serialAllocatorState.js';
 
 export function useSerialAllocator({
   settings,
-  log,
   numericLogId,
+  currentBandName,
+  contacts = [],
   notifyOfflineCachingDegraded,
 }) {
   const serialAllocatorRef = useRef(null);
-  const [serialAllocationStatus, setSerialAllocationStatus] = useState({
-    required: false,
-    available: true,
-    current: null,
-    message: '',
-  });
+  const [publishedState, setPublishedState] = useState(null);
+  const [message, setMessage] = useState('');
 
   useEffect(() => {
     const field = sentSerialField(settings);
     if (!field || !numericLogId) {
       serialAllocatorRef.current = null;
-      setSerialAllocationStatus({
-        required: false,
-        available: true,
-        current: null,
-        message: '',
-      });
+      setPublishedState(null);
+      setMessage('');
       return;
     }
 
     let cancelled = false;
-    const batchSize = serialBatchSize(log?.contest_params ?? {});
-    const threshold = serialRefillRemainingThreshold(batchSize);
     const instanceId = getSerialInstanceId();
     const manager = {
-      allocation: loadSerialAllocation(numericLogId, field.adif, instanceId),
-      batchSize,
-      current: null,
       errorReported: false,
       field,
+      initialized: false,
       instanceId,
-      message: '',
+      pendingContacts: [],
       requestInFlight: false,
       retryTimerId: undefined,
+      state: null,
     };
     serialAllocatorRef.current = manager;
 
@@ -66,46 +54,18 @@ export function useSerialAllocator({
       return !cancelled && serialAllocatorRef.current === manager;
     }
 
-    function remaining() {
-      return serialRangesRemaining(manager.allocation);
-    }
-
-    function publish() {
+    function publish(nextMessage = '') {
       if (!isActive()) return;
-      setSerialAllocationStatus({
-        required: true,
-        available: manager.current !== null && manager.current !== undefined,
-        current: manager.current,
-        message: manager.message,
-        fieldAdif: field.adif,
-      });
+      setPublishedState(manager.state ? { ...manager.state } : null);
+      setMessage(nextMessage);
     }
 
-    function persist() {
+    function persistUnused(serial) {
       if (
-        !saveSerialAllocation(
-          numericLogId,
-          field.adif,
-          manager.instanceId,
-          manager.allocation,
-        )
+        !saveUnusedSerial(numericLogId, field.adif, manager.instanceId, serial)
       ) {
         notifyOfflineCachingDegraded();
       }
-    }
-
-    function reserveLocalSerial() {
-      if (manager.current !== null && manager.current !== undefined)
-        return true;
-      const reserved = reserveNextSerial(manager.allocation);
-      if (!reserved) {
-        manager.current = null;
-        return false;
-      }
-      manager.allocation = reserved.allocation;
-      manager.current = reserved.serial;
-      persist();
-      return true;
     }
 
     function clearRetryTimer() {
@@ -115,95 +75,153 @@ export function useSerialAllocator({
       }
     }
 
-    function scheduleRetry() {
+    function scheduleRetry(action) {
       if (!isActive() || manager.retryTimerId !== undefined) return;
       manager.retryTimerId = window.setTimeout(() => {
         manager.retryTimerId = undefined;
-        requestAllocation('retry');
+        action();
       }, SERIAL_ALLOCATION_RETRY_DELAY_MS);
     }
 
-    async function requestAllocation(reason) {
+    function reportAllocationError(error, operation) {
+      if (manager.errorReported) return;
+      manager.errorReported = true;
+      reportClientErrorLater({
+        source: 'LoggerScreen.serialAllocation',
+        message: 'Unable to determine the next sent serial number.',
+        error,
+        details: {
+          logId: numericLogId,
+          fieldAdif: field.adif,
+          operation,
+        },
+      });
+    }
+
+    async function requestReservation() {
       if (!isActive() || manager.requestInFlight) return;
       clearRetryTimer();
       manager.requestInFlight = true;
-      if (manager.current === null || manager.current === undefined) {
-        manager.message = 'Requesting serial numbers...';
-      }
-      publish();
+      publish('Requesting the next serial number...');
 
       try {
         const result = await apiJson(
           `/logs/${numericLogId}/serial-allocation`,
           {
             method: 'POST',
-            body: JSON.stringify({
-              field_adif: field.adif,
-              count: manager.batchSize,
-              reason,
-            }),
+            body: JSON.stringify({ field_adif: field.adif }),
           },
         );
         const allocation = result?.allocation ?? result ?? {};
-        manager.allocation = appendSerialRange(
-          manager.allocation,
-          allocation.start,
-          allocation.end,
+        const serial = Number.parseInt(
+          String(allocation.serial ?? allocation.start),
+          10,
         );
-        persist();
-        reserveLocalSerial();
+        if (!Number.isFinite(serial) || serial <= 0) {
+          throw new Error('backend returned an invalid serial reservation');
+        }
+        manager.state = {
+          ...manager.state,
+          next: serial,
+        };
+        persistUnused(serial);
         manager.errorReported = false;
-        manager.message = '';
+        publish();
       } catch (error) {
         if (!isActive()) return;
-        manager.message = unavailableSerialMessage(
-          manager.current,
-          remaining(),
-        );
-        if (!manager.errorReported) {
-          manager.errorReported = true;
-          reportClientErrorLater({
-            source: 'LoggerScreen.serialAllocation',
-            message: 'Unable to allocate sent serial numbers.',
-            error,
-            details: {
-              logId: numericLogId,
-              fieldAdif: field.adif,
-              batchSize: manager.batchSize,
-              reason,
-            },
-          });
-        }
-        scheduleRetry();
+        reportAllocationError(error, 'reserve');
+        publish(unavailableSerialMessage('global'));
+        scheduleRetry(requestReservation);
       } finally {
-        if (isActive()) {
-          manager.requestInFlight = false;
+        manager.requestInFlight = false;
+      }
+    }
+
+    function observeContact(contact) {
+      if (!manager.initialized) {
+        manager.pendingContacts.push(contact);
+        return;
+      }
+
+      const nextState = serialStateAfterContact(manager.state, contact);
+      if (nextState === manager.state) return;
+
+      if (manager.state.reservationRequired) {
+        persistUnused(null);
+        manager.state = { ...manager.state, next: null };
+        publish('Requesting the next serial number...');
+        requestReservation();
+        return;
+      }
+
+      manager.state = nextState;
+      publish();
+    }
+    manager.observeContact = observeContact;
+
+    async function initialize() {
+      if (!isActive() || manager.requestInFlight) return;
+      clearRetryTimer();
+      manager.requestInFlight = true;
+      publish('Loading the next serial number...');
+
+      try {
+        const query = new URLSearchParams({ field_adif: field.adif });
+        const result = await apiJson(
+          `/logs/${numericLogId}/serial-allocation?${query.toString()}`,
+        );
+        const previousState = manager.state;
+        manager.state = mergeSerialStates(
+          serialStateFromBackend(result?.state ?? result),
+          previousState,
+        );
+        manager.initialized = true;
+        manager.errorReported = false;
+
+        if (manager.state.reservationRequired) {
+          manager.state.next = loadUnusedSerial(
+            numericLogId,
+            field.adif,
+            manager.instanceId,
+          );
+        } else {
+          persistUnused(null);
+        }
+
+        const pendingContacts = manager.pendingContacts;
+        manager.pendingContacts = [];
+        for (const contact of pendingContacts) {
+          observeContact(contact);
+        }
+
+        if (
+          manager.state.reservationRequired &&
+          currentSerialForBand(manager.state, null) === null
+        ) {
+          publish('Requesting the next serial number...');
+        } else {
           publish();
         }
+      } catch (error) {
+        if (!isActive()) return;
+        reportAllocationError(error, 'initialize');
+        publish(unavailableSerialMessage('global'));
+        scheduleRetry(initialize);
+      } finally {
+        manager.requestInFlight = false;
+        if (
+          isActive() &&
+          manager.initialized &&
+          manager.state.reservationRequired &&
+          currentSerialForBand(manager.state, null) === null
+        ) {
+          requestReservation();
+        }
       }
     }
+    manager.refresh = initialize;
 
-    function ensureSerials(reason) {
-      reserveLocalSerial();
-      publish();
-      if (
-        shouldRequestSerialRefill({
-          current: manager.current,
-          remaining: remaining(),
-          threshold,
-        })
-      ) {
-        requestAllocation(reason);
-      }
-    }
-
-    manager.consumeLoggedSerial = () => {
-      manager.current = null;
-      manager.message = '';
-      ensureSerials('after-log');
-    };
-
-    ensureSerials('startup');
+    initialize();
 
     return () => {
       cancelled = true;
@@ -212,19 +230,52 @@ export function useSerialAllocator({
         serialAllocatorRef.current = null;
       }
     };
-  }, [
-    settings,
-    log?.contest_params,
-    numericLogId,
-    notifyOfflineCachingDegraded,
-  ]);
+  }, [settings, numericLogId, notifyOfflineCachingDegraded]);
 
-  const handleSerialContactLogged = useCallback(() => {
-    serialAllocatorRef.current?.consumeLoggedSerial?.();
+  const handleSerialContactLogged = useCallback((contact) => {
+    serialAllocatorRef.current?.observeContact?.(contact);
   }, []);
+
+  useEffect(() => {
+    for (const contact of contacts) {
+      handleSerialContactLogged(contact);
+    }
+  }, [contacts, handleSerialContactLogged]);
+
+  const refreshSerialState = useCallback(() => {
+    serialAllocatorRef.current?.refresh?.();
+  }, []);
+
+  const serialAllocationStatus = useMemo(() => {
+    const field = sentSerialField(settings);
+    if (!field) {
+      return {
+        required: false,
+        available: true,
+        current: null,
+        message: '',
+      };
+    }
+
+    const current = currentSerialForBand(publishedState, currentBandName);
+    const available = current !== null;
+    return {
+      required: true,
+      available,
+      current,
+      message:
+        message ||
+        (available
+          ? ''
+          : unavailableSerialMessage(publishedState?.scope, currentBandName)),
+      fieldAdif: field.adif,
+      scope: publishedState?.scope ?? field.serial_scope ?? 'global',
+    };
+  }, [currentBandName, message, publishedState, settings]);
 
   return {
     serialAllocationStatus,
     handleSerialContactLogged,
+    refreshSerialState,
   };
 }

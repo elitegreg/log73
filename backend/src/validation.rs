@@ -1292,6 +1292,7 @@ mod tests {
                 regex: None,
                 in_sets: Vec::new(),
                 valid_values: Vec::new(),
+                serial_scope: Default::default(),
                 only_when: None,
                 is_sent: false,
             }],

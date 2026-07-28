@@ -38,7 +38,7 @@ use axum::{
 };
 use bandmap::{BandMapEvent, BandMapManager, CqSpotInput, InUseSpotInput, LocalSpotInput};
 use clap::Parser;
-use contest_rules::{ContestRules, ContestRulesStore};
+use contest_rules::{ContestRules, ContestRulesStore, ExchangeField, SerialScope};
 use db::{
     AuthConfig, Contact, Database, NewLog, RadioPayload, UpdateLog, contact_adif_value, contact_id,
     contact_log_id, contact_meta_value, set_contact_meta,
@@ -52,7 +52,7 @@ use radio_manager::RadioManager;
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use stats::StatsTracker;
 use std::{
-    collections::{HashMap, hash_map::DefaultHasher},
+    collections::{BTreeMap, HashMap, hash_map::DefaultHasher},
     fs,
     fs::OpenOptions,
     hash::Hasher,
@@ -535,7 +535,10 @@ async fn main() {
             post(import_adif).layer(DefaultBodyLimit::max(64 * 1024 * 1024)),
         )
         .route("/logs/{id}/cabrillo", post(export_cabrillo))
-        .route("/logs/{id}/serial-allocation", post(allocate_serials))
+        .route(
+            "/logs/{id}/serial-allocation",
+            get(serial_state).post(allocate_serial),
+        )
         .route(
             "/logs/{log_id}/contacts",
             get(contacts).post(commit_contact),
@@ -2203,33 +2206,143 @@ async fn delete_radio(
     }
 }
 
-const DEFAULT_SERIAL_BATCH_SIZE: i64 = 10;
-const MAX_SERIAL_BATCH_SIZE: i64 = 1000;
 const DEFAULT_CONTACTS_PAGE_LIMIT: usize = 200;
 const MAX_CONTACTS_PAGE_LIMIT: usize = 1000;
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct SerialStateQuery {
+    field_adif: String,
+}
 
 #[derive(Debug, serde::Deserialize)]
 struct SerialAllocationPayload {
     field_adif: String,
-    count: Option<i64>,
 }
 
-async fn allocate_serials(
+#[derive(Debug, serde::Serialize)]
+struct SerialState {
+    field_adif: String,
+    scope: SerialScope,
+    reservation_required: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next: Option<i64>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    next_by_band: BTreeMap<String, i64>,
+}
+
+fn sent_serial_field<'a>(rules: &'a ContestRules, field_adif: &str) -> Option<&'a ExchangeField> {
+    rules.exchange.iter().find(|field| {
+        field.is_sent
+            && field.adif.eq_ignore_ascii_case(field_adif)
+            && exchange_field_type_kind(&field.field_type) == "SERIAL"
+    })
+}
+
+fn normalized_param_value(value: Option<&serde_json::Value>) -> Option<String> {
+    let value = match value? {
+        serde_json::Value::String(value) => value.clone(),
+        serde_json::Value::Number(value) => value.to_string(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        _ => return None,
+    };
+    let normalized = value.trim().to_uppercase();
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn category_transmitter(rules: &ContestRules, log: &db::Log) -> Option<String> {
+    let cabrillo = rules.cabrillo.as_ref()?;
+    if let Some(field) = cabrillo
+        .fixed_fields
+        .iter()
+        .find(|field| field.name.eq_ignore_ascii_case("CATEGORY-TRANSMITTER"))
+    {
+        return normalized_param_value(Some(&serde_json::Value::String(field.value.clone())));
+    }
+
+    let field = cabrillo
+        .log_fields
+        .iter()
+        .find(|field| field.name.eq_ignore_ascii_case("CATEGORY-TRANSMITTER"))?;
+    let configured = log
+        .contest_params
+        .as_object()
+        .and_then(|params| params.get(&field.name));
+    normalized_param_value(configured)
+        .or_else(|| normalized_param_value(field.default.as_ref()))
+        .or_else(|| {
+            (field.valid_values.len() == 1).then(|| field.valid_values[0].trim().to_uppercase())
+        })
+}
+
+fn serial_reservation_required(rules: &ContestRules, log: &db::Log, field: &ExchangeField) -> bool {
+    field.serial_scope == SerialScope::Global
+        && category_transmitter(rules, log).is_some_and(|value| value != "ONE")
+}
+
+fn contact_serial_value(contact: &Contact, field_adif: &str) -> Option<i64> {
+    match contact_adif_value(contact, field_adif)? {
+        serde_json::Value::Number(value) => value.as_i64(),
+        serde_json::Value::String(value) => value.trim().parse().ok(),
+        _ => None,
+    }
+    .filter(|value| *value > 0)
+}
+
+fn next_serial_after(maximum: Option<i64>) -> Result<i64, String> {
+    maximum
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(|| "serial value overflow".to_string())
+}
+
+fn serial_state_from_contacts(
+    rules: &ContestRules,
+    log: &db::Log,
+    field: &ExchangeField,
+    contacts: &[Contact],
+) -> Result<SerialState, String> {
+    let reservation_required = serial_reservation_required(rules, log, field);
+    if field.serial_scope == SerialScope::Band {
+        let mut next_by_band = BTreeMap::new();
+        for band in &rules.allowed_bands {
+            let maximum = contacts
+                .iter()
+                .filter(|contact| {
+                    contact_adif_value(contact, "BAND")
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|value| value.eq_ignore_ascii_case(band))
+                })
+                .filter_map(|contact| contact_serial_value(contact, &field.adif))
+                .max();
+            next_by_band.insert(band.clone(), next_serial_after(maximum)?);
+        }
+        return Ok(SerialState {
+            field_adif: field.adif.clone(),
+            scope: field.serial_scope,
+            reservation_required,
+            next: None,
+            next_by_band,
+        });
+    }
+
+    let maximum = contacts
+        .iter()
+        .filter_map(|contact| contact_serial_value(contact, &field.adif))
+        .max();
+    Ok(SerialState {
+        field_adif: field.adif.clone(),
+        scope: field.serial_scope,
+        reservation_required,
+        next: Some(next_serial_after(maximum)?),
+        next_by_band: BTreeMap::new(),
+    })
+}
+
+async fn serial_state(
     State(app_state): State<AppState>,
     Path(log_id): Path<i64>,
-    Json(payload): Json<SerialAllocationPayload>,
+    Query(query): Query<SerialStateQuery>,
 ) -> Json<serde_json::Value> {
-    let field_adif = payload.field_adif.trim();
-    if field_adif.is_empty() {
-        return Json(
-            serde_json::json!({ "ok": false, "error": "serial field ADIF name is required" }),
-        );
-    }
-    let count = payload
-        .count
-        .unwrap_or(DEFAULT_SERIAL_BATCH_SIZE)
-        .clamp(1, MAX_SERIAL_BATCH_SIZE);
-
     let log = match app_state.db.log(log_id).await {
         Ok(Some(log)) => log,
         Ok(None) => {
@@ -2244,20 +2357,63 @@ async fn allocate_serials(
             serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id) }),
         );
     };
-    let Some(serial_field) = rules.exchange.iter().find(|field| {
-        field.is_sent
-            && field.adif.eq_ignore_ascii_case(field_adif)
-            && exchange_field_type_kind(&field.field_type) == "SERIAL"
-    }) else {
+    let Some(field) = sent_serial_field(rules, query.field_adif.trim()) else {
+        return Json(serde_json::json!({
+            "ok": false,
+            "error": format!("{} is not a sent serial field for contest {}", query.field_adif, rules.contest),
+        }));
+    };
+    let contacts = match app_state.db.contacts(log_id).await {
+        Ok(contacts) => contacts,
+        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    };
+    match serial_state_from_contacts(rules, &log, field, &contacts) {
+        Ok(state) => Json(serde_json::json!({ "ok": true, "state": state })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
+    }
+}
+
+async fn allocate_serial(
+    State(app_state): State<AppState>,
+    Path(log_id): Path<i64>,
+    Json(payload): Json<SerialAllocationPayload>,
+) -> Json<serde_json::Value> {
+    let field_adif = payload.field_adif.trim();
+    if field_adif.is_empty() {
+        return Json(
+            serde_json::json!({ "ok": false, "error": "serial field ADIF name is required" }),
+        );
+    }
+    let log = match app_state.db.log(log_id).await {
+        Ok(Some(log)) => log,
+        Ok(None) => {
+            return Json(
+                serde_json::json!({ "ok": false, "error": format!("log {log_id} not found") }),
+            );
+        }
+        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+    };
+    let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
+        return Json(
+            serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id) }),
+        );
+    };
+    let Some(serial_field) = sent_serial_field(rules, field_adif) else {
         return Json(serde_json::json!({
             "ok": false,
             "error": format!("{} is not a sent serial field for contest {}", field_adif, rules.contest),
         }));
     };
+    if !serial_reservation_required(rules, &log, serial_field) {
+        return Json(serde_json::json!({
+            "ok": false,
+            "error": format!("{} does not require serial reservation for contest {}", field_adif, rules.contest),
+        }));
+    }
 
     match app_state
         .db
-        .allocate_serials(log_id, serial_field.adif.clone(), count)
+        .allocate_serial(log_id, serial_field.adif.clone())
         .await
     {
         Ok(allocation) => Json(serde_json::json!({ "ok": true, "allocation": allocation })),
@@ -2579,6 +2735,126 @@ mod tests {
                 ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
             ]),
         )
+    }
+
+    fn serial_contact(serial: i64, band: &str) -> Contact {
+        build_contact(
+            Map::new(),
+            Map::from_iter([
+                ("STX".to_string(), json!(serial)),
+                ("BAND".to_string(), json!(band)),
+            ]),
+        )
+    }
+
+    fn bundled_rules() -> ContestRulesStore {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load")
+    }
+
+    #[test]
+    fn serial_state_uses_committed_global_maximum() {
+        let store = bundled_rules();
+        let rules = store.get("ARRL-SS-CW").expect("ARRL SS rules load");
+        let field = sent_serial_field(rules, "STX").expect("sent serial field exists");
+        let log = db::Log {
+            id: 1,
+            name: "Sweepstakes".to_string(),
+            contest_id: rules.contest.clone(),
+            station_callsign: "N0CALL".to_string(),
+            contest_params: json!({
+                "Precedence": "A",
+                "Check": "00",
+                "Section": "SC",
+                "CATEGORY-TRANSMITTER": "ONE"
+            }),
+        };
+
+        let state = serial_state_from_contacts(
+            rules,
+            &log,
+            field,
+            &[serial_contact(122, "20m"), serial_contact(123, "40m")],
+        )
+        .expect("serial state resolves");
+
+        assert_eq!(state.scope, SerialScope::Global);
+        assert!(!state.reservation_required);
+        assert_eq!(state.next, Some(124));
+    }
+
+    #[test]
+    fn serial_state_tracks_independent_band_maximums() {
+        let store = bundled_rules();
+        let rules = store.get("ARRL-SS-CW").expect("ARRL SS rules load");
+        let mut field = sent_serial_field(rules, "STX")
+            .expect("sent serial field exists")
+            .clone();
+        field.serial_scope = SerialScope::Band;
+        let log = db::Log {
+            id: 1,
+            name: "Per-band serials".to_string(),
+            contest_id: rules.contest.clone(),
+            station_callsign: "N0CALL".to_string(),
+            contest_params: json!({}),
+        };
+
+        let state = serial_state_from_contacts(
+            rules,
+            &log,
+            &field,
+            &[
+                serial_contact(66, "20m"),
+                serial_contact(7, "15m"),
+                serial_contact(8, "15m"),
+            ],
+        )
+        .expect("serial state resolves");
+
+        assert_eq!(state.scope, SerialScope::Band);
+        assert!(!state.reservation_required);
+        assert_eq!(state.next, None);
+        assert_eq!(state.next_by_band.get("20m"), Some(&67));
+        assert_eq!(state.next_by_band.get("15m"), Some(&9));
+        assert_eq!(state.next_by_band.get("40m"), Some(&1));
+    }
+
+    #[test]
+    fn only_multi_transmitter_global_serials_require_reservation() {
+        let store = bundled_rules();
+        let serial_rules = store.get("ARRL-SS-CW").expect("ARRL SS rules load");
+        let field = sent_serial_field(serial_rules, "STX").expect("sent serial field exists");
+        let multi_rules = store.get("CQ-WW-CW").expect("CQWW rules load");
+        let multi_log = db::Log {
+            id: 1,
+            name: "Multi-two".to_string(),
+            contest_id: multi_rules.contest.clone(),
+            station_callsign: "N0CALL".to_string(),
+            contest_params: json!({
+                "CATEGORY-OPERATOR": "MULTI-OP",
+                "CATEGORY-TRANSMITTER": "TWO"
+            }),
+        };
+
+        assert!(serial_reservation_required(multi_rules, &multi_log, field));
+
+        let mut per_band_field = field.clone();
+        per_band_field.serial_scope = SerialScope::Band;
+        assert!(!serial_reservation_required(
+            multi_rules,
+            &multi_log,
+            &per_band_field
+        ));
+
+        let one_log = db::Log {
+            contest_params: json!({
+                "CATEGORY-OPERATOR": "SINGLE-OP",
+                "CATEGORY-TRANSMITTER": "ONE"
+            }),
+            ..multi_log
+        };
+        assert!(!serial_reservation_required(multi_rules, &one_log, field));
     }
 
     #[test]
