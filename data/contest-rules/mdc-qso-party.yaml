@@ -184,7 +184,8 @@ contests:
           - Counties
           - States
           - 'Canadian Provinces'
-          - '*'
+        regex: '^\S+$'
+        valid_values_or_regex: true
     qso_columns:
       - 'Location'
       - 'Mult'

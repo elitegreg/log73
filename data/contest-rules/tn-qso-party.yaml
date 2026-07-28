@@ -81,7 +81,9 @@ contests:
           label: 'Location'
           type: 'String:4'
           help_text: 'Tennessee county, state, province/territory, or DXCC prefix.'
-          in_sets: ['Tennessee Counties', 'States', 'Canadian Provinces', '*']
+          in_sets: ['Tennessee Counties', 'States', 'Canadian Provinces']
+          regex: '^\S+$'
+          valid_values_or_regex: true
         - name: 'NAME'
           label: 'Name'
           type: 'String:75'
@@ -229,7 +231,9 @@ contests:
         type: 'String:4'
         adif: 'SRX_STRING'
         is_sent: false
-        in_sets: ['Tennessee Counties', 'States', 'Canadian Provinces', '*']
+        in_sets: ['Tennessee Counties', 'States', 'Canadian Provinces']
+        regex: '^\S+$'
+        valid_values_or_regex: true
     qso_columns: ['RST(s)', 'RST(r)', 'Location', 'Mult', 'Pts', 'Op']
     qso_column_fields:
       Freq: 'FREQ'
@@ -257,7 +261,9 @@ contests:
         label: 'County, State, Province, or DXCC Prefix'
         type: 'String:4'
         required: true
-        in_sets: ['Tennessee Counties', 'States', 'Canadian Provinces', '*']
+        in_sets: ['Tennessee Counties', 'States', 'Canadian Provinces']
+        regex: '^\S+$'
+        valid_values_or_regex: true
     exchange:
       - name: 'RST(s)'
         type: 'RST'
@@ -270,7 +276,9 @@ contests:
         fixed: true
         source_param: 'Location'
         is_sent: true
-        in_sets: ['Tennessee Counties', 'States', 'Canadian Provinces', '*']
+        in_sets: ['Tennessee Counties', 'States', 'Canadian Provinces']
+        regex: '^\S+$'
+        valid_values_or_regex: true
       - name: 'RST(r)'
         type: 'RST'
         adif: 'RST_RCVD'

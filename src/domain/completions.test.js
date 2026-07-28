@@ -30,9 +30,9 @@ test('exchange completions use valid values', () => {
   assert.deepEqual(exchangeCompletionMatches(field, 'a'), ['ABBE', 'AIKE']);
 });
 
-test('exchange completions keep geographic wildcard candidates but omit the wildcard', () => {
+test('exchange completions include values from combined geographic sets', () => {
   const field = {
-    in_sets: ['Counties', 'States', 'Canadian Provinces', '*'],
+    in_sets: ['Counties', 'States', 'Canadian Provinces'],
     valid_values: ['BAL', 'MS', 'SC', 'SD', 'SK'],
   };
   assert.deepEqual(exchangeCompletionMatches(field, 's'), [

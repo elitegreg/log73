@@ -116,15 +116,38 @@ test('validateConfiguredField accepts configured values or an alternate regex', 
   assert.equal(validateConfiguredField(field, '12345').ok, false);
 });
 
-test('validateExchangeField wildcard sets allow free-form values', () => {
+test('validateExchangeField accepts TN and MDC locations without spaces', () => {
+  const tnLocation = {
+    name: 'Location',
+    type: 'String:4',
+    valid_values: ['ANDE', 'SC', 'SK'],
+    regex: '^\\S+$',
+    valid_values_or_regex: true,
+  };
+  const mdcLocation = {
+    name: 'Location',
+    type: 'String:16',
+    valid_values: ['BAL', 'SC', 'SK'],
+    regex: '^\\S+$',
+    valid_values_or_regex: true,
+  };
+
+  for (const field of [tnLocation, mdcLocation]) {
+    assert.equal(validateExchangeField(field, field.valid_values[0]).ok, true);
+    assert.equal(validateExchangeField(field, 'DL').ok, true);
+    assert.equal(validateExchangeField(field, 'D L').ok, false);
+  }
+});
+
+test('validateExchangeField validates configured values when a field has in_sets', () => {
   const field = {
     name: 'Location',
     type: 'String:16',
-    in_sets: ['States', '*'],
+    in_sets: ['States'],
     valid_values: ['SC', 'NC'],
   };
   assert.equal(validateExchangeField(field, 'sc').ok, true);
-  assert.equal(validateExchangeField(field, 'Somewhere').ok, true);
+  assert.equal(validateExchangeField(field, 'Somewhere').ok, false);
 });
 
 test('validateExchangeField validates regex patterns', () => {

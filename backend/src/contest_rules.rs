@@ -72,6 +72,10 @@ pub struct ContestParam {
     pub required: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub regex: Option<String>,
+    /// Accept a configured value or a value matching `regex`, rather than
+    /// requiring both when both validators are present.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub valid_values_or_regex: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -614,9 +618,6 @@ fn apply_defines(current: &mut Vec<ValueSet>, updates: &[ValueSet]) {
 fn defined_values(define: &[ValueSet], in_sets: &[String]) -> Result<Vec<String>, String> {
     let mut values = Vec::new();
     for set_name in in_sets {
-        if set_name == "*" {
-            continue;
-        }
         let value_set = define
             .iter()
             .find(|value_set| &value_set.name == set_name)
@@ -1576,12 +1577,12 @@ contests:
             .find(|field| field.name == "Location" && !field.is_sent)
             .expect("in-state MDC received location should exist");
         assert_eq!(in_state_received.field_type, "String:16");
-        assert!(
-            in_state_received
-                .in_sets
-                .iter()
-                .any(|set_name| set_name == "*")
+        assert_eq!(
+            in_state_received.in_sets,
+            vec!["Counties", "States", "Canadian Provinces"]
         );
+        assert_eq!(in_state_received.regex.as_deref(), Some(r"^\S+$"));
+        assert!(in_state_received.valid_values_or_regex);
         assert!(in_state_received.valid_values.contains(&"BAL".to_string()));
         assert!(in_state_received.valid_values.contains(&"SC".to_string()));
         assert!(in_state_received.valid_values.contains(&"SK".to_string()));
@@ -1638,24 +1639,24 @@ contests:
             .find(|field| field.name == "Location" && !field.is_sent)
             .expect("in-state received location should exist");
         assert_eq!(received_location.field_type, "String:4");
-        assert!(
-            received_location
-                .in_sets
-                .iter()
-                .any(|set_name| set_name == "*")
+        assert_eq!(
+            received_location.in_sets,
+            vec!["Tennessee Counties", "States", "Canadian Provinces"]
         );
+        assert_eq!(received_location.regex.as_deref(), Some(r"^\S+$"));
+        assert!(received_location.valid_values_or_regex);
         assert!(received_location.valid_values.contains(&"ANDE".to_string()));
         assert!(received_location.valid_values.contains(&"SC".to_string()));
         assert!(received_location.valid_values.contains(&"SK".to_string()));
 
         assert_eq!(outside.log_params[0].name, "Location");
         assert_eq!(outside.log_params[0].field_type, "String:4");
-        assert!(
-            outside.log_params[0]
-                .in_sets
-                .iter()
-                .any(|set_name| set_name == "*")
+        assert_eq!(
+            outside.log_params[0].in_sets,
+            vec!["Tennessee Counties", "States", "Canadian Provinces"]
         );
+        assert_eq!(outside.log_params[0].regex.as_deref(), Some(r"^\S+$"));
+        assert!(outside.log_params[0].valid_values_or_regex);
         assert_eq!(outside.multipliers.len(), 1);
         assert_eq!(outside.multipliers[0].name, "Tennessee County");
     }

@@ -29,11 +29,7 @@ function validateSingleValue(field, value, radioMode) {
     return { ok: false, error: `${label} must be numeric.` };
   }
 
-  const allowsAnyValue = (field?.in_sets ?? []).some(
-    (setName) => String(setName).trim() === '*',
-  );
-  const hasValidValues =
-    !allowsAnyValue && (field?.valid_values ?? []).length > 0;
+  const hasValidValues = (field?.valid_values ?? []).length > 0;
   const matchesValidValue =
     !hasValidValues ||
     field.valid_values.some(

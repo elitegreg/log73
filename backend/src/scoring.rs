@@ -1133,6 +1133,7 @@ mod tests {
                     field_type: "String:16".to_string(),
                     required: None,
                     regex: None,
+                    valid_values_or_regex: false,
                     default: None,
                     in_sets: Vec::new(),
                     valid_values: category_power_values

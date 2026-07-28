@@ -694,7 +694,7 @@ fn validate_contest_param(param: &ContestParam, value: Option<&Value>) -> Result
                 line,
                 &param.valid_values,
                 param.regex.as_deref(),
-                false,
+                param.valid_values_or_regex,
                 "CW",
             )?;
         }
@@ -711,7 +711,7 @@ fn validate_contest_param(param: &ContestParam, value: Option<&Value>) -> Result
         &value,
         &param.valid_values,
         param.regex.as_deref(),
-        false,
+        param.valid_values_or_regex,
         "CW",
     )
 }
@@ -953,11 +953,7 @@ fn validate_exchange_field(
         &field.name,
         &field.field_type,
         &value,
-        if field.in_sets.iter().any(|set_name| set_name == "*") {
-            &[]
-        } else {
-            &field.valid_values
-        },
+        &field.valid_values,
         field.regex.as_deref(),
         field.valid_values_or_regex,
         radio_mode,
@@ -1580,13 +1576,15 @@ mod tests {
     }
 
     #[test]
-    fn wildcard_exchange_set_allows_free_form_values_within_field_length() {
+    fn exchange_field_accepts_configured_values_or_no_space_regex() {
         let mut rules = test_rules();
         rules.exchange[0].name = "Location".to_string();
         rules.exchange[0].field_type = "String:16".to_string();
         rules.exchange[0].adif = "SRX_STRING".to_string();
-        rules.exchange[0].in_sets = vec!["States".to_string(), "*".to_string()];
+        rules.exchange[0].in_sets = vec!["States".to_string()];
         rules.exchange[0].valid_values = vec!["SC".to_string(), "NC".to_string()];
+        rules.exchange[0].regex = Some(r"^\S+$".to_string());
+        rules.exchange[0].valid_values_or_regex = true;
 
         let mut contact = test_contact();
         {
@@ -1595,7 +1593,7 @@ mod tests {
                 .and_then(Value::as_object_mut)
                 .expect("contact adif should be an object");
             adif.remove("RST_RCVD");
-            adif.insert("SRX_STRING".to_string(), json!("FREDERICK COUNTY"));
+            adif.insert("SRX_STRING".to_string(), json!("DL"));
         }
         assert!(validate_contact(&rules, &test_bands(), 1, &contact).is_ok());
 
@@ -1603,7 +1601,7 @@ mod tests {
             .get_mut("adif")
             .and_then(Value::as_object_mut)
             .expect("contact adif should be an object")
-            .insert("SRX_STRING".to_string(), json!("SEVENTEEN CHARACT"));
+            .insert("SRX_STRING".to_string(), json!("FREDERICK COUNTY"));
         assert!(validate_contact(&rules, &test_bands(), 1, &contact).is_err());
     }
 
