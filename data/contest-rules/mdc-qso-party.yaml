@@ -161,7 +161,7 @@ contests:
         values_from_file: us_states.dat
         exclude: ['MD']
       - name: 'Canadian Provinces'
-        values_from_file: canadian_provices.dat
+        values_from_file: canadian_provinces.dat
     log_params:
       - name: 'County'
         label: 'County'

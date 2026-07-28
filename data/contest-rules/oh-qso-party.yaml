@@ -120,8 +120,7 @@ contests:
         values_from_file: us_states.dat
         exclude: ['OH']
       - name: 'Canadian Provinces'
-        values:
-          ['NL', 'PE', 'NS', 'NB', 'QC', 'ON', 'MB', 'SK', 'AB', 'BC', 'NT']
+        values_from_file: canadian_provinces.dat
     log_params:
       - name: 'County'
         label: 'Ohio County'

@@ -155,7 +155,7 @@ contests:
         values_from_file: us_states.dat
         exclude: ['SC']
       - name: 'Canadian Provinces'
-        values_from_file: canadian_provices.dat
+        values_from_file: canadian_provinces.dat
       - name: 'Washington DC'
         values: ['DC']
     log_params:

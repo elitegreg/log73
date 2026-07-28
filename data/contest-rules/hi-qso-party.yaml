@@ -119,7 +119,7 @@ contests:
       - name: 'Washington DC'
         values: ['DC']
       - name: 'Canadian Provinces'
-        values_from_file: canadian_provices.dat
+        values_from_file: canadian_provinces.dat
     log_params:
       - name: 'District'
         label: 'Hawaii District'

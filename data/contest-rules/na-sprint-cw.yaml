@@ -18,7 +18,7 @@ contests:
       - name: 'District of Columbia'
         values: ['DC']
       - name: 'Canadian Multipliers'
-        values_from_file: canadian_provices.dat
+        values_from_file: canadian_provinces.dat
       - name: 'North American Countries'
         values:
           - 4U1UN
