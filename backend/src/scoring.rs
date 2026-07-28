@@ -410,7 +410,11 @@ fn score_qso_points(
             .when
             .as_ref()
             .map(|condition| condition_matches(condition, contact, rules))
-            .unwrap_or(true);
+            .unwrap_or(true)
+            && rule
+                .when_all
+                .iter()
+                .all(|condition| condition_matches(condition, contact, rules));
         if matches {
             return Some(rule.points);
         }
@@ -451,6 +455,13 @@ fn multiplier_matches(
         .exclude_call_suffixes
         .iter()
         .any(|suffix| call.ends_with(&suffix.trim().to_uppercase()))
+    {
+        return false;
+    }
+    if multiplier
+        .when
+        .as_ref()
+        .is_some_and(|condition| !condition_matches(condition, contact, rules))
     {
         return false;
     }
@@ -1125,10 +1136,12 @@ mod tests {
                         values: vec!["SSB".to_string()],
                         valid_values: Vec::new(),
                     }),
+                    when_all: Vec::new(),
                     points: 1,
                 },
                 QsoPointRule {
                     when: None,
+                    when_all: Vec::new(),
                     points: 2,
                 },
             ],
@@ -1144,6 +1157,7 @@ mod tests {
             key: vec!["STATE".to_string()],
             in_sets: Vec::new(),
             valid_values: Vec::new(),
+            when: None,
             exclude_call_suffixes: Vec::new(),
             exclude_values: Vec::new(),
             fixed_key: None,
@@ -1226,6 +1240,86 @@ mod tests {
         assert_eq!(totals.score, 3);
         assert_eq!(contact_meta_value(&contacts[0], "pts"), Some(&json!(1)));
         assert_eq!(contact_meta_value(&contacts[1], "pts"), Some(&json!(2)));
+    }
+
+    #[test]
+    fn conditional_point_rules_distinguish_arrl_160_domestic_and_dx_contacts() {
+        let domestic = || ScoringCondition {
+            field: "DXCC".to_string(),
+            in_set: None,
+            in_sets: Vec::new(),
+            values: vec!["1".to_string(), "291".to_string()],
+            valid_values: Vec::new(),
+        };
+        let station_domestic = || ScoringCondition {
+            field: "MY_DXCC".to_string(),
+            ..domestic()
+        };
+        let points = QsoPoints {
+            points: None,
+            rules: vec![
+                QsoPointRule {
+                    when: None,
+                    when_all: vec![domestic(), station_domestic()],
+                    points: 2,
+                },
+                QsoPointRule {
+                    when: Some(domestic()),
+                    when_all: Vec::new(),
+                    points: 5,
+                },
+                QsoPointRule {
+                    when: Some(station_domestic()),
+                    when_all: Vec::new(),
+                    points: 5,
+                },
+                QsoPointRule {
+                    when: None,
+                    when_all: Vec::new(),
+                    points: 0,
+                },
+            ],
+            geography: None,
+            category_band_param: None,
+        };
+        let rules = test_rules(
+            points,
+            vec!["CALL"],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = vec![
+            contact(vec![
+                ("CALL", json!("K1AAA")),
+                ("DXCC", json!(291)),
+                ("MY_DXCC", json!(1)),
+            ]),
+            contact(vec![
+                ("CALL", json!("F1AAA")),
+                ("DXCC", json!(227)),
+                ("MY_DXCC", json!(291)),
+            ]),
+            contact(vec![
+                ("CALL", json!("VE1AAA")),
+                ("DXCC", json!(1)),
+                ("MY_DXCC", json!(227)),
+            ]),
+            contact(vec![
+                ("CALL", json!("DL1AAA")),
+                ("DXCC", json!(230)),
+                ("MY_DXCC", json!(227)),
+            ]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 12);
+        assert_eq!(contact_meta_value(&contacts[0], "pts"), Some(&json!(2)));
+        assert_eq!(contact_meta_value(&contacts[1], "pts"), Some(&json!(5)));
+        assert_eq!(contact_meta_value(&contacts[2], "pts"), Some(&json!(5)));
+        assert_eq!(contact_meta_value(&contacts[3], "pts"), Some(&json!(0)));
     }
 
     #[test]

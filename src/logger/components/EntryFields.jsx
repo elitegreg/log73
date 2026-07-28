@@ -9,6 +9,7 @@ import { CALLSIGN_FIELD_WIDTH_CHARS } from '../mainWindowHelpers';
 function EntryFields({
   settings,
   radioMode,
+  conditionFields,
   callSignRef,
   callSign,
   dxccLabel,
@@ -57,7 +58,12 @@ function EntryFields({
       {settings?.exchange?.map((field, index) => {
         const { kind, maxLength } = parseFieldType(field.type, radioMode);
         const value = exchangeValue(field);
-        const validation = validateExchangeField(field, value, radioMode);
+        const validation = validateExchangeField(
+          field,
+          value,
+          radioMode,
+          conditionFields,
+        );
         const fieldWidthChars = Math.max(maxLength + 1, field.name.length, 4);
         const readOnly =
           field.fixed === true || (field.is_sent && kind === 'SERIAL');

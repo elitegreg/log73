@@ -147,6 +147,32 @@ export function validateConfiguredField(field, value, radioMode = 'CW') {
   return validateSingleValue(field, normalizedValue, radioMode);
 }
 
-export function validateExchangeField(field, value, radioMode = 'CW') {
+export function validateExchangeField(
+  field,
+  value,
+  radioMode = 'CW',
+  conditionFields = {},
+) {
+  const condition = field?.only_when;
+  if (condition) {
+    const conditionValue = String(
+      conditionFields?.[condition.field] ?? '',
+    )
+      .trim()
+      .toUpperCase();
+    const candidates = [
+      ...(condition.valid_values ?? []),
+      ...(condition.values ?? []),
+    ].map((candidate) => String(candidate).trim().toUpperCase());
+    const applies =
+      conditionValue !== '' &&
+      (candidates.length === 0 || candidates.includes(conditionValue));
+    const trimmedValue = String(value ?? '').trim();
+    if (!applies) {
+      return trimmedValue === ''
+        ? { ok: true, error: '' }
+        : { ok: false, error: `${fieldValueLabel(field)} must be blank.` };
+    }
+  }
   return validateConfiguredField(field, value, radioMode);
 }

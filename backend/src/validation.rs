@@ -1,5 +1,7 @@
 use crate::bands::{Band, band_by_name, band_for_frequency};
-use crate::contest_rules::{ContestParam, ContestRules, ContestRulesStore, ExchangeField};
+use crate::contest_rules::{
+    ContestParam, ContestRules, ContestRulesStore, ExchangeField, ScoringCondition,
+};
 use crate::cw;
 use crate::db::{
     self, Contact, Database, NewLog, RadioPayload, UpdateLog, contact_adif_value, contact_id,
@@ -936,6 +938,12 @@ fn validate_exchange_field(
     radio_mode: &str,
 ) -> Result<(), String> {
     let value = json_trimmed_string(contact_adif_value(contact, &field.adif)).unwrap_or_default();
+    if !exchange_field_applies(field, contact) {
+        if value.is_empty() {
+            return Ok(());
+        }
+        return Err(format!("{} must be blank", field.name));
+    }
     if value.is_empty() {
         return Err(format!("{} is required", field.name));
     }
@@ -951,6 +959,28 @@ fn validate_exchange_field(
         field.regex.as_deref(),
         radio_mode,
     )
+}
+
+pub(crate) fn exchange_field_applies(field: &ExchangeField, contact: &Contact) -> bool {
+    field
+        .only_when
+        .as_ref()
+        .is_none_or(|condition| contact_matches_condition(contact, condition))
+}
+
+fn contact_matches_condition(contact: &Contact, condition: &ScoringCondition) -> bool {
+    let value = json_trimmed_string(contact_adif_value(contact, &condition.field))
+        .or_else(|| json_trimmed_string(contact_meta_value(contact, &condition.field)))
+        .unwrap_or_default()
+        .to_uppercase();
+    if value.is_empty() {
+        return false;
+    }
+    let mut valid_values = condition.valid_values.iter().chain(condition.values.iter());
+    valid_values
+        .clone()
+        .next()
+        .is_none_or(|_| valid_values.any(|candidate| candidate.eq_ignore_ascii_case(&value)))
 }
 
 fn validate_typed_field(
@@ -1262,6 +1292,7 @@ mod tests {
                 regex: None,
                 in_sets: Vec::new(),
                 valid_values: Vec::new(),
+                only_when: None,
                 is_sent: false,
             }],
             qso_columns: Vec::new(),
@@ -1437,6 +1468,35 @@ mod tests {
         let mut contact = test_contact();
         contact.insert("RST_RCVD".to_string(), json!(59));
         assert!(validate_contact(&rules, &test_bands(), 1, &contact).is_err());
+    }
+
+    #[test]
+    fn conditionally_requires_or_forbids_exchange_fields() {
+        let mut rules = test_rules();
+        let field = &mut rules.exchange[0];
+        field.name = "Section".to_string();
+        field.field_type = "String:3".to_string();
+        field.adif = "ARRL_SECT".to_string();
+        field.valid_values = vec!["EMA".to_string(), "ONN".to_string()];
+        field.only_when = Some(ScoringCondition {
+            field: "DXCC".to_string(),
+            in_set: None,
+            in_sets: Vec::new(),
+            values: vec!["1".to_string(), "291".to_string()],
+            valid_values: Vec::new(),
+        });
+
+        let mut domestic = test_contact();
+        db::set_contact_adif(&mut domestic, "DXCC", json!(291));
+        assert!(validate_contact(&rules, &test_bands(), 1, &domestic).is_err());
+        db::set_contact_adif(&mut domestic, "ARRL_SECT", json!("EMA"));
+        assert!(validate_contact(&rules, &test_bands(), 1, &domestic).is_ok());
+
+        let mut dx = test_contact();
+        db::set_contact_adif(&mut dx, "DXCC", json!(230));
+        assert!(validate_contact(&rules, &test_bands(), 1, &dx).is_ok());
+        db::set_contact_adif(&mut dx, "ARRL_SECT", json!("EMA"));
+        assert!(validate_contact(&rules, &test_bands(), 1, &dx).is_err());
     }
 
     #[test]

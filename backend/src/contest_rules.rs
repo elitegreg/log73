@@ -35,6 +35,10 @@ pub struct ExchangeField {
     pub in_sets: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub valid_values: Vec<String>,
+    /// When set, this exchange is required only for matching contacts and must
+    /// otherwise be blank.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub only_when: Option<ScoringCondition>,
     pub is_sent: bool,
 }
 
@@ -113,6 +117,8 @@ pub struct ScoringCondition {
 pub struct QsoPointRule {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<ScoringCondition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub when_all: Vec<ScoringCondition>,
     pub points: i64,
 }
 
@@ -152,6 +158,8 @@ pub struct MultiplierRule {
     pub in_sets: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub valid_values: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub when: Option<ScoringCondition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_call_suffixes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -722,11 +730,17 @@ fn resolve_in_sets(contest: &mut ContestRules) -> Result<(), String> {
         if !field.in_sets.is_empty() {
             field.valid_values = defined_values(&contest.define, &field.in_sets)?;
         }
+        if let Some(condition) = &mut field.only_when {
+            resolve_scoring_condition_in_sets(&contest.define, condition)?;
+        }
     }
 
     if let Some(qso_points) = &mut contest.qso_points {
         for rule in &mut qso_points.rules {
             if let Some(condition) = &mut rule.when {
+                resolve_scoring_condition_in_sets(&contest.define, condition)?;
+            }
+            for condition in &mut rule.when_all {
                 resolve_scoring_condition_in_sets(&contest.define, condition)?;
             }
         }
@@ -735,6 +749,9 @@ fn resolve_in_sets(contest: &mut ContestRules) -> Result<(), String> {
     for multiplier in &mut contest.multipliers {
         if !multiplier.in_sets.is_empty() {
             multiplier.valid_values = defined_values(&contest.define, &multiplier.in_sets)?;
+        }
+        if let Some(condition) = &mut multiplier.when {
+            resolve_scoring_condition_in_sets(&contest.define, condition)?;
         }
     }
 
@@ -1749,6 +1766,35 @@ contests:
                 .as_ref()
                 .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
             Some("ARRL-SS-SSB")
+        );
+    }
+
+    #[test]
+    fn bundled_arrl_160_rules_resolve_conditional_sections() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let contest = store.get("ARRL-160").expect("ARRL 160 rules should load");
+
+        assert_eq!(contest.allowed_bands, ["160m"]);
+        assert_eq!(contest.allowed_modes, ["CW"]);
+        assert_eq!(contest.dupe_key, ["CALL"]);
+        assert_eq!(
+            contest.qso_points.as_ref().map(|points| points.rules.len()),
+            Some(4)
+        );
+        let received_section = contest
+            .exchange
+            .iter()
+            .find(|field| field.name == "Section" && !field.is_sent)
+            .expect("received Section should exist");
+        assert!(received_section.valid_values.contains(&"EMA".to_string()));
+        assert_eq!(
+            received_section
+                .only_when
+                .as_ref()
+                .map(|condition| condition.valid_values.len()),
+            Some(15)
         );
     }
 

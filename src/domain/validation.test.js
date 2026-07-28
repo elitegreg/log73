@@ -39,6 +39,25 @@ test('validateExchangeField requires non-empty values', () => {
   assert.match(result.error, /Section is required/);
 });
 
+test('validateExchangeField conditionally requires or forbids an exchange', () => {
+  const field = {
+    name: 'Section',
+    type: 'String:3',
+    valid_values: ['EMA', 'ONN'],
+    only_when: { field: 'DXCC', valid_values: ['1', '291'] },
+  };
+  assert.equal(validateExchangeField(field, '', 'CW', { DXCC: 291 }).ok, false);
+  assert.equal(
+    validateExchangeField(field, 'ema', 'CW', { DXCC: 291 }).ok,
+    true,
+  );
+  assert.equal(validateExchangeField(field, '', 'CW', { DXCC: 230 }).ok, true);
+  assert.equal(
+    validateExchangeField(field, 'EMA', 'CW', { DXCC: 230 }).ok,
+    false,
+  );
+});
+
 test('validateExchangeField validates RST by mode', () => {
   assert.equal(
     validateExchangeField({ name: 'RST', type: 'RST' }, '599', 'CW').ok,

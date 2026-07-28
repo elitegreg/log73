@@ -568,6 +568,7 @@ mod tests {
                     regex: None,
                     in_sets: Vec::new(),
                     valid_values: Vec::new(),
+                    only_when: None,
                     is_sent: true,
                 },
                 crate::contest_rules::ExchangeField {
@@ -580,6 +581,7 @@ mod tests {
                     regex: None,
                     in_sets: Vec::new(),
                     valid_values: Vec::new(),
+                    only_when: None,
                     is_sent: false,
                 },
             ],

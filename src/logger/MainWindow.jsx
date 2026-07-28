@@ -433,6 +433,10 @@ function MainWindow({
       field,
       exchangeValue(field, values),
       radioMode,
+      {
+        DXCC: dxccAdifNumber(currentDxccInfo),
+        MY_DXCC: dxccAdifNumber(stationDxccInfo),
+      },
     );
   }
 
@@ -447,7 +451,7 @@ function MainWindow({
       Boolean(settings?.exchange) &&
       callSign.trim() !== '' &&
       settings.exchange.every(
-        (field) => String(exchangeValue(field, values)).trim() !== '',
+        (field) => exchangeValidation(field, values).ok,
       )
     );
   }
@@ -982,6 +986,10 @@ function MainWindow({
       <EntryFields
         settings={settings}
         radioMode={radioMode}
+        conditionFields={{
+          DXCC: dxccAdifNumber(currentDxccInfo),
+          MY_DXCC: dxccAdifNumber(stationDxccInfo),
+        }}
         callSignRef={callSignRef}
         callSign={callSign}
         dxccLabel={currentDxccLabel}

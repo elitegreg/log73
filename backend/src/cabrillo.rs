@@ -203,13 +203,13 @@ fn render_qso_line(rules: &ContestRules, log: &Log, contact: &Contact) -> Result
     let sent_fields = rules
         .exchange
         .iter()
-        .filter(|field| field.is_sent)
+        .filter(|field| field.is_sent && crate::validation::exchange_field_applies(field, contact))
         .map(|field| exchange_token(field, log, contact))
         .collect::<Result<Vec<_>, _>>()?;
     let received_fields = rules
         .exchange
         .iter()
-        .filter(|field| !field.is_sent)
+        .filter(|field| !field.is_sent && crate::validation::exchange_field_applies(field, contact))
         .map(|field| exchange_token(field, log, contact))
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -392,6 +392,7 @@ mod tests {
                     regex: None,
                     in_sets: Vec::new(),
                     valid_values: Vec::new(),
+                    only_when: None,
                     is_sent: true,
                 },
                 ExchangeField {
@@ -404,6 +405,7 @@ mod tests {
                     regex: None,
                     in_sets: Vec::new(),
                     valid_values: Vec::new(),
+                    only_when: None,
                     is_sent: true,
                 },
                 ExchangeField {
@@ -416,6 +418,7 @@ mod tests {
                     regex: None,
                     in_sets: Vec::new(),
                     valid_values: Vec::new(),
+                    only_when: None,
                     is_sent: false,
                 },
                 ExchangeField {
@@ -428,6 +431,7 @@ mod tests {
                     regex: None,
                     in_sets: Vec::new(),
                     valid_values: Vec::new(),
+                    only_when: None,
                     is_sent: false,
                 },
             ],
