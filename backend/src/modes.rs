@@ -7,16 +7,31 @@ pub fn mode_is_cw(mode: &str) -> bool {
 }
 
 pub fn transmit_modes_for_radio_kind(radio_kind: &str) -> Result<&'static [Mode], String> {
-    let driver = supported_drivers()
-        .iter()
-        .copied()
-        .find(|driver| driver.id.eq_ignore_ascii_case(radio_kind.trim()))
-        .ok_or_else(|| format!("unsupported radio driver: {}", radio_kind.trim()))?;
+    let driver = driver_for_radio_kind(radio_kind)?;
     let capabilities = driver
         .capabilities(capability_region(driver))
         .map_err(|error| error.to_string())?;
 
     Ok(capabilities.tx.map_or(&[], |tx| tx.modes))
+}
+
+pub fn supports_cat_cw_keying_for_radio_kind(radio_kind: &str) -> Result<bool, String> {
+    let driver = driver_for_radio_kind(radio_kind)?;
+    let capabilities = driver
+        .capabilities(capability_region(driver))
+        .map_err(|error| error.to_string())?;
+
+    Ok(capabilities
+        .keyer
+        .is_some_and(|keyer| keyer.send_cw.is_supported()))
+}
+
+fn driver_for_radio_kind(radio_kind: &str) -> Result<DriverDescriptor, String> {
+    supported_drivers()
+        .iter()
+        .copied()
+        .find(|driver| driver.id.eq_ignore_ascii_case(radio_kind.trim()))
+        .ok_or_else(|| format!("unsupported radio driver: {}", radio_kind.trim()))
 }
 
 pub fn default_data_mode(transmit_modes: &[Mode]) -> Mode {
@@ -124,6 +139,14 @@ mod tests {
     fn driver_transmit_modes_come_from_capabilities() {
         let modes = transmit_modes_for_radio_kind("dummy").expect("dummy capabilities");
         assert_eq!(modes, Mode::ALL);
+    }
+
+    #[test]
+    fn cat_cw_keying_support_comes_from_driver_capabilities() {
+        assert!(supports_cat_cw_keying_for_radio_kind("elecraft-k4").expect("K4 capabilities"));
+        assert!(
+            !supports_cat_cw_keying_for_radio_kind("yaesu-ftdx10").expect("FTDX10 capabilities")
+        );
     }
 
     #[test]

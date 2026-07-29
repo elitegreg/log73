@@ -1974,6 +1974,7 @@ struct RadioKindOption {
     transmit_modes: Vec<String>,
     default_data_mode: String,
     default_rtty_mode: String,
+    supports_cat_cw_keying: bool,
 }
 
 async fn radio_kinds() -> Json<Vec<RadioKindOption>> {
@@ -1985,6 +1986,9 @@ async fn radio_kinds() -> Json<Vec<RadioKindOption>> {
                     .expect("registered radio driver capabilities should be valid");
                 let default_data_mode = modes::default_data_mode(transmit_modes);
                 let default_rtty_mode = modes::default_rtty_mode(transmit_modes);
+                let supports_cat_cw_keying =
+                    modes::supports_cat_cw_keying_for_radio_kind(driver.id)
+                        .expect("registered radio driver capabilities should be valid");
                 RadioKindOption {
                     id: driver.id,
                     display_name: driver.display_name,
@@ -1992,6 +1996,7 @@ async fn radio_kinds() -> Json<Vec<RadioKindOption>> {
                     transmit_modes: transmit_modes.iter().map(ToString::to_string).collect(),
                     default_data_mode: default_data_mode.to_string(),
                     default_rtty_mode: default_rtty_mode.to_string(),
+                    supports_cat_cw_keying,
                 }
             })
             .collect(),

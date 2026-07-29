@@ -1750,8 +1750,10 @@ mod tests {
         fs::create_dir_all(&log_dir).expect("create log directory");
         fs::write(&path, "log output").expect("write log file");
 
-        let mut settings = LauncherSettings::default();
-        settings.log_file_path = path.to_string_lossy().into_owned();
+        let settings = LauncherSettings {
+            log_file_path: path.to_string_lossy().into_owned(),
+            ..LauncherSettings::default()
+        };
 
         assert!(
             remove_log_file(&settings)

@@ -37,6 +37,7 @@ function normalizeRadioKinds(value) {
             transmit_modes: [],
             default_data_mode: DEFAULT_DATA_MODE,
             default_rtty_mode: DEFAULT_RTTY_MODE,
+            supports_cat_cw_keying: false,
           }
         : {
             id: String(kind?.id ?? '').trim(),
@@ -53,6 +54,7 @@ function normalizeRadioKinds(value) {
               normalizeMode(kind?.default_data_mode) || DEFAULT_DATA_MODE,
             default_rtty_mode:
               normalizeMode(kind?.default_rtty_mode) || DEFAULT_RTTY_MODE,
+            supports_cat_cw_keying: Boolean(kind?.supports_cat_cw_keying),
           },
     )
     .filter((kind) => kind.id);
@@ -348,7 +350,11 @@ function CreateRadioScreen() {
         normalizeSoundDeviceId(radio.voice_output_device_id) ??
           NONE_SOUND_DEVICE_ID,
       );
-      setCwKeyerType(radio.cw_keyer_type ?? DEFAULT_CW_KEYER_TYPE);
+      setCwKeyerType(
+        radio.cw_keyer_type === 'cat' && !savedRadioKind?.supports_cat_cw_keying
+          ? DEFAULT_CW_KEYER_TYPE
+          : (radio.cw_keyer_type ?? DEFAULT_CW_KEYER_TYPE),
+      );
       setWinkeyerSerialPort(radio.winkeyer_serial_port ?? '');
       setCwSerialPort(radio.cw_serial_port ?? '');
       setCwSerialBaudRate(
@@ -430,6 +436,11 @@ function CreateRadioScreen() {
     setRadioKind(nextRadioKind);
     setDataMode(nextRadioKindDetails?.default_data_mode ?? DEFAULT_DATA_MODE);
     setRttyMode(nextRadioKindDetails?.default_rtty_mode ?? DEFAULT_RTTY_MODE);
+    if (!nextRadioKindDetails?.supports_cat_cw_keying) {
+      setCwKeyerType((current) =>
+        current === 'cat' ? DEFAULT_CW_KEYER_TYPE : current,
+      );
+    }
   }
 
   async function saveRadio(event) {
@@ -691,7 +702,9 @@ function CreateRadioScreen() {
         >
           <option value="none">None</option>
           <option value="winkeyer">Winkeyer</option>
-          <option value="cat">CAT</option>
+          {selectedRadioKindDetails?.supports_cat_cw_keying ? (
+            <option value="cat">CAT</option>
+          ) : null}
           <option value="serial">Serial (DTR/RTS)</option>
         </select>
       </label>

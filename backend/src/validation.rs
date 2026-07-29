@@ -130,6 +130,9 @@ pub fn validate_radio(payload: &RadioPayload) -> Result<(), String> {
     if !ALLOWED_CW_KEYER_TYPES.contains(&cw_keyer_type.as_str()) {
         return Err("CW keyer type must be one of: none, winkeyer, cat, serial".to_string());
     }
+    if cw_keyer_type == "cat" && !crate::modes::supports_cat_cw_keying_for_radio_kind(radio_kind)? {
+        return Err("CAT CW keying is not supported by this radio".to_string());
+    }
 
     match transport_kind.as_str() {
         "tcp" => {
@@ -1733,6 +1736,16 @@ mod tests {
         radio.cw_keyer_type = "cat".to_string();
 
         assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn rejects_cat_cw_keyer_when_radio_does_not_support_cw_sending() {
+        let mut radio = test_radio();
+        radio.radio_kind = "yaesu-ftdx10".to_string();
+        radio.cw_keyer_type = "cat".to_string();
+
+        let error = validate_radio(&radio).expect_err("unsupported CAT CW keyer should fail");
+        assert!(error.contains("CAT CW keying is not supported"));
     }
 
     #[test]
