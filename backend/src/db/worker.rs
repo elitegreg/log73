@@ -410,8 +410,7 @@ mod tests {
     use crate::cw::DEFAULT_CW_MESSAGES;
     use crate::db::config::{DEFAULT_DXCLUSTER_MAX_AGE_MIN, DEFAULT_DXCLUSTER_PORT};
     use crate::db::contact::{
-        contact_adif_value, contact_id, contact_log_id, contact_meta_value, set_contact_adif,
-        set_contact_meta,
+        contact_adif_value, contact_id, contact_log_id, set_contact_adif, set_contact_meta,
     };
     use crate::db::models::LoginPasswordUpdate;
     use crate::voice_messages::DEFAULT_VOICE_MESSAGES;
@@ -867,8 +866,9 @@ mod tests {
         set_contact_adif(&mut contact, "CONT", json!("EU"));
         set_contact_adif(&mut contact, "MY_DXCC", json!(291));
         set_contact_adif(&mut contact, "MY_CONT", json!("NA"));
-        set_contact_meta(&mut contact, "DXCC_PREFIX", json!("F"));
-        set_contact_meta(&mut contact, "MY_DXCC_PREFIX", json!("K"));
+        set_contact_adif(&mut contact, "APP_LOG73_DXCC_PFX", json!("F"));
+        set_contact_adif(&mut contact, "APP_LOG73_MY_DXCC_PFX", json!("K"));
+        set_contact_adif(&mut contact, "PFX", json!("F1"));
 
         let saved = database
             .upsert_contacts(log.id, vec![contact])
@@ -879,13 +879,14 @@ mod tests {
         assert_eq!(contact_adif_value(&saved[0], "MY_DXCC"), Some(&json!(291)));
         assert_eq!(contact_adif_value(&saved[0], "MY_CONT"), Some(&json!("NA")));
         assert_eq!(
-            contact_meta_value(&saved[0], "DXCC_PREFIX"),
+            contact_adif_value(&saved[0], "APP_LOG73_DXCC_PFX"),
             Some(&json!("F"))
         );
         assert_eq!(
-            contact_meta_value(&saved[0], "MY_DXCC_PREFIX"),
+            contact_adif_value(&saved[0], "APP_LOG73_MY_DXCC_PFX"),
             Some(&json!("K"))
         );
+        assert_eq!(contact_adif_value(&saved[0], "PFX"), Some(&json!("F1")));
     }
 
     #[tokio::test]

@@ -54,6 +54,7 @@ pub enum SerialScope {
     #[default]
     Global,
     Band,
+    CategoryTransmitter,
 }
 
 impl SerialScope {
@@ -169,17 +170,56 @@ pub struct QsoPoints {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum GeographyPointValue {
+    Fixed(i64),
+    ByBand {
+        default: i64,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        by_band: BTreeMap<String, i64>,
+    },
+}
+
+impl Default for GeographyPointValue {
+    fn default() -> Self {
+        Self::Fixed(0)
+    }
+}
+
+impl From<i64> for GeographyPointValue {
+    fn from(points: i64) -> Self {
+        Self::Fixed(points)
+    }
+}
+
+impl GeographyPointValue {
+    pub fn for_band(&self, band: Option<&str>) -> i64 {
+        match self {
+            Self::Fixed(points) => *points,
+            Self::ByBand { default, by_band } => band
+                .and_then(|band| {
+                    by_band
+                        .iter()
+                        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(band))
+                        .map(|(_, points)| *points)
+                })
+                .unwrap_or(*default),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeographyQsoPoints {
     pub country_field: String,
     pub station_country_field: String,
     pub continent_field: String,
     pub station_continent_field: String,
-    pub same_country: i64,
-    pub different_country_north_america: i64,
-    pub different_country_same_continent: i64,
-    pub different_continent: i64,
+    pub same_country: GeographyPointValue,
+    pub different_country_north_america: GeographyPointValue,
+    pub different_country_same_continent: GeographyPointValue,
+    pub different_continent: GeographyPointValue,
     #[serde(default)]
-    pub unresolved: i64,
+    pub unresolved: GeographyPointValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1019,7 +1059,7 @@ mod tests {
     }
 
     #[test]
-    fn serial_scope_defaults_global_and_accepts_band_scope() {
+    fn serial_scope_defaults_global_and_accepts_configured_scopes() {
         let global = resolve_yaml_contest(
             r#"
 contests:
@@ -1056,6 +1096,83 @@ contests:
             "PER-BAND",
         );
         assert_eq!(per_band.exchange[0].serial_scope, SerialScope::Band);
+
+        let category_transmitter = resolve_yaml_contest(
+            r#"
+contests:
+  - id: CATEGORY
+    allowed_bands: [20]
+    allowed_modes: ['CW']
+    exchange:
+      - name: Serial
+        type: 'Serial:6'
+        serial_scope: 'category_transmitter'
+        adif: 'STX'
+        is_sent: true
+    qso_columns: []
+    qso_column_fields: {}
+"#,
+            "CATEGORY",
+        );
+        assert_eq!(
+            category_transmitter.exchange[0].serial_scope,
+            SerialScope::CategoryTransmitter
+        );
+    }
+
+    #[test]
+    fn geography_points_accept_scalars_and_band_overrides() {
+        let contest = resolve_yaml_contest(
+            r#"
+contests:
+  - id: GEOGRAPHY
+    allowed_bands: [40, 20]
+    allowed_modes: ['CW']
+    exchange: []
+    qso_columns: []
+    qso_column_fields: {}
+    scoring:
+      qso_points:
+        geography:
+          country_field: APP_LOG73_DXCC_PFX
+          station_country_field: APP_LOG73_MY_DXCC_PFX
+          continent_field: CONT
+          station_continent_field: MY_CONT
+          same_country: 1
+          different_country_north_america:
+            default: 2
+            by_band:
+              40m: 4
+          different_country_same_continent: 1
+          different_continent:
+            default: 3
+            by_band:
+              40m: 6
+"#,
+            "GEOGRAPHY",
+        );
+        let geography = contest
+            .qso_points
+            .as_ref()
+            .and_then(|points| points.geography.as_ref())
+            .expect("geography should resolve");
+
+        assert_eq!(geography.same_country.for_band(Some("40m")), 1);
+        assert_eq!(
+            geography
+                .different_country_north_america
+                .for_band(Some("40M")),
+            4
+        );
+        assert_eq!(
+            geography
+                .different_country_north_america
+                .for_band(Some("20m")),
+            2
+        );
+        assert_eq!(geography.different_continent.for_band(Some("40m")), 6);
+        assert_eq!(geography.different_continent.for_band(None), 3);
+        assert_eq!(geography.unresolved.for_band(Some("40m")), 0);
     }
 
     #[test]
@@ -1822,13 +1939,58 @@ contests:
                 .as_ref()
                 .and_then(|points| points.geography.as_ref())
                 .map(|geography| geography.country_field.as_str()),
-            Some("DXCC_PREFIX")
+            Some("APP_LOG73_DXCC_PFX")
         );
         assert_eq!(
             cw.qso_points
                 .as_ref()
                 .and_then(|points| points.category_band_param.as_deref()),
             Some("CATEGORY-BAND")
+        );
+        assert_eq!(
+            ssb.cabrillo
+                .as_ref()
+                .and_then(|cabrillo| cabrillo.fixed_fields.first())
+                .map(|field| field.value.as_str()),
+            Some("SSB")
+        );
+    }
+
+    #[test]
+    fn bundled_cqwpx_rules_resolve_cw_and_ssb_variants() {
+        let yaml = include_str!("../../data/contest-rules/cqwpx.yaml");
+        let cw = resolve_yaml_contest(yaml, "CQ-WPX-CW");
+        let ssb = resolve_yaml_contest(yaml, "CQ-WPX-SSB");
+
+        assert_eq!(cw.allowed_modes, vec!["CW".to_string()]);
+        assert_eq!(ssb.allowed_modes, vec!["SSB".to_string()]);
+        assert_eq!(
+            cw.allowed_bands,
+            vec!["160m", "80m", "40m", "20m", "15m", "10m"]
+        );
+        assert_eq!(cw.dupe_key, vec!["CALL", "BAND"]);
+        assert_eq!(cw.multipliers.len(), 1);
+        assert_eq!(cw.multipliers[0].field, "WPX_PREFIX");
+        assert_eq!(cw.multipliers[0].key, vec!["WPX_PREFIX"]);
+        assert_eq!(
+            cw.exchange
+                .iter()
+                .find(|field| field.adif == "STX")
+                .map(|field| field.serial_scope),
+            Some(SerialScope::CategoryTransmitter)
+        );
+        assert_eq!(
+            cw.qso_points
+                .as_ref()
+                .and_then(|points| points.geography.as_ref())
+                .map(|geography| geography.different_continent.for_band(Some("40m"))),
+            Some(6)
+        );
+        assert_eq!(
+            ssb.cabrillo
+                .as_ref()
+                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
+            Some("CQ-WPX-SSB")
         );
         assert_eq!(
             ssb.cabrillo

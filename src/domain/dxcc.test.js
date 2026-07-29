@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  callsignFilterPrefix,
   callsignPrefix,
   dxccContinent,
   dxccLabel,
   lookupDxcc,
-  splitCallsign,
 } from './dxcc.js';
 
 const testland = {
@@ -109,40 +107,27 @@ const TEST_DXCC = {
   ],
 };
 
-test('splitCallsign returns prefix number and suffix', () => {
-  assert.deepEqual(splitCallsign('KB1AWN'), {
-    prefix: 'KB',
-    number: '1',
-    suffix: 'AWN',
-  });
-  assert.deepEqual(splitCallsign('NK12A'), {
-    prefix: 'NK',
-    number: '12',
-    suffix: 'A',
-  });
-  assert.deepEqual(splitCallsign('4O9A'), {
-    prefix: '4O',
-    number: '9',
-    suffix: 'A',
-  });
-  assert.equal(splitCallsign('KP'), null);
-  assert.equal(splitCallsign('4O'), null);
-});
-
-test('callsignPrefix follows the digit-delimited prefix rule', () => {
-  assert.equal(callsignPrefix('KP2M'), 'KP');
-  assert.equal(callsignPrefix('4O9A'), '4O');
-  assert.equal(callsignPrefix('KP'), null);
-  assert.equal(callsignPrefix('4O'), null);
-});
-
-test('callsignFilterPrefix waits for a full prefix plus number', () => {
-  assert.equal(callsignFilterPrefix('K'), '');
-  assert.equal(callsignFilterPrefix('KP'), '');
-  assert.equal(callsignFilterPrefix('4O'), '');
-  assert.equal(callsignFilterPrefix('K1'), 'K1');
-  assert.equal(callsignFilterPrefix('KP2'), 'KP2');
-  assert.equal(callsignFilterPrefix('4O9A'), '4O9');
+test('callsignPrefix follows WPX prefix rules', () => {
+  for (const [callsign, expected] of [
+    ['W7DX', 'W7'],
+    ['OL25LP', 'OL25'],
+    ['DL60CHILD', 'DL60'],
+    ['9A800VZ', '9A800'],
+    ['DR2006Q', 'DR2006'],
+    ['LY1000CW', 'LY1000'],
+    ['KL7RA/WK9', 'WK9'],
+    ['OE/K5ZD', 'OE0'],
+    ['PA/N8BJQ', 'PA0'],
+    ['XEFTJW', 'XE0'],
+    ['F1ABC/MM', 'F1'],
+    ['W9ABC/4', 'W4'],
+    ['K1A/VE3', 'VE3'],
+    ['EA8/K1A', 'EA8'],
+    ['BAD/CALL/FORMAT', null],
+    ['?', null],
+  ]) {
+    assert.equal(callsignPrefix(callsign), expected, callsign);
+  }
 });
 
 test('lookupDxcc prefers exact matches and then longest prefixes', () => {
@@ -157,7 +142,10 @@ test('lookupDxcc prefers exact matches and then longest prefixes', () => {
     utc_offset: 2,
   });
   assert.deepEqual(lookupDxcc(TEST_DXCC, '4O9A'), montenegro);
-  assert.equal(lookupDxcc(TEST_DXCC, 'KP'), null);
+  assert.deepEqual(lookupDxcc(TEST_DXCC, 'KP'), unitedStates);
+  assert.deepEqual(lookupDxcc(TEST_DXCC, '4O'), montenegro);
+  assert.equal(callsignPrefix('W7DX'), 'W7');
+  assert.equal(lookupDxcc(TEST_DXCC, 'W7DX').primary_prefix, 'K');
 });
 
 test('lookupDxcc resolves slash-prefixed and slash-suffixed DXCCs', () => {

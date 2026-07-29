@@ -1,5 +1,6 @@
 use crate::contest_rules::{ContestRules, MultiplierRule, QsoPoints, ScoringCondition};
 use crate::db::{Contact, contact_adif_value, contact_id, contact_meta_value, set_contact_meta};
+use crate::dxcc::callsign_prefix;
 use crate::log_cache::LogCacheProcessor;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -373,32 +374,41 @@ fn score_qso_points(
     rules: &ContestRules,
 ) -> Option<i64> {
     if let Some(geography) = &qso_points.geography {
+        let band = field_value(contact, rules, "BAND");
         let Some(country) = field_value(contact, rules, &geography.country_field) else {
-            return Some(geography.unresolved);
+            return Some(geography.unresolved.for_band(band.as_deref()));
         };
         let Some(station_country) = field_value(contact, rules, &geography.station_country_field)
         else {
-            return Some(geography.unresolved);
+            return Some(geography.unresolved.for_band(band.as_deref()));
         };
         let Some(continent) = field_value(contact, rules, &geography.continent_field) else {
-            return Some(geography.unresolved);
+            return Some(geography.unresolved.for_band(band.as_deref()));
         };
         let Some(station_continent) =
             field_value(contact, rules, &geography.station_continent_field)
         else {
-            return Some(geography.unresolved);
+            return Some(geography.unresolved.for_band(band.as_deref()));
         };
 
         if country == station_country {
-            return Some(geography.same_country);
+            return Some(geography.same_country.for_band(band.as_deref()));
         }
         if continent != station_continent {
-            return Some(geography.different_continent);
+            return Some(geography.different_continent.for_band(band.as_deref()));
         }
         if continent == "NA" {
-            return Some(geography.different_country_north_america);
+            return Some(
+                geography
+                    .different_country_north_america
+                    .for_band(band.as_deref()),
+            );
         }
-        return Some(geography.different_country_same_continent);
+        return Some(
+            geography
+                .different_country_same_continent
+                .for_band(band.as_deref()),
+        );
     }
 
     if let Some(points) = qso_points.points {
@@ -527,6 +537,15 @@ fn field_value(contact: &Map<String, Value>, rules: &ContestRules, field: &str) 
             "SSB" | "FM" | "AM" => "PHONE".to_string(),
             other => other.to_string(),
         });
+    }
+    if field.eq_ignore_ascii_case("WPX_PREFIX") {
+        return json_string(contact_adif_value(contact, "PFX"))
+            .map(|prefix| prefix.trim().to_uppercase())
+            .filter(|prefix| !prefix.is_empty())
+            .or_else(|| {
+                json_string(contact_adif_value(contact, "CALL"))
+                    .and_then(|callsign| callsign_prefix(&callsign))
+            });
     }
     json_string(contact_adif_value(contact, field))
         .or_else(|| json_string(contact_meta_value(contact, field)))
@@ -1212,15 +1231,15 @@ mod tests {
             points: None,
             rules: Vec::new(),
             geography: Some(GeographyQsoPoints {
-                country_field: "DXCC_PREFIX".to_string(),
-                station_country_field: "MY_DXCC_PREFIX".to_string(),
+                country_field: "APP_LOG73_DXCC_PFX".to_string(),
+                station_country_field: "APP_LOG73_MY_DXCC_PFX".to_string(),
                 continent_field: "CONT".to_string(),
                 station_continent_field: "MY_CONT".to_string(),
-                same_country: 0,
-                different_country_north_america: 2,
-                different_country_same_continent: 1,
-                different_continent: 3,
-                unresolved: 0,
+                same_country: 0.into(),
+                different_country_north_america: 2.into(),
+                different_country_same_continent: 1.into(),
+                different_continent: 3.into(),
+                unresolved: 0.into(),
             }),
             category_band_param: None,
         }
@@ -1241,7 +1260,7 @@ mod tests {
         for (key, value) in fields {
             match key {
                 "id" | "logId" | "status" | "sessionId" | "clientId" | "force" | "error"
-                | "pts" | "mult" | "bonus" | "dupe" | "DXCC_PREFIX" | "MY_DXCC_PREFIX" => {
+                | "pts" | "mult" | "bonus" | "dupe" => {
                     meta.insert(key.to_string(), value);
                 }
                 _ => {
@@ -1250,6 +1269,34 @@ mod tests {
             }
         }
         crate::db::build_contact(meta, adif)
+    }
+
+    #[test]
+    fn wpx_prefix_field_prefers_pfx_and_falls_back_to_callsign() {
+        let rules = test_rules(
+            fixed_points(1),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let stored = contact(vec![("CALL", json!("K1ABC")), ("PFX", json!(" w7 "))]);
+        let derived = contact(vec![("CALL", json!("W7DX"))]);
+        let empty = contact(vec![("CALL", json!("W7DX")), ("PFX", json!(" "))]);
+
+        assert_eq!(
+            field_value(&stored, &rules, "WPX_PREFIX").as_deref(),
+            Some("W7")
+        );
+        assert_eq!(
+            field_value(&derived, &rules, "WPX_PREFIX").as_deref(),
+            Some("W7")
+        );
+        assert_eq!(
+            field_value(&empty, &rules, "WPX_PREFIX").as_deref(),
+            Some("W7")
+        );
     }
 
     #[test]
@@ -1427,36 +1474,39 @@ mod tests {
             Vec::new(),
             Vec::new(),
         );
-        let station = vec![("MY_DXCC_PREFIX", json!("K")), ("MY_CONT", json!("NA"))];
+        let station = vec![
+            ("APP_LOG73_MY_DXCC_PFX", json!("K")),
+            ("MY_CONT", json!("NA")),
+        ];
         let mut contacts = vec![
             contact(
                 station
                     .clone()
                     .into_iter()
-                    .chain([("DXCC_PREFIX", json!("K")), ("CONT", json!("NA"))])
+                    .chain([("APP_LOG73_DXCC_PFX", json!("K")), ("CONT", json!("NA"))])
                     .collect(),
             ),
             contact(
                 station
                     .clone()
                     .into_iter()
-                    .chain([("DXCC_PREFIX", json!("VE")), ("CONT", json!("NA"))])
+                    .chain([("APP_LOG73_DXCC_PFX", json!("VE")), ("CONT", json!("NA"))])
                     .collect(),
             ),
             contact(
                 station
                     .into_iter()
-                    .chain([("DXCC_PREFIX", json!("F")), ("CONT", json!("EU"))])
+                    .chain([("APP_LOG73_DXCC_PFX", json!("F")), ("CONT", json!("EU"))])
                     .collect(),
             ),
             contact(vec![
-                ("MY_DXCC_PREFIX", json!("F")),
+                ("APP_LOG73_MY_DXCC_PFX", json!("F")),
                 ("MY_CONT", json!("EU")),
-                ("DXCC_PREFIX", json!("DL")),
+                ("APP_LOG73_DXCC_PFX", json!("DL")),
                 ("CONT", json!("EU")),
             ]),
             contact(vec![
-                ("MY_DXCC_PREFIX", json!("K")),
+                ("APP_LOG73_MY_DXCC_PFX", json!("K")),
                 ("MY_CONT", json!("NA")),
             ]),
         ];
@@ -1469,6 +1519,96 @@ mod tests {
         assert_eq!(contact_meta_value(&contacts[2], "pts"), Some(&json!(3)));
         assert_eq!(contact_meta_value(&contacts[3], "pts"), Some(&json!(1)));
         assert_eq!(contact_meta_value(&contacts[4], "pts"), Some(&json!(0)));
+    }
+
+    #[test]
+    fn bundled_cqwpx_scores_band_weighted_geography_and_unique_prefixes() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store.get("CQ-WPX-CW").expect("CQ-WPX-CW rules should load");
+        let station = [
+            ("APP_LOG73_MY_DXCC_PFX", json!("K")),
+            ("MY_CONT", json!("NA")),
+        ];
+        let mut contacts = [
+            ("K1ABC", "20m", "K", "NA"),
+            ("VE3XYZ", "20m", "VE", "NA"),
+            ("DL1ABC", "20m", "DL", "EU"),
+            ("DL1ZZZ", "40m", "DL", "EU"),
+            ("F2ABC", "40m", "F", "EU"),
+            ("K1ABC", "40m", "K", "NA"),
+        ]
+        .into_iter()
+        .map(|(call, band, country, continent)| {
+            contact(
+                station
+                    .clone()
+                    .into_iter()
+                    .chain([
+                        ("CALL", json!(call)),
+                        ("BAND", json!(band)),
+                        ("MODE", json!("CW")),
+                        ("APP_LOG73_DXCC_PFX", json!(country)),
+                        ("CONT", json!(continent)),
+                    ])
+                    .collect(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+        let totals = score_contacts(rules, json!({ "CATEGORY-BAND": "ALL" }), &mut contacts);
+
+        assert_eq!(totals.qso_count, 6);
+        assert_eq!(totals.qso_points, 19);
+        assert_eq!(totals.multipliers, 4);
+        assert_eq!(totals.score, 76);
+        assert_eq!(contact_meta_value(&contacts[0], "pts"), Some(&json!(1)));
+        assert_eq!(contact_meta_value(&contacts[1], "pts"), Some(&json!(2)));
+        assert_eq!(contact_meta_value(&contacts[2], "pts"), Some(&json!(3)));
+        assert_eq!(contact_meta_value(&contacts[3], "pts"), Some(&json!(6)));
+        assert_eq!(contact_meta_value(&contacts[5], "pts"), Some(&json!(1)));
+        assert_eq!(contact_meta_value(&contacts[3], "mult"), Some(&json!(0)));
+        assert_eq!(
+            contact_meta_value(&contacts[5], "dupe"),
+            Some(&json!(false))
+        );
+
+        let european_station = [
+            ("APP_LOG73_MY_DXCC_PFX", json!("F")),
+            ("MY_CONT", json!("EU")),
+        ];
+        let mut same_continent_contacts = [
+            ("F1ABC", "40m", "F"),
+            ("DL1ABC", "20m", "DL"),
+            ("DL1XYZ", "40m", "DL"),
+        ]
+        .into_iter()
+        .map(|(call, band, country)| {
+            contact(
+                european_station
+                    .clone()
+                    .into_iter()
+                    .chain([
+                        ("CALL", json!(call)),
+                        ("BAND", json!(band)),
+                        ("MODE", json!("CW")),
+                        ("APP_LOG73_DXCC_PFX", json!(country)),
+                        ("CONT", json!("EU")),
+                    ])
+                    .collect(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+        let same_continent_totals = score_contacts(
+            rules,
+            json!({ "CATEGORY-BAND": "ALL" }),
+            &mut same_continent_contacts,
+        );
+        assert_eq!(same_continent_totals.qso_points, 4);
+        assert_eq!(same_continent_totals.multipliers, 2);
+        assert_eq!(same_continent_totals.score, 8);
     }
 
     #[test]
@@ -1500,8 +1640,8 @@ mod tests {
     fn multiplier_excludes_configured_callsign_suffixes() {
         let mut country = state_multiplier();
         country.name = "Country".to_string();
-        country.field = "DXCC_PREFIX".to_string();
-        country.key = vec!["DXCC_PREFIX".to_string(), "BAND".to_string()];
+        country.field = "APP_LOG73_DXCC_PFX".to_string();
+        country.key = vec!["APP_LOG73_DXCC_PFX".to_string(), "BAND".to_string()];
         country.exclude_call_suffixes = vec!["/MM".to_string()];
         let rules = test_rules(
             fixed_points(1),
@@ -1514,7 +1654,7 @@ mod tests {
         let mut contacts = vec![contact(vec![
             ("CALL", json!("K1ABC/MM")),
             ("BAND", json!("20m")),
-            ("DXCC_PREFIX", json!("K")),
+            ("APP_LOG73_DXCC_PFX", json!("K")),
         ])];
 
         let totals = score_contacts(&rules, Value::Null, &mut contacts);

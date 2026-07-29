@@ -342,6 +342,7 @@ test('correctedEsmCallsignText returns suffix-only or full callsign corrections'
   assert.equal(correctedEsmCallsignText('KB1AWN', 'KB1AWM'), 'AWM');
   assert.equal(correctedEsmCallsignText('KD1AWM', 'KB1AWM'), 'KB1AWM');
   assert.equal(correctedEsmCallsignText('3DA0RU', '3DA0RW'), 'RW');
+  assert.equal(correctedEsmCallsignText('K1ABC', 'K1ABC/VE3'), 'K1ABC/VE3');
   assert.equal(correctedEsmCallsignText('K1ABC', 'K1ABC'), '');
 });
 

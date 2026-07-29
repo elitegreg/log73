@@ -3,7 +3,7 @@ import {
   parseFieldType,
   sanitizeExchangeValue,
 } from '../domain/contactFields.js';
-import { splitCallsign } from '../domain/dxcc.js';
+import { callsignPrefix } from '../domain/dxcc.js';
 import {
   LOGGER_MODE_OPTIONS,
   adifModeForLoggerMode,
@@ -400,20 +400,20 @@ export function correctedEsmCallsignText(
     return '';
   }
 
-  const sentParts = splitCallsign(normalizedSentCallsign);
-  const correctedParts = splitCallsign(normalizedCorrectedCallsign);
-  if (!sentParts || !correctedParts) {
+  const sentPrefix = callsignPrefix(normalizedSentCallsign);
+  const correctedPrefix = callsignPrefix(normalizedCorrectedCallsign);
+  if (
+    !sentPrefix ||
+    sentPrefix !== correctedPrefix ||
+    !normalizedCorrectedCallsign.startsWith(correctedPrefix)
+  ) {
     return normalizedCorrectedCallsign;
   }
 
-  if (
-    sentParts.prefix === correctedParts.prefix &&
-    sentParts.number === correctedParts.number
-  ) {
-    return correctedParts.suffix || normalizedCorrectedCallsign;
-  }
-
-  return normalizedCorrectedCallsign;
+  return (
+    normalizedCorrectedCallsign.slice(correctedPrefix.length) ||
+    normalizedCorrectedCallsign
+  );
 }
 
 export function esmStateAfterCallsignEdit({

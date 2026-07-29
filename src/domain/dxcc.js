@@ -4,44 +4,79 @@ function normalizeCallsign(callsign) {
     .toUpperCase();
 }
 
-export function splitCallsign(callsign) {
+export function callsignPrefix(callsign) {
   const normalized = normalizeCallsign(callsign);
-  if (!normalized) return null;
+  if (!normalized || !/^[A-Z0-9/]+$/.test(normalized)) return null;
 
-  const characters = [...normalized];
-  const firstSearchIndex = /^\d$/.test(characters[0]) ? 1 : 0;
-  let separatorStart = -1;
-  let separatorEnd = -1;
+  let source = normalized;
+  if (normalized.includes('/')) {
+    const parts = normalized.split('/');
+    if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
 
-  for (let index = firstSearchIndex; index < characters.length; index += 1) {
-    if (!/^\d$/.test(characters[index])) continue;
-    separatorStart = index;
-    separatorEnd = index + 1;
-    while (
-      separatorEnd < characters.length &&
-      /^\d$/.test(characters[separatorEnd])
-    ) {
-      separatorEnd += 1;
+    const [left, right] = parts;
+    if (isNonPrefixCallsignDesignator(right)) {
+      source = left;
+    } else if (/^\d+$/.test(right)) {
+      source = portableNumericPrefix(left, right);
+      if (!source) return null;
+    } else {
+      const leftPrefixLike = isPrefixLikeCallsignComponent(left);
+      const rightPrefixLike = isPrefixLikeCallsignComponent(right);
+      if (leftPrefixLike && !rightPrefixLike) {
+        source = left;
+      } else if (!leftPrefixLike && rightPrefixLike) {
+        source = right;
+      } else {
+        source = left.length < right.length ? left : right;
+      }
     }
-    break;
   }
 
-  if (separatorStart <= 0) return null;
-
-  return {
-    prefix: characters.slice(0, separatorStart).join(''),
-    number: characters.slice(separatorStart, separatorEnd).join(''),
-    suffix: characters.slice(separatorEnd).join(''),
-  };
+  return prefixFromComponent(source);
 }
 
-export function callsignPrefix(callsign) {
-  return splitCallsign(callsign)?.prefix ?? null;
+function isNonPrefixCallsignDesignator(value) {
+  return [
+    'MM',
+    'M',
+    'AM',
+    'A',
+    'E',
+    'J',
+    'P',
+    'QRP',
+    'QRPP',
+    'AG',
+    'AE',
+    'KT',
+  ].includes(value);
 }
 
-export function callsignFilterPrefix(callsign) {
-  const parts = splitCallsign(callsign);
-  return parts ? `${parts.prefix}${parts.number}` : '';
+function isPrefixLikeCallsignComponent(value) {
+  return !/\d/.test(value) || /\d$/.test(value);
+}
+
+function portableNumericPrefix(base, portableNumber) {
+  const lastDigit = base.search(/\d(?!.*\d)/);
+  if (lastDigit < 0) return null;
+  let digitGroupStart = lastDigit;
+  while (digitGroupStart > 0 && /\d/.test(base[digitGroupStart - 1])) {
+    digitGroupStart -= 1;
+  }
+  const stem = base.slice(0, digitGroupStart);
+  return stem ? `${stem}${portableNumber}` : null;
+}
+
+function prefixFromComponent(component) {
+  if (!component || !/^[A-Z0-9]+$/.test(component)) return null;
+  const lastDigit = component.search(/\d(?!.*\d)/);
+  if (lastDigit >= 0) return component.slice(0, lastDigit + 1);
+
+  const letters = [...component]
+    .filter((character) => /[A-Z]/.test(character))
+    .slice(0, 2)
+    .join('');
+  return letters.length === 2 ? `${letters}0` : null;
 }
 
 export function lookupDxcc(database, callsign) {

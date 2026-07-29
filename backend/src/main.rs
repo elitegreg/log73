@@ -2275,8 +2275,22 @@ fn category_transmitter(rules: &ContestRules, log: &db::Log) -> Option<String> {
 }
 
 fn serial_reservation_required(rules: &ContestRules, log: &db::Log, field: &ExchangeField) -> bool {
-    field.serial_scope == SerialScope::Global
+    effective_serial_scope(rules, log, field) == SerialScope::Global
         && category_transmitter(rules, log).is_some_and(|value| value != "ONE")
+}
+
+fn effective_serial_scope(
+    rules: &ContestRules,
+    log: &db::Log,
+    field: &ExchangeField,
+) -> SerialScope {
+    match field.serial_scope {
+        SerialScope::CategoryTransmitter => match category_transmitter(rules, log).as_deref() {
+            Some("TWO" | "UNLIMITED") => SerialScope::Band,
+            _ => SerialScope::Global,
+        },
+        scope => scope,
+    }
 }
 
 fn contact_serial_value(contact: &Contact, field_adif: &str) -> Option<i64> {
@@ -2301,8 +2315,9 @@ fn serial_state_from_contacts(
     field: &ExchangeField,
     contacts: &[Contact],
 ) -> Result<SerialState, String> {
+    let scope = effective_serial_scope(rules, log, field);
     let reservation_required = serial_reservation_required(rules, log, field);
-    if field.serial_scope == SerialScope::Band {
+    if scope == SerialScope::Band {
         let mut next_by_band = BTreeMap::new();
         for band in &rules.allowed_bands {
             let maximum = contacts
@@ -2318,7 +2333,7 @@ fn serial_state_from_contacts(
         }
         return Ok(SerialState {
             field_adif: field.adif.clone(),
-            scope: field.serial_scope,
+            scope,
             reservation_required,
             next: None,
             next_by_band,
@@ -2331,7 +2346,7 @@ fn serial_state_from_contacts(
         .max();
     Ok(SerialState {
         field_adif: field.adif.clone(),
-        scope: field.serial_scope,
+        scope,
         reservation_required,
         next: Some(next_serial_after(maximum)?),
         next_by_band: BTreeMap::new(),
@@ -2855,6 +2870,53 @@ mod tests {
             ..multi_log
         };
         assert!(!serial_reservation_required(multi_rules, &one_log, field));
+    }
+
+    #[test]
+    fn cqwpx_serial_scope_follows_transmitter_category() {
+        let store = bundled_rules();
+        let rules = store.get("CQ-WPX-CW").expect("CQ WPX rules load");
+        let field = sent_serial_field(rules, "STX").expect("sent serial field exists");
+        assert_eq!(field.serial_scope, SerialScope::CategoryTransmitter);
+        let contacts = [serial_contact(12, "20m"), serial_contact(7, "40m")];
+        let log_for = |transmitter: &str, station: &str| db::Log {
+            id: 1,
+            name: "CQ WPX".to_string(),
+            contest_id: rules.contest.clone(),
+            station_callsign: "N0CALL".to_string(),
+            contest_params: json!({
+                "CATEGORY-OPERATOR": "MULTI-OP",
+                "CATEGORY-TRANSMITTER": transmitter,
+                "CATEGORY-STATION": station
+            }),
+        };
+
+        let multi_one =
+            serial_state_from_contacts(rules, &log_for("ONE", "FIXED"), field, &contacts)
+                .expect("multi-one serial state resolves");
+        assert_eq!(multi_one.scope, SerialScope::Global);
+        assert_eq!(multi_one.next, Some(13));
+        assert!(!multi_one.reservation_required);
+
+        let multi_two =
+            serial_state_from_contacts(rules, &log_for("TWO", "FIXED"), field, &contacts)
+                .expect("multi-two serial state resolves");
+        assert_eq!(multi_two.scope, SerialScope::Band);
+        assert_eq!(multi_two.next_by_band.get("20m"), Some(&13));
+        assert_eq!(multi_two.next_by_band.get("40m"), Some(&8));
+        assert!(!multi_two.reservation_required);
+
+        let distributed = serial_state_from_contacts(
+            rules,
+            &log_for("UNLIMITED", "DISTRIBUTED"),
+            field,
+            &contacts,
+        )
+        .expect("distributed serial state resolves");
+        assert_eq!(distributed.scope, SerialScope::Band);
+        assert_eq!(distributed.next_by_band.get("20m"), Some(&13));
+        assert_eq!(distributed.next_by_band.get("40m"), Some(&8));
+        assert!(!distributed.reservation_required);
     }
 
     #[test]

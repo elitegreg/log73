@@ -1,8 +1,5 @@
 use crate::contest_rules::ContestRulesStore;
-use crate::db::{
-    Contact, Database, contact_adif_value, contact_id, contact_meta_value, set_contact_adif,
-    set_contact_meta,
-};
+use crate::db::{Contact, Database, contact_adif_value, contact_id, set_contact_adif};
 use crate::dxcc::{DxccDatabase, DxccInfo};
 use crate::scoring::{ContestScoringModule, ScoringModules};
 use std::cmp::Reverse;
@@ -372,9 +369,9 @@ fn enrich_missing_dxcc(database: &DxccDatabase, contacts: &mut [Contact]) {
                     "MY_CONT",
                     serde_json::Value::String(info.continent),
                 );
-                set_contact_meta(
+                set_contact_adif(
                     contact,
-                    "MY_DXCC_PREFIX",
+                    "APP_LOG73_MY_DXCC_PFX",
                     serde_json::Value::String(info.primary_prefix),
                 );
             }
@@ -394,7 +391,7 @@ fn enrich_missing_dxcc(database: &DxccDatabase, contacts: &mut [Contact]) {
 
         let dxcc = contact_adif_value(contact, "DXCC");
         let dxcc_missing = dxcc.is_none_or(serde_json::Value::is_null);
-        let prefix_missing = contact_meta_value(contact, "DXCC_PREFIX")
+        let prefix_missing = contact_adif_value(contact, "APP_LOG73_DXCC_PFX")
             .and_then(serde_json::Value::as_str)
             .is_none_or(|prefix| prefix.trim().is_empty());
         let continent_missing = contact_adif_value(contact, "CONT")
@@ -411,9 +408,9 @@ fn enrich_missing_dxcc(database: &DxccDatabase, contacts: &mut [Contact]) {
             set_contact_adif(contact, "DXCC", serde_json::Value::Number(info.adif.into()));
         }
         if prefix_missing && !info.primary_prefix.trim().is_empty() {
-            set_contact_meta(
+            set_contact_adif(
                 contact,
-                "DXCC_PREFIX",
+                "APP_LOG73_DXCC_PFX",
                 serde_json::Value::String(info.primary_prefix),
             );
         }
@@ -692,11 +689,11 @@ mod tests {
         assert_eq!(contact_adif_value(&contacts[0], "CONT"), Some(&json!("EU")));
         assert_eq!(contact_adif_value(&contacts[0], "DXCC"), Some(&json!(227)));
         assert_eq!(
-            contact_meta_value(&contacts[0], "MY_DXCC_PREFIX"),
+            contact_adif_value(&contacts[0], "APP_LOG73_MY_DXCC_PFX"),
             Some(&json!("K"))
         );
         assert_eq!(
-            contact_meta_value(&contacts[0], "DXCC_PREFIX"),
+            contact_adif_value(&contacts[0], "APP_LOG73_DXCC_PFX"),
             Some(&json!("F"))
         );
     }

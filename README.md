@@ -510,8 +510,11 @@ BAND              band name
 FREQ              frequency in Hz
 MODE              normalized mode
 CONT              worked station continent from the callsign lookup
+PFX               callsign/WPX prefix derived from CALL
+APP_LOG73_DXCC_PFX worked station DXCC/WAE primary prefix
 MY_DXCC           station callsign ADIF DXCC number
 MY_CONT           station callsign continent
+APP_LOG73_MY_DXCC_PFX station callsign DXCC/WAE primary prefix
 ```
 
 Important `meta` fields:
@@ -527,8 +530,6 @@ pts        scored QSO points
 mult       scored multipliers credited by this QSO
 bonus      scored bonus points credited by this QSO
 dupe       whether the QSO is currently a dupe
-DXCC_PREFIX     worked station DXCC/WAE primary prefix
-MY_DXCC_PREFIX  station callsign DXCC/WAE primary prefix
 ```
 
 Fields mapped to database columns are stored directly from `contact.adif` into `qsos`. Extra ADIF fields are serialized into the `JSON` column. `contact.meta` is transient and is not stored in the QSO JSON payload.
@@ -538,7 +539,7 @@ Committed contacts are loaded from the backend. Pending/updating contacts are ca
 ## Contest rules
 
 Contest rules are loaded from YAML files in `<data-dir>/contest-rules/` by default. In a source checkout, run the backend with `--data-dir ./data` to use `data/contest-rules/`.
-Scoring-related YAML settings live under a `scoring` block (`qso_points`, `dupe_key`, `multipliers`, `bonus_points`, `param_multipliers`, `multiplier_count_bonus_points`). `qso_points.geography` can compare stamped worked/station country and continent fields, and `qso_points.category_band_param` can limit scoring to a Cabrillo category band. Multiplier rules may use `exclude_call_suffixes` or `exclude_values`; `param_multipliers` maps persisted log parameters to score factors, and multiplier-count bonuses award the highest reached threshold for a named multiplier.
+Scoring-related YAML settings live under a `scoring` block (`qso_points`, `dupe_key`, `multipliers`, `bonus_points`, `param_multipliers`, `multiplier_count_bonus_points`). `qso_points.geography` can compare stamped worked/station country and continent fields. Each geography point value may be an integer or a `{ default, by_band }` mapping for band-specific values. `qso_points.category_band_param` can limit scoring to a Cabrillo category band. Multiplier rules may use `exclude_call_suffixes` or `exclude_values`; the virtual `WPX_PREFIX` field derives CQ WPX prefixes from `CALL`. `param_multipliers` maps persisted log parameters to score factors, and multiplier-count bonuses award the highest reached threshold for a named multiplier.
 Contest-specific Cabrillo metadata lives under a `cabrillo` block (`contest_id`, `fixed_fields`, `log_fields`, `export_fields`). A `CATEGORY-TRANSMITTER` log field can set `multi_single_has_mult_transmitter: true` when multi-single QSOs require a run/mult transmitter ID.
 ADIF export uses committed QSO data from the database and derives `QSO_DATE` and `TIME_ON` from the stored `QSO_DATE_TIME_ON` epoch.
 
@@ -549,6 +550,8 @@ ARRL-FIELD-DAY           ARRL Field Day
 CWT                      CWOps CWT
 CQ-WW-CW                 CQ World Wide DX Contest (CW)
 CQ-WW-SSB                CQ World Wide DX Contest (SSB)
+CQ-WPX-CW                CQ World Wide WPX Contest (CW)
+CQ-WPX-SSB               CQ World Wide WPX Contest (SSB)
 HI-QSO-PARTY             Hawaii QSO Party outside Hawaii
 HI-QSO-PARTY (In State)  Hawaii QSO Party in Hawaii
 K1USNSST                 K1USN SST
@@ -579,7 +582,7 @@ Log creation dynamically requests required rule parameters where needed:
 - `TN-QSO-PARTY`: `Location`
 - `TN-QSO-PARTY (In State)`: `County`
 
-Those values seed sent exchange fields in the logger, which are fixed unless a contest permits a mobile location change. Sent `Serial` fields are global by default and may set `serial_scope: band` for independent per-band counters. The backend derives initial serials from committed contacts, and logger clients advance them from local and websocket contact events. Only global serials used with a `CATEGORY-TRANSMITTER` value other than `ONE` are reserved; those reservations contain exactly one serial and an unused value is cached in browser local storage. The HI, MDC, and SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
+Those values seed sent exchange fields in the logger, which are fixed unless a contest permits a mobile location change. Sent `Serial` fields are global by default, may set `serial_scope: band` for independent per-band counters, or may use `serial_scope: category_transmitter` to select global scope for `ONE` and band scope for `TWO`/`UNLIMITED`. The backend derives initial serials from committed contacts, and logger clients advance them from local and websocket contact events. Only global serials used with a `CATEGORY-TRANSMITTER` value other than `ONE` are reserved; those reservations contain exactly one serial and an unused value is cached in browser local storage. The HI, MDC, and SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
 For `SC-QSO-PARTY (In State)`, the received value is labeled `Exchange` because it may be a county, state/province, or `DX`.
 
 ## UI themes

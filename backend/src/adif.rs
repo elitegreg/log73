@@ -546,6 +546,9 @@ mod tests {
                 ("SRX_STRING".to_string(), json!("NC")),
                 ("STX_STRING".to_string(), json!("ABBE")),
                 ("APP_LOG73_FOO".to_string(), json!("bar")),
+                ("APP_LOG73_DXCC_PFX".to_string(), json!("K")),
+                ("APP_LOG73_MY_DXCC_PFX".to_string(), json!("K")),
+                ("PFX".to_string(), json!("W1")),
             ]),
         )
     }
@@ -630,6 +633,9 @@ mod tests {
         assert!(text.contains("<BAND:3>20m"));
         assert!(text.contains("<FREQ:5>14.25"));
         assert!(text.contains("<APP_LOG73_FOO:3>bar"));
+        assert!(text.contains("<APP_LOG73_DXCC_PFX:1>K"));
+        assert!(text.contains("<APP_LOG73_MY_DXCC_PFX:1>K"));
+        assert!(text.contains("<PFX:2>W1"));
         assert!(text.contains("<EOR>\n"));
         assert!(!text.contains("_id"));
         assert!(!text.contains("LOG_ID"));
@@ -660,6 +666,8 @@ mod tests {
         let mut contact = test_contact();
         if let Some(adif) = contact.get_mut("adif").and_then(Value::as_object_mut) {
             adif.remove("APP_LOG73_FOO");
+            adif.remove("APP_LOG73_DXCC_PFX");
+            adif.remove("APP_LOG73_MY_DXCC_PFX");
         }
         let text = render_log(&test_log(), &[contact]).expect("ADIF export should render");
         let (mut writer, reader) = tokio::io::duplex(4096);
@@ -769,7 +777,7 @@ mod tests {
         let imported = import_contacts(
             &log,
             &test_rules(),
-            "<EOH><QSO_DATE:8>20231114<TIME_ON:6>221523<STATION_CALLSIGN:6>N0CALL<CALL:4>W1AW<BAND:3>20m<FREQ:5>14.25<MODE:2>CW<N1MM_SECTION:2>NC<EOR>",
+            "<EOH><QSO_DATE:8>20231114<TIME_ON:6>221523<STATION_CALLSIGN:6>N0CALL<CALL:4>W1AW<BAND:3>20m<FREQ:5>14.25<MODE:2>CW<PFX:2>W1<APP_LOG73_DXCC_PFX:1>K<APP_LOG73_MY_DXCC_PFX:1>K<N1MM_SECTION:2>NC<EOR>",
             &mappings,
         )
         .expect("contact should import");
@@ -800,6 +808,15 @@ mod tests {
         assert_eq!(
             contact_adif_value(contact, "N1MM_SECTION"),
             Some(&json!("NC"))
+        );
+        assert_eq!(contact_adif_value(contact, "PFX"), Some(&json!("W1")));
+        assert_eq!(
+            contact_adif_value(contact, "APP_LOG73_DXCC_PFX"),
+            Some(&json!("K"))
+        );
+        assert_eq!(
+            contact_adif_value(contact, "APP_LOG73_MY_DXCC_PFX"),
+            Some(&json!("K"))
         );
     }
 

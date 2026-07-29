@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { buildSentExchange, fieldDefault } from '../domain/contactFields';
 import { cabrilloTransmitterAdif } from '../domain/cabrilloTransmitter';
-import { dxccContinent } from '../domain/dxcc';
+import { callsignPrefix, dxccContinent } from '../domain/dxcc';
 import { validateCallsign, validateExchangeField } from '../domain/validation';
 import {
   CW_WPM_STORAGE_KEY,
@@ -519,6 +519,7 @@ function MainWindow({
 
     const timeOn = callSignEditedAtRef.current;
     const normalizedCallSign = callSign.trim().toUpperCase();
+    const pfx = callsignPrefix(normalizedCallSign);
     const dxccNumber = dxccAdifNumber(currentDxccInfo);
     const prefix = dxccPrefix(currentDxccInfo);
     const continent = dxccContinent(currentDxccInfo);
@@ -531,8 +532,6 @@ function MainWindow({
         sessionId,
         logId,
         clientId: createContactId(timeOn, normalizedCallSign),
-        ...(prefix === null ? {} : { DXCC_PREFIX: prefix }),
-        ...(myPrefix === null ? {} : { MY_DXCC_PREFIX: myPrefix }),
         ...(force ? { force: true } : {}),
       },
       adif: {
@@ -544,6 +543,9 @@ function MainWindow({
         BAND: currentBand?.name ?? '',
         FREQ: radioFrequencyHz,
         MODE: adifModeForLoggerMode(radioMode),
+        ...(pfx === null ? {} : { PFX: pfx }),
+        ...(prefix === null ? {} : { APP_LOG73_DXCC_PFX: prefix }),
+        ...(myPrefix === null ? {} : { APP_LOG73_MY_DXCC_PFX: myPrefix }),
         ...(dxccNumber === null ? {} : { DXCC: dxccNumber }),
         ...(continent === null ? {} : { CONT: continent }),
         ...(myDxccNumber === null ? {} : { MY_DXCC: myDxccNumber }),

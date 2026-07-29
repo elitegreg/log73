@@ -193,25 +193,91 @@ impl DxccDatabase {
 
 pub fn callsign_prefix(callsign: &str) -> Option<String> {
     let normalized = normalize_callsign(callsign);
-    if normalized.is_empty() {
+    if normalized.is_empty()
+        || !normalized
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '/')
+    {
         return None;
     }
 
-    let chars = normalized.chars().collect::<Vec<_>>();
-    if chars.first()?.is_ascii_digit() {
-        let second_digit_index = chars
-            .iter()
-            .enumerate()
-            .skip(1)
-            .find_map(|(index, character)| character.is_ascii_digit().then_some(index))?;
-        Some(chars[..second_digit_index].iter().collect())
+    let source = if let Some((left, right)) = normalized.split_once('/') {
+        if left.is_empty() || right.is_empty() || right.contains('/') {
+            return None;
+        }
+        if is_non_prefix_callsign_designator(right) {
+            left.to_string()
+        } else if right.chars().all(|character| character.is_ascii_digit()) {
+            portable_numeric_prefix(left, right)?
+        } else {
+            match (
+                is_prefix_like_callsign_component(left),
+                is_prefix_like_callsign_component(right),
+            ) {
+                (true, false) => left.to_string(),
+                (false, true) => right.to_string(),
+                _ if left.len() < right.len() => left.to_string(),
+                _ => right.to_string(),
+            }
+        }
     } else {
-        let first_digit_index = chars
-            .iter()
-            .enumerate()
-            .find_map(|(index, character)| character.is_ascii_digit().then_some(index))?;
-        (first_digit_index > 0).then(|| chars[..first_digit_index].iter().collect())
+        normalized
+    };
+
+    prefix_from_component(&source)
+}
+
+fn is_non_prefix_callsign_designator(value: &str) -> bool {
+    matches!(
+        value,
+        "MM" | "M" | "AM" | "A" | "E" | "J" | "P" | "QRP" | "QRPP" | "AG" | "AE" | "KT"
+    )
+}
+
+fn is_prefix_like_callsign_component(value: &str) -> bool {
+    !value.chars().any(|character| character.is_ascii_digit())
+        || value
+            .chars()
+            .last()
+            .is_some_and(|character| character.is_ascii_digit())
+}
+
+fn portable_numeric_prefix(base: &str, portable_number: &str) -> Option<String> {
+    let last_digit = base
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| character.is_ascii_digit().then_some(index))?;
+    let digit_group_start = base[..=last_digit]
+        .char_indices()
+        .rev()
+        .find_map(|(index, character)| (!character.is_ascii_digit()).then_some(index + 1))
+        .unwrap_or(0);
+    let stem = &base[..digit_group_start];
+    (!stem.is_empty()).then(|| format!("{stem}{portable_number}"))
+}
+
+fn prefix_from_component(component: &str) -> Option<String> {
+    if component.is_empty()
+        || !component
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
+    {
+        return None;
     }
+    if let Some((last_digit, character)) = component
+        .char_indices()
+        .rev()
+        .find(|(_, character)| character.is_ascii_digit())
+    {
+        return Some(component[..last_digit + character.len_utf8()].to_string());
+    }
+
+    let letters = component
+        .chars()
+        .filter(|character| character.is_ascii_alphabetic())
+        .take(2)
+        .collect::<String>();
+    (letters.len() == 2).then(|| format!("{letters}0"))
 }
 
 fn normalize_callsign(callsign: &str) -> String {
@@ -486,12 +552,40 @@ K,United States,291,NA,5,8,38.00,97.00,5.0,K N W =GM0AVR;
     }
 
     #[test]
-    fn callsign_prefix_uses_digit_rules() {
-        assert_eq!(callsign_prefix("KP2M"), Some("KP".to_string()));
-        assert_eq!(callsign_prefix("4O9A"), Some("4O".to_string()));
-        assert_eq!(callsign_prefix("K"), None);
-        assert_eq!(callsign_prefix("KP"), None);
-        assert_eq!(callsign_prefix("4O"), None);
+    fn callsign_prefix_uses_wpx_rules() {
+        for (callsign, expected) in [
+            ("W7DX", Some("W7")),
+            ("OL25LP", Some("OL25")),
+            ("DL60CHILD", Some("DL60")),
+            ("9A800VZ", Some("9A800")),
+            ("DR2006Q", Some("DR2006")),
+            ("LY1000CW", Some("LY1000")),
+            ("KL7RA/WK9", Some("WK9")),
+            ("OE/K5ZD", Some("OE0")),
+            ("PA/N8BJQ", Some("PA0")),
+            ("XEFTJW", Some("XE0")),
+            ("F1ABC/MM", Some("F1")),
+            ("W9ABC/4", Some("W4")),
+            ("K1A/VE3", Some("VE3")),
+            ("EA8/K1A", Some("EA8")),
+            ("BAD/CALL/FORMAT", None),
+            ("?", None),
+        ] {
+            assert_eq!(
+                callsign_prefix(callsign).as_deref(),
+                expected,
+                "unexpected prefix for {callsign}"
+            );
+        }
+
+        let database = DxccDatabase::from_str(SAMPLE_CTY).expect("sample CTY should parse");
+        assert_eq!(
+            database
+                .lookup("W7DX")
+                .expect("W7DX should resolve")
+                .primary_prefix,
+            "K"
+        );
     }
 
     #[test]

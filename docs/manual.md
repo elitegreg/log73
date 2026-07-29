@@ -162,7 +162,7 @@ Configure Log73 includes:
 
 ### Serial allocation context
 
-For a sent serial exchange, the backend supplies the initial next value and the logger advances it as local or websocket contacts are observed. Serial fields are global unless the rule sets `serial_scope: band`. Only multi-transmitter global serials reserve values, one at a time; an unused reservation is cached in browser local storage. Logging is blocked while a required serial is unavailable.
+For a sent serial exchange, the backend supplies the initial next value and the logger advances it as local or websocket contacts are observed. Serial fields are global unless the rule sets `serial_scope: band`. A rule may instead set `serial_scope: category_transmitter` to use a global sequence for `CATEGORY-TRANSMITTER: ONE` and independent band sequences for `TWO` or `UNLIMITED`. Only multi-transmitter global serials reserve values, one at a time; an unused reservation is cached in browser local storage. Logging is blocked while a required serial is unavailable.
 
 ---
 

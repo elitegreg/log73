@@ -717,6 +717,40 @@ mod tests {
     }
 
     #[test]
+    fn cqwpx_exports_rst_serial_exchange_and_multi_two_transmitter() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store.get("CQ-WPX-CW").expect("CQ WPX CW rules should load");
+        let mut log = test_log();
+        log.contest_id = "CQ-WPX-CW".to_string();
+        log.contest_params = json!({
+            "CATEGORY-OPERATOR": "MULTI-OP",
+            "CATEGORY-ASSISTED": "ASSISTED",
+            "CATEGORY-BAND": "ALL",
+            "CATEGORY-POWER": "HIGH",
+            "CATEGORY-STATION": "FIXED",
+            "CATEGORY-TRANSMITTER": "TWO"
+        });
+        let mut contact = test_contact("K1ABC", "OL25LP", 1_700_000_000);
+        crate::db::set_contact_adif(&mut contact, "MODE", json!("CW"));
+        crate::db::set_contact_adif(&mut contact, "RST_SENT", json!(599));
+        crate::db::set_contact_adif(&mut contact, "STX", json!(123));
+        crate::db::set_contact_adif(&mut contact, "RST_RCVD", json!(599));
+        crate::db::set_contact_adif(&mut contact, "SRX", json!(456));
+        crate::db::set_contact_adif(&mut contact, "APP_LOG73_TX_ID", json!(1));
+
+        let text = render_log(rules, &log, &[contact], &json!({}), 42)
+            .expect("CQ WPX Cabrillo should render");
+
+        assert!(text.lines().any(|line| line == "CONTEST: CQ-WPX-CW"));
+        assert!(text.lines().any(|line| line == "CATEGORY-MODE: CW"));
+        assert!(text.lines().any(|line| line == "CATEGORY-TRANSMITTER: TWO"));
+        let fields = qso_line(&text).split_whitespace().collect::<Vec<_>>();
+        assert_eq!(&fields[6..], ["599", "123", "OL25LP", "599", "456", "1"]);
+    }
+
+    #[test]
     fn na_sprint_ssb_exports_required_headers_and_exchange_order() {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir.as_path()])

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { callsignFilterPrefix } from '../../domain/dxcc.js';
+import { callsignPrefix } from '../../domain/dxcc.js';
 import { apiJson } from '../../lib/api';
 import {
   CONTACTS_PAGE_SIZE,
@@ -69,18 +69,17 @@ export function useContactsOutbox({
   }, [numericLogId]);
 
   useEffect(() => {
-    activeCallsignPrefixRef.current = callsignFilterPrefix(
-      debouncedCallsignSearch,
-    );
+    activeCallsignPrefixRef.current =
+      callsignPrefix(debouncedCallsignSearch) ?? '';
   }, [debouncedCallsignSearch]);
 
   const visibleContacts = useMemo(() => {
-    const callsignPrefix = callsignFilterPrefix(debouncedCallsignSearch);
-    if (!callsignPrefix) return allContacts;
+    const filterPrefix = callsignPrefix(debouncedCallsignSearch) ?? '';
+    if (!filterPrefix) return allContacts;
 
     return allContacts.filter((contact) => {
       if (metaValue(contact, 'status') !== 'Committed') {
-        return callsignPrefixMatches(contact, callsignPrefix);
+        return callsignPrefixMatches(contact, filterPrefix);
       }
       return true;
     });
@@ -91,8 +90,8 @@ export function useContactsOutbox({
     let contactsLoadInFlightPromise = null;
     let offset = 0;
     let hasMore = true;
-    const callsignPrefix = callsignFilterPrefix(debouncedCallsignSearch);
-    activeCallsignPrefixRef.current = callsignPrefix;
+    const filterPrefix = callsignPrefix(debouncedCallsignSearch) ?? '';
+    activeCallsignPrefixRef.current = filterPrefix;
     setHasMoreContacts(true);
     setIsLoadingMoreContacts(false);
 
@@ -101,7 +100,7 @@ export function useContactsOutbox({
         limit: String(CONTACTS_PAGE_SIZE),
         offset: String(pageOffset),
       });
-      if (callsignPrefix) params.set('callsign_prefix', callsignPrefix);
+      if (filterPrefix) params.set('callsign_prefix', filterPrefix);
       return `/logs/${numericLogId}/contacts?${params.toString()}`;
     }
 
@@ -166,7 +165,7 @@ export function useContactsOutbox({
                 error,
                 {
                   logId: numericLogId,
-                  callsignPrefix,
+                  callsignPrefix: filterPrefix,
                   offset,
                 },
               );
@@ -181,7 +180,7 @@ export function useContactsOutbox({
               error,
               {
                 logId: numericLogId,
-                callsignPrefix,
+                callsignPrefix: filterPrefix,
               },
             );
           }

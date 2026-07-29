@@ -1,6 +1,6 @@
 use super::contact::{
     Contact, build_contact, contact_adif, contact_adif_value, contact_id, contact_log_id,
-    contact_meta_value, frequency_hz, json_i64, json_string, set_contact_adif, set_contact_meta,
+    frequency_hz, json_i64, json_string, set_contact_adif, set_contact_meta,
 };
 use rusqlite::types::{Value as SqlValue, ValueRef};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -24,13 +24,13 @@ const QSO_COLUMNS: &[&str] = &[
     "CQZ",
     "CONT",
     "DXCC",
-    "DXCC_PREFIX",
+    "APP_LOG73_DXCC_PFX",
     "GRIDSQUARE",
     "MY_CNTY",
     "MY_CONT",
     "MY_CQ_ZONE",
     "MY_DXCC",
-    "MY_DXCC_PREFIX",
+    "APP_LOG73_MY_DXCC_PFX",
     "MY_GRIDSQUARE",
     "MY_STATE",
     "MY_ARRL_SECT",
@@ -76,13 +76,13 @@ INSERT INTO qsos (
     CQZ,
     CONT,
     DXCC,
-    DXCC_PREFIX,
+    APP_LOG73_DXCC_PFX,
     GRIDSQUARE,
     MY_CNTY,
     MY_CONT,
     MY_CQ_ZONE,
     MY_DXCC,
-    MY_DXCC_PREFIX,
+    APP_LOG73_MY_DXCC_PFX,
     MY_GRIDSQUARE,
     MY_STATE,
     MY_ARRL_SECT,
@@ -149,13 +149,13 @@ INSERT INTO qsos (
     CQZ,
     CONT,
     DXCC,
-    DXCC_PREFIX,
+    APP_LOG73_DXCC_PFX,
     GRIDSQUARE,
     MY_CNTY,
     MY_CONT,
     MY_CQ_ZONE,
     MY_DXCC,
-    MY_DXCC_PREFIX,
+    APP_LOG73_MY_DXCC_PFX,
     MY_GRIDSQUARE,
     MY_STATE,
     MY_ARRL_SECT,
@@ -219,13 +219,13 @@ ON CONFLICT(ID) DO UPDATE SET
     CQZ = excluded.CQZ,
     CONT = excluded.CONT,
     DXCC = excluded.DXCC,
-    DXCC_PREFIX = excluded.DXCC_PREFIX,
+    APP_LOG73_DXCC_PFX = excluded.APP_LOG73_DXCC_PFX,
     GRIDSQUARE = excluded.GRIDSQUARE,
     MY_CNTY = excluded.MY_CNTY,
     MY_CONT = excluded.MY_CONT,
     MY_CQ_ZONE = excluded.MY_CQ_ZONE,
     MY_DXCC = excluded.MY_DXCC,
-    MY_DXCC_PREFIX = excluded.MY_DXCC_PREFIX,
+    APP_LOG73_MY_DXCC_PFX = excluded.APP_LOG73_MY_DXCC_PFX,
     MY_GRIDSQUARE = excluded.MY_GRIDSQUARE,
     MY_STATE = excluded.MY_STATE,
     MY_ARRL_SECT = excluded.MY_ARRL_SECT,
@@ -322,10 +322,7 @@ fn select_log_contest_id(connection: &Connection, log_id: i64) -> rusqlite::Resu
 
 pub(super) fn qso_column_for_adif(field_adif: &str) -> Option<&'static str> {
     QSO_COLUMNS.iter().copied().find(|column| {
-        !matches!(
-            *column,
-            "LOG_ID" | "JSON" | "DXCC_PREFIX" | "MY_DXCC_PREFIX"
-        ) && column.eq_ignore_ascii_case(field_adif)
+        !matches!(*column, "LOG_ID" | "JSON") && column.eq_ignore_ascii_case(field_adif)
     })
 }
 
@@ -367,12 +364,6 @@ fn contact_to_sql_values(contact: &Contact) -> Vec<SqlValue> {
             }
             if *column == "LOG_ID" {
                 return SqlValue::Integer(contact_log_id(contact).unwrap_or(1));
-            }
-            if matches!(*column, "DXCC_PREFIX" | "MY_DXCC_PREFIX") {
-                return contact_meta_value(contact, column)
-                    .and_then(|value| json_string(Some(value)))
-                    .map(SqlValue::Text)
-                    .unwrap_or(SqlValue::Null);
             }
             if *column == "QSO_DATE_TIME_ON" {
                 return json_i64(contact_adif_value(contact, "QSO_DATE_TIME_ON"))
@@ -447,13 +438,6 @@ fn row_to_contact(row: &rusqlite::Row<'_>) -> rusqlite::Result<Contact> {
         if *column == "JSON" || *column == "LOG_ID" {
             continue;
         }
-        if matches!(*column, "DXCC_PREFIX" | "MY_DXCC_PREFIX") {
-            let value: Option<String> = row.get(*column)?;
-            if let Some(value) = value {
-                meta.insert(column.to_string(), Value::String(value));
-            }
-            continue;
-        }
         if INTEGER_COLUMNS.contains(column) {
             let value: Option<i64> = row.get(*column)?;
             if let Some(value) = value {
@@ -502,12 +486,14 @@ mod tests {
                 ("STX".to_string(), json!(12)),
                 ("COMMENT".to_string(), json!("hello")),
                 ("CUSTOM_SERIAL".to_string(), json!(88)),
+                ("PFX".to_string(), json!("K1")),
             ]),
         );
 
         let parsed: Value = serde_json::from_str(&extra_json(&contact)).expect("json parses");
         assert_eq!(parsed.get("COMMENT"), Some(&json!("hello")));
         assert_eq!(parsed.get("CUSTOM_SERIAL"), Some(&json!(88)));
+        assert_eq!(parsed.get("PFX"), Some(&json!("K1")));
         assert_eq!(parsed.get("CALL"), None);
         assert_eq!(parsed.get("CONTEST_ID"), None);
         assert_eq!(parsed.get("STX"), None);
