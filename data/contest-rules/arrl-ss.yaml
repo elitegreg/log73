@@ -40,7 +40,7 @@ contests:
         type: 'Serial:4'
         adif: 'STX'
         is_sent: true
-      - name: 'Precedence(s)'
+      - name: 'Prec(s)'
         type: 'String:1'
         adif: 'STX_STRING'
         fixed: true
@@ -54,7 +54,7 @@ contests:
         source_param: 'Check'
         regex: '^\d{2}$'
         is_sent: true
-      - name: 'Section(s)'
+      - name: 'Sect(s)'
         type: 'String:3'
         adif: 'MY_ARRL_SECT'
         fixed: true
@@ -65,7 +65,7 @@ contests:
         type: 'Serial:4'
         adif: 'SRX'
         is_sent: false
-      - name: 'Precedence'
+      - name: 'Prec'
         type: 'String:1'
         adif: 'SRX_STRING'
         valid_values: ['A', 'B', 'M', 'Q', 'S', 'U']
@@ -75,25 +75,25 @@ contests:
         adif: 'CHECK'
         regex: '^\d{2}$'
         is_sent: false
-      - name: 'Section'
+      - name: 'Sect'
         type: 'String:3'
         adif: 'ARRL_SECT'
         in_sets: ['ARRL Sections', 'RAC Sections']
         is_sent: false
-    qso_columns: ['Serial', 'Precedence', 'Check', 'Section', 'Mult', 'Pts', 'Op']
+    qso_columns: ['Serial(s)', 'Serial', 'Prec', 'Check', 'Sect', 'Mult', 'Pts', 'Op']
     qso_column_fields:
       Freq: 'FREQ'
       Mode: 'MODE'
       Call: 'CALL'
       Op: 'OPERATOR'
       'Serial(s)': 'STX'
-      'Precedence(s)': 'STX_STRING'
+      'Prec(s)': 'STX_STRING'
       'Check(s)': 'MY_CHECK'
-      'Section(s)': 'MY_ARRL_SECT'
+      'Sect(s)': 'MY_ARRL_SECT'
       Serial: 'SRX'
-      Precedence: 'SRX_STRING'
+      Prec: 'SRX_STRING'
       Check: 'CHECK'
-      Section: 'ARRL_SECT'
+      Sect: 'ARRL_SECT'
     cabrillo:
       contest_id: 'ARRL-SS-CW'
       fixed_fields:
