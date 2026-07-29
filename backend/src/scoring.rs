@@ -2524,6 +2524,86 @@ mod tests {
     }
 
     #[test]
+    fn bundled_arrl_dx_scores_wve_and_dx_entries_per_band() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let wve = store
+            .get("ARRL-DX-CW")
+            .expect("W/VE ARRL DX rules should load");
+        let dx = store
+            .get("ARRL-DX-CW (DX)")
+            .expect("DX ARRL DX rules should load");
+
+        let mut wve_contacts = [
+            ("DL1ABC", "20m", 230, "KW"),
+            ("DL1ABC", "40m", 230, "KW"),
+            ("F1ABC", "20m", 227, "500"),
+            ("VE3ABC", "20m", 1, "100"),
+        ]
+        .into_iter()
+        .map(|(call, band, dxcc, power)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(dxcc)),
+                ("SRX_STRING", json!(power)),
+            ])
+        })
+        .collect::<Vec<_>>();
+        let wve_totals = score_contacts(wve, Value::Null, &mut wve_contacts);
+        assert_eq!(wve_totals.qso_points, 9);
+        assert_eq!(wve_totals.multipliers, 3);
+        assert_eq!(wve_totals.score, 27);
+        assert_eq!(contact_meta_value(&wve_contacts[3], "pts"), Some(&json!(0)));
+
+        let mut single_band_contacts = [("DL1ABC", "20m", 230), ("F1ABC", "40m", 227)]
+            .into_iter()
+            .map(|(call, band, dxcc)| {
+                contact(vec![
+                    ("CALL", json!(call)),
+                    ("BAND", json!(band)),
+                    ("MODE", json!("CW")),
+                    ("DXCC", json!(dxcc)),
+                    ("SRX_STRING", json!("KW")),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let single_band_totals = score_contacts(
+            wve,
+            json!({ "CATEGORY-BAND": "20M" }),
+            &mut single_band_contacts,
+        );
+        assert_eq!(single_band_totals.qso_points, 3);
+        assert_eq!(single_band_totals.multipliers, 1);
+        assert_eq!(single_band_totals.score, 3);
+
+        let mut dx_contacts = [
+            ("K1ABC", "20m", 291, "MA"),
+            ("K1ABC", "40m", 291, "MA"),
+            ("VE1ABC", "20m", 1, "LB"),
+            ("KL7ABC", "20m", 6, "AK"),
+        ]
+        .into_iter()
+        .map(|(call, band, dxcc, location)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(dxcc)),
+                ("SRX_STRING", json!(location)),
+            ])
+        })
+        .collect::<Vec<_>>();
+        let dx_totals = score_contacts(dx, Value::Null, &mut dx_contacts);
+        assert_eq!(dx_totals.qso_points, 9);
+        assert_eq!(dx_totals.multipliers, 3);
+        assert_eq!(dx_totals.score, 27);
+        assert_eq!(contact_meta_value(&dx_contacts[3], "pts"), Some(&json!(0)));
+    }
+
+    #[test]
     fn bundled_naqp_scores_per_band_and_excludes_dx_entries() {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir.as_path()])

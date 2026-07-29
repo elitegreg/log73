@@ -1791,6 +1791,68 @@ contests:
     }
 
     #[test]
+    fn bundled_arrl_dx_rules_resolve_wve_and_dx_cw_and_ssb_variants() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let cw = store.get("ARRL-DX-CW").expect("W/VE CW rules should load");
+        let cw_dx = store
+            .get("ARRL-DX-CW (DX)")
+            .expect("DX CW rules should load");
+        let ssb = store
+            .get("ARRL-DX-SSB")
+            .expect("W/VE SSB rules should load");
+        let ssb_dx = store
+            .get("ARRL-DX-SSB (DX)")
+            .expect("DX SSB rules should load");
+
+        assert_eq!(cw.allowed_modes, ["CW"]);
+        assert_eq!(cw_dx.allowed_modes, ["CW"]);
+        assert_eq!(ssb.allowed_modes, ["SSB"]);
+        assert_eq!(ssb_dx.allowed_modes, ["SSB"]);
+        assert_eq!(cw.dupe_key, ["CALL", "BAND"]);
+        assert_eq!(
+            cw.qso_points
+                .as_ref()
+                .and_then(|points| points.category_band_param.as_deref()),
+            Some("CATEGORY-BAND")
+        );
+        assert_eq!(cw.exchange[1].name, "Location(s)");
+        assert_eq!(cw.exchange[3].name, "Power");
+        assert_eq!(cw_dx.exchange[1].name, "Power(s)");
+        assert_eq!(cw_dx.exchange[3].name, "Location");
+        assert_eq!(cw_dx.multipliers[0].key, ["SRX_STRING", "BAND"]);
+        assert!(
+            cw_dx.multipliers[0]
+                .valid_values
+                .contains(&"LB".to_string())
+        );
+        assert!(
+            !cw_dx.multipliers[0]
+                .valid_values
+                .contains(&"AK".to_string())
+        );
+        assert!(
+            !cw_dx.multipliers[0]
+                .valid_values
+                .contains(&"HI".to_string())
+        );
+        assert_eq!(
+            ssb.cabrillo
+                .as_ref()
+                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
+            Some("ARRL-DX-SSB")
+        );
+        assert_eq!(
+            ssb_dx
+                .cabrillo
+                .as_ref()
+                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
+            Some("ARRL-DX-SSB")
+        );
+    }
+
+    #[test]
     fn bundled_arrl_sweepstakes_rules_resolve_cw_and_ssb_variants() {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir.as_path()])

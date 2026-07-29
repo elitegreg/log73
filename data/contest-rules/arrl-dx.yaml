@@ -1,0 +1,232 @@
+contests:
+  - id: 'ARRL-DX-CW'
+    display_name: 'ARRL International DX Contest (CW)'
+    allowed_bands: [160, 80, 40, 20, 15, 10]
+    allowed_modes: ['CW']
+    define:
+      - name: 'ARRL DX W/VE DXCC'
+        values: ['1', '291']
+      - name: 'ARRL DX States'
+        values_from_file: us_states.dat
+        exclude: ['AK', 'HI']
+      - name: 'District of Columbia'
+        values: ['DC']
+      - name: 'Canadian Provinces and Territories'
+        values_from_file: canadian_provinces.dat
+      - name: 'Labrador'
+        values: ['LB']
+    scoring:
+      qso_points:
+        category_band_param: 'CATEGORY-BAND'
+        rules:
+          - when:
+              field: 'DXCC'
+              exclude_in_sets: ['ARRL DX W/VE DXCC']
+            points: 3
+          - points: 0
+      dupe_key: ['CALL', 'BAND']
+      multipliers:
+        - name: 'DXCC Entity'
+          field: 'DXCC'
+          key: ['DXCC', 'BAND']
+          exclude_values: ['1', '291']
+    log_params:
+      - name: 'Location'
+        label: 'State or Province'
+        type: 'String:2'
+        required: true
+        in_sets: ['ARRL DX States', 'District of Columbia', 'Canadian Provinces and Territories', 'Labrador']
+    exchange:
+      - name: 'RST(s)'
+        type: 'RST'
+        adif: 'RST_SENT'
+        default: 599
+        is_sent: true
+      - name: 'Location(s)'
+        type: 'String:2'
+        adif: 'STX_STRING'
+        fixed: true
+        source_param: 'Location'
+        in_sets: ['ARRL DX States', 'District of Columbia', 'Canadian Provinces and Territories', 'Labrador']
+        is_sent: true
+      - name: 'RST(r)'
+        type: 'RST'
+        adif: 'RST_RCVD'
+        default: 599
+        is_sent: false
+      - name: 'Power'
+        type: 'String:4'
+        adif: 'SRX_STRING'
+        regex: '^\\S{1,4}$'
+        is_sent: false
+    qso_columns: ['RST(r)', 'Power', 'Mult', 'Pts', 'Op']
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'RST(s)': 'RST_SENT'
+      'Location(s)': 'STX_STRING'
+      'RST(r)': 'RST_RCVD'
+      Power: 'SRX_STRING'
+    cabrillo:
+      contest_id: 'ARRL-DX-CW'
+      fixed_fields:
+        - name: 'CATEGORY-MODE'
+          value: 'CW'
+      log_fields:
+        - name: 'CATEGORY-OPERATOR'
+          label: 'Category Operator'
+          type: 'String:24'
+          widget: 'select'
+          default: 'SINGLE-OP'
+          valid_values: ['SINGLE-OP', 'SINGLE-OP-UNLIMITED', 'MULTI-OP', 'CHECKLOG']
+        - name: 'CATEGORY-ASSISTED'
+          label: 'Category Assisted'
+          type: 'String:16'
+          widget: 'select'
+          default: 'NON-ASSISTED'
+          valid_values: ['ASSISTED', 'NON-ASSISTED']
+        - name: 'CATEGORY-BAND'
+          label: 'Category Band'
+          type: 'String:8'
+          widget: 'select'
+          default: 'ALL'
+          valid_values: ['ALL', '160M', '80M', '40M', '20M', '15M', '10M']
+        - name: 'CATEGORY-POWER'
+          label: 'Category Power'
+          type: 'String:16'
+          widget: 'select'
+          default: 'LOW'
+          valid_values: ['QRP', 'LOW', 'HIGH']
+        - name: 'CATEGORY-TRANSMITTER'
+          label: 'Category Transmitter'
+          type: 'String:16'
+          widget: 'select'
+          default: 'ONE'
+          valid_values: ['ONE', 'TWO', 'UNLIMITED']
+        - name: 'CATEGORY-OVERLAY'
+          label: 'Category Overlay'
+          type: 'String:24'
+          widget: 'select'
+          required: false
+          valid_values: ['LIMITED-ANTENNAS']
+      export_fields:
+        - name: 'LOCATION'
+          label: 'Location'
+          type: 'String:32'
+          required: false
+          help_text: 'State or province for W/VE stations; DX for all others.'
+        - name: 'CLUB'
+          label: 'Club'
+          type: 'String:75'
+          required: false
+          preserve_case: true
+        - name: 'EMAIL'
+          label: 'Email'
+          type: 'String:75'
+          required: false
+          regex: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$'
+          preserve_case: true
+        - name: 'NAME'
+          label: 'Name'
+          type: 'String:75'
+          required: false
+          preserve_case: true
+        - name: 'ADDRESS'
+          label: 'Address'
+          type: 'String:45'
+          widget: 'textarea'
+          max_lines: 6
+          required: false
+          preserve_case: true
+        - name: 'SOAPBOX'
+          label: 'Soapbox'
+          type: 'String:75'
+          widget: 'textarea'
+          required: false
+          preserve_case: true
+    metadata:
+      source: 'https://contests.arrl.org/ContestRules/DX-Rules.pdf'
+      notes: 'W/VE stations work DX stations only. DXCC entities count once per band, excluding USA and Canada. Category combinations, band-change limits, and other operating restrictions remain operator-enforced.'
+
+  - id: 'ARRL-DX-CW (DX)'
+    extends: 'ARRL-DX-CW'
+    display_name: 'ARRL International DX Contest (CW, DX)'
+    scoring:
+      qso_points:
+        category_band_param: 'CATEGORY-BAND'
+        rules:
+          - when:
+              field: 'DXCC'
+              in_sets: ['ARRL DX W/VE DXCC']
+            points: 3
+          - points: 0
+      multipliers:
+        - name: 'State or Province'
+          field: 'SRX_STRING'
+          key: ['SRX_STRING', 'BAND']
+          in_sets: ['ARRL DX States', 'District of Columbia', 'Canadian Provinces and Territories', 'Labrador']
+    log_params:
+      - name: 'Power'
+        label: 'Power'
+        type: 'String:4'
+        required: true
+        regex: '^\\S{1,4}$'
+        help_text: 'Transmit power as a number or abbreviation.'
+    exchange:
+      - name: 'RST(s)'
+        type: 'RST'
+        adif: 'RST_SENT'
+        default: 599
+        is_sent: true
+      - name: 'Power(s)'
+        type: 'String:4'
+        adif: 'STX_STRING'
+        fixed: true
+        source_param: 'Power'
+        regex: '^\\S{1,4}$'
+        is_sent: true
+      - name: 'RST(r)'
+        type: 'RST'
+        adif: 'RST_RCVD'
+        default: 599
+        is_sent: false
+      - name: 'Location'
+        type: 'String:2'
+        adif: 'SRX_STRING'
+        in_sets: ['ARRL DX States', 'District of Columbia', 'Canadian Provinces and Territories', 'Labrador']
+        is_sent: false
+    qso_columns: ['RST(r)', 'Location', 'Mult', 'Pts', 'Op']
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'RST(s)': 'RST_SENT'
+      'Power(s)': 'STX_STRING'
+      'RST(r)': 'RST_RCVD'
+      Location: 'SRX_STRING'
+    metadata:
+      source: 'https://contests.arrl.org/ContestRules/DX-Rules.pdf'
+      notes: 'DX stations work W/VE stations only. States, DC, Canadian provinces and territories, and Labrador count once per band. Category combinations, band-change limits, and other operating restrictions remain operator-enforced.'
+
+  - id: 'ARRL-DX-SSB'
+    extends: 'ARRL-DX-CW'
+    display_name: 'ARRL International DX Contest (SSB)'
+    allowed_modes: ['SSB']
+    cabrillo:
+      contest_id: 'ARRL-DX-SSB'
+      fixed_fields:
+        - name: 'CATEGORY-MODE'
+          value: 'SSB'
+
+  - id: 'ARRL-DX-SSB (DX)'
+    extends: 'ARRL-DX-CW (DX)'
+    display_name: 'ARRL International DX Contest (SSB, DX)'
+    allowed_modes: ['SSB']
+    cabrillo:
+      contest_id: 'ARRL-DX-SSB'
+      fixed_fields:
+        - name: 'CATEGORY-MODE'
+          value: 'SSB'
