@@ -798,7 +798,7 @@ fn device_info(
             .map(str::to_string),
         extended: description
             .as_ref()
-            .map(|description| description.extended().to_vec())
+            .map(|description| description.extended().map(str::to_string).collect())
             .unwrap_or_default(),
         is_default: default_id == Some(id.as_str()),
         default_config,
@@ -825,7 +825,7 @@ fn default_stream_config(
 fn device_by_id(id: &str) -> Option<rodio::Device> {
     let id = normalized_optional_id(Some(id))?;
     let device_id = id.parse::<cpal::DeviceId>().ok()?;
-    let host = cpal::host_from_id(device_id.0).ok()?;
+    let host = cpal::host_from_id(device_id.host()).ok()?;
     host.device_by_id(&device_id)
 }
 
