@@ -163,8 +163,7 @@ impl ContestScoringModule {
                 bonus
                     .thresholds
                     .iter()
-                    .filter(|(threshold, _)| **threshold <= count)
-                    .next_back()
+                    .rfind(|(threshold, _)| **threshold <= count)
                     .map(|(_, points)| *points)
                     .unwrap_or(0)
             })
