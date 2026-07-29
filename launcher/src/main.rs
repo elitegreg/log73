@@ -1,6 +1,6 @@
 use iced::widget::image::Handle as ImageHandle;
 use iced::widget::{
-    Image, button, column, container, pick_list, row, scrollable, text, text_input,
+    Image, button, column, container, opaque, pick_list, row, scrollable, stack, text, text_input,
 };
 use iced::{Element, Font, Length, Subscription, Task, Theme, application, font, window};
 use serde::{Deserialize, Serialize};
@@ -79,6 +79,7 @@ struct Launcher {
     next_token: u64,
     stop_in_progress: bool,
     download_in_progress: Option<DownloadKind>,
+    confirm_remove_database: bool,
     pending_close_window: Option<window::Id>,
 }
 
@@ -95,6 +96,7 @@ impl Default for Launcher {
             next_token: 1,
             stop_in_progress: false,
             download_in_progress: None,
+            confirm_remove_database: false,
             pending_close_window: None,
         }
     }
@@ -131,6 +133,10 @@ enum Message {
     BindModeSelected(BindMode),
     PortChanged(String),
     AppBrowserSelected(AppBrowser),
+    RemoveLogFilePressed,
+    RemoveDatabasePressed,
+    ConfirmRemoveDatabasePressed,
+    CancelRemoveDatabasePressed,
     StartPressed,
     StopPressed,
     OpenLogPressed,
@@ -458,6 +464,44 @@ fn update(state: &mut Launcher, message: Message) -> Task<Message> {
         Message::AppBrowserSelected(browser) => {
             state.settings.app_browser = browser;
             state.settings_dirty = true;
+            Task::none()
+        }
+        Message::RemoveLogFilePressed => {
+            if !can_remove_files(state) {
+                state.status = "Stop the backend before removing files.".to_string();
+                return Task::none();
+            }
+
+            state.status = match remove_log_file(&state.settings) {
+                Ok(note) => note,
+                Err(error) => format!("Failed to remove log file: {error}"),
+            };
+            Task::none()
+        }
+        Message::RemoveDatabasePressed => {
+            if !can_remove_files(state) {
+                state.status = "Stop the backend before removing files.".to_string();
+            } else {
+                state.confirm_remove_database = true;
+            }
+            Task::none()
+        }
+        Message::ConfirmRemoveDatabasePressed => {
+            state.confirm_remove_database = false;
+            if !can_remove_files(state) {
+                state.status = "Stop the backend before removing files.".to_string();
+                return Task::none();
+            }
+
+            state.status = match remove_database(&state.settings) {
+                Ok(note) => note,
+                Err(error) => format!("Failed to remove database: {error}"),
+            };
+            Task::none()
+        }
+        Message::CancelRemoveDatabasePressed => {
+            state.confirm_remove_database = false;
+            state.status = "Database removal cancelled.".to_string();
             Task::none()
         }
         Message::StartPressed => start_backend(state),
@@ -811,6 +855,37 @@ fn open_log_file(settings: &LauncherSettings) -> Result<String, String> {
     eprintln!("log73-launcher: opening log file {}", log_file.display());
     open::that(&log_file).map_err(|error| error.to_string())?;
     Ok(format!("Opened log file: {}", log_file.display()))
+}
+
+fn can_remove_files(state: &Launcher) -> bool {
+    state.child.is_none() && !state.stop_in_progress
+}
+
+fn remove_log_file(settings: &LauncherSettings) -> Result<String, String> {
+    let log_file_path = settings.log_file_path.trim();
+    if log_file_path.is_empty() {
+        return Err("log file path is empty".to_string());
+    }
+
+    remove_file(PathBuf::from(log_file_path), "log file")
+}
+
+fn remove_database(settings: &LauncherSettings) -> Result<String, String> {
+    let data_dir = PathBuf::from(settings.data_dir.trim());
+    if data_dir.as_os_str().is_empty() {
+        return Err("data directory is empty".to_string());
+    }
+
+    remove_file(log73_paths::database_path(data_dir), "database")
+}
+
+fn remove_file(path: PathBuf, label: &str) -> Result<String, String> {
+    if !path.exists() {
+        return Ok(format!("{} is already absent: {}", label, path.display()));
+    }
+
+    fs::remove_file(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    Ok(format!("Removed {}: {}", label, path.display()))
 }
 
 fn open_default_browser(settings: &LauncherSettings) -> Result<String, String> {
@@ -1256,9 +1331,25 @@ fn view_settings(state: &Launcher) -> Element<'_, Message> {
     .width(Length::FillPortion(1));
 
     let profile_dir = effective_browser_user_data_dir(state.settings.app_browser);
+    let can_remove_files = can_remove_files(state);
 
     let defaults_button = button("Set defaults").on_press(Message::SetDefaultsPressed);
     let back_button = button("Back").on_press(Message::BackToMainPressed);
+    let remove_log_file_button = if can_remove_files {
+        button("Remove Log File").on_press(Message::RemoveLogFilePressed)
+    } else {
+        button("Remove Log File")
+    };
+    let remove_database_button = if can_remove_files {
+        button("Remove DB").on_press(Message::RemoveDatabasePressed)
+    } else {
+        button("Remove DB")
+    };
+    let removal_hint = if can_remove_files {
+        "Removal actions permanently delete files from the configured paths."
+    } else {
+        "Stop the backend before removing the log file or database."
+    };
 
     let content = column![
         text("Settings"),
@@ -1279,6 +1370,8 @@ fn view_settings(state: &Launcher) -> Element<'_, Message> {
             "App mode user data dir: {}",
             profile_dir.to_string_lossy()
         )),
+        row![remove_log_file_button, remove_database_button].spacing(12),
+        text(removal_hint),
         row![defaults_button, back_button].spacing(12),
         text(&state.status),
     ]
@@ -1286,11 +1379,51 @@ fn view_settings(state: &Launcher) -> Element<'_, Message> {
     .padding(16)
     .max_width(900);
 
-    container(scrollable(content).height(Length::Fill))
+    let settings = container(scrollable(content).height(Length::Fill))
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
-        .into()
+        .into();
+
+    if state.confirm_remove_database {
+        let confirmation = container(
+            column![
+                text("Remove DB?").size(24),
+                text(
+                    "This permanently deletes the log73 database in the configured data directory."
+                ),
+                text(
+                    log73_paths::database_path(state.settings.data_dir.trim())
+                        .to_string_lossy()
+                        .into_owned(),
+                ),
+                row![
+                    button("Cancel").on_press(Message::CancelRemoveDatabasePressed),
+                    button("Remove DB").on_press(Message::ConfirmRemoveDatabasePressed),
+                ]
+                .spacing(12),
+            ]
+            .spacing(16)
+            .padding(20)
+            .max_width(480),
+        )
+        .style(iced::widget::container::rounded_box)
+        .width(Length::Fixed(500.0));
+
+        return stack![
+            settings,
+            opaque(
+                container(confirmation)
+                    .width(Length::Fill)
+                    .height(Length::Fill)
+                    .center_x(Length::Fill)
+                    .center_y(Length::Fill),
+            ),
+        ]
+        .into();
+    }
+
+    settings
 }
 
 fn default_backend_path() -> String {
@@ -1526,6 +1659,7 @@ mod tests {
             next_token: 1,
             stop_in_progress: false,
             download_in_progress: None,
+            confirm_remove_database: false,
             pending_close_window: None,
         }
     }
@@ -1607,5 +1741,65 @@ mod tests {
         assert_eq!(loaded.app_browser, settings.app_browser);
 
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn removing_log_file_uses_the_configured_path() {
+        let path = temp_settings_path("remove-log").with_file_name("backend.log");
+        let log_dir = path.parent().expect("log path has parent").to_path_buf();
+        fs::create_dir_all(&log_dir).expect("create log directory");
+        fs::write(&path, "log output").expect("write log file");
+
+        let mut settings = LauncherSettings::default();
+        settings.log_file_path = path.to_string_lossy().into_owned();
+
+        assert!(
+            remove_log_file(&settings)
+                .expect("remove log file")
+                .contains("Removed log file")
+        );
+        assert!(!path.exists());
+        assert!(
+            remove_log_file(&settings)
+                .expect("missing log file is reported")
+                .contains("already absent")
+        );
+
+        let _ = fs::remove_dir_all(log_dir);
+    }
+
+    #[test]
+    fn database_removal_requires_confirmation_and_uses_data_dir() {
+        let data_dir = temp_settings_path("remove-database").with_file_name("data");
+        fs::create_dir_all(&data_dir).expect("create data directory");
+        let database_path = log73_paths::database_path(&data_dir);
+        fs::write(&database_path, "database").expect("write database file");
+
+        let mut launcher = test_launcher();
+        launcher.settings.data_dir = data_dir.to_string_lossy().into_owned();
+
+        let _ = update(&mut launcher, Message::RemoveDatabasePressed);
+        assert!(launcher.confirm_remove_database);
+        assert!(database_path.exists());
+
+        let _ = update(&mut launcher, Message::CancelRemoveDatabasePressed);
+        assert!(!launcher.confirm_remove_database);
+        assert!(database_path.exists());
+
+        let _ = update(&mut launcher, Message::RemoveDatabasePressed);
+        let _ = update(&mut launcher, Message::ConfirmRemoveDatabasePressed);
+        assert!(!database_path.exists());
+
+        let _ = fs::remove_dir_all(data_dir);
+    }
+
+    #[test]
+    fn file_removal_is_rejected_while_backend_is_stopping() {
+        let mut launcher = test_launcher();
+        launcher.stop_in_progress = true;
+
+        let _ = update(&mut launcher, Message::RemoveLogFilePressed);
+
+        assert_eq!(launcher.status, "Stop the backend before removing files.");
     }
 }
