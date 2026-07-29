@@ -1728,6 +1728,55 @@ contests:
     }
 
     #[test]
+    fn bundled_wfd_rules_support_the_2026_exchange_and_objective_multiplier() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let contest = store
+            .get("WFD")
+            .expect("Winter Field Day rules should load");
+
+        assert_eq!(
+            contest.allowed_bands,
+            ["160m", "80m", "40m", "20m", "15m", "10m", "6m", "2m"]
+        );
+        assert_eq!(contest.allowed_modes, ["CW", "SSB", "FM"]);
+        assert_eq!(contest.dupe_key, ["CALL", "BAND", "MODE_CLASS"]);
+        assert_eq!(
+            contest.qso_points.as_ref().map(|points| points.rules.len()),
+            Some(2)
+        );
+        assert_eq!(contest.param_multipliers.len(), 1);
+        assert_eq!(contest.param_multipliers[0].values.get("32"), Some(&33));
+
+        let sent_exchange = contest
+            .exchange
+            .iter()
+            .find(|field| field.name == "Exchange(s)")
+            .expect("sent exchange should exist");
+        assert_eq!(sent_exchange.source_param.as_deref(), Some("X-EXCHANGE"));
+        assert_eq!(sent_exchange.regex.as_deref(), Some(r"^\d+[HIOM]$"));
+
+        let cabrillo = contest
+            .cabrillo
+            .as_ref()
+            .expect("Cabrillo rules should exist");
+        assert_eq!(cabrillo.contest_id.as_deref(), Some("WFD"));
+        assert!(
+            cabrillo
+                .log_fields
+                .iter()
+                .any(|field| field.name == "X-EXCHANGE")
+        );
+        assert!(
+            cabrillo
+                .log_fields
+                .iter()
+                .any(|field| field.name == "LOCATION")
+        );
+    }
+
+    #[test]
     fn bundled_cqww_rules_resolve_cw_and_ssb_variants() {
         let yaml = include_str!("../../data/contest-rules/cqww.yaml");
         let cw = resolve_yaml_contest(yaml, "CQ-WW-CW");

@@ -1,0 +1,179 @@
+contests:
+  - id: 'WFD'
+    display_name: 'Winter Field Day'
+    allowed_bands: [160, 80, 40, 20, 15, 10, 6, 2]
+    allowed_modes: ['CW', 'SSB', 'FM']
+    scoring:
+      qso_points:
+        rules:
+          - when:
+              field: 'MODE'
+              values: ['SSB', 'FM', 'AM']
+            points: 1
+          - points: 2
+      dupe_key: ['CALL', 'BAND', 'MODE_CLASS']
+      param_multipliers:
+        - param: 'Objective Multiplier'
+          values:
+            '0': 1
+            '1': 2
+            '2': 3
+            '3': 4
+            '4': 5
+            '5': 6
+            '6': 7
+            '7': 8
+            '8': 9
+            '9': 10
+            '10': 11
+            '11': 12
+            '12': 13
+            '13': 14
+            '14': 15
+            '15': 16
+            '16': 17
+            '17': 18
+            '18': 19
+            '19': 20
+            '20': 21
+            '21': 22
+            '22': 23
+            '23': 24
+            '24': 25
+            '25': 26
+            '26': 27
+            '27': 28
+            '28': 29
+            '29': 30
+            '30': 31
+            '31': 32
+            '32': 33
+    define:
+      - name: 'ARRL Sections'
+        values_from_file: arrl_sections.dat
+      - name: 'RAC Sections'
+        values_from_file: rac_sections.dat
+      - name: 'Other Locations'
+        values: ['MX', 'DX']
+    log_params:
+      - name: 'X-EXCHANGE'
+        label: 'Category and Class'
+        type: 'String:8'
+        required: true
+        regex: '^\d+[HIOM]$'
+        help_text: 'Number of simultaneously capable transmitters followed by H, I, O, or M; for example, 3O.'
+      - name: 'LOCATION'
+        label: 'Location Identifier'
+        type: 'String:3'
+        required: true
+        in_sets: ['ARRL Sections', 'RAC Sections', 'Other Locations']
+      - name: 'Objective Multiplier'
+        label: 'Objective Multiplier'
+        type: 'String:2'
+        widget: 'select'
+        default: '0'
+        valid_values:
+          [
+            '0',
+            '1',
+            '2',
+            '3',
+            '4',
+            '5',
+            '6',
+            '7',
+            '8',
+            '9',
+            '10',
+            '11',
+            '12',
+            '13',
+            '14',
+            '15',
+            '16',
+            '17',
+            '18',
+            '19',
+            '20',
+            '21',
+            '22',
+            '23',
+            '24',
+            '25',
+            '26',
+            '27',
+            '28',
+            '29',
+            '30',
+            '31',
+            '32',
+          ]
+        help_text: 'Sum of completed WFD objective multipliers. Score is QSO points × (this value + 1).'
+    exchange:
+      - name: 'Exchange(s)'
+        type: 'String:8'
+        adif: 'STX_STRING'
+        fixed: true
+        source_param: 'X-EXCHANGE'
+        regex: '^\d+[HIOM]$'
+        is_sent: true
+      - name: 'Location(s)'
+        type: 'String:3'
+        adif: 'MY_ARRL_SECT'
+        fixed: true
+        source_param: 'LOCATION'
+        in_sets: ['ARRL Sections', 'RAC Sections', 'Other Locations']
+        is_sent: true
+      - name: 'Exchange'
+        type: 'String:8'
+        adif: 'SRX_STRING'
+        regex: '^\d+[HIOM]$'
+        is_sent: false
+      - name: 'Location'
+        type: 'String:3'
+        adif: 'ARRL_SECT'
+        in_sets: ['ARRL Sections', 'RAC Sections', 'Other Locations']
+        is_sent: false
+    qso_columns: ['Exchange', 'Location', 'Pts', 'Op']
+    qso_column_fields:
+      Freq: 'FREQ'
+      Mode: 'MODE'
+      Call: 'CALL'
+      Op: 'OPERATOR'
+      'Exchange(s)': 'STX_STRING'
+      'Location(s)': 'MY_ARRL_SECT'
+      Exchange: 'SRX_STRING'
+      Location: 'ARRL_SECT'
+    cabrillo:
+      contest_id: 'WFD'
+      log_fields:
+        - name: 'X-EXCHANGE'
+          label: 'Category and Class'
+          type: 'String:8'
+          required: true
+          regex: '^\d+[HIOM]$'
+        - name: 'LOCATION'
+          label: 'Location Identifier'
+          type: 'String:3'
+          required: true
+          in_sets: ['ARRL Sections', 'RAC Sections', 'Other Locations']
+      export_fields:
+        - name: 'CLUB'
+          label: 'Club'
+          type: 'String:75'
+          required: false
+          preserve_case: true
+        - name: 'NAME'
+          label: 'Contact Name'
+          type: 'String:75'
+          required: false
+          preserve_case: true
+        - name: 'EMAIL'
+          label: 'Email'
+          type: 'String:75'
+          required: false
+          regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
+          preserve_case: true
+    metadata:
+      source: 'https://winterfieldday.org/sop.php'
+      notes: 'Supports Log73 bands except WFD-prohibited 12m, 17m, 30m, and 60m. CW and phone modes are supported; digital modes and satellite objective contacts are not yet supported. Enter the total completed 2026 objective multiplier manually (maximum 32).'
