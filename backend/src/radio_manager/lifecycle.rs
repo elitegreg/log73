@@ -1,5 +1,5 @@
 use super::cat_runtime::{ManagedRadioRuntime, debug_radio_config, run_managed_radio};
-use crate::bands::Band;
+use crate::bands::BandCatalog;
 use crate::db::{Database, RadioConfig};
 use crate::radio::{RadioCommand, RadioState, RadioStatus, ServerMessage};
 use crate::voice_keyer::VoiceKeyer;
@@ -13,7 +13,7 @@ use tracing::debug;
 pub struct RadioManager {
     db: Database,
     voice_keyer: VoiceKeyer,
-    bands: Arc<Vec<Band>>,
+    bands: BandCatalog,
     radios: Arc<Mutex<HashMap<i64, ManagedRadioSlot>>>,
 }
 
@@ -43,7 +43,7 @@ struct ManagedRadio {
 }
 
 impl RadioManager {
-    pub fn new(db: Database, voice_keyer: VoiceKeyer, bands: Arc<Vec<Band>>) -> Self {
+    pub fn new(db: Database, voice_keyer: VoiceKeyer, bands: BandCatalog) -> Self {
         Self {
             db,
             voice_keyer,

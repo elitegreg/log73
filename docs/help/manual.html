@@ -271,6 +271,9 @@
 ~/.local/share/log73/contest-rules/*.yaml
 ~/.local/share/log73/MASTER.SCP
 ~/.local/share/log73/cty.csv
+~/.local/share/log73/bands_1.csv
+~/.local/share/log73/bands_2.csv
+~/.local/share/log73/bands_3.csv
 ~/.local/share/log73/log73.db</code></pre>
     <p>Recommended production launch pattern:</p>
     <div class="sourceCode" id="cb2">
@@ -294,6 +297,12 @@
       <li>
         Contest rules are loaded from both installed data and user data rule
         directories.
+      </li>
+      <li>
+        Band catalogs are loaded for the configured IARU Region. Log73 first
+        tries <code>bands_&lt;region&gt;.csv</code> in the user data directory,
+        then falls back to the application data directory if the user copy
+        cannot be read or validated.
       </li>
     </ul>
     <hr />
@@ -394,6 +403,7 @@
       <li>Theme selection</li>
       <li>Zoom selection</li>
       <li>Login username/password</li>
+      <li>IARU Region (Region 2 by default)</li>
       <li>DX Cluster settings</li>
       <li>Logger side image URL (browser-local setting)</li>
       <li>Reset-to-defaults convenience button</li>
@@ -401,6 +411,10 @@
     <h3 id="key-details">Key details</h3>
     <ul>
       <li>Leaving both password fields blank disables login.</li>
+      <li>
+        The selected IARU Region controls the bands available to the logger,
+        radio, band map, validation, and Cabrillo export.
+      </li>
       <li>
         DX Cluster config includes enable toggle, host, port, callsign, max age,
         and startup commands.

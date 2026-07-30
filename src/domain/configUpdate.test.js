@@ -8,6 +8,7 @@ test('buildConfigUpdatePayload preserves auth when password fields are blank', (
     loginPassword: '',
     loginPasswordConfirm: '',
     disableLogin: false,
+    iaruRegion: '3',
     dxClusterEnabled: true,
     dxClusterHost: 'cluster.example.test',
     dxClusterPort: '7300',
@@ -17,6 +18,7 @@ test('buildConfigUpdatePayload preserves auth when password fields are blank', (
   });
 
   assert.deepEqual(payload, {
+    iaru_region: 3,
     login_user: 'greg',
     disable_login: false,
     dxcluster_enabled: true,
@@ -34,6 +36,7 @@ test('buildConfigUpdatePayload sends password change fields when provided', () =
     loginPassword: 'secret',
     loginPasswordConfirm: 'secret',
     disableLogin: false,
+    iaruRegion: '2',
     dxClusterEnabled: false,
     dxClusterHost: '',
     dxClusterPort: '23',
@@ -53,6 +56,7 @@ test('buildConfigUpdatePayload sends explicit disable without password change fi
     loginPassword: '',
     loginPasswordConfirm: '',
     disableLogin: true,
+    iaruRegion: '1',
     dxClusterEnabled: false,
     dxClusterHost: '',
     dxClusterPort: '23',
@@ -62,6 +66,25 @@ test('buildConfigUpdatePayload sends explicit disable without password change fi
   });
 
   assert.equal(payload.disable_login, true);
+  assert.equal(payload.iaru_region, 1);
   assert.equal('login_password_change' in payload, false);
   assert.equal('login_password_confirm' in payload, false);
+});
+
+test('buildConfigUpdatePayload defaults invalid IARU region values to Region 2', () => {
+  const payload = buildConfigUpdatePayload({
+    loginUser: '',
+    loginPassword: '',
+    loginPasswordConfirm: '',
+    disableLogin: true,
+    iaruRegion: '',
+    dxClusterEnabled: false,
+    dxClusterHost: '',
+    dxClusterPort: '23',
+    dxClusterCallsign: '',
+    dxClusterMaxAgeMin: '60',
+    dxClusterCommands: '',
+  });
+
+  assert.equal(payload.iaru_region, 2);
 });

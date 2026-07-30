@@ -12,6 +12,7 @@ import {
 import {
   BAND_MAP_ENABLED_STORAGE_KEY,
   bandForFrequency,
+  bandNamesEqual,
 } from '../../logger/mainWindowHelpers.js';
 
 function normalizedBandMapSequence(value) {
@@ -102,8 +103,11 @@ export function visibleBandMapSpotStoreForCurrentBand({
   return createBandMapSpotStore(
     (baseStore.sortedSpots ?? []).filter((spot) => {
       const band = bandForFrequency(Number(spot?.frequency_hz), bandCatalog);
-      if (!band || band.name !== currentBand.name) return false;
-      return allowedBands.length === 0 || allowedBands.includes(band.name);
+      if (!band || !bandNamesEqual(band.name, currentBand.name)) return false;
+      return (
+        allowedBands.length === 0 ||
+        allowedBands.some((bandName) => bandNamesEqual(bandName, band.name))
+      );
     }),
   );
 }

@@ -1271,6 +1271,7 @@ mod tests {
                 upper_hz: 7_300_000,
                 default_ssb_mode: "LSB".to_string(),
                 sort_order: 1,
+                cabrillo: "khz".to_string(),
             },
             Band {
                 iaru_region: 2,
@@ -1279,6 +1280,7 @@ mod tests {
                 upper_hz: 14_350_000,
                 default_ssb_mode: "USB".to_string(),
                 sort_order: 2,
+                cabrillo: "khz".to_string(),
             },
         ]
     }

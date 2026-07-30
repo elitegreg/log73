@@ -1,7 +1,7 @@
 use super::commands::{apply_command, fail_unavailable_radio_command, logger_state_from_cat_state};
 use super::cw_task::{CwTaskCommand, run_cw_task};
 use super::keyers::{CwSerialDevice, open_serial_keyer};
-use crate::bands::Band;
+use crate::bands::BandCatalog;
 use crate::db::RadioConfig;
 use crate::radio::{RadioCommand, RadioState, RadioStatus};
 use crate::voice_keyer::VoiceKeyer;
@@ -32,7 +32,7 @@ pub(super) async fn run_managed_radio(
     mut commands: mpsc::Receiver<RadioCommand>,
     mut shutdown: oneshot::Receiver<()>,
     voice_keyer: VoiceKeyer,
-    bands: Arc<Vec<Band>>,
+    bands: BandCatalog,
 ) {
     let ManagedRadioRuntime {
         current_status,
@@ -274,12 +274,13 @@ pub(super) async fn run_managed_radio(
                                 last_rit_offset_hz,
                                 "applying CAT radio command"
                             );
+                            let band_snapshot = bands.snapshot();
                             match apply_command(
                                 &radio,
                                 &current,
                                 command,
                                 &mut last_rit_offset_hz,
-                                bands.as_ref(),
+                                band_snapshot.as_ref(),
                                 &config,
                                 &updates,
                             ).await {

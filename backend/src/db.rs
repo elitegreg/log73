@@ -1,4 +1,3 @@
-mod bands;
 mod config;
 mod contact;
 mod contacts;
@@ -11,8 +10,8 @@ mod worker;
 
 #[allow(unused_imports)]
 pub use config::{
-    DEFAULT_DXCLUSTER_MAX_AGE_MIN, DEFAULT_DXCLUSTER_PORT, MAX_DXCLUSTER_MAX_AGE_MIN,
-    MIN_DXCLUSTER_MAX_AGE_MIN,
+    DEFAULT_DXCLUSTER_MAX_AGE_MIN, DEFAULT_DXCLUSTER_PORT, DEFAULT_IARU_REGION,
+    MAX_DXCLUSTER_MAX_AGE_MIN, MIN_DXCLUSTER_MAX_AGE_MIN,
 };
 #[allow(unused_imports)]
 pub use contact::set_contact_adif;

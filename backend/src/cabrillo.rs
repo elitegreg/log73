@@ -1,3 +1,4 @@
+use crate::bands::{Band, band_by_name};
 use crate::contest_rules::{ContestParam, ContestRules, ExchangeField};
 use crate::db::{Contact, Log, contact_adif_value};
 use crate::qso_time::qso_datetime_cabrillo;
@@ -36,6 +37,7 @@ pub fn render_log(
     contacts: &[Contact],
     export_params: &Value,
     claimed_score: i64,
+    bands: &[Band],
 ) -> Result<String, String> {
     let cabrillo = rules
         .cabrillo
@@ -92,7 +94,7 @@ pub fn render_log(
     append_operators_lines(&mut lines, contacts, &log.station_callsign)?;
 
     for contact in contacts {
-        lines.push(render_qso_line(rules, log, contact)?);
+        lines.push(render_qso_line(rules, log, contact, bands)?);
     }
 
     lines.push("END-OF-LOG:".to_string());
@@ -187,9 +189,13 @@ fn append_operators_lines(
     Ok(())
 }
 
-fn render_qso_line(rules: &ContestRules, log: &Log, contact: &Contact) -> Result<String, String> {
-    let frequency = qso_frequency_token(contact)
-        .ok_or_else(|| "contact is missing frequency for Cabrillo export".to_string())?;
+fn render_qso_line(
+    rules: &ContestRules,
+    log: &Log,
+    contact: &Contact,
+    bands: &[Band],
+) -> Result<String, String> {
+    let frequency = qso_frequency_token(contact, bands)?;
     let mode = qso_mode_token(contact).ok_or_else(|| "contact is missing mode".to_string())?;
     let epoch = contact_i64(contact_adif_value(contact, "QSO_DATE_TIME_ON"))
         .ok_or_else(|| "contact is missing QSO date/time".to_string())?;
@@ -302,9 +308,20 @@ fn exchange_token(field: &ExchangeField, log: &Log, contact: &Contact) -> Result
     Err(format!("contact is missing {}", field.name))
 }
 
-fn qso_frequency_token(contact: &Contact) -> Option<String> {
-    contact_i64(contact_adif_value(contact, "FREQ"))
-        .map(|frequency_hz| (frequency_hz / 1000).to_string())
+fn qso_frequency_token(contact: &Contact, bands: &[Band]) -> Result<String, String> {
+    let frequency_hz = contact_i64(contact_adif_value(contact, "FREQ"))
+        .filter(|frequency_hz| *frequency_hz > 0)
+        .ok_or_else(|| "contact is missing frequency for Cabrillo export".to_string())?;
+    let band_name = token_string(contact_adif_value(contact, "BAND"))
+        .ok_or_else(|| "contact is missing band for Cabrillo export".to_string())?;
+    let band = band_by_name(bands, &band_name).ok_or_else(|| {
+        format!("contact band {band_name} is not available in the configured IARU region")
+    })?;
+    if band.cabrillo == "khz" {
+        Ok((frequency_hz / 1_000).to_string())
+    } else {
+        Ok(band.cabrillo.clone())
+    }
 }
 
 fn qso_mode_token(contact: &Contact) -> Option<String> {
@@ -373,6 +390,44 @@ mod tests {
     use serde_json::json;
     use std::collections::BTreeMap;
     use std::path::PathBuf;
+
+    fn test_bands() -> Vec<Band> {
+        [
+            ("20M", 14_000_000, 14_350_000, "khz"),
+            ("6M", 50_000_000, 54_000_000, "50"),
+            ("23cm", 1_240_000_000, 1_300_000_000, "1.2G"),
+            ("10Ghz", 10_000_000_000, 10_500_000_000, "10G"),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (name, lower_hz, upper_hz, cabrillo))| Band {
+            iaru_region: 2,
+            name: name.to_string(),
+            lower_hz,
+            upper_hz,
+            default_ssb_mode: "USB".to_string(),
+            sort_order: i64::try_from(index + 1).unwrap(),
+            cabrillo: cabrillo.to_string(),
+        })
+        .collect()
+    }
+
+    fn render_log(
+        rules: &ContestRules,
+        log: &Log,
+        contacts: &[Contact],
+        export_params: &Value,
+        claimed_score: i64,
+    ) -> Result<String, String> {
+        super::render_log(
+            rules,
+            log,
+            contacts,
+            export_params,
+            claimed_score,
+            &test_bands(),
+        )
+    }
 
     fn test_rules() -> ContestRules {
         ContestRules {
@@ -542,6 +597,7 @@ mod tests {
                 ("STATION_CALLSIGN".to_string(), json!("N0CALL")),
                 ("OPERATOR".to_string(), json!(operator)),
                 ("CALL".to_string(), json!(call)),
+                ("BAND".to_string(), json!("20m")),
                 ("FREQ".to_string(), json!(14_250_000_i64)),
                 ("MODE".to_string(), json!("SSB")),
                 ("RST_SENT".to_string(), json!(59)),
@@ -944,6 +1000,83 @@ mod tests {
             );
             assert_eq!(qso_mode_token(&contact).as_deref(), Some(token));
         }
+    }
+
+    #[test]
+    fn cabrillo_khz_bands_use_the_contacts_actual_frequency() {
+        let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
+        crate::db::set_contact_adif(&mut contact, "FREQ", json!(14_123_456));
+
+        assert_eq!(
+            qso_frequency_token(&contact, &test_bands()),
+            Ok("14123".to_string())
+        );
+    }
+
+    #[test]
+    fn cabrillo_literal_is_used_for_every_frequency_on_the_band() {
+        for frequency_hz in [50_000_000, 50_313_000, 53_999_999] {
+            let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
+            crate::db::set_contact_adif(&mut contact, "BAND", json!("6m"));
+            crate::db::set_contact_adif(&mut contact, "FREQ", json!(frequency_hz));
+            assert_eq!(
+                qso_frequency_token(&contact, &test_bands()),
+                Ok("50".to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn rendered_qso_line_uses_the_band_cabrillo_literal() {
+        let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
+        crate::db::set_contact_adif(&mut contact, "BAND", json!("6M"));
+        crate::db::set_contact_adif(&mut contact, "FREQ", json!(50_313_000));
+
+        let text = render_log(&test_rules(), &test_log(), &[contact], &json!({}), 1)
+            .expect("Cabrillo log renders");
+        assert!(qso_line(&text).starts_with("QSO: 50 PH "));
+    }
+
+    #[test]
+    fn cabrillo_23cm_and_microwave_literals_are_preserved() {
+        for (band, frequency_hz, expected) in [
+            ("23CM", 1_296_000_000_i64, "1.2G"),
+            ("10ghz", 10_368_000_000_i64, "10G"),
+        ] {
+            let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
+            crate::db::set_contact_adif(&mut contact, "BAND", json!(band));
+            crate::db::set_contact_adif(&mut contact, "FREQ", json!(frequency_hz));
+            assert_eq!(
+                qso_frequency_token(&contact, &test_bands()),
+                Ok(expected.to_string())
+            );
+        }
+    }
+
+    #[test]
+    fn cabrillo_frequency_rejects_missing_frequency_band_and_unknown_band() {
+        let bands = test_bands();
+        let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
+        crate::db::set_contact_adif(&mut contact, "FREQ", Value::Null);
+        assert!(
+            qso_frequency_token(&contact, &bands)
+                .unwrap_err()
+                .contains("frequency")
+        );
+
+        let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
+        crate::db::set_contact_adif(&mut contact, "BAND", Value::Null);
+        assert!(
+            qso_frequency_token(&contact, &bands)
+                .unwrap_err()
+                .contains("band")
+        );
+
+        let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
+        crate::db::set_contact_adif(&mut contact, "BAND", json!("4M"));
+        let error = qso_frequency_token(&contact, &bands).unwrap_err();
+        assert!(error.contains("4M"));
+        assert!(error.contains("configured IARU region"));
     }
 
     #[test]

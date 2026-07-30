@@ -1,4 +1,4 @@
-use crate::bands::{Band, band_for_frequency};
+use crate::bands::{Band, BandCatalog, band_for_frequency};
 use crate::db::{Contact, contact_adif, contact_adif_value};
 use crate::dxcluster::{DxClusterRbnSpot, DxClusterSpot};
 use crate::log_cache::LogCacheProcessor;
@@ -87,7 +87,7 @@ pub struct BandMapManager {
 }
 
 struct BandMapManagerInner {
-    bands: Arc<Vec<Band>>,
+    bands: BandCatalog,
     max_age: Mutex<Duration>,
     store: Mutex<BandMapSpotStore>,
     events: broadcast::Sender<BandMapEvent>,
@@ -153,11 +153,11 @@ enum UpsertOutcome {
 }
 
 impl BandMapManager {
-    pub fn new(bands: Arc<Vec<Band>>, max_age: Duration) -> Self {
+    pub fn new(bands: impl Into<BandCatalog>, max_age: Duration) -> Self {
         let (events, _) = broadcast::channel(BANDMAP_EVENT_BUFFER);
         let manager = Self {
             inner: Arc::new(BandMapManagerInner {
-                bands,
+                bands: bands.into(),
                 max_age: Mutex::new(max_age),
                 store: Mutex::new(BandMapSpotStore::default()),
                 events,
@@ -377,9 +377,10 @@ impl BandMapManager {
         let max_age = self.max_age();
         let cutoff = cutoff_timestamp(max_age);
         let mut desired = HashMap::<BandMapDedupeKey, BandMapSpotCandidate>::new();
+        let bands = self.inner.bands.snapshot();
 
         for contact in contacts {
-            let Some(candidate) = local_spot_candidate(&self.inner.bands, log_id, contact) else {
+            let Some(candidate) = local_spot_candidate(bands.as_ref(), log_id, contact) else {
                 continue;
             };
             if candidate.received_at < cutoff {
@@ -466,7 +467,8 @@ impl BandMapManager {
     }
 
     fn band_name_for_frequency(&self, frequency_hz: u64) -> Option<String> {
-        band_for_frequency(&self.inner.bands, Frequency::from_hz(frequency_hz))
+        let bands = self.inner.bands.snapshot();
+        band_for_frequency(bands.as_ref(), Frequency::from_hz(frequency_hz))
             .map(|band| band.name.clone())
     }
 
@@ -814,6 +816,7 @@ fn unix_timestamp_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bands::BandCatalog;
     use crate::db::{build_contact, set_contact_adif};
     use serde_json::json;
     use std::thread;
@@ -826,7 +829,34 @@ mod tests {
             upper_hz: 14_350_000,
             default_ssb_mode: "USB".to_string(),
             sort_order: 1,
+            cabrillo: "khz".to_string(),
         }])
+    }
+
+    #[test]
+    fn manager_uses_replacement_band_catalog_without_restart() {
+        let catalog = BandCatalog::from(test_bands());
+        let manager = BandMapManager::new(catalog.clone(), Duration::from_secs(60));
+        assert_eq!(
+            manager.band_name_for_frequency(14_100_000).as_deref(),
+            Some("20m")
+        );
+
+        catalog.replace(vec![Band {
+            iaru_region: 1,
+            name: "6M".to_string(),
+            lower_hz: 50_000_000,
+            upper_hz: 54_000_000,
+            default_ssb_mode: "USB".to_string(),
+            sort_order: 1,
+            cabrillo: "50".to_string(),
+        }]);
+
+        assert_eq!(manager.band_name_for_frequency(14_100_000), None);
+        assert_eq!(
+            manager.band_name_for_frequency(50_100_000).as_deref(),
+            Some("6M")
+        );
     }
 
     fn contact(log_id: i64, call: &str, freq: u64, timestamp: u64, sect: &str) -> Contact {

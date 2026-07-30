@@ -3,6 +3,7 @@ export function buildConfigUpdatePayload({
   loginPassword,
   loginPasswordConfirm,
   disableLogin,
+  iaruRegion,
   dxClusterEnabled,
   dxClusterHost,
   dxClusterPort,
@@ -11,6 +12,7 @@ export function buildConfigUpdatePayload({
   dxClusterCommands,
 }) {
   const payload = {
+    iaru_region: Number.parseInt(iaruRegion, 10) || 2,
     login_user: loginUser,
     disable_login: Boolean(disableLogin),
     dxcluster_enabled: dxClusterEnabled,

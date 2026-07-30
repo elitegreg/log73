@@ -24,6 +24,7 @@ import {
   esmStateAfterCallsignEdit,
   bandForFrequency,
   bandByName,
+  bandNamesEqual,
   createContactId,
   createMessageRequestId,
   callsignHasQuery,
@@ -157,7 +158,9 @@ function MainWindow({
   const currentBand = bandForFrequency(radioFrequencyHz, bandCatalog);
   const currentBandValue = currentBand ? currentBand.name : 'unknown';
   const currentBandAllowed = currentBand
-    ? allowedBands.includes(currentBand.name)
+    ? allowedBands.some((bandName) =>
+        bandNamesEqual(bandName, currentBand.name),
+      )
     : false;
   const bandOptions = allowedBands
     .map((bandName) => bandByName(bandCatalog, bandName))
@@ -174,7 +177,7 @@ function MainWindow({
 
   if (
     currentBand &&
-    !bandOptions.some((band) => band.name === currentBand.name)
+    !bandOptions.some((band) => bandNamesEqual(band.name, currentBand.name))
   ) {
     bandOptions.push(currentBand);
   }

@@ -39,6 +39,9 @@ This manual assumes a production-style install similar to:
 ~/.local/share/log73/contest-rules/*.yaml
 ~/.local/share/log73/MASTER.SCP
 ~/.local/share/log73/cty.csv
+~/.local/share/log73/bands_1.csv
+~/.local/share/log73/bands_2.csv
+~/.local/share/log73/bands_3.csv
 ~/.local/share/log73/log73.db
 ```
 
@@ -54,6 +57,9 @@ Important path behavior:
 - Data dir defaults to platform data dir (Linux typically `~/.local/share/log73`).
 - Database path defaults to `~/.local/share/log73/log73.db`.
 - Contest rules are loaded from both installed data and user data rule directories.
+- Band catalogs are loaded for the configured IARU Region. Log73 first tries
+  `bands_<region>.csv` in the user data directory, then falls back to the
+  application data directory if the user copy cannot be read or validated.
 
 ---
 
@@ -111,6 +117,7 @@ Configure Log73 includes:
 - Theme selection
 - Zoom selection
 - Login username/password
+- IARU Region (Region 2 by default)
 - DX Cluster settings
 - Logger side image URL (browser-local setting)
 - Reset-to-defaults convenience button
@@ -118,6 +125,8 @@ Configure Log73 includes:
 ### Key details
 
 - Leaving both password fields blank disables login.
+- The selected IARU Region controls the bands available to the logger, radio,
+  band map, validation, and Cabrillo export.
 - DX Cluster config includes enable toggle, host, port, callsign, max age, and startup commands.
 - Logger side image URL is stored in local browser storage (not backend DB) and used by logger UI.
 - The logger side image is only shown if download succeeds; refresh attempts occur hourly.

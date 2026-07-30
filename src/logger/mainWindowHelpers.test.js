@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   availableModeOptions,
   bandByName,
+  bandNamesEqual,
   bandForFrequency,
   callsignClearThresholdHz,
   loggerFrequencyChangeAction,
@@ -89,12 +90,15 @@ test('availableModeOptions prefers backend-provided mode catalog', () => {
 
 test('band helpers use backend-provided band catalog', () => {
   const bands = [
-    { name: '40m', lowerHz: 7000000, upperHz: 7300000 },
-    { name: '20m', lowerHz: 14000000, upperHz: 14350000 },
+    { name: '40M', lowerHz: 7000000, upperHz: 7300000 },
+    { name: '20M', lowerHz: 14000000, upperHz: 14350000 },
   ];
 
-  assert.equal(bandForFrequency(14074000, bands)?.name, '20m');
+  assert.equal(bandForFrequency(14074000, bands)?.name, '20M');
   assert.equal(bandByName(bands, '40m')?.lowerHz, 7000000);
+  assert.equal(bandByName(bands, ' 20m ')?.upperHz, 14350000);
+  assert.equal(bandNamesEqual('23cm', '23CM'), true);
+  assert.equal(bandNamesEqual('20m', '40m'), false);
   assert.equal(bandByName(bands, '15m'), undefined);
 });
 

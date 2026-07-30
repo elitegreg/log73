@@ -65,6 +65,7 @@ pub struct SerialAllocation {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ConfigView {
+    pub iaru_region: i64,
     pub login_user: String,
     pub login_enabled: bool,
     pub dxcluster_enabled: bool,
@@ -100,6 +101,7 @@ pub enum LoginPasswordUpdate {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct UpdateConfig {
+    pub iaru_region: i64,
     pub login_user: String,
     pub login_password: LoginPasswordUpdate,
     pub dxcluster_enabled: bool,

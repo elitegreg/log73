@@ -246,9 +246,10 @@ test('band map visible store only shows spots on the current band', () => {
     { id: 2, frequency_hz: 21074000, call_dx: 'K2ABC', call_de: 'N0CALL' },
   ]);
   const settings = {
+    allowed_bands: ['20m', '15m'],
     band_catalog: [
-      { name: '20m', lowerHz: 14000000, upperHz: 14350000 },
-      { name: '15m', lowerHz: 21000000, upperHz: 21450000 },
+      { name: '20M', lowerHz: 14000000, upperHz: 14350000 },
+      { name: '15M', lowerHz: 21000000, upperHz: 21450000 },
     ],
   };
 

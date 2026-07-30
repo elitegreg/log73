@@ -5,6 +5,7 @@ pub const DEFAULT_DXCLUSTER_PORT: u16 = 23;
 pub const DEFAULT_DXCLUSTER_MAX_AGE_MIN: u16 = 60;
 pub const MIN_DXCLUSTER_MAX_AGE_MIN: u16 = 15;
 pub const MAX_DXCLUSTER_MAX_AGE_MIN: u16 = 360;
+pub const DEFAULT_IARU_REGION: i64 = 2;
 
 impl Default for DxClusterConfig {
     fn default() -> Self {
@@ -71,6 +72,12 @@ pub(super) fn db_dxcluster_config(connection: &Connection) -> rusqlite::Result<D
     }
 }
 
+pub(super) fn db_iaru_region(connection: &Connection) -> rusqlite::Result<i64> {
+    connection.query_row("SELECT IARU_REGION FROM config LIMIT 1", [], |row| {
+        row.get(0)
+    })
+}
+
 pub(super) fn db_update_config(
     connection: &Connection,
     config: UpdateConfig,
@@ -89,8 +96,9 @@ pub(super) fn db_update_config(
     let dxcluster_commands = &config.dxcluster_commands;
 
     let updated = connection.execute(
-        "UPDATE config SET LOGIN_USER = ?1, LOGIN_PASSWORD = ?2, DXCLUSTER_ENABLED = ?3, DXCLUSTER_HOST = ?4, DXCLUSTER_PORT = ?5, DXCLUSTER_CALLSIGN = ?6, DXCLUSTER_MAX_AGE_MIN = ?7, DXCLUSTER_COMMANDS = ?8",
+        "UPDATE config SET IARU_REGION = ?1, LOGIN_USER = ?2, LOGIN_PASSWORD = ?3, DXCLUSTER_ENABLED = ?4, DXCLUSTER_HOST = ?5, DXCLUSTER_PORT = ?6, DXCLUSTER_CALLSIGN = ?7, DXCLUSTER_MAX_AGE_MIN = ?8, DXCLUSTER_COMMANDS = ?9",
         params![
+            config.iaru_region,
             login_user,
             &login_password,
             config.dxcluster_enabled,
@@ -103,8 +111,9 @@ pub(super) fn db_update_config(
     )?;
     if updated == 0 {
         connection.execute(
-            "INSERT INTO config (version, LOGIN_USER, LOGIN_PASSWORD, DXCLUSTER_ENABLED, DXCLUSTER_HOST, DXCLUSTER_PORT, DXCLUSTER_CALLSIGN, DXCLUSTER_MAX_AGE_MIN, DXCLUSTER_COMMANDS) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO config (version, IARU_REGION, LOGIN_USER, LOGIN_PASSWORD, DXCLUSTER_ENABLED, DXCLUSTER_HOST, DXCLUSTER_PORT, DXCLUSTER_CALLSIGN, DXCLUSTER_MAX_AGE_MIN, DXCLUSTER_COMMANDS) VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
+                config.iaru_region,
                 login_user,
                 &login_password,
                 config.dxcluster_enabled,

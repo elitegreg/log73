@@ -9,6 +9,7 @@ function normalizeBand(band) {
     upperHz: Number(band?.upper_hz ?? 0),
     defaultSsbMode: String(band?.default_ssb_mode ?? ''),
     sortOrder: Number(band?.sort_order ?? 0),
+    cabrillo: String(band?.cabrillo ?? ''),
   };
 }
 

@@ -264,7 +264,15 @@ export function bandForFrequency(frequencyHz, bands = []) {
 }
 
 export function bandByName(bands = [], name) {
-  return bands.find((band) => band.name === name);
+  return bands.find((band) => bandNamesEqual(band.name, name));
+}
+
+export function bandNamesEqual(left, right) {
+  return normalizedBandName(left) === normalizedBandName(right);
+}
+
+function normalizedBandName(value) {
+  return String(value ?? '').trim().toUpperCase();
 }
 
 export function createContactId(date, callSign) {

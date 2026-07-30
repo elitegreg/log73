@@ -1,5 +1,4 @@
-use super::bands::db_bands;
-use super::config::{db_auth_config, db_dxcluster_config, db_update_config};
+use super::config::{db_auth_config, db_dxcluster_config, db_iaru_region, db_update_config};
 use super::contact::Contact;
 use super::contacts::{
     db_contacts, db_delete_contact, db_upsert_contacts, select_contact, select_contact_log_id,
@@ -14,7 +13,6 @@ use super::models::{
 use super::radios::{db_create_radio, db_delete_radio, db_radios, db_update_radio, select_radio};
 use super::schema::initialize_schema;
 use super::serials::db_allocate_serial;
-use crate::bands::Band;
 use rusqlite::Connection;
 use std::path::Path;
 use std::thread;
@@ -47,10 +45,6 @@ enum DbCommand {
         id: i64,
         response: oneshot::Sender<rusqlite::Result<usize>>,
     },
-    Bands {
-        iaru_region: i64,
-        response: oneshot::Sender<rusqlite::Result<Vec<Band>>>,
-    },
     Radios {
         response: oneshot::Sender<rusqlite::Result<Vec<RadioConfig>>>,
     },
@@ -63,6 +57,9 @@ enum DbCommand {
     },
     DxClusterConfig {
         response: oneshot::Sender<rusqlite::Result<DxClusterConfig>>,
+    },
+    IaruRegion {
+        response: oneshot::Sender<rusqlite::Result<i64>>,
     },
     UpdateConfig {
         config: UpdateConfig,
@@ -196,14 +193,6 @@ impl Database {
             .await
     }
 
-    pub async fn bands(&self, iaru_region: i64) -> rusqlite::Result<Vec<Band>> {
-        self.call(|response| DbCommand::Bands {
-            iaru_region,
-            response,
-        })
-        .await
-    }
-
     pub async fn radios(&self) -> rusqlite::Result<Vec<RadioConfig>> {
         self.call(|response| DbCommand::Radios { response }).await
     }
@@ -223,12 +212,18 @@ impl Database {
             .await
     }
 
+    pub async fn iaru_region(&self) -> rusqlite::Result<i64> {
+        self.call(|response| DbCommand::IaruRegion { response })
+            .await
+    }
+
     pub async fn config_view(&self) -> rusqlite::Result<ConfigView> {
         let auth_config = self.auth_config().await?;
         let dxcluster_config = self.dxcluster_config().await?;
         let login_enabled =
             !auth_config.login_user.trim().is_empty() && !auth_config.login_password.is_empty();
         Ok(ConfigView {
+            iaru_region: self.iaru_region().await?,
             login_user: auth_config.login_user,
             login_enabled,
             dxcluster_enabled: dxcluster_config.enabled,
@@ -340,12 +335,6 @@ fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbComm
             DbCommand::LogQsoCount { id, response } => {
                 let _ = response.send(db_log_qso_count(&connection, id));
             }
-            DbCommand::Bands {
-                iaru_region,
-                response,
-            } => {
-                let _ = response.send(db_bands(&connection, iaru_region));
-            }
             DbCommand::Radios { response } => {
                 let _ = response.send(db_radios(&connection));
             }
@@ -357,6 +346,9 @@ fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbComm
             }
             DbCommand::DxClusterConfig { response } => {
                 let _ = response.send(db_dxcluster_config(&connection));
+            }
+            DbCommand::IaruRegion { response } => {
+                let _ = response.send(db_iaru_region(&connection));
             }
             DbCommand::UpdateConfig { config, response } => {
                 let _ = response.send(db_update_config(&connection, config));
@@ -420,6 +412,86 @@ mod tests {
         Database::open(":memory:").expect("in-memory database opens")
     }
 
+    fn config_update(iaru_region: i64) -> UpdateConfig {
+        UpdateConfig {
+            iaru_region,
+            login_user: String::new(),
+            login_password: LoginPasswordUpdate::Preserve,
+            dxcluster_enabled: false,
+            dxcluster_host: String::new(),
+            dxcluster_port: DEFAULT_DXCLUSTER_PORT,
+            dxcluster_callsign: String::new(),
+            dxcluster_max_age_min: DEFAULT_DXCLUSTER_MAX_AGE_MIN,
+            dxcluster_commands: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn iaru_region_defaults_to_region_two_and_round_trips_valid_values() {
+        let database = test_database();
+        assert_eq!(
+            database.iaru_region().await.expect("region loads"),
+            crate::db::DEFAULT_IARU_REGION
+        );
+        assert_eq!(
+            database
+                .config_view()
+                .await
+                .expect("config view loads")
+                .iaru_region,
+            crate::db::DEFAULT_IARU_REGION
+        );
+
+        for region in 1..=3 {
+            database
+                .update_config(config_update(region))
+                .await
+                .expect("valid region is stored");
+            assert_eq!(database.iaru_region().await.expect("region loads"), region);
+            assert_eq!(
+                database
+                    .config_view()
+                    .await
+                    .expect("config view loads")
+                    .iaru_region,
+                region
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn invalid_iaru_regions_are_rejected_without_changing_the_region() {
+        let database = test_database();
+        database
+            .update_config(config_update(1))
+            .await
+            .expect("initial region is stored");
+
+        for region in [0, 4, -1] {
+            assert!(database.update_config(config_update(region)).await.is_err());
+            assert_eq!(database.iaru_region().await.expect("region loads"), 1);
+        }
+    }
+
+    #[test]
+    fn fresh_schema_has_configured_region_and_no_bands_table() {
+        let connection = Connection::open_in_memory().expect("in-memory connection opens");
+        initialize_schema(&connection).expect("schema initializes");
+        let region: i64 = connection
+            .query_row("SELECT IARU_REGION FROM config", [], |row| row.get(0))
+            .expect("configured region exists");
+        let bands_table_count: i64 = connection
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'bands'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("schema tables can be inspected");
+
+        assert_eq!(region, crate::db::DEFAULT_IARU_REGION);
+        assert_eq!(bands_table_count, 0);
+    }
+
     async fn create_test_log(database: &Database) -> Log {
         database
             .create_log(NewLog {
@@ -446,6 +518,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "greg".to_string(),
                 login_password: LoginPasswordUpdate::Set("hash".to_string()),
                 dxcluster_enabled: true,
@@ -476,6 +549,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "greg".to_string(),
                 login_password: LoginPasswordUpdate::Set(original_hash.clone()),
                 dxcluster_enabled: false,
@@ -490,6 +564,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "gregory".to_string(),
                 login_password: LoginPasswordUpdate::Preserve,
                 dxcluster_enabled: true,
@@ -515,6 +590,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "greg".to_string(),
                 login_password: LoginPasswordUpdate::Set(original_hash.clone()),
                 dxcluster_enabled: false,
@@ -529,6 +605,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "greg".to_string(),
                 login_password: LoginPasswordUpdate::Preserve,
                 dxcluster_enabled: true,
@@ -555,6 +632,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "greg".to_string(),
                 login_password: LoginPasswordUpdate::Set(original_hash.clone()),
                 dxcluster_enabled: false,
@@ -569,6 +647,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "greg".to_string(),
                 login_password: LoginPasswordUpdate::Set(replacement_hash.clone()),
                 dxcluster_enabled: false,
@@ -597,6 +676,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "greg".to_string(),
                 login_password: LoginPasswordUpdate::Set(original_hash),
                 dxcluster_enabled: false,
@@ -611,6 +691,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "greg".to_string(),
                 login_password: LoginPasswordUpdate::Disable,
                 dxcluster_enabled: false,
@@ -640,6 +721,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "greg".to_string(),
                 login_password: LoginPasswordUpdate::Set(original_hash.clone()),
                 dxcluster_enabled: false,
@@ -661,6 +743,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "gregory".to_string(),
                 login_password: LoginPasswordUpdate::Preserve,
                 dxcluster_enabled: false,
@@ -682,6 +765,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "gregory".to_string(),
                 login_password: LoginPasswordUpdate::Set(replacement_hash),
                 dxcluster_enabled: false,
@@ -703,6 +787,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "gregory".to_string(),
                 login_password: LoginPasswordUpdate::Disable,
                 dxcluster_enabled: false,
@@ -731,6 +816,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "greg".to_string(),
                 login_password: LoginPasswordUpdate::Set(original_hash),
                 dxcluster_enabled: false,
@@ -745,6 +831,7 @@ mod tests {
 
         database
             .update_config(UpdateConfig {
+                iaru_region: crate::db::DEFAULT_IARU_REGION,
                 login_user: "greg".to_string(),
                 login_password: LoginPasswordUpdate::Preserve,
                 dxcluster_enabled: true,

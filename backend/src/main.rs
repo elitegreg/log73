@@ -72,8 +72,11 @@ struct AppState {
     log_events: broadcast::Sender<ServerMessage>,
     db: Database,
     auth_config: std::sync::Arc<RwLock<AuthConfig>>,
+    config_update_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     contest_rules: ContestRulesStore,
-    bands: std::sync::Arc<Vec<bands::Band>>,
+    bands: bands::BandCatalog,
+    user_data_dir: PathBuf,
+    installed_data_dir: PathBuf,
     log_cache: LogCache,
     incremental_scoring: IncrementalScoreTracker,
     stats: StatsTracker,
@@ -440,13 +443,21 @@ async fn main() {
             Duration::from_secs(u64::from(db::DEFAULT_DXCLUSTER_MAX_AGE_MIN) * 60)
         }
     };
-    let loaded_bands = std::sync::Arc::new(
-        db.bands(2)
-            .await
-            .unwrap_or_else(|error| panic!("failed to load region 2 bands: {error}")),
+    let iaru_region = db
+        .iaru_region()
+        .await
+        .unwrap_or_else(|error| panic!("failed to load configured IARU region: {error}"));
+    let loaded_bands =
+        bands::load_region_bands(&paths.data_dir, &paths.installed_data_dir, iaru_region)
+            .unwrap_or_else(|error| panic!("failed to load configured bands: {error}"));
+    let band_catalog = bands::BandCatalog::new(loaded_bands);
+    info!(
+        iaru_region,
+        bands = band_catalog.snapshot().len(),
+        "loaded amateur radio band catalog"
     );
-    let bandmap = BandMapManager::new(loaded_bands.clone(), initial_bandmap_max_age);
-    let radio_manager = RadioManager::new(db.clone(), voice_keyer.clone(), loaded_bands.clone());
+    let bandmap = BandMapManager::new(band_catalog.clone(), initial_bandmap_max_age);
+    let radio_manager = RadioManager::new(db.clone(), voice_keyer.clone(), band_catalog.clone());
     let scoring_modules = ScoringModules::new();
     let incremental_scoring = IncrementalScoreTracker::new();
     let stats = StatsTracker::new();
@@ -467,8 +478,11 @@ async fn main() {
         log_events,
         db,
         auth_config,
+        config_update_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
         contest_rules,
-        bands: loaded_bands,
+        bands: band_catalog,
+        user_data_dir: paths.data_dir.clone(),
+        installed_data_dir: paths.installed_data_dir.clone(),
         log_cache,
         incremental_scoring,
         stats,
@@ -1161,7 +1175,7 @@ async fn contest_settings(
 }
 
 async fn bands_catalog(State(app_state): State<AppState>) -> Json<Vec<bands::Band>> {
-    Json(app_state.bands.as_ref().clone())
+    Json(app_state.bands.snapshot().as_ref().clone())
 }
 
 async fn modes_catalog() -> Json<Vec<String>> {
@@ -1368,8 +1382,10 @@ async fn config(State(app_state): State<AppState>) -> ApiResult<db::ConfigView> 
         .map_err(|error| ApiError::internal(error.to_string()))
 }
 
-#[derive(Debug, Default, serde::Deserialize, serde::Serialize)]
+#[derive(Debug, serde::Deserialize, serde::Serialize)]
 struct UpdateConfigPayload {
+    #[serde(default = "default_iaru_region")]
+    iaru_region: i64,
     #[serde(default)]
     login_user: String,
     #[serde(default)]
@@ -1394,6 +1410,10 @@ struct UpdateConfigPayload {
 
 fn default_dxcluster_port() -> u16 {
     db::DEFAULT_DXCLUSTER_PORT
+}
+
+fn default_iaru_region() -> i64 {
+    db::DEFAULT_IARU_REGION
 }
 
 fn default_dxcluster_max_age_min() -> u16 {
@@ -1502,6 +1522,27 @@ async fn update_config(
     Json(payload): Json<UpdateConfigPayload>,
 ) -> ApiResult<db::ConfigView> {
     debug!("update config PUT request");
+    let _config_update_guard = app_state.config_update_lock.lock().await;
+    if !(1..=3).contains(&payload.iaru_region) {
+        return Err(ApiError::bad_request("IARU region must be 1, 2, or 3"));
+    }
+    let current_region = app_state
+        .db
+        .iaru_region()
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let replacement_bands = if current_region == payload.iaru_region {
+        None
+    } else {
+        Some(
+            bands::load_region_bands(
+                &app_state.user_data_dir,
+                &app_state.installed_data_dir,
+                payload.iaru_region,
+            )
+            .map_err(ApiError::internal)?,
+        )
+    };
     let login_password = match validation::validate_auth_config(
         &payload.login_user,
         payload.login_password_change.as_deref(),
@@ -1531,6 +1572,7 @@ async fn update_config(
     app_state
         .db
         .update_config(db::UpdateConfig {
+            iaru_region: payload.iaru_region,
             login_user: payload.login_user,
             login_password,
             dxcluster_enabled: payload.dxcluster_enabled,
@@ -1542,6 +1584,15 @@ async fn update_config(
         })
         .await
         .map_err(|error| ApiError::internal(error.to_string()))?;
+
+    if let Some(replacement_bands) = replacement_bands {
+        app_state.bands.replace(replacement_bands);
+        info!(
+            iaru_region = payload.iaru_region,
+            bands = app_state.bands.snapshot().len(),
+            "updated amateur radio band catalog"
+        );
+    }
 
     match app_state.db.auth_config().await {
         Ok(config) => *app_state.auth_config.write().await = config,
@@ -1677,12 +1728,14 @@ async fn export_cabrillo(
     let mut scored_contacts = contacts.clone();
     let claimed_score =
         score_contacts(rules, log.contest_params.clone(), &mut scored_contacts).score;
+    let band_snapshot = app_state.bands.snapshot();
     let text = match cabrillo::render_log(
         rules,
         &log,
         &contacts,
         &payload.export_params,
         claimed_score,
+        band_snapshot.as_ref(),
     ) {
         Ok(text) => text,
         Err(error) => {
@@ -1784,7 +1837,7 @@ async fn import_adif(
     if let Err((index, error)) = validation::validate_import_contacts(
         &app_state.db,
         &app_state.contest_rules,
-        app_state.bands.as_ref(),
+        app_state.bands.snapshot().as_ref(),
         id,
         &contacts,
     )
@@ -2517,7 +2570,7 @@ async fn commit_contact(
     if let Err(error) = validation::validate_contacts(
         &app_state.db,
         &app_state.contest_rules,
-        app_state.bands.as_ref(),
+        app_state.bands.snapshot().as_ref(),
         log_id,
         &input_contacts,
     )
@@ -2755,6 +2808,21 @@ mod tests {
                 ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
             ]),
         )
+    }
+
+    #[test]
+    fn config_update_payload_defaults_to_region_two_and_accepts_all_regions() {
+        let default_payload: UpdateConfigPayload =
+            serde_json::from_value(json!({})).expect("default config payload parses");
+        assert_eq!(default_payload.iaru_region, db::DEFAULT_IARU_REGION);
+
+        for region in 1..=3 {
+            let payload: UpdateConfigPayload = serde_json::from_value(json!({
+                "iaru_region": region
+            }))
+            .expect("configured region parses");
+            assert_eq!(payload.iaru_region, region);
+        }
     }
 
     fn serial_contact(serial: i64, band: &str) -> Contact {

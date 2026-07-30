@@ -19,6 +19,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
   const [loginPasswordConfirm, setLoginPasswordConfirm] = useState('');
   const [loginEnabled, setLoginEnabled] = useState(false);
   const [disableLogin, setDisableLogin] = useState(false);
+  const [iaruRegion, setIaruRegion] = useState('2');
   const [dxClusterEnabled, setDxClusterEnabled] = useState(false);
   const [dxClusterHost, setDxClusterHost] = useState('');
   const [dxClusterPort, setDxClusterPort] = useState('23');
@@ -47,6 +48,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
         setLoginUser(config.login_user ?? '');
         setLoginEnabled(Boolean(config.login_enabled));
         setDisableLogin(false);
+        setIaruRegion(String(config.iaru_region ?? 2));
         setDxClusterEnabled(Boolean(config.dxcluster_enabled));
         setDxClusterHost(config.dxcluster_host ?? '');
         setDxClusterPort(String(config.dxcluster_port ?? 23));
@@ -69,6 +71,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
     setLoginPasswordConfirm('');
     setLoginEnabled(false);
     setDisableLogin(true);
+    setIaruRegion('2');
     setDxClusterEnabled(false);
     setDxClusterHost('');
     setDxClusterPort('23');
@@ -108,6 +111,7 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
             loginPassword,
             loginPasswordConfirm,
             disableLogin,
+            iaruRegion,
             dxClusterEnabled,
             dxClusterHost,
             dxClusterPort,
@@ -182,6 +186,17 @@ function ConfigScreen({ theme, onSetTheme, zoom, onSetZoom }) {
         </label>
         <span>{loginStatus}</span>
       </div>
+      <label>
+        IARU Region
+        <select
+          value={iaruRegion}
+          onChange={(event) => setIaruRegion(event.target.value)}
+        >
+          <option value="1">Region 1</option>
+          <option value="2">Region 2</option>
+          <option value="3">Region 3</option>
+        </select>
+      </label>
       <label>
         Username
         <input
