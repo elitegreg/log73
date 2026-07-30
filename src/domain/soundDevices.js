@@ -9,10 +9,38 @@ export function soundDeviceOptionLabel(device) {
   const name = String(
     device?.name ?? device?.description ?? device?.id ?? '',
   ).trim();
-  const host = String(device?.host ?? '').trim();
   const defaultText = device?.is_default ? ' (default)' : '';
-  const hostText = host ? ` [${host}]` : '';
-  return `${name || 'Unknown sound device'}${hostText}${defaultText}`;
+  return `${name || 'Unknown sound device'}${defaultText}`;
+}
+
+export function soundDeviceHosts(devices) {
+  return [
+    ...new Set(
+      (Array.isArray(devices) ? devices : [])
+        .map((device) => String(device?.host ?? '').trim())
+        .filter(Boolean),
+    ),
+  ].sort((left, right) => left.localeCompare(right));
+}
+
+export function filterSoundDevicesByHost(devices, host) {
+  const normalizedHost = String(host ?? '').trim();
+  if (!normalizedHost) return Array.isArray(devices) ? devices : [];
+  return (Array.isArray(devices) ? devices : []).filter(
+    (device) => String(device?.host ?? '').trim() === normalizedHost,
+  );
+}
+
+export function preferredSoundDeviceHost(hosts, platform = '') {
+  const normalizedHosts = Array.isArray(hosts) ? hosts : [];
+  if (!/linux/i.test(platform)) return NONE_SOUND_DEVICE_ID;
+  for (const preferredHost of ['pipewire', 'pulseaudio', 'alsa']) {
+    const host = normalizedHosts.find(
+      (candidate) => candidate.toLowerCase() === preferredHost,
+    );
+    if (host) return host;
+  }
+  return NONE_SOUND_DEVICE_ID;
 }
 
 export function soundDeviceOptions(devices, selectedId = NONE_SOUND_DEVICE_ID) {

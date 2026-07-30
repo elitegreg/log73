@@ -2,8 +2,11 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiJson } from '../lib/api';
 import {
+  filterSoundDevicesByHost,
   NONE_SOUND_DEVICE_ID,
   normalizeSoundDeviceId,
+  preferredSoundDeviceHost,
+  soundDeviceHosts,
   soundDeviceOptions,
 } from '../domain/soundDevices';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
@@ -156,6 +159,7 @@ function CreateRadioScreen() {
     useState(NONE_SOUND_DEVICE_ID);
   const [voiceOutputDeviceId, setVoiceOutputDeviceId] =
     useState(NONE_SOUND_DEVICE_ID);
+  const [audioSubsystem, setAudioSubsystem] = useState(NONE_SOUND_DEVICE_ID);
   const [cwKeyerType, setCwKeyerType] = useState(DEFAULT_CW_KEYER_TYPE);
   const [winkeyerSerialPort, setWinkeyerSerialPort] = useState('');
   const [cwSerialPort, setCwSerialPort] = useState('');
@@ -177,6 +181,19 @@ function CreateRadioScreen() {
   const selectedRadioKind = radioKind || defaultRadioKind(radioKinds);
   const selectedRadioKindDetails = radioKinds.find(
     (kind) => kind.id === selectedRadioKind,
+  );
+  const audioSubsystems = soundDeviceHosts([
+    ...voiceInputDevices,
+    ...voiceOutputDevices,
+  ]);
+  const showAudioSubsystem = audioSubsystems.length > 1;
+  const filteredVoiceInputDevices = filterSoundDevicesByHost(
+    voiceInputDevices,
+    audioSubsystem,
+  );
+  const filteredVoiceOutputDevices = filterSoundDevicesByHost(
+    voiceOutputDevices,
+    audioSubsystem,
   );
 
   const notifyOperationalError = useCallback(
@@ -310,6 +327,13 @@ function CreateRadioScreen() {
         );
         setCwMessages(loadedDefaultCwMessages);
         setVoiceMessages(loadedDefaultVoiceMessages);
+        const hosts = soundDeviceHosts([
+          ...loadedVoiceInputDevices,
+          ...loadedVoiceOutputDevices,
+        ]);
+        setAudioSubsystem(
+          preferredSoundDeviceHost(hosts, window.navigator.platform),
+        );
         return;
       }
 
@@ -349,6 +373,23 @@ function CreateRadioScreen() {
       setVoiceOutputDeviceId(
         normalizeSoundDeviceId(radio.voice_output_device_id) ??
           NONE_SOUND_DEVICE_ID,
+      );
+      const selectedDeviceId =
+        normalizeSoundDeviceId(radio.voice_input_device_id) ??
+        normalizeSoundDeviceId(radio.voice_output_device_id);
+      const selectedDevice = [
+        ...loadedVoiceInputDevices,
+        ...loadedVoiceOutputDevices,
+      ].find(
+        (device) => normalizeSoundDeviceId(device.id) === selectedDeviceId,
+      );
+      const hosts = soundDeviceHosts([
+        ...loadedVoiceInputDevices,
+        ...loadedVoiceOutputDevices,
+      ]);
+      setAudioSubsystem(
+        String(selectedDevice?.host ?? '').trim() ||
+          preferredSoundDeviceHost(hosts, window.navigator.platform),
       );
       setCwKeyerType(
         radio.cw_keyer_type === 'cat' && !savedRadioKind?.supports_cat_cw_keying
@@ -440,6 +481,26 @@ function CreateRadioScreen() {
       setCwKeyerType((current) =>
         current === 'cat' ? DEFAULT_CW_KEYER_TYPE : current,
       );
+    }
+  }
+
+  function handleAudioSubsystemChange(nextSubsystem) {
+    setAudioSubsystem(nextSubsystem);
+    if (
+      nextSubsystem &&
+      !filterSoundDevicesByHost(voiceInputDevices, nextSubsystem).some(
+        (device) => normalizeSoundDeviceId(device.id) === voiceInputDeviceId,
+      )
+    ) {
+      setVoiceInputDeviceId(NONE_SOUND_DEVICE_ID);
+    }
+    if (
+      nextSubsystem &&
+      !filterSoundDevicesByHost(voiceOutputDevices, nextSubsystem).some(
+        (device) => normalizeSoundDeviceId(device.id) === voiceOutputDeviceId,
+      )
+    ) {
+      setVoiceOutputDeviceId(NONE_SOUND_DEVICE_ID);
     }
   }
 
@@ -663,19 +724,36 @@ function CreateRadioScreen() {
         />
         RIT Clear on Log
       </label>
+      {showAudioSubsystem ? (
+        <label>
+          Audio Subsystem
+          <select
+            value={audioSubsystem}
+            onChange={(event) => handleAudioSubsystemChange(event.target.value)}
+          >
+            <option value={NONE_SOUND_DEVICE_ID}>None</option>
+            {audioSubsystems.map((subsystem) => (
+              <option key={subsystem} value={subsystem}>
+                {subsystem}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
       <label>
         Voice Input Sound Device
         <select
           value={voiceInputDeviceId}
           onChange={(event) => setVoiceInputDeviceId(event.target.value)}
         >
-          {soundDeviceOptions(voiceInputDevices, voiceInputDeviceId).map(
-            (option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ),
-          )}
+          {soundDeviceOptions(
+            filteredVoiceInputDevices,
+            voiceInputDeviceId,
+          ).map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
         </select>
       </label>
       <label>
@@ -684,13 +762,14 @@ function CreateRadioScreen() {
           value={voiceOutputDeviceId}
           onChange={(event) => setVoiceOutputDeviceId(event.target.value)}
         >
-          {soundDeviceOptions(voiceOutputDevices, voiceOutputDeviceId).map(
-            (option) => (
-              <option key={option.id} value={option.id}>
-                {option.label}
-              </option>
-            ),
-          )}
+          {soundDeviceOptions(
+            filteredVoiceOutputDevices,
+            voiceOutputDeviceId,
+          ).map((option) => (
+            <option key={option.id} value={option.id}>
+              {option.label}
+            </option>
+          ))}
         </select>
       </label>
       <label>

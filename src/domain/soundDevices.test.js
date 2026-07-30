@@ -2,8 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   NONE_SOUND_DEVICE_ID,
+  filterSoundDevicesByHost,
   normalizeSoundDeviceId,
+  preferredSoundDeviceHost,
   soundDeviceOptionLabel,
+  soundDeviceHosts,
   soundDeviceOptions,
 } from './soundDevices.js';
 
@@ -15,7 +18,7 @@ test('normalizeSoundDeviceId trims values and maps blank selections to null', ()
   assert.equal(normalizeSoundDeviceId(' alsa:hw:1,0 '), 'alsa:hw:1,0');
 });
 
-test('soundDeviceOptionLabel includes name host and default marker', () => {
+test('soundDeviceOptionLabel includes the name and default marker', () => {
   assert.equal(
     soundDeviceOptionLabel({
       id: 'alsa:hw:1,0',
@@ -23,7 +26,7 @@ test('soundDeviceOptionLabel includes name host and default marker', () => {
       name: 'USB Audio',
       is_default: true,
     }),
-    'USB Audio [alsa] (default)',
+    'USB Audio (default)',
   );
   assert.equal(
     soundDeviceOptionLabel({ id: 'coreaudio:1', description: 'Line Out' }),
@@ -46,7 +49,39 @@ test('soundDeviceOptions always includes None first and de-duplicates device ids
     options.map((option) => option.id),
     ['', 'alsa:out-1', 'alsa:out-2'],
   );
-  assert.equal(options[2].label, 'Headphones [alsa] (default)');
+  assert.equal(options[2].label, 'Headphones (default)');
+});
+
+test('sound-device hosts are unique and can filter devices', () => {
+  const devices = [
+    { id: 'pipewire:in', host: 'pipewire' },
+    { id: 'alsa:in', host: 'alsa' },
+    { id: 'pipewire:out', host: 'pipewire' },
+  ];
+
+  assert.deepEqual(soundDeviceHosts(devices), ['alsa', 'pipewire']);
+  assert.deepEqual(filterSoundDevicesByHost(devices, 'pipewire'), [
+    devices[0],
+    devices[2],
+  ]);
+  assert.deepEqual(
+    filterSoundDevicesByHost(devices, NONE_SOUND_DEVICE_ID),
+    devices,
+  );
+});
+
+test('preferredSoundDeviceHost applies Linux subsystem preferences', () => {
+  assert.equal(
+    preferredSoundDeviceHost(
+      ['alsa', 'pulseaudio', 'pipewire'],
+      'Linux x86_64',
+    ),
+    'pipewire',
+  );
+  assert.equal(
+    preferredSoundDeviceHost(['alsa'], 'MacIntel'),
+    NONE_SOUND_DEVICE_ID,
+  );
 });
 
 test('soundDeviceOptions preserves missing selected device so forms remain controlled', () => {
