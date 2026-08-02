@@ -61,7 +61,7 @@ install -m 0644 data/cty.csv "${package_root}/opt/log73/data/cty.csv"
 install -m 0644 data/bands_1.csv "${package_root}/opt/log73/data/bands_1.csv"
 install -m 0644 data/bands_2.csv "${package_root}/opt/log73/data/bands_2.csv"
 install -m 0644 data/bands_3.csv "${package_root}/opt/log73/data/bands_3.csv"
-cp -R data/contest-rules "${package_root}/opt/log73/data/contest-rules"
+cp -R data/* "${package_root}/opt/log73/data/"
 find "${package_root}/opt/log73/data/contest-rules" -type f -exec chmod 0644 {} +
 install -m 0644 static/log73-icon-512.png \
   "${package_root}/usr/share/icons/hicolor/512x512/apps/log73.png"

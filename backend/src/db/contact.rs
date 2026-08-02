@@ -9,8 +9,23 @@ const ADIF_KEY: &str = "adif";
 pub fn build_contact(meta: ContactFields, adif: ContactFields) -> Contact {
     let mut contact = Map::new();
     contact.insert(META_KEY.to_string(), Value::Object(meta));
-    contact.insert(ADIF_KEY.to_string(), Value::Object(adif));
+    contact.insert(
+        ADIF_KEY.to_string(),
+        Value::Object(normalize_contact_adif(adif)),
+    );
     contact
+}
+
+/// ADIF field names are case-insensitive. Store them in their canonical
+/// uppercase form so all consumers can use ordinary map lookups.
+pub fn normalize_contact_adif(adif: ContactFields) -> ContactFields {
+    adif.into_iter()
+        .map(|(key, value)| (normalize_adif_field_name(&key), value))
+        .collect()
+}
+
+pub fn normalize_adif_field_name(key: &str) -> String {
+    key.trim().to_ascii_uppercase()
 }
 
 pub fn contact_meta(contact: &Contact) -> Option<&ContactFields> {
@@ -26,7 +41,8 @@ pub fn contact_meta_value<'a>(contact: &'a Contact, key: &str) -> Option<&'a Val
 }
 
 pub fn contact_adif_value<'a>(contact: &'a Contact, key: &str) -> Option<&'a Value> {
-    contact_adif(contact).and_then(|adif| adif.get(key))
+    let key = normalize_adif_field_name(key);
+    contact_adif(contact).and_then(|adif| adif.get(&key))
 }
 
 pub fn set_contact_meta(contact: &mut Contact, key: &str, value: Value) {
@@ -43,7 +59,7 @@ pub fn set_contact_adif(contact: &mut Contact, key: &str, value: Value) {
         contact.insert(ADIF_KEY.to_string(), Value::Object(Map::new()));
     }
     if let Some(adif) = contact.get_mut(ADIF_KEY).and_then(Value::as_object_mut) {
-        adif.insert(key.to_string(), value);
+        adif.insert(normalize_adif_field_name(key), value);
     }
 }
 
@@ -123,5 +139,24 @@ mod tests {
 
         assert_eq!(contact_id(&contact), Some(42));
         assert_eq!(contact_adif_value(&contact, "CALL"), Some(&json!("K1ABC")));
+    }
+
+    #[test]
+    fn contact_adif_field_names_are_normalized_to_uppercase() {
+        let mut contact = build_contact(
+            Map::new(),
+            Map::from_iter([("call".to_string(), json!("K1ABC"))]),
+        );
+        set_contact_adif(&mut contact, "BaNd", json!("20m"));
+
+        assert_eq!(
+            contact_adif(&contact),
+            Some(&Map::from_iter([
+                ("CALL".to_string(), json!("K1ABC")),
+                ("BAND".to_string(), json!("20m")),
+            ]))
+        );
+        assert_eq!(contact_adif_value(&contact, "call"), Some(&json!("K1ABC")));
+        assert_eq!(contact_adif_value(&contact, "band"), Some(&json!("20m")));
     }
 }

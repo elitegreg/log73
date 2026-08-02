@@ -44,7 +44,7 @@ use contest_rules::{
 };
 use db::{
     AuthConfig, Contact, Database, NewLog, RadioPayload, UpdateLog, contact_adif_value, contact_id,
-    contact_log_id, contact_meta_value, set_contact_meta,
+    contact_log_id, contact_meta_value, normalize_contact_adif, set_contact_meta,
 };
 use dxcluster::{DxClusterEvent, DxClusterManager, format_dxcluster_frequency_khz};
 use futures_util::{SinkExt, StreamExt};
@@ -2874,13 +2874,23 @@ fn contacts_from_payload(payload: serde_json::Value) -> Result<Vec<Contact>, Str
         serde_json::Value::Array(values) => values
             .into_iter()
             .map(|value| match value {
-                serde_json::Value::Object(contact) => Ok(contact),
+                serde_json::Value::Object(contact) => Ok(normalize_contact_adif_fields(contact)),
                 _ => Err("contact list must contain objects".to_string()),
             })
             .collect(),
-        serde_json::Value::Object(contact) => Ok(vec![contact]),
+        serde_json::Value::Object(contact) => Ok(vec![normalize_contact_adif_fields(contact)]),
         _ => Err("contacts payload must be an object or list of objects".to_string()),
     }
+}
+
+fn normalize_contact_adif_fields(mut contact: Contact) -> Contact {
+    if let Some(serde_json::Value::Object(adif)) = contact.remove("adif") {
+        contact.insert(
+            "adif".to_string(),
+            serde_json::Value::Object(normalize_contact_adif(adif)),
+        );
+    }
+    contact
 }
 
 #[cfg(test)]
@@ -2903,6 +2913,25 @@ mod tests {
                 ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
             ]),
         )
+    }
+
+    #[test]
+    fn contacts_from_payload_normalizes_adif_field_names() {
+        let contacts = contacts_from_payload(json!({
+            "meta": {},
+            "adif": { "call": "K1ABC", "BaNd": "20m" }
+        }))
+        .expect("contact payload should parse");
+
+        assert_eq!(contacts.len(), 1);
+        assert_eq!(
+            contact_adif_value(&contacts[0], "CALL"),
+            Some(&json!("K1ABC"))
+        );
+        assert_eq!(
+            contact_adif_value(&contacts[0], "BAND"),
+            Some(&json!("20m"))
+        );
     }
 
     #[test]
