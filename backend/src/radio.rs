@@ -34,6 +34,14 @@ pub enum ServerMessage {
     MessageSent {
         request_id: String,
     },
+    WsjtXError {
+        radio_id: i64,
+        log_id: i64,
+        message: String,
+    },
+    RadioInUse {
+        message: String,
+    },
     #[serde(rename = "dxcluster_spot")]
     DxClusterSpot {
         spot: Box<DxClusterSpot>,
@@ -411,6 +419,37 @@ mod tests {
             serde_json::json!({
                 "type": "supercheckpartial_update",
                 "callsigns": ["K1ABC", "W1AW"]
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_wsjtx_and_radio_ownership_errors() {
+        let wsjtx = serde_json::to_value(ServerMessage::WsjtXError {
+            radio_id: 2,
+            log_id: 7,
+            message: "bind failed".to_string(),
+        })
+        .expect("WSJT-X error should serialize");
+        assert_eq!(
+            wsjtx,
+            serde_json::json!({
+                "type": "wsjt_x_error",
+                "radio_id": 2,
+                "log_id": 7,
+                "message": "bind failed"
+            })
+        );
+
+        let in_use = serde_json::to_value(ServerMessage::RadioInUse {
+            message: "radio in use".to_string(),
+        })
+        .expect("radio-in-use error should serialize");
+        assert_eq!(
+            in_use,
+            serde_json::json!({
+                "type": "radio_in_use",
+                "message": "radio in use"
             })
         );
     }

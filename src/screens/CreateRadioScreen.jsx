@@ -11,6 +11,7 @@ import {
 } from '../domain/soundDevices';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
+import { DEFAULT_WSJTX_PORT, nextAvailableWsjtxPort } from '../domain/wsjtx';
 
 const DEFAULT_RADIO_KIND = 'dummy';
 const DEFAULT_TRANSPORT_KIND = 'none';
@@ -146,6 +147,10 @@ function CreateRadioScreen() {
   const [options, setOptions] = useState('');
   const [dataMode, setDataMode] = useState(DEFAULT_DATA_MODE);
   const [rttyMode, setRttyMode] = useState(DEFAULT_RTTY_MODE);
+  const [wsjtxEnabled, setWsjtxEnabled] = useState(false);
+  const [wsjtxBindAddress, setWsjtxBindAddress] = useState('127.0.0.1');
+  const [wsjtxPort, setWsjtxPort] = useState(DEFAULT_WSJTX_PORT);
+  const [wsjtxMulticastGroup, setWsjtxMulticastGroup] = useState('');
   const [cwTuningIncrementHz, setCwTuningIncrementHz] = useState(
     DEFAULT_CW_TUNING_INCREMENT_HZ,
   );
@@ -225,6 +230,17 @@ function CreateRadioScreen() {
 
     async function loadContext() {
       let kinds = [];
+      let radios = [];
+
+      try {
+        radios = await apiJson('/radios');
+      } catch (error) {
+        notifyOperationalError(
+          'CreateRadioScreen.loadRadios',
+          'Unable to load existing radio settings.',
+          error,
+        );
+      }
 
       try {
         const result = await apiJson('/radio-kinds');
@@ -327,6 +343,7 @@ function CreateRadioScreen() {
         );
         setCwMessages(loadedDefaultCwMessages);
         setVoiceMessages(loadedDefaultVoiceMessages);
+        setWsjtxPort(nextAvailableWsjtxPort(radios));
         const hosts = soundDeviceHosts([
           ...loadedVoiceInputDevices,
           ...loadedVoiceOutputDevices,
@@ -359,6 +376,10 @@ function CreateRadioScreen() {
           savedRadioKind?.default_rtty_mode ||
           DEFAULT_RTTY_MODE,
       );
+      setWsjtxEnabled(Boolean(radio.wsjtx_enabled));
+      setWsjtxBindAddress(radio.wsjtx_bind_address ?? '127.0.0.1');
+      setWsjtxPort(radio.wsjtx_port ?? DEFAULT_WSJTX_PORT);
+      setWsjtxMulticastGroup(radio.wsjtx_multicast_group ?? '');
       setCwTuningIncrementHz(
         radio.cw_tuning_increment_hz ?? DEFAULT_CW_TUNING_INCREMENT_HZ,
       );
@@ -523,6 +544,10 @@ function CreateRadioScreen() {
           options: options,
           data_mode: dataMode,
           rtty_mode: rttyMode,
+          wsjtx_enabled: Boolean(wsjtxEnabled),
+          wsjtx_bind_address: wsjtxBindAddress,
+          wsjtx_port: Number(wsjtxPort),
+          wsjtx_multicast_group: wsjtxMulticastGroup.trim(),
           cw_tuning_increment_hz: Number(cwTuningIncrementHz),
           ssb_tuning_increment_hz: Number(ssbTuningIncrementHz),
           rit_clear_on_log: Boolean(ritClearOnLog),
@@ -696,6 +721,48 @@ function CreateRadioScreen() {
           ))}
         </select>
       </label>
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={wsjtxEnabled}
+          onChange={(event) => setWsjtxEnabled(event.target.checked)}
+        />
+        WSJT-X in DATA
+      </label>
+      {wsjtxEnabled ? (
+        <>
+          <label>
+            WSJT-X Bind
+            <select
+              value={wsjtxBindAddress}
+              onChange={(event) => setWsjtxBindAddress(event.target.value)}
+              required
+            >
+              <option value="127.0.0.1">localhost</option>
+              <option value="0.0.0.0">open</option>
+            </select>
+          </label>
+          <label>
+            WSJT-X Port
+            <input
+              type="number"
+              min="1024"
+              max="65535"
+              value={wsjtxPort}
+              onChange={(event) => setWsjtxPort(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            WSJT-X Multicast Group
+            <input
+              value={wsjtxMulticastGroup}
+              onChange={(event) => setWsjtxMulticastGroup(event.target.value)}
+              placeholder="Optional IPv4 multicast address"
+            />
+          </label>
+        </>
+      ) : null}
       <label>
         Tuning Increment (CW) in Hz
         <input

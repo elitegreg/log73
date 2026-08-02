@@ -64,6 +64,7 @@ function LoggerScreen() {
   const remoteContactHandlerRef = useRef(null);
   const remoteContactDeletedHandlerRef = useRef(null);
   const refreshContactsHandlerRef = useRef(null);
+  const radioInUseHandlerRef = useRef(null);
 
   const {
     radioState,
@@ -84,6 +85,7 @@ function LoggerScreen() {
     onRemoteContactRef: remoteContactHandlerRef,
     onRemoteContactDeletedRef: remoteContactDeletedHandlerRef,
     onRefreshContactsRef: refreshContactsHandlerRef,
+    onRadioInUseRef: radioInUseHandlerRef,
   });
 
   const {
@@ -181,6 +183,7 @@ function LoggerScreen() {
   remoteContactHandlerRef.current = upsertRemoteContact;
   remoteContactDeletedHandlerRef.current = removeRemoteContact;
   refreshContactsHandlerRef.current = refreshContacts;
+  radioInUseHandlerRef.current = () => navigate('/ui/open_log');
 
   useEffect(() => {
     const element = loggerMainColumnRef.current;

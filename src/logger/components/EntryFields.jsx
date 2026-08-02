@@ -21,6 +21,7 @@ function EntryFields({
   exchangeInputRefs,
   updateExchangeField,
   handleExchangeKeyDown,
+  locked = false,
 }) {
   const callsignValidation = validateCallsign(callSign);
 
@@ -49,9 +50,15 @@ function EntryFields({
           onKeyDown={handleCallsignKeyDown}
           onFocus={() => setActiveCompletionField('CALL')}
           onBlur={() => setActiveCompletionField(null)}
-          className={`callsign${callsignValidation.ok ? '' : ' invalid-field'}`}
-          title={callsignValidation.ok ? undefined : callsignValidation.error}
-          aria-invalid={callsignValidation.ok ? undefined : true}
+          className={`callsign${locked || callsignValidation.ok ? '' : ' invalid-field'}`}
+          title={
+            locked || callsignValidation.ok
+              ? undefined
+              : callsignValidation.error
+          }
+          aria-invalid={locked || callsignValidation.ok ? undefined : true}
+          readOnly={locked}
+          tabIndex={locked ? -1 : undefined}
           maxLength={12}
         />
       </label>
@@ -66,6 +73,7 @@ function EntryFields({
         );
         const fieldWidthChars = Math.max(maxLength + 1, field.label.length, 4);
         const readOnly =
+          locked ||
           field.fixed === true ||
           (field.direction === 'sent' && kind === 'SERIAL');
 
@@ -98,9 +106,9 @@ function EntryFields({
               onBlur={() => setActiveCompletionField(null)}
               readOnly={readOnly}
               tabIndex={readOnly ? -1 : undefined}
-              className={`${readOnly ? 'fixed-field' : ''}${validation.ok ? '' : ' invalid-field'}`.trim()}
-              title={validation.ok ? undefined : validation.error}
-              aria-invalid={validation.ok ? undefined : true}
+              className={`${readOnly ? 'fixed-field' : ''}${locked || validation.ok ? '' : ' invalid-field'}`.trim()}
+              title={locked || validation.ok ? undefined : validation.error}
+              aria-invalid={locked || validation.ok ? undefined : true}
               maxLength={maxLength}
             />
           </label>

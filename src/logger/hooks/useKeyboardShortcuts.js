@@ -28,9 +28,19 @@ export function useKeyboardShortcuts({
   setCwWpm,
   sendMessageKey,
   stopMessageSending,
+  manualEntryDisabled = false,
 }) {
   useEffect(() => {
     function handleFunctionKey(event) {
+      const entryShortcut =
+        (event.altKey && ['m', 'o', 'q'].includes(event.key.toLowerCase())) ||
+        (event.ctrlKey && ['p', 'k'].includes(event.key.toLowerCase())) ||
+        (event.ctrlKey && ['ArrowDown', 'ArrowUp'].includes(event.key)) ||
+        FUNCTION_KEY_PATTERN.test(event.key);
+      if (manualEntryDisabled && entryShortcut) {
+        event.preventDefault();
+        return;
+      }
       if (
         event.altKey &&
         !event.ctrlKey &&

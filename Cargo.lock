@@ -1736,6 +1736,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ham-radio-digital-interfacing"
+version = "0.1.0"
+source = "git+https://github.com/elitegreg/ham-radio-digital-interfacing-rs.git#6e5ce3ab605380712de2ceeb5cdb16039f47ff18"
+dependencies = [
+ "bytes",
+ "chrono",
+ "socket2",
+ "thiserror 2.0.19",
+ "tokio",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2620,6 +2632,7 @@ dependencies = [
  "dxcllistener",
  "dxclparser",
  "futures-util",
+ "ham-radio-digital-interfacing",
  "log73-paths",
  "mime_guess",
  "radif",

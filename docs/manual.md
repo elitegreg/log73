@@ -183,6 +183,9 @@ For a sent serial exchange, the backend supplies the initial next value and the 
 - Name
 - Transport: `none`, `tcp`, or `serial` (`none` is for the dummy driver)
 - CW tuning increment / SSB tuning increment
+- DATA and RTTY radio-mode mappings
+- Optional **WSJT-X in DATA** listener settings: localhost/open bind, UDP port,
+  and IPv4 multicast group
 - CW keyer type: `none`, `winkeyer`, `cat`, `serial`
 - CW messages set (editable and validated)
 
@@ -193,6 +196,8 @@ For a sent serial exchange, the backend supplies the initial next value and the 
 - Transport must be `none`, `tcp`, or `serial`
 - Non-dummy radios require TCP or serial transport
 - Tuning increments must be `1..9999` Hz
+- Enabled WSJT-X ports must be unique across radios and in `1024..65535`.
+- WSJT-X multicast groups, when set, must be IPv4 multicast addresses.
 
 Transport-specific:
 
@@ -216,6 +221,22 @@ CW messages:
 - Length-limited
 - Control chars restricted
 - Validated against CW message parser rules
+
+### WSJT-X logging
+
+Enable **WSJT-X in DATA** on a radio, then configure WSJT-X under
+**Settings → Reporting** to send UDP messages to the selected bind address and
+port (the first default is `127.0.0.1:2237`). Choose **open** only when WSJT-X
+runs on another computer; this binds `0.0.0.0` and should be protected with the
+host firewall. An optional IPv4 multicast group may be used instead.
+
+The UDP listener is active only while that radio is open for a log and Log73's
+radio mode is DATA. A radio can serve multiple logger windows for the same log,
+but cannot be used by two different logs at once. In WSJT-X DATA mode the
+manual callsign/exchange fields and logging controls are cleared and locked;
+accept the **Log QSO** dialog in WSJT-X to add the QSO. Listener, protocol,
+ADIF, and database errors are reported as logger notifications and recorded in
+the backend log.
 
 ---
 

@@ -863,6 +863,10 @@ mod tests {
             options: String::new(),
             data_mode: "DATA-USB".to_string(),
             rtty_mode: "RTTY".to_string(),
+            wsjtx_enabled: false,
+            wsjtx_bind_address: "127.0.0.1".to_string(),
+            wsjtx_port: 2237,
+            wsjtx_multicast_group: String::new(),
             cw_tuning_increment_hz: crate::db::DEFAULT_CW_TUNING_INCREMENT_HZ,
             ssb_tuning_increment_hz: crate::db::DEFAULT_SSB_TUNING_INCREMENT_HZ,
             rit_clear_on_log: false,
@@ -1271,6 +1275,10 @@ mod tests {
         assert_eq!(radio.options, "");
         assert_eq!(radio.data_mode, "DATA-USB");
         assert_eq!(radio.rtty_mode, "RTTY");
+        assert!(!radio.wsjtx_enabled);
+        assert_eq!(radio.wsjtx_bind_address, "127.0.0.1");
+        assert_eq!(radio.wsjtx_port, 2237);
+        assert_eq!(radio.wsjtx_multicast_group, "");
         assert_eq!(
             radio.cw_tuning_increment_hz,
             crate::db::DEFAULT_CW_TUNING_INCREMENT_HZ
@@ -1287,6 +1295,29 @@ mod tests {
         assert_eq!(radio.cw_serial_baud_rate, 9_600);
         assert_eq!(radio.cw_serial_line, "dtr");
         assert_eq!(radio.voice_messages, DEFAULT_VOICE_MESSAGES);
+    }
+
+    #[tokio::test]
+    async fn enabled_wsjtx_ports_are_unique_but_disabled_ports_are_not_reserved() {
+        let database = test_database();
+        let mut first = tcp_radio();
+        first.wsjtx_enabled = true;
+        database
+            .create_radio(first)
+            .await
+            .expect("first enabled WSJT-X port is accepted");
+
+        let mut duplicate = tcp_radio();
+        duplicate.name = "Duplicate".to_string();
+        duplicate.wsjtx_enabled = true;
+        assert!(database.create_radio(duplicate).await.is_err());
+
+        let mut disabled = tcp_radio();
+        disabled.name = "Disabled".to_string();
+        database
+            .create_radio(disabled)
+            .await
+            .expect("disabled radio does not reserve its WSJT-X port");
     }
 
     #[tokio::test]

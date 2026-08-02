@@ -21,6 +21,7 @@ function RadioControls({
   onSetBandMapEnabled,
   backendSocketStatus,
   catStatus,
+  manualEntryDisabled = false,
 }) {
   const modeSelectable = isSelectableMode(radioMode);
   const modeOptions = modeSelectable
@@ -77,6 +78,7 @@ function RadioControls({
           type="checkbox"
           checked={esmEnabled}
           onChange={(event) => onSetEsmEnabled?.(event.target.checked)}
+          disabled={manualEntryDisabled}
         />
       </label>
       {modeIsCw(radioMode) && (

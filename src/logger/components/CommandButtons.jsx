@@ -14,6 +14,7 @@ function CommandButtons({
   highlightLogIt = false,
   disableLogIt = false,
   logItTitle,
+  manualEntryDisabled = false,
 }) {
   return (
     <div className="command-buttons">
@@ -25,13 +26,17 @@ function CommandButtons({
       >
         Stop Sending
       </button>
-      <button className="cmd-btn" onClick={clearEntryFields}>
+      <button
+        className="cmd-btn"
+        onClick={clearEntryFields}
+        disabled={manualEntryDisabled}
+      >
         Clear
       </button>
       <button
         className={`cmd-btn${highlightLogIt ? ' esm-next' : ''}`}
         onClick={() => logContact(false)}
-        disabled={disableLogIt}
+        disabled={manualEntryDisabled || disableLogIt}
         title={logItTitle}
       >
         Log it
@@ -49,6 +54,7 @@ function CommandButtons({
         type="button"
         title="Keyboard shortcut: Alt-M"
         onClick={handleMark}
+        disabled={manualEntryDisabled}
       >
         Mark
       </button>
@@ -57,6 +63,7 @@ function CommandButtons({
         type="button"
         title="Keyboard shortcut: Alt-O"
         onClick={handleStore}
+        disabled={manualEntryDisabled}
       >
         Store
       </button>
@@ -65,10 +72,16 @@ function CommandButtons({
         type="button"
         title="Keyboard shortcut: Ctrl-P"
         onClick={handleSpotIt}
+        disabled={manualEntryDisabled}
       >
         Spot It
       </button>
-      <button className="cmd-btn" type="button" onClick={handleQrzClick}>
+      <button
+        className="cmd-btn"
+        type="button"
+        onClick={handleQrzClick}
+        disabled={manualEntryDisabled}
+      >
         QRZ
       </button>
     </div>

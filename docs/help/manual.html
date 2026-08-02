@@ -495,6 +495,11 @@
         <code>serial</code> (<code>none</code> is for the dummy driver)
       </li>
       <li>CW tuning increment / SSB tuning increment</li>
+      <li>DATA and RTTY radio-mode mappings</li>
+      <li>
+        Optional <strong>WSJT-X in DATA</strong> listener settings: bind, UDP
+        port, and IPv4 multicast group
+      </li>
       <li>
         CW keyer type: <code>none</code>, <code>winkeyer</code>,
         <code>cat</code>, <code>serial</code>
@@ -511,6 +516,11 @@
       </li>
       <li>Non-dummy radios require TCP or serial transport</li>
       <li>Tuning increments must be <code>1..9999</code> Hz</li>
+      <li>
+        Enabled WSJT-X ports must be unique and in
+        <code>1024..65535</code>
+      </li>
+      <li>WSJT-X multicast groups must be IPv4 multicast addresses</li>
     </ul>
     <p>Transport-specific:</p>
     <ul>
@@ -546,6 +556,25 @@
       <li>Control chars restricted</li>
       <li>Validated against CW message parser rules</li>
     </ul>
+    <h3 id="wsjt-x-logging">WSJT-X logging</h3>
+    <p>
+      Enable <strong>WSJT-X in DATA</strong> on a radio, then configure WSJT-X
+      under <strong>Settings → Reporting</strong> to send UDP messages to the
+      selected address and port. The first default is
+      <code>127.0.0.1:2237</code>. Choose <strong>open</strong> only for a
+      remote WSJT-X computer; this binds <code>0.0.0.0</code> and should be
+      protected by the host firewall. An optional IPv4 multicast group may be
+      used instead.
+    </p>
+    <p>
+      The listener runs only while the radio is open for a log and Log73 is in
+      DATA mode. Multiple logger windows may use that radio for the same log,
+      but another log cannot acquire it simultaneously. In WSJT-X DATA mode,
+      manual entry fields and logging controls are cleared and locked. Accept
+      the <strong>Log QSO</strong> dialog in WSJT-X to log the contact.
+      Listener, protocol, ADIF, and database errors appear as logger
+      notifications and in the backend log.
+    </p>
     <hr />
     <h2 id="opening-and-using-the-logger">9) Opening and using the logger</h2>
     <p>Logger layout includes:</p>

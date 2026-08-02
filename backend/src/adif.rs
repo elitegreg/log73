@@ -114,6 +114,56 @@ pub fn import_contacts(
     Ok(contacts)
 }
 
+pub fn import_wsjtx_contact(rules: &ContestRules, text: &str) -> Result<Contact, ImportError> {
+    let mut records = parse_records(text).map_err(|error| ImportError { line: 1, error })?;
+    if records.len() != 1 {
+        return Err(ImportError {
+            line: records.first().map_or(1, |record| record.line),
+            error: format!(
+                "WSJT-X ADIF must contain exactly one QSO record; found {}",
+                records.len()
+            ),
+        });
+    }
+    let record = records.remove(0);
+    let line = record.line;
+    let mut adif = record
+        .fields
+        .iter()
+        .filter(|(key, _)| !matches!(key.as_str(), "ID" | "_ID" | "_LOG_ID" | "_STATUS"))
+        .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+        .collect::<ContactFields>();
+
+    let epoch = import_qso_epoch(&record).map_err(|error| ImportError { line, error })?;
+    adif.insert("QSO_DATE_TIME_ON".to_string(), Value::Number(epoch.into()));
+    let frequency =
+        import_frequency_hz(required_field(&record, "FREQ")?).ok_or_else(|| ImportError {
+            line,
+            error: "FREQ is invalid".to_string(),
+        })?;
+    adif.insert("FREQ".to_string(), Value::Number(frequency.into()));
+    for name in ["STATION_CALLSIGN", "CALL", "BAND", "MODE"] {
+        required_field(&record, name)?;
+    }
+
+    let contest_id = rules
+        .cabrillo
+        .as_ref()
+        .and_then(|cabrillo| cabrillo.contest_id.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&rules.contest);
+    adif.insert(
+        "CONTEST_ID".to_string(),
+        Value::String(contest_id.to_string()),
+    );
+
+    Ok(build_contact(
+        Map::from_iter([("force".to_string(), Value::Bool(true))]),
+        adif,
+    ))
+}
+
 pub fn parse_records(text: &str) -> Result<Vec<AdifRecord>, String> {
     let bytes = text.as_bytes();
     let mut index = 0;
@@ -681,6 +731,54 @@ mod tests {
             records[0].fields.get("CALL").map(String::as_str),
             Some("W1AW")
         );
+    }
+
+    #[test]
+    fn wsjtx_import_forces_contest_and_preserves_digital_mode() {
+        let mut rules = test_rules();
+        rules.cabrillo = Some(crate::contest_rules::CabrilloRules {
+            contest_id: Some("CABRILLO-ID".to_string()),
+            ..Default::default()
+        });
+        let text = "WSJT-X<ADIF_VER:5>3.1.0<EOH><QSO_DATE:8>20240801<TIME_ON:6>123456<STATION_CALLSIGN:6>N0CALL<CALL:4>W1AW<BAND:3>20m<FREQ:6>14.074<MODE:4>MFSK<SUBMODE:3>FT8<CONTEST_ID:4>LIES<EOR>";
+
+        let contact = import_wsjtx_contact(&rules, text).expect("WSJT-X ADIF should import");
+
+        assert_eq!(
+            crate::db::contact_meta_value(&contact, "force"),
+            Some(&json!(true))
+        );
+        assert_eq!(
+            crate::db::contact_adif_value(&contact, "CONTEST_ID"),
+            Some(&json!("CABRILLO-ID"))
+        );
+        assert_eq!(
+            crate::db::contact_adif_value(&contact, "MODE"),
+            Some(&json!("MFSK"))
+        );
+        assert_eq!(
+            crate::db::contact_adif_value(&contact, "SUBMODE"),
+            Some(&json!("FT8"))
+        );
+        assert_eq!(
+            crate::db::contact_adif_value(&contact, "FREQ"),
+            Some(&json!(14_074_000))
+        );
+    }
+
+    #[test]
+    fn wsjtx_import_falls_back_to_rule_contest_id_and_requires_one_record() {
+        let rules = test_rules();
+        let record = "<QSO_DATE:8>20240801<TIME_ON:6>123456<STATION_CALLSIGN:6>N0CALL<CALL:4>W1AW<BAND:3>20m<FREQ:6>14.074<MODE:4>MFSK<EOR>";
+        let contact = import_wsjtx_contact(&rules, record).expect("one record should import");
+        assert_eq!(
+            crate::db::contact_adif_value(&contact, "CONTEST_ID"),
+            Some(&json!("SC-QSO-PARTY"))
+        );
+
+        let error = import_wsjtx_contact(&rules, &format!("{record}{record}"))
+            .expect_err("multiple records must be rejected");
+        assert!(error.error.contains("exactly one QSO record"));
     }
 
     #[test]

@@ -16,6 +16,7 @@ use regex::Regex;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
+    net::Ipv4Addr,
     sync::{Mutex, OnceLock},
 };
 
@@ -219,6 +220,22 @@ pub fn validate_radio(payload: &RadioPayload) -> Result<(), String> {
             "CAT serial baud rate and CW serial baud rate must match when sharing a serial port"
                 .to_string(),
         );
+    }
+
+    if !matches!(payload.wsjtx_bind_address.trim(), "127.0.0.1" | "0.0.0.0") {
+        return Err("WSJT-X bind address must be 127.0.0.1 or 0.0.0.0".to_string());
+    }
+    if payload.wsjtx_port < 1024 {
+        return Err("WSJT-X port must be between 1024 and 65535".to_string());
+    }
+    let multicast_group = payload.wsjtx_multicast_group.trim();
+    if !multicast_group.is_empty() {
+        let group = multicast_group
+            .parse::<Ipv4Addr>()
+            .map_err(|_| "WSJT-X multicast group must be a valid IPv4 address".to_string())?;
+        if !group.is_multicast() {
+            return Err("WSJT-X multicast group must be an IPv4 multicast address".to_string());
+        }
     }
 
     validate_cw_messages(&payload.cw_messages)?;
@@ -1329,6 +1346,10 @@ mod tests {
             options: String::new(),
             data_mode: "DATA-USB".to_string(),
             rtty_mode: "RTTY".to_string(),
+            wsjtx_enabled: false,
+            wsjtx_bind_address: "127.0.0.1".to_string(),
+            wsjtx_port: 2237,
+            wsjtx_multicast_group: String::new(),
             cw_tuning_increment_hz: db::DEFAULT_CW_TUNING_INCREMENT_HZ,
             ssb_tuning_increment_hz: db::DEFAULT_SSB_TUNING_INCREMENT_HZ,
             rit_clear_on_log: false,
@@ -1379,6 +1400,23 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn validates_wsjtx_network_settings() {
+        let mut radio = test_radio();
+        radio.wsjtx_enabled = true;
+        radio.wsjtx_multicast_group = "239.255.0.1".to_string();
+        assert!(validate_radio(&radio).is_ok());
+
+        radio.wsjtx_port = 1023;
+        assert!(validate_radio(&radio).is_err());
+        radio.wsjtx_port = 2237;
+        radio.wsjtx_bind_address = "192.0.2.1".to_string();
+        assert!(validate_radio(&radio).is_err());
+        radio.wsjtx_bind_address = "0.0.0.0".to_string();
+        radio.wsjtx_multicast_group = "192.0.2.1".to_string();
+        assert!(validate_radio(&radio).is_err());
     }
 
     #[test]

@@ -42,6 +42,10 @@ pub struct RadioConfig {
     pub options: String,
     pub data_mode: String,
     pub rtty_mode: String,
+    pub wsjtx_enabled: bool,
+    pub wsjtx_bind_address: String,
+    pub wsjtx_port: u16,
+    pub wsjtx_multicast_group: String,
     pub cw_tuning_increment_hz: u32,
     pub ssb_tuning_increment_hz: u32,
     pub rit_clear_on_log: bool,
@@ -127,6 +131,14 @@ pub struct RadioPayload {
     pub data_mode: String,
     #[serde(default)]
     pub rtty_mode: String,
+    #[serde(default)]
+    pub wsjtx_enabled: bool,
+    #[serde(default = "default_wsjtx_bind_address")]
+    pub wsjtx_bind_address: String,
+    #[serde(default = "default_wsjtx_port")]
+    pub wsjtx_port: u16,
+    #[serde(default)]
+    pub wsjtx_multicast_group: String,
     #[serde(default = "default_cw_tuning_increment_hz")]
     pub cw_tuning_increment_hz: u32,
     #[serde(default = "default_ssb_tuning_increment_hz")]
@@ -160,6 +172,14 @@ fn default_cw_tuning_increment_hz() -> u32 {
 
 fn default_ssb_tuning_increment_hz() -> u32 {
     DEFAULT_SSB_TUNING_INCREMENT_HZ
+}
+
+fn default_wsjtx_bind_address() -> String {
+    "127.0.0.1".to_string()
+}
+
+const fn default_wsjtx_port() -> u16 {
+    2237
 }
 
 fn default_cw_serial_baud_rate() -> u32 {

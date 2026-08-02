@@ -23,6 +23,7 @@ mod supercheckpartial;
 mod validation;
 mod voice_keyer;
 mod voice_messages;
+mod wsjtx;
 
 use axum::{
     Json, Router,
@@ -67,10 +68,12 @@ use tower_http::trace::TraceLayer;
 use tracing::{Span, debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use voice_keyer::VoiceKeyer;
+use wsjtx::WsjtXManager;
 
 #[derive(Clone)]
 struct AppState {
     radio_manager: RadioManager,
+    wsjtx_manager: WsjtXManager,
     log_events: broadcast::Sender<ServerMessage>,
     db: Database,
     auth_config: std::sync::Arc<RwLock<AuthConfig>>,
@@ -475,8 +478,18 @@ async fn main() {
     log_cache.register_processor(std::sync::Arc::new(bandmap.clone()));
     log_cache.register_processor(std::sync::Arc::new(supercheckpartial.clone()));
 
+    let wsjtx_manager = WsjtXManager::new(
+        db.clone(),
+        contest_rules.clone(),
+        band_catalog.clone(),
+        log_cache.clone(),
+        incremental_scoring.clone(),
+        log_events.clone(),
+    );
+
     let app_state = AppState {
         radio_manager,
+        wsjtx_manager,
         log_events,
         db,
         auth_config,
@@ -648,7 +661,7 @@ async fn ws_handler(
 }
 
 async fn handle_socket(
-    socket: WebSocket,
+    mut socket: WebSocket,
     app_state: AppState,
     session_id: String,
     radio_id: Option<i64>,
@@ -658,14 +671,53 @@ async fn handle_socket(
         warn!(session_id, "backend websocket missing radio_id");
         return;
     };
-
-    let Ok(radio_handle) = app_state.radio_manager.acquire(radio_id).await else {
-        warn!(
-            session_id,
-            radio_id, "backend websocket requested unavailable radio"
-        );
+    let Some(log_id) = log_id else {
+        warn!(session_id, radio_id, "backend websocket missing log_id");
         return;
     };
+
+    let radio_handle = match app_state.radio_manager.acquire(radio_id, log_id).await {
+        Ok(handle) => handle,
+        Err(message) => {
+            warn!(session_id, radio_id, log_id, %message, "backend websocket could not acquire radio");
+            if message.contains("already in use by log") {
+                let payload = serde_json::to_string(&ServerMessage::RadioInUse { message })
+                    .expect("radio-in-use message should serialize");
+                let _ = socket.send(Message::Text(payload.into())).await;
+                let _ = socket.close().await;
+            }
+            return;
+        }
+    };
+
+    let config = match app_state.db.radio(radio_id).await {
+        Ok(Some(config)) => config,
+        Ok(None) => {
+            app_state.radio_manager.release(radio_id).await;
+            return;
+        }
+        Err(error) => {
+            warn!(session_id, radio_id, %error, "unable to load WSJT-X radio config");
+            app_state.radio_manager.release(radio_id).await;
+            return;
+        }
+    };
+    let mut log_events = app_state.log_events.subscribe();
+    if let Err(error) = app_state
+        .wsjtx_manager
+        .acquire(
+            radio_id,
+            log_id,
+            config,
+            radio_handle.current_state().await,
+            radio_handle.subscribe(),
+        )
+        .await
+    {
+        warn!(session_id, radio_id, log_id, %error, "unable to acquire WSJT-X listener");
+        app_state.radio_manager.release(radio_id).await;
+        return;
+    }
 
     info!(session_id, radio_id, "backend websocket connected");
     let (mut sender, mut receiver) = socket.split();
@@ -680,6 +732,7 @@ async fn handle_socket(
         .await
         .is_err()
     {
+        app_state.wsjtx_manager.release(radio_id).await;
         app_state.radio_manager.release(radio_id).await;
         return;
     }
@@ -694,13 +747,12 @@ async fn handle_socket(
             .await
             .is_err()
     {
+        app_state.wsjtx_manager.release(radio_id).await;
         app_state.radio_manager.release(radio_id).await;
         return;
     }
 
-    if let Some(log_id) = log_id
-        && let Some(totals) = app_state.incremental_scoring.totals(log_id)
-    {
+    if let Some(totals) = app_state.incremental_scoring.totals(log_id) {
         let score_update = score_update_message(log_id, &totals);
         if sender
             .send(Message::Text(
@@ -711,6 +763,7 @@ async fn handle_socket(
             .await
             .is_err()
         {
+            app_state.wsjtx_manager.release(radio_id).await;
             app_state.radio_manager.release(radio_id).await;
             return;
         }
@@ -718,12 +771,11 @@ async fn handle_socket(
 
     let mut radio_status_updates = radio_handle.subscribe_status();
     let mut radio_updates = radio_handle.subscribe();
-    let mut log_events = app_state.log_events.subscribe();
     let (direct_tx, mut direct_rx) = mpsc::channel::<ServerMessage>(32);
     let mut bandmap_enabled = false;
     let mut bandmap_subscription: Option<tokio::task::JoinHandle<()>> = None;
     let outbound_session_id = session_id.clone();
-    let outbound_log_id = log_id;
+    let outbound_log_id = Some(log_id);
     let outbound = tokio::spawn(async move {
         loop {
             let message = tokio::select! {
@@ -738,7 +790,7 @@ async fn handle_socket(
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
                 event = log_events.recv() => match event {
-                    Ok(event) => match websocket_log_event_for_client(event, outbound_session_id.as_str(), outbound_log_id) {
+                    Ok(event) => match websocket_log_event_for_client(event, outbound_session_id.as_str(), outbound_log_id, radio_id) {
                         Some(event) => serde_json::to_string(&event).expect("log event should serialize"),
                         None => continue,
                     },
@@ -801,7 +853,7 @@ async fn handle_socket(
                         direct_tx.clone(),
                         session_id.clone(),
                         radio_id,
-                        log_id,
+                        Some(log_id),
                     ));
                     if direct_tx
                         .send(ServerMessage::BandMapSubscriptionReady)
@@ -1078,6 +1130,7 @@ async fn handle_socket(
         subscription.abort();
     }
     outbound.abort();
+    app_state.wsjtx_manager.release(radio_id).await;
     app_state.radio_manager.release(radio_id).await;
     info!(session_id, radio_id, "backend websocket disconnected");
 }
@@ -2174,6 +2227,9 @@ async fn create_radio(
     if let Err(error) = validation::validate_radio(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
+    if let Err(error) = validate_unique_wsjtx_port(&app_state, None, &payload).await {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
     if let Err(error) = app_state
         .voice_keyer
         .validate_radio_voice_messages(&payload.voice_messages)
@@ -2204,6 +2260,9 @@ async fn update_radio(
     if let Err(error) = validation::validate_radio(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
+    if let Err(error) = validate_unique_wsjtx_port(&app_state, Some(id), &payload).await {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
     if let Err(error) = app_state
         .voice_keyer
         .validate_radio_voice_messages(&payload.voice_messages)
@@ -2232,6 +2291,10 @@ async fn update_radio(
                 }
                 debug!(id, "active radio reload requested after update");
             }
+            app_state
+                .wsjtx_manager
+                .reload_config(id, radio.clone())
+                .await;
             Json(serde_json::json!({ "ok": true, "radio": radio }))
         }
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
@@ -2244,6 +2307,30 @@ fn resolve_radio_mode_mappings(payload: &mut RadioPayload) -> Result<(), String>
         modes::resolved_mode_mappings(&payload.radio_kind, &payload.data_mode, &payload.rtty_mode)?;
     payload.data_mode = data_mode;
     payload.rtty_mode = rtty_mode;
+    Ok(())
+}
+
+async fn validate_unique_wsjtx_port(
+    app_state: &AppState,
+    radio_id: Option<i64>,
+    payload: &RadioPayload,
+) -> Result<(), String> {
+    if !payload.wsjtx_enabled {
+        return Ok(());
+    }
+    let radios = app_state
+        .db
+        .radios()
+        .await
+        .map_err(|error| error.to_string())?;
+    if radios.iter().any(|radio| {
+        radio.wsjtx_enabled && radio.wsjtx_port == payload.wsjtx_port && Some(radio.id) != radio_id
+    }) {
+        return Err(format!(
+            "WSJT-X port {} is already used by another enabled radio",
+            payload.wsjtx_port
+        ));
+    }
     Ok(())
 }
 
@@ -2659,6 +2746,7 @@ fn websocket_log_event_for_client(
     event: ServerMessage,
     outbound_session_id: &str,
     outbound_log_id: Option<i64>,
+    outbound_radio_id: i64,
 ) -> Option<ServerMessage> {
     let outbound_log_id = outbound_log_id?;
     match event {
@@ -2691,6 +2779,17 @@ fn websocket_log_event_for_client(
         }),
         ServerMessage::SupercheckpartialUpdate { callsigns } => {
             Some(ServerMessage::SupercheckpartialUpdate { callsigns })
+        }
+        ServerMessage::WsjtXError {
+            radio_id,
+            log_id,
+            message,
+        } if radio_id == outbound_radio_id && log_id == outbound_log_id => {
+            Some(ServerMessage::WsjtXError {
+                radio_id,
+                log_id,
+                message,
+            })
         }
         _ => None,
     }
@@ -2994,8 +3093,10 @@ mod tests {
             contact: committed_contact(1, "origin-session"),
         };
 
-        assert!(websocket_log_event_for_client(event.clone(), "other-session", Some(1)).is_some());
-        assert!(websocket_log_event_for_client(event, "other-session", Some(2)).is_none());
+        assert!(
+            websocket_log_event_for_client(event.clone(), "other-session", Some(1), 1).is_some()
+        );
+        assert!(websocket_log_event_for_client(event, "other-session", Some(2), 1).is_none());
     }
 
     #[test]
@@ -3004,14 +3105,14 @@ mod tests {
             contact: committed_contact(1, "origin-session"),
         };
 
-        assert!(websocket_log_event_for_client(event, "origin-session", Some(1)).is_none());
+        assert!(websocket_log_event_for_client(event, "origin-session", Some(1), 1).is_none());
     }
 
     #[test]
     fn websocket_contact_deleted_and_score_updates_are_log_scoped() {
         let deleted = ServerMessage::ContactDeleted { id: 55, log_id: 7 };
-        assert!(websocket_log_event_for_client(deleted.clone(), "session", Some(7)).is_some());
-        assert!(websocket_log_event_for_client(deleted, "session", Some(8)).is_none());
+        assert!(websocket_log_event_for_client(deleted.clone(), "session", Some(7), 1).is_some());
+        assert!(websocket_log_event_for_client(deleted, "session", Some(8), 1).is_none());
 
         let score = ServerMessage::ScoreUpdate {
             log_id: 7,
@@ -3020,8 +3121,8 @@ mod tests {
             bonus_points: 5,
             total_score: 35,
         };
-        assert!(websocket_log_event_for_client(score.clone(), "session", Some(7)).is_some());
-        assert!(websocket_log_event_for_client(score, "session", Some(8)).is_none());
+        assert!(websocket_log_event_for_client(score.clone(), "session", Some(7), 1).is_some());
+        assert!(websocket_log_event_for_client(score, "session", Some(8), 1).is_none());
     }
 
     #[test]
@@ -3030,9 +3131,22 @@ mod tests {
             callsigns: vec!["K1ABC".to_string()],
         };
 
-        assert!(websocket_log_event_for_client(update.clone(), "session-a", Some(7)).is_some());
-        assert!(websocket_log_event_for_client(update.clone(), "session-a", Some(8)).is_some());
-        assert!(websocket_log_event_for_client(update, "session-a", None).is_none());
+        assert!(websocket_log_event_for_client(update.clone(), "session-a", Some(7), 1).is_some());
+        assert!(websocket_log_event_for_client(update.clone(), "session-a", Some(8), 1).is_some());
+        assert!(websocket_log_event_for_client(update, "session-a", None, 1).is_none());
+    }
+
+    #[test]
+    fn websocket_wsjtx_errors_are_scoped_to_radio_and_log() {
+        let event = ServerMessage::WsjtXError {
+            radio_id: 2,
+            log_id: 7,
+            message: "bind failed".to_string(),
+        };
+
+        assert!(websocket_log_event_for_client(event.clone(), "session", Some(7), 2).is_some());
+        assert!(websocket_log_event_for_client(event.clone(), "session", Some(8), 2).is_none());
+        assert!(websocket_log_event_for_client(event, "session", Some(7), 3).is_none());
     }
 
     #[test]

@@ -32,6 +32,7 @@ enum ManagedRadioSlot {
 }
 
 struct ManagedRadio {
+    log_id: i64,
     current_status: Arc<RwLock<RadioStatus>>,
     current: Arc<RwLock<Option<RadioState>>>,
     status_updates: broadcast::Sender<RadioStatus>,
@@ -52,7 +53,7 @@ impl RadioManager {
         }
     }
 
-    pub async fn acquire(&self, radio_id: i64) -> Result<RadioHandle, String> {
+    pub async fn acquire(&self, radio_id: i64, log_id: i64) -> Result<RadioHandle, String> {
         loop {
             let wait_for_shutdown = {
                 let mut radios = self.radios.lock().await;
@@ -60,6 +61,12 @@ impl RadioManager {
                 if let Some(slot) = radios.get_mut(&radio_id) {
                     match slot {
                         ManagedRadioSlot::Active(radio) => {
+                            if radio.log_id != log_id {
+                                return Err(format!(
+                                    "radio {radio_id} is already in use by log {}",
+                                    radio.log_id
+                                ));
+                            }
                             radio.refcount += 1;
                             debug!(
                                 radio_id,
@@ -102,6 +109,12 @@ impl RadioManager {
                 if let Some(slot) = radios.get_mut(&radio_id) {
                     match slot {
                         ManagedRadioSlot::Active(radio) => {
+                            if radio.log_id != log_id {
+                                return Err(format!(
+                                    "radio {radio_id} is already in use by log {}",
+                                    radio.log_id
+                                ));
+                            }
                             radio.refcount += 1;
                             debug!(
                                 radio_id,
@@ -156,6 +169,7 @@ impl RadioManager {
                     radios.insert(
                         radio_id,
                         ManagedRadioSlot::Active(ManagedRadio {
+                            log_id,
                             current_status: current_status.clone(),
                             current: current.clone(),
                             status_updates: status_updates.clone(),
@@ -271,6 +285,10 @@ impl RadioManager {
 }
 
 impl RadioHandle {
+    pub async fn current_state(&self) -> Option<RadioState> {
+        self.current.read().await.clone()
+    }
+
     pub async fn current_status_message(&self) -> ServerMessage {
         ServerMessage::RadioStatus(self.current_status.read().await.clone())
     }
@@ -296,5 +314,72 @@ impl RadioHandle {
         command: RadioCommand,
     ) -> Result<(), mpsc::error::SendError<RadioCommand>> {
         self.commands.send(command).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        cw::DEFAULT_CW_MESSAGES, db::RadioPayload, voice_messages::DEFAULT_VOICE_MESSAGES,
+    };
+
+    fn test_radio() -> RadioPayload {
+        RadioPayload {
+            name: "Dummy".to_string(),
+            radio_kind: "dummy".to_string(),
+            transport_kind: "none".to_string(),
+            tcp_host: String::new(),
+            tcp_port: 0,
+            serial_port: String::new(),
+            serial_baud_rate: 115_200,
+            options: String::new(),
+            data_mode: "DATA-USB".to_string(),
+            rtty_mode: "RTTY".to_string(),
+            wsjtx_enabled: false,
+            wsjtx_bind_address: "127.0.0.1".to_string(),
+            wsjtx_port: 2237,
+            wsjtx_multicast_group: String::new(),
+            cw_tuning_increment_hz: 20,
+            ssb_tuning_increment_hz: 100,
+            rit_clear_on_log: false,
+            voice_input_device_id: None,
+            voice_output_device_id: None,
+            cw_keyer_type: "none".to_string(),
+            winkeyer_serial_port: String::new(),
+            cw_serial_port: String::new(),
+            cw_serial_baud_rate: 9_600,
+            cw_serial_line: "dtr".to_string(),
+            cw_messages: DEFAULT_CW_MESSAGES.to_string(),
+            voice_messages: DEFAULT_VOICE_MESSAGES.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn active_radio_is_exclusive_to_one_log_but_allows_same_log_sessions() {
+        let db = Database::open(":memory:").expect("database opens");
+        let radio = db
+            .create_radio(test_radio())
+            .await
+            .expect("radio is created");
+        let manager = RadioManager::new(db, VoiceKeyer::new(), BandCatalog::new(Vec::new()));
+
+        manager
+            .acquire(radio.id, 10)
+            .await
+            .expect("first log acquires radio");
+        manager
+            .acquire(radio.id, 10)
+            .await
+            .expect("second session for same log acquires radio");
+        let error = manager
+            .acquire(radio.id, 11)
+            .await
+            .err()
+            .expect("different log must be rejected");
+        assert!(error.contains("already in use by log 10"));
+
+        manager.release(radio.id).await;
+        manager.release(radio.id).await;
     }
 }

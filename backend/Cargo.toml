@@ -22,6 +22,7 @@ csv = "1"
 dxcllistener = { git = "https://github.com/elitegreg/dxcllistener.git" }
 dxclparser = "1.0.1"
 futures-util = "0.3"
+ham-radio-digital-interfacing = { git = "https://github.com/elitegreg/ham-radio-digital-interfacing-rs.git" }
 log73-paths = { path = "../paths" }
 mime_guess = "2.0.5"
 regex = "1"

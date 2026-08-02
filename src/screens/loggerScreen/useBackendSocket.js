@@ -36,6 +36,7 @@ export function useBackendSocket({
   onRemoteContactRef,
   onRemoteContactDeletedRef,
   onRefreshContactsRef,
+  onRadioInUseRef,
 }) {
   const [radioState, setRadioState] = useState(DEFAULT_RADIO_STATE);
   const [backendSocketStatus, setBackendSocketStatus] =
@@ -523,6 +524,24 @@ export function useBackendSocket({
               bonusPoints: Number(message.bonus_points ?? 0),
               score: Number(message.total_score ?? 0),
             });
+          } else if (message.type === 'wsjt_x_error') {
+            notifyOperationalError(
+              'wsjtx',
+              'WSJT-X integration error.',
+              message.message,
+              { logId: numericLogId, radioId: numericRadioId },
+            );
+          } else if (message.type === 'radio_in_use') {
+            shouldReconnect = false;
+            notifyOperationalError(
+              'radioInUse',
+              'The selected radio is already in use by another log.',
+              message.message,
+              { logId: numericLogId, radioId: numericRadioId },
+            );
+            socket.close();
+            onRadioInUseRef.current?.();
+            return;
           }
           onSocketMessageRef.current?.(message);
         } catch (error) {
@@ -597,6 +616,7 @@ export function useBackendSocket({
     numericLogId,
     numericRadioId,
     onRefreshContactsRef,
+    onRadioInUseRef,
     onRemoteContactDeletedRef,
     onRemoteContactRef,
     onSocketMessageRef,
