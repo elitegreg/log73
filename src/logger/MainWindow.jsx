@@ -74,6 +74,8 @@ function MainWindow({
   catStatus,
   messageLabels,
   messageSentEvent,
+  wsjtxTarget,
+  onSetWsjtXTarget,
   sessionId,
   logId,
   bandMapEnabled,
@@ -1026,6 +1028,9 @@ function MainWindow({
         onSetRadioMode={onSetRadioMode}
         esmEnabled={esmEnabled}
         onSetEsmEnabled={setEsmEnabled}
+        wsjtxEnabled={Boolean(radio?.wsjtx_enabled)}
+        wsjtxTarget={wsjtxTarget}
+        onSetWsjtXTarget={onSetWsjtXTarget}
         cwWpm={cwWpm}
         cwWpmMin={CW_WPM_MIN}
         cwWpmMax={CW_WPM_MAX}

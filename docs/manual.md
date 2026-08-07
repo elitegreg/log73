@@ -230,13 +230,20 @@ port (the first default is `127.0.0.1:2237`). Choose **open** only when WSJT-X
 runs on another computer; this binds `0.0.0.0` and should be protected with the
 host firewall. An optional IPv4 multicast group may be used instead.
 
-The UDP listener is active only while that radio is open for a log and Log73's
-radio mode is DATA. A radio can serve multiple logger windows for the same log,
-but cannot be used by two different logs at once. In WSJT-X DATA mode the
-manual callsign/exchange fields and logging controls are cleared and locked;
-accept the **Log QSO** dialog in WSJT-X to add the QSO. Listener, protocol,
-ADIF, and database errors are reported as logger notifications and recorded in
-the backend log.
+Multiple logger windows, including different logs, may share one radio. When
+WSJT-X is enabled and the radio is in DATA mode, **WSJT-X Target** replaces the
+ESM checkbox. Exactly one logger per radio may be the target; selecting it in a
+different logger moves the target. The first logger opened for a radio is
+selected automatically, while closing or unchecking the selected logger leaves
+the radio without a target.
+
+The UDP listener runs only while a target is selected and the radio remains in
+DATA mode. Incoming Logged ADIF contacts are saved to the selected logger's
+log. In WSJT-X DATA mode the manual callsign/exchange fields and logging
+controls are cleared and locked; accept the **Log QSO** dialog in WSJT-X to add
+the QSO. When WSJT-X is disabled, DATA mode retains ESM and manual keyboard
+entry. Listener, protocol, ADIF, and database errors are reported as logger
+notifications and recorded in the backend log.
 
 ---
 
@@ -260,6 +267,7 @@ Operational basics:
 - Live CAT mode/frequency state in title/status areas
 - CW function-key banks for Run and S&P
 - ESM optional workflows for Enter-driven operation
+- WSJT-X Target selection in WSJT-X-enabled DATA mode
 - Log table supports selection, edit, delete
 - `?` button (upper-right) opens help at `/help/index.html`
 

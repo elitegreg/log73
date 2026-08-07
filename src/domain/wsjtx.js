@@ -18,8 +18,12 @@ export function nextAvailableWsjtxPort(radios, start = DEFAULT_WSJTX_PORT) {
 }
 
 export function wsjtxDataModeLocked(radio, mode) {
+  return wsjtxTargetControlVisible(Boolean(radio?.wsjtx_enabled), mode);
+}
+
+export function wsjtxTargetControlVisible(wsjtxEnabled, mode) {
   return (
-    Boolean(radio?.wsjtx_enabled) &&
+    Boolean(wsjtxEnabled) &&
     String(mode ?? '')
       .trim()
       .toUpperCase() === 'DATA'

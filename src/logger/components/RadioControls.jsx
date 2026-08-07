@@ -1,4 +1,5 @@
 import React from 'react';
+import { wsjtxTargetControlVisible } from '../../domain/wsjtx';
 import { MODE_OPTIONS, isSelectableMode, modeIsCw } from '../mainWindowHelpers';
 
 function RadioControls({
@@ -13,6 +14,9 @@ function RadioControls({
   onSetRadioMode,
   esmEnabled,
   onSetEsmEnabled,
+  wsjtxEnabled,
+  wsjtxTarget,
+  onSetWsjtXTarget,
   cwWpm,
   cwWpmMin,
   cwWpmMax,
@@ -27,6 +31,7 @@ function RadioControls({
   const modeOptions = modeSelectable
     ? MODE_OPTIONS
     : [...MODE_OPTIONS, radioMode].filter(Boolean);
+  const showWsjtXTarget = wsjtxTargetControlVisible(wsjtxEnabled, radioMode);
 
   return (
     <div className="radio-controls">
@@ -72,15 +77,27 @@ function RadioControls({
           ))}
         </select>
       </label>
-      <label className="radio-control esm-toggle">
-        ESM:
-        <input
-          type="checkbox"
-          checked={esmEnabled}
-          onChange={(event) => onSetEsmEnabled?.(event.target.checked)}
-          disabled={manualEntryDisabled}
-        />
-      </label>
+      {showWsjtXTarget ? (
+        <label className="radio-control esm-toggle">
+          WSJT-X Target:
+          <input
+            type="checkbox"
+            checked={Boolean(wsjtxTarget)}
+            onChange={(event) => onSetWsjtXTarget?.(event.target.checked)}
+            disabled={backendSocketStatus !== 'connected'}
+          />
+        </label>
+      ) : (
+        <label className="radio-control esm-toggle">
+          ESM:
+          <input
+            type="checkbox"
+            checked={esmEnabled}
+            onChange={(event) => onSetEsmEnabled?.(event.target.checked)}
+            disabled={manualEntryDisabled}
+          />
+        </label>
+      )}
       {modeIsCw(radioMode) && (
         <label className="radio-control cw-wpm-control">
           CW WPM:

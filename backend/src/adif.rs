@@ -130,7 +130,18 @@ pub fn import_wsjtx_contact(rules: &ContestRules, text: &str) -> Result<Contact,
     let mut adif = record
         .fields
         .iter()
-        .filter(|(key, _)| !matches!(key.as_str(), "ID" | "_ID" | "_LOG_ID" | "_STATUS"))
+        .filter(|(key, _)| {
+            !matches!(
+                key.as_str(),
+                "ID" | "_ID"
+                    | "_LOG_ID"
+                    | "_STATUS"
+                    | "QSO_DATE"
+                    | "QSO_DATE_OFF"
+                    | "TIME_OFF"
+                    | "TIME_ON"
+            )
+        })
         .map(|(key, value)| (key.clone(), Value::String(value.clone())))
         .collect::<ContactFields>();
 
@@ -744,7 +755,7 @@ mod tests {
             contest_id: Some("CABRILLO-ID".to_string()),
             ..Default::default()
         });
-        let text = "WSJT-X<ADIF_VER:5>3.1.0<EOH><QSO_DATE:8>20240801<TIME_ON:6>123456<STATION_CALLSIGN:6>N0CALL<CALL:4>W1AW<BAND:3>20m<FREQ:6>14.074<MODE:4>MFSK<SUBMODE:3>FT8<CONTEST_ID:4>LIES<EOR>";
+        let text = "WSJT-X<ADIF_VER:5>3.1.0<EOH><QSO_DATE:8>20240801<TIME_ON:6>123456<QSO_DATE_OFF:8>20240801<TIME_OFF:6>123500<STATION_CALLSIGN:6>N0CALL<CALL:4>W1AW<BAND:3>20m<FREQ:6>14.074<MODE:4>MFSK<SUBMODE:3>FT8<CONTEST_ID:4>LIES<EOR>";
 
         let contact = import_wsjtx_contact(&rules, text).expect("WSJT-X ADIF should import");
 
@@ -768,6 +779,9 @@ mod tests {
             crate::db::contact_adif_value(&contact, "FREQ"),
             Some(&json!(14_074_000))
         );
+        for name in ["QSO_DATE", "QSO_DATE_OFF", "TIME_OFF", "TIME_ON"] {
+            assert_eq!(crate::db::contact_adif_value(&contact, name), None);
+        }
     }
 
     #[test]

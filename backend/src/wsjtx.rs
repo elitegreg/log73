@@ -12,7 +12,7 @@ use ham_radio_digital_interfacing::wsjtx::{
     Event, Message, MulticastGroup, ServerConfig, WsjtXServer,
 };
 use std::{collections::HashMap, net::Ipv4Addr, sync::Arc};
-use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
+use tokio::sync::{Mutex, broadcast, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
@@ -24,13 +24,33 @@ pub struct WsjtXManager {
 struct WsjtXManagerInner {
     listeners: Mutex<HashMap<i64, ManagedListener>>,
     ingestor: WsjtXIngestor,
+    target_events: broadcast::Sender<WsjtXTargetState>,
 }
 
 struct ManagedListener {
-    log_id: i64,
-    refcount: usize,
+    registrations: HashMap<String, LoggerRegistration>,
+    target: Option<WsjtXTarget>,
+    target_updates: watch::Sender<Option<WsjtXTarget>>,
     commands: mpsc::Sender<ControllerCommand>,
     task: JoinHandle<()>,
+}
+
+struct LoggerRegistration {
+    log_id: i64,
+    refcount: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct WsjtXTarget {
+    logger_id: String,
+    log_id: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WsjtXTargetState {
+    pub radio_id: i64,
+    pub logger_id: Option<String>,
+    pub log_id: Option<i64>,
 }
 
 enum ControllerCommand {
@@ -73,6 +93,7 @@ impl WsjtXManager {
                     scoring,
                     events,
                 },
+                target_events: broadcast::channel(32).0,
             }),
         }
     }
@@ -80,58 +101,110 @@ impl WsjtXManager {
     pub async fn acquire(
         &self,
         radio_id: i64,
+        logger_id: &str,
         log_id: i64,
         config: RadioConfig,
         initial_state: Option<RadioState>,
         updates: broadcast::Receiver<RadioState>,
-    ) -> Result<(), String> {
+    ) -> Result<WsjtXTargetState, String> {
         let mut listeners = self.inner.listeners.lock().await;
         if let Some(listener) = listeners.get_mut(&radio_id) {
-            if listener.log_id != log_id {
-                return Err(format!(
-                    "radio {radio_id} is already assigned to log {}",
-                    listener.log_id
-                ));
+            if let Some(registration) = listener.registrations.get_mut(logger_id) {
+                if registration.log_id != log_id {
+                    return Err(format!(
+                        "logger {logger_id} is already registered for log {}",
+                        registration.log_id
+                    ));
+                }
+                registration.refcount += 1;
+            } else {
+                listener.registrations.insert(
+                    logger_id.to_string(),
+                    LoggerRegistration {
+                        log_id,
+                        refcount: 1,
+                    },
+                );
             }
-            listener.refcount += 1;
-            return Ok(());
+            return Ok(target_state(radio_id, listener.target.as_ref()));
         }
 
         let (commands, command_rx) = mpsc::channel(8);
+        let target = WsjtXTarget {
+            logger_id: logger_id.to_string(),
+            log_id,
+        };
+        let (target_updates, target_rx) = watch::channel(Some(target.clone()));
         let ingestor = self.inner.ingestor.clone();
         let task = tokio::spawn(run_controller(
             radio_id,
-            log_id,
             config,
             initial_state,
             updates,
+            target_rx,
             command_rx,
             ingestor,
         ));
+        let registrations = HashMap::from([(
+            logger_id.to_string(),
+            LoggerRegistration {
+                log_id,
+                refcount: 1,
+            },
+        )]);
         listeners.insert(
             radio_id,
             ManagedListener {
-                log_id,
-                refcount: 1,
+                registrations,
+                target: Some(target.clone()),
+                target_updates,
                 commands,
                 task,
             },
         );
-        Ok(())
+        let state = target_state(radio_id, Some(&target));
+        let _ = self.inner.target_events.send(state.clone());
+        Ok(state)
     }
 
-    pub async fn release(&self, radio_id: i64) {
-        let listener = {
+    pub async fn release(&self, radio_id: i64, logger_id: &str) {
+        let (listener, target_changed) = {
             let mut listeners = self.inner.listeners.lock().await;
             let Some(listener) = listeners.get_mut(&radio_id) else {
                 return;
             };
-            listener.refcount = listener.refcount.saturating_sub(1);
-            if listener.refcount > 0 {
-                return;
+
+            let remove_registration = match listener.registrations.get_mut(logger_id) {
+                Some(registration) => {
+                    registration.refcount = registration.refcount.saturating_sub(1);
+                    registration.refcount == 0
+                }
+                None => false,
+            };
+            if remove_registration {
+                listener.registrations.remove(logger_id);
             }
-            listeners.remove(&radio_id)
+
+            let target_changed = remove_registration
+                && listener
+                    .target
+                    .as_ref()
+                    .is_some_and(|target| target.logger_id == logger_id);
+            if target_changed {
+                listener.target = None;
+                listener.target_updates.send_replace(None);
+            }
+
+            let listener = if listener.registrations.is_empty() {
+                listeners.remove(&radio_id)
+            } else {
+                None
+            };
+            (listener, target_changed)
         };
+        if target_changed {
+            let _ = self.inner.target_events.send(no_target_state(radio_id));
+        }
         if let Some(listener) = listener {
             let (completed, result) = oneshot::channel();
             let _ = listener
@@ -141,6 +214,50 @@ impl WsjtXManager {
             let _ = result.await;
             let _ = listener.task.await;
         }
+    }
+
+    pub async fn set_target(
+        &self,
+        radio_id: i64,
+        logger_id: &str,
+        enabled: bool,
+    ) -> Result<WsjtXTargetState, String> {
+        let state = {
+            let mut listeners = self.inner.listeners.lock().await;
+            let listener = listeners
+                .get_mut(&radio_id)
+                .ok_or_else(|| format!("radio {radio_id} has no open logger"))?;
+            let registration = listener.registrations.get(logger_id).ok_or_else(|| {
+                format!("logger {logger_id} is not registered for radio {radio_id}")
+            })?;
+
+            let next_target = if enabled {
+                Some(WsjtXTarget {
+                    logger_id: logger_id.to_string(),
+                    log_id: registration.log_id,
+                })
+            } else if listener
+                .target
+                .as_ref()
+                .is_some_and(|target| target.logger_id == logger_id)
+            {
+                None
+            } else {
+                listener.target.clone()
+            };
+
+            if listener.target != next_target {
+                listener.target = next_target.clone();
+                listener.target_updates.send_replace(next_target);
+            }
+            target_state(radio_id, listener.target.as_ref())
+        };
+        let _ = self.inner.target_events.send(state.clone());
+        Ok(state)
+    }
+
+    pub fn subscribe_targets(&self) -> broadcast::Receiver<WsjtXTargetState> {
+        self.inner.target_events.subscribe()
     }
 
     pub async fn reload_config(&self, radio_id: i64, config: RadioConfig) {
@@ -157,19 +274,43 @@ impl WsjtXManager {
                 .await;
         }
     }
+
+    #[cfg(test)]
+    async fn current_target(&self, radio_id: i64) -> WsjtXTargetState {
+        let listeners = self.inner.listeners.lock().await;
+        target_state(
+            radio_id,
+            listeners
+                .get(&radio_id)
+                .and_then(|listener| listener.target.as_ref()),
+        )
+    }
+}
+
+fn target_state(radio_id: i64, target: Option<&WsjtXTarget>) -> WsjtXTargetState {
+    WsjtXTargetState {
+        radio_id,
+        logger_id: target.map(|target| target.logger_id.clone()),
+        log_id: target.map(|target| target.log_id),
+    }
+}
+
+fn no_target_state(radio_id: i64) -> WsjtXTargetState {
+    target_state(radio_id, None)
 }
 
 async fn run_controller(
     radio_id: i64,
-    log_id: i64,
     mut config: RadioConfig,
     initial_state: Option<RadioState>,
     mut updates: broadcast::Receiver<RadioState>,
+    mut target_updates: watch::Receiver<Option<WsjtXTarget>>,
     mut commands: mpsc::Receiver<ControllerCommand>,
     ingestor: WsjtXIngestor,
 ) {
     let mut mode = initial_state.map(|state| state.mode).unwrap_or_default();
-    let mut running = reconcile_listener(None, radio_id, log_id, &config, &mode, &ingestor).await;
+    let mut running =
+        reconcile_listener(None, radio_id, &config, &mode, &target_updates, &ingestor).await;
 
     loop {
         tokio::select! {
@@ -178,25 +319,31 @@ async fn run_controller(
                     let next_mode = update.mode;
                     if next_mode != mode {
                         mode = next_mode;
-                        running = reconcile_listener(running, radio_id, log_id, &config, &mode, &ingestor).await;
+                        running = reconcile_listener(running, radio_id, &config, &mode, &target_updates, &ingestor).await;
                     }
                 }
                 Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                    warn!(radio_id, log_id, skipped, "WSJT-X radio-state subscription lagged");
+                    warn!(radio_id, skipped, "WSJT-X radio-state subscription lagged");
                 }
                 Err(broadcast::error::RecvError::Closed) => break,
+            },
+            changed = target_updates.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                running = reconcile_listener(running, radio_id, &config, &mode, &target_updates, &ingestor).await;
             },
             command = commands.recv() => match command {
                 Some(ControllerCommand::Reload(next_config)) => {
                     let needs_restart = listener_settings_changed(&config, &next_config);
                     config = *next_config;
                     if needs_restart {
-                        running = stop_listener(running, radio_id, log_id).await;
+                        running = stop_listener(running, radio_id).await;
                     }
-                    running = reconcile_listener(running, radio_id, log_id, &config, &mode, &ingestor).await;
+                    running = reconcile_listener(running, radio_id, &config, &mode, &target_updates, &ingestor).await;
                 }
                 Some(ControllerCommand::Shutdown(completed)) => {
-                    let _ = stop_listener(running, radio_id, log_id).await;
+                    let _ = stop_listener(running, radio_id).await;
                     let _ = completed.send(());
                     return;
                 }
@@ -204,30 +351,31 @@ async fn run_controller(
             }
         }
     }
-    let _ = stop_listener(running, radio_id, log_id).await;
+    let _ = stop_listener(running, radio_id).await;
 }
 
 async fn reconcile_listener(
     running: Option<RunningListener>,
     radio_id: i64,
-    log_id: i64,
     config: &RadioConfig,
     mode: &str,
+    target_updates: &watch::Receiver<Option<WsjtXTarget>>,
     ingestor: &WsjtXIngestor,
 ) -> Option<RunningListener> {
-    let should_run = config.wsjtx_enabled && mode.eq_ignore_ascii_case("DATA");
+    let should_run = listener_should_run(config, mode, target_updates.borrow().is_some());
     match (running, should_run) {
         (Some(running), true) => Some(running),
-        (Some(running), false) => stop_listener(Some(running), radio_id, log_id).await,
+        (Some(running), false) => stop_listener(Some(running), radio_id).await,
         (None, false) => None,
         (None, true) => {
             let (shutdown, shutdown_rx) = oneshot::channel();
             let config = config.clone();
             let ingestor = ingestor.clone();
+            let target_updates = target_updates.clone();
             let task = tokio::spawn(run_listener(
                 radio_id,
-                log_id,
                 config,
+                target_updates,
                 shutdown_rx,
                 ingestor,
             ));
@@ -236,39 +384,40 @@ async fn reconcile_listener(
     }
 }
 
-async fn stop_listener(
-    running: Option<RunningListener>,
-    radio_id: i64,
-    log_id: i64,
-) -> Option<RunningListener> {
+fn listener_should_run(config: &RadioConfig, mode: &str, has_target: bool) -> bool {
+    config.wsjtx_enabled && mode.eq_ignore_ascii_case("DATA") && has_target
+}
+
+async fn stop_listener(running: Option<RunningListener>, radio_id: i64) -> Option<RunningListener> {
     if let Some(running) = running {
         let _ = running.shutdown.send(());
         let _ = running.task.await;
-        info!(radio_id, log_id, "WSJT-X UDP listener stopped");
+        info!(radio_id, "WSJT-X UDP listener stopped");
     }
     None
 }
 
 async fn run_listener(
     radio_id: i64,
-    log_id: i64,
     config: RadioConfig,
+    target_updates: watch::Receiver<Option<WsjtXTarget>>,
     mut shutdown: oneshot::Receiver<()>,
     ingestor: WsjtXIngestor,
 ) {
     let server_config = match server_config(&config) {
         Ok(config) => config,
         Err(message) => {
-            ingestor.emit_error(radio_id, log_id, message);
+            emit_target_error(&ingestor, radio_id, &target_updates, message);
             return;
         }
     };
     let server = match WsjtXServer::spawn(server_config) {
         Ok(server) => server,
         Err(error) => {
-            ingestor.emit_error(
+            emit_target_error(
+                &ingestor,
                 radio_id,
-                log_id,
+                &target_updates,
                 format!("Unable to start WSJT-X UDP listener: {error}"),
             );
             return;
@@ -276,7 +425,7 @@ async fn run_listener(
     };
     let local_address = server.local_address();
     let mut events = server.subscribe();
-    info!(radio_id, log_id, %local_address, "WSJT-X UDP listener started");
+    info!(radio_id, %local_address, "WSJT-X UDP listener started");
 
     loop {
         tokio::select! {
@@ -284,34 +433,41 @@ async fn run_listener(
             event = events.recv() => match event {
                 Ok(Event::Datagram { datagram, .. }) => {
                     if let Message::LoggedAdif(logged) = &datagram.message {
+                        let Some(target) = target_updates.borrow().clone() else {
+                            continue;
+                        };
                         match logged.text.as_deref() {
                             Some(text) => {
-                                if let Err(message) = ingestor.ingest(radio_id, log_id, text).await {
-                                    ingestor.emit_error(radio_id, log_id, message);
+                                debug!(radio_id, log_id = target.log_id, wsjtx_instance_id = %datagram.id, adif = %text, "received WSJT-X Logged ADIF contact");
+                                if let Err(message) = ingestor.ingest(radio_id, target.log_id, text).await {
+                                    ingestor.emit_error(radio_id, target.log_id, message);
                                 }
                             }
                             None => ingestor.emit_error(
                                 radio_id,
-                                log_id,
+                                target.log_id,
                                 "WSJT-X sent an empty Logged ADIF message".to_string(),
                             ),
                         }
                     }
                 }
-                Ok(Event::ProtocolError { source, error }) => ingestor.emit_error(
+                Ok(Event::ProtocolError { source, error }) => emit_target_error(
+                    &ingestor,
                     radio_id,
-                    log_id,
+                    &target_updates,
                     format!("Invalid WSJT-X datagram from {source}: {error}"),
                 ),
-                Ok(Event::SocketError { operation, peer, message, .. }) => ingestor.emit_error(
+                Ok(Event::SocketError { operation, peer, message, .. }) => emit_target_error(
+                    &ingestor,
                     radio_id,
-                    log_id,
+                    &target_updates,
                     format!("WSJT-X UDP {operation} error{}: {message}", peer.map_or_else(String::new, |peer| format!(" for {peer}"))),
                 ),
                 Ok(_) => {}
-                Err(broadcast::error::RecvError::Lagged(skipped)) => ingestor.emit_error(
+                Err(broadcast::error::RecvError::Lagged(skipped)) => emit_target_error(
+                    &ingestor,
                     radio_id,
-                    log_id,
+                    &target_updates,
                     format!("WSJT-X event receiver lagged; skipped {skipped} events"),
                 ),
                 Err(broadcast::error::RecvError::Closed) => break,
@@ -320,11 +476,25 @@ async fn run_listener(
     }
 
     if let Err(error) = server.shutdown().await {
-        ingestor.emit_error(
+        emit_target_error(
+            &ingestor,
             radio_id,
-            log_id,
+            &target_updates,
             format!("WSJT-X UDP listener stopped with an error: {error}"),
         );
+    }
+}
+
+fn emit_target_error(
+    ingestor: &WsjtXIngestor,
+    radio_id: i64,
+    target_updates: &watch::Receiver<Option<WsjtXTarget>>,
+    message: String,
+) {
+    if let Some(target) = target_updates.borrow().as_ref() {
+        ingestor.emit_error(radio_id, target.log_id, message);
+    } else {
+        error!(radio_id, %message, "WSJT-X error without an active target");
     }
 }
 
@@ -417,6 +587,31 @@ impl WsjtXIngestor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{dxcc::DxccDatabase, scoring::ScoringModules};
+
+    fn test_manager() -> WsjtXManager {
+        let db = Database::open(":memory:").expect("database opens");
+        let rules_dir =
+            std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let rules = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules load");
+        let scoring = IncrementalScoreTracker::new();
+        let log_cache = LogCache::new(
+            db.clone(),
+            rules.clone(),
+            ScoringModules::new(),
+            Arc::new(DxccDatabase::default()),
+        );
+        let events = broadcast::channel(16).0;
+        WsjtXManager::new(
+            db,
+            rules,
+            BandCatalog::new(Vec::new()),
+            log_cache,
+            scoring,
+            events,
+        )
+    }
 
     fn test_config() -> RadioConfig {
         RadioConfig {
@@ -479,5 +674,118 @@ mod tests {
         changed = config.clone();
         changed.name = "Renamed".to_string();
         assert!(!listener_settings_changed(&config, &changed));
+    }
+
+    #[test]
+    fn listener_requires_enabled_data_mode_and_a_target() {
+        let config = test_config();
+        assert!(listener_should_run(&config, "DATA", true));
+        assert!(!listener_should_run(&config, "CW", true));
+        assert!(!listener_should_run(&config, "DATA", false));
+
+        let mut disabled = config;
+        disabled.wsjtx_enabled = false;
+        assert!(!listener_should_run(&disabled, "DATA", true));
+    }
+
+    #[tokio::test]
+    async fn first_logger_is_target_and_later_logger_does_not_steal_it() {
+        let manager = test_manager();
+        let (_, updates) = broadcast::channel(4);
+        let initial_state = Some(RadioState {
+            frequency_hz: 14_074_000,
+            mode: "CW".to_string(),
+            rit_offset_hz: 0,
+        });
+
+        let first = manager
+            .acquire(
+                1,
+                "logger-a",
+                10,
+                test_config(),
+                initial_state.clone(),
+                updates.resubscribe(),
+            )
+            .await
+            .expect("first logger registers");
+        assert_eq!(first.logger_id.as_deref(), Some("logger-a"));
+        assert_eq!(first.log_id, Some(10));
+
+        let second = manager
+            .acquire(1, "logger-b", 11, test_config(), initial_state, updates)
+            .await
+            .expect("second logger registers");
+        assert_eq!(second, first);
+
+        manager.release(1, "logger-b").await;
+        manager.release(1, "logger-a").await;
+    }
+
+    #[tokio::test]
+    async fn target_switch_is_exclusive_and_target_close_does_not_reassign() {
+        let manager = test_manager();
+        let (_, updates) = broadcast::channel(4);
+        let initial_state = Some(RadioState {
+            frequency_hz: 14_074_000,
+            mode: "CW".to_string(),
+            rit_offset_hz: 0,
+        });
+        manager
+            .acquire(
+                1,
+                "logger-a",
+                10,
+                test_config(),
+                initial_state.clone(),
+                updates.resubscribe(),
+            )
+            .await
+            .expect("first logger registers");
+        manager
+            .acquire(1, "logger-b", 11, test_config(), initial_state, updates)
+            .await
+            .expect("second logger registers");
+
+        let switched = manager
+            .set_target(1, "logger-b", true)
+            .await
+            .expect("target switches");
+        assert_eq!(switched.logger_id.as_deref(), Some("logger-b"));
+        assert_eq!(switched.log_id, Some(11));
+
+        manager.release(1, "logger-b").await;
+        assert_eq!(manager.current_target(1).await, no_target_state(1));
+
+        manager.release(1, "logger-a").await;
+    }
+
+    #[tokio::test]
+    async fn target_can_be_explicitly_cleared() {
+        let manager = test_manager();
+        let (_, updates) = broadcast::channel(4);
+        manager
+            .acquire(
+                1,
+                "logger-a",
+                10,
+                test_config(),
+                Some(RadioState {
+                    frequency_hz: 14_074_000,
+                    mode: "CW".to_string(),
+                    rit_offset_hz: 0,
+                }),
+                updates,
+            )
+            .await
+            .expect("logger registers");
+
+        let cleared = manager
+            .set_target(1, "logger-a", false)
+            .await
+            .expect("target clears");
+        assert_eq!(cleared, no_target_state(1));
+
+        manager.release(1, "logger-a").await;
     }
 }

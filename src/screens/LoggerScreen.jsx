@@ -27,7 +27,7 @@ import { useLoggerContext } from './loggerScreen/useLoggerContext';
 import { useLoggerImage } from './loggerScreen/useLoggerImage';
 import { useOperationalErrorReporter } from './loggerScreen/useOperationalErrorReporter';
 import { useSerialAllocator } from './loggerScreen/useSerialAllocator';
-import { getSessionId } from './loggerScreenHelpers';
+import { createSessionId, getSessionId } from './loggerScreenHelpers';
 
 function LoggerScreen() {
   const { logId, radioId } = useParams();
@@ -35,6 +35,7 @@ function LoggerScreen() {
   const numericLogId = Number(logId);
   const numericRadioId = Number(radioId);
   const [sessionId] = useState(getSessionId);
+  const [loggerId] = useState(createSessionId);
   const [transmitterSelection, setTransmitterSelection] = useState(null);
   const [bandMapEnabled, setBandMapEnabled] = useState(() => {
     return localStorage.getItem(BAND_MAP_ENABLED_STORAGE_KEY) === '1';
@@ -64,7 +65,6 @@ function LoggerScreen() {
   const remoteContactHandlerRef = useRef(null);
   const remoteContactDeletedHandlerRef = useRef(null);
   const refreshContactsHandlerRef = useRef(null);
-  const radioInUseHandlerRef = useRef(null);
 
   const {
     radioState,
@@ -75,8 +75,11 @@ function LoggerScreen() {
     isSocketDebugPanelEnabled,
     socketDebugEntries,
     sendRadioMessage,
+    wsjtxTarget,
+    setWsjtXTarget,
   } = useBackendSocket({
     sessionId,
+    loggerId,
     numericLogId,
     numericRadioId,
     notifyOperationalError,
@@ -85,7 +88,6 @@ function LoggerScreen() {
     onRemoteContactRef: remoteContactHandlerRef,
     onRemoteContactDeletedRef: remoteContactDeletedHandlerRef,
     onRefreshContactsRef: refreshContactsHandlerRef,
-    onRadioInUseRef: radioInUseHandlerRef,
   });
 
   const {
@@ -183,7 +185,6 @@ function LoggerScreen() {
   remoteContactHandlerRef.current = upsertRemoteContact;
   remoteContactDeletedHandlerRef.current = removeRemoteContact;
   refreshContactsHandlerRef.current = refreshContacts;
-  radioInUseHandlerRef.current = () => navigate('/ui/open_log');
 
   useEffect(() => {
     const element = loggerMainColumnRef.current;
@@ -334,6 +335,8 @@ function LoggerScreen() {
               catStatus={catStatus}
               messageLabels={messageLabels}
               messageSentEvent={messageSentEvent}
+              wsjtxTarget={wsjtxTarget}
+              onSetWsjtXTarget={setWsjtXTarget}
               sessionId={sessionId}
               logId={numericLogId}
               bandMapEnabled={bandMapEnabled}

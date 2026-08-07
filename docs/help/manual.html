@@ -567,13 +567,21 @@
       used instead.
     </p>
     <p>
-      The listener runs only while the radio is open for a log and Log73 is in
-      DATA mode. Multiple logger windows may use that radio for the same log,
-      but another log cannot acquire it simultaneously. In WSJT-X DATA mode,
-      manual entry fields and logging controls are cleared and locked. Accept
-      the <strong>Log QSO</strong> dialog in WSJT-X to log the contact.
-      Listener, protocol, ADIF, and database errors appear as logger
-      notifications and in the backend log.
+      Multiple logger windows, including different logs, may share one radio.
+      When WSJT-X is enabled and the radio is in DATA mode,
+      <strong>WSJT-X Target</strong> replaces ESM. Exactly one logger per radio
+      may be selected. Selecting another logger moves the target. The first
+      logger is selected automatically; closing or unchecking it leaves no
+      target.
+    </p>
+    <p>
+      The UDP listener runs only while a target is selected and the radio stays
+      in DATA mode. Logged ADIF contacts are saved to the selected logger's log.
+      Manual entry fields and logging controls are cleared and locked in WSJT-X
+      DATA mode. When WSJT-X is disabled, DATA mode retains ESM and manual
+      keyboard entry. Accept the <strong>Log QSO</strong> dialog in WSJT-X to
+      log the contact. Listener, protocol, ADIF, and database errors appear as
+      logger notifications and in the backend log.
     </p>
     <hr />
     <h2 id="opening-and-using-the-logger">9) Opening and using the logger</h2>
@@ -595,6 +603,7 @@
       <li>Live CAT mode/frequency state in title/status areas</li>
       <li>CW function-key banks for Run and S&amp;P</li>
       <li>ESM optional workflows for Enter-driven operation</li>
+      <li>WSJT-X Target selection in WSJT-X-enabled DATA mode</li>
       <li>Log table supports selection, edit, delete</li>
       <li>
         <code>?</code> button (upper-right) opens help at

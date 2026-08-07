@@ -68,7 +68,7 @@ use tower_http::trace::TraceLayer;
 use tracing::{Span, debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use voice_keyer::VoiceKeyer;
-use wsjtx::WsjtXManager;
+use wsjtx::{WsjtXManager, WsjtXTargetState};
 
 #[derive(Clone)]
 struct AppState {
@@ -651,19 +651,23 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     let session_id = params.get("session_id").cloned().unwrap_or_default();
+    let logger_id = params.get("logger_id").cloned().unwrap_or_default();
     let radio_id = params
         .get("radio_id")
         .and_then(|value| value.parse::<i64>().ok());
     let log_id = params
         .get("log_id")
         .and_then(|value| value.parse::<i64>().ok());
-    ws.on_upgrade(move |socket| handle_socket(socket, app_state, session_id, radio_id, log_id))
+    ws.on_upgrade(move |socket| {
+        handle_socket(socket, app_state, session_id, logger_id, radio_id, log_id)
+    })
 }
 
 async fn handle_socket(
-    mut socket: WebSocket,
+    socket: WebSocket,
     app_state: AppState,
     session_id: String,
+    logger_id: String,
     radio_id: Option<i64>,
     log_id: Option<i64>,
 ) {
@@ -675,17 +679,18 @@ async fn handle_socket(
         warn!(session_id, radio_id, "backend websocket missing log_id");
         return;
     };
+    if logger_id.is_empty() {
+        warn!(
+            session_id,
+            radio_id, log_id, "backend websocket missing logger_id"
+        );
+        return;
+    }
 
-    let radio_handle = match app_state.radio_manager.acquire(radio_id, log_id).await {
+    let radio_handle = match app_state.radio_manager.acquire(radio_id).await {
         Ok(handle) => handle,
         Err(message) => {
             warn!(session_id, radio_id, log_id, %message, "backend websocket could not acquire radio");
-            if message.contains("already in use by log") {
-                let payload = serde_json::to_string(&ServerMessage::RadioInUse { message })
-                    .expect("radio-in-use message should serialize");
-                let _ = socket.send(Message::Text(payload.into())).await;
-                let _ = socket.close().await;
-            }
             return;
         }
     };
@@ -703,10 +708,12 @@ async fn handle_socket(
         }
     };
     let mut log_events = app_state.log_events.subscribe();
-    if let Err(error) = app_state
+    let mut wsjtx_target_updates = app_state.wsjtx_manager.subscribe_targets();
+    let wsjtx_target = match app_state
         .wsjtx_manager
         .acquire(
             radio_id,
+            &logger_id,
             log_id,
             config,
             radio_handle.current_state().await,
@@ -714,10 +721,13 @@ async fn handle_socket(
         )
         .await
     {
-        warn!(session_id, radio_id, log_id, %error, "unable to acquire WSJT-X listener");
-        app_state.radio_manager.release(radio_id).await;
-        return;
-    }
+        Ok(target) => target,
+        Err(error) => {
+            warn!(session_id, logger_id, radio_id, log_id, %error, "unable to register logger for WSJT-X");
+            app_state.radio_manager.release(radio_id).await;
+            return;
+        }
+    };
 
     info!(session_id, radio_id, "backend websocket connected");
     let (mut sender, mut receiver) = socket.split();
@@ -732,7 +742,7 @@ async fn handle_socket(
         .await
         .is_err()
     {
-        app_state.wsjtx_manager.release(radio_id).await;
+        app_state.wsjtx_manager.release(radio_id, &logger_id).await;
         app_state.radio_manager.release(radio_id).await;
         return;
     }
@@ -747,7 +757,21 @@ async fn handle_socket(
             .await
             .is_err()
     {
-        app_state.wsjtx_manager.release(radio_id).await;
+        app_state.wsjtx_manager.release(radio_id, &logger_id).await;
+        app_state.radio_manager.release(radio_id).await;
+        return;
+    }
+
+    if sender
+        .send(Message::Text(
+            serde_json::to_string(&wsjtx_target_message(&wsjtx_target))
+                .expect("WSJT-X target should serialize")
+                .into(),
+        ))
+        .await
+        .is_err()
+    {
+        app_state.wsjtx_manager.release(radio_id, &logger_id).await;
         app_state.radio_manager.release(radio_id).await;
         return;
     }
@@ -763,7 +787,7 @@ async fn handle_socket(
             .await
             .is_err()
         {
-            app_state.wsjtx_manager.release(radio_id).await;
+            app_state.wsjtx_manager.release(radio_id, &logger_id).await;
             app_state.radio_manager.release(radio_id).await;
             return;
         }
@@ -787,6 +811,11 @@ async fn handle_socket(
                 update = radio_updates.recv() => match update {
                     Ok(update) => serde_json::to_string(&ServerMessage::RadioState(update)).expect("radio state should serialize"),
                     Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+                target = wsjtx_target_updates.recv() => match target {
+                    Ok(target) if target.radio_id == radio_id => serde_json::to_string(&wsjtx_target_message(&target)).expect("WSJT-X target should serialize"),
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
                     Err(broadcast::error::RecvError::Closed) => break,
                 },
                 event = log_events.recv() => match event {
@@ -1122,6 +1151,23 @@ async fn handle_socket(
                 }
                 let _ = radio_handle.send_command(RadioCommand::SetWpm(wpm)).await;
             }
+            Ok(ClientMessage::SetWsjtXTarget { enabled }) => {
+                debug!(
+                    session_id,
+                    logger_id,
+                    radio_id,
+                    log_id,
+                    enabled,
+                    "websocket set_wsjtx_target command received"
+                );
+                if let Err(error) = app_state
+                    .wsjtx_manager
+                    .set_target(radio_id, &logger_id, enabled)
+                    .await
+                {
+                    warn!(session_id, logger_id, radio_id, log_id, enabled, %error, "unable to update WSJT-X target");
+                }
+            }
             Err(error) => warn!(session_id, radio_id, %error, "invalid websocket message"),
         }
     }
@@ -1130,9 +1176,17 @@ async fn handle_socket(
         subscription.abort();
     }
     outbound.abort();
-    app_state.wsjtx_manager.release(radio_id).await;
+    app_state.wsjtx_manager.release(radio_id, &logger_id).await;
     app_state.radio_manager.release(radio_id).await;
     info!(session_id, radio_id, "backend websocket disconnected");
+}
+
+fn wsjtx_target_message(state: &WsjtXTargetState) -> ServerMessage {
+    ServerMessage::WsjtXTarget {
+        radio_id: state.radio_id,
+        logger_id: state.logger_id.clone(),
+        log_id: state.log_id,
+    }
 }
 
 fn spawn_bandmap_websocket_subscription(

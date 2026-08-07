@@ -32,7 +32,6 @@ enum ManagedRadioSlot {
 }
 
 struct ManagedRadio {
-    log_id: i64,
     current_status: Arc<RwLock<RadioStatus>>,
     current: Arc<RwLock<Option<RadioState>>>,
     status_updates: broadcast::Sender<RadioStatus>,
@@ -53,7 +52,7 @@ impl RadioManager {
         }
     }
 
-    pub async fn acquire(&self, radio_id: i64, log_id: i64) -> Result<RadioHandle, String> {
+    pub async fn acquire(&self, radio_id: i64) -> Result<RadioHandle, String> {
         loop {
             let wait_for_shutdown = {
                 let mut radios = self.radios.lock().await;
@@ -61,12 +60,6 @@ impl RadioManager {
                 if let Some(slot) = radios.get_mut(&radio_id) {
                     match slot {
                         ManagedRadioSlot::Active(radio) => {
-                            if radio.log_id != log_id {
-                                return Err(format!(
-                                    "radio {radio_id} is already in use by log {}",
-                                    radio.log_id
-                                ));
-                            }
                             radio.refcount += 1;
                             debug!(
                                 radio_id,
@@ -109,12 +102,6 @@ impl RadioManager {
                 if let Some(slot) = radios.get_mut(&radio_id) {
                     match slot {
                         ManagedRadioSlot::Active(radio) => {
-                            if radio.log_id != log_id {
-                                return Err(format!(
-                                    "radio {radio_id} is already in use by log {}",
-                                    radio.log_id
-                                ));
-                            }
                             radio.refcount += 1;
                             debug!(
                                 radio_id,
@@ -169,7 +156,6 @@ impl RadioManager {
                     radios.insert(
                         radio_id,
                         ManagedRadioSlot::Active(ManagedRadio {
-                            log_id,
                             current_status: current_status.clone(),
                             current: current.clone(),
                             status_updates: status_updates.clone(),
@@ -356,7 +342,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_radio_is_exclusive_to_one_log_but_allows_same_log_sessions() {
+    async fn active_radio_is_shared_by_all_logger_sessions() {
         let db = Database::open(":memory:").expect("database opens");
         let radio = db
             .create_radio(test_radio())
@@ -365,21 +351,17 @@ mod tests {
         let manager = RadioManager::new(db, VoiceKeyer::new(), BandCatalog::new(Vec::new()));
 
         manager
-            .acquire(radio.id, 10)
+            .acquire(radio.id)
             .await
-            .expect("first log acquires radio");
+            .expect("first logger acquires radio");
         manager
-            .acquire(radio.id, 10)
+            .acquire(radio.id)
             .await
-            .expect("second session for same log acquires radio");
-        let error = manager
-            .acquire(radio.id, 11)
-            .await
-            .err()
-            .expect("different log must be rejected");
-        assert!(error.contains("already in use by log 10"));
+            .expect("logger for a different log shares radio");
 
         manager.release(radio.id).await;
+        assert!(manager.is_active(radio.id).await);
         manager.release(radio.id).await;
+        assert!(!manager.is_active(radio.id).await);
     }
 }

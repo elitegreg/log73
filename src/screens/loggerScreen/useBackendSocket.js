@@ -28,6 +28,7 @@ const MAX_SOCKET_DEBUG_ENTRIES = 80;
 
 export function useBackendSocket({
   sessionId,
+  loggerId,
   numericLogId,
   numericRadioId,
   notifyOperationalError,
@@ -36,7 +37,6 @@ export function useBackendSocket({
   onRemoteContactRef,
   onRemoteContactDeletedRef,
   onRefreshContactsRef,
-  onRadioInUseRef,
 }) {
   const [radioState, setRadioState] = useState(DEFAULT_RADIO_STATE);
   const [backendSocketStatus, setBackendSocketStatus] =
@@ -44,15 +44,29 @@ export function useBackendSocket({
   const [catStatus, setCatStatus] = useState('offline');
   const [messageSentEvent, setMessageSentEvent] = useState(null);
   const [scoreSummary, setScoreSummary] = useState(EMPTY_SCORE_SUMMARY);
+  const [wsjtxTarget, setWsjtXTargetState] = useState(false);
   const [isSocketDebugPanelEnabled] = useState(readSocketDebugPanelEnabled);
   const [socketDebugEntries, setSocketDebugEntries] = useState([]);
   const backendSocketRef = useRef(null);
+  const wsjtxTargetIntentRef = useRef(false);
   const socketDebugSequenceRef = useRef(0);
 
   const sendRadioMessage = useCallback((message) => {
     const socket = backendSocketRef.current;
     if (socket?.readyState === WebSocket.OPEN)
       socket.send(JSON.stringify(message));
+  }, []);
+
+  const setWsjtXTarget = useCallback((enabled) => {
+    const nextEnabled = Boolean(enabled);
+    wsjtxTargetIntentRef.current = nextEnabled;
+    setWsjtXTargetState(nextEnabled);
+    const socket = backendSocketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(
+        JSON.stringify({ type: 'set_wsjt_x_target', enabled: nextEnabled }),
+      );
+    }
   }, []);
 
   useEffect(() => {
@@ -93,6 +107,7 @@ export function useBackendSocket({
       logSocketDebug(isSocketDebugPanelEnabled, {
         event,
         sessionId,
+        loggerId,
         logId: numericLogId,
         radioId: numericRadioId,
         ...details,
@@ -437,6 +452,7 @@ export function useBackendSocket({
       const clearedPendingPingRequestId = clearSocketHealthState();
       const url = websocketUrl({
         session_id: sessionId,
+        logger_id: loggerId,
         log_id: numericLogId,
         radio_id: numericRadioId,
       });
@@ -531,17 +547,16 @@ export function useBackendSocket({
               message.message,
               { logId: numericLogId, radioId: numericRadioId },
             );
-          } else if (message.type === 'radio_in_use') {
-            shouldReconnect = false;
-            notifyOperationalError(
-              'radioInUse',
-              'The selected radio is already in use by another log.',
-              message.message,
-              { logId: numericLogId, radioId: numericRadioId },
-            );
-            socket.close();
-            onRadioInUseRef.current?.();
-            return;
+          } else if (message.type === 'wsjt_x_target') {
+            const isThisLogger = message.logger_id === loggerId;
+            setWsjtXTargetState(isThisLogger);
+            if (message.logger_id) {
+              wsjtxTargetIntentRef.current = isThisLogger;
+            } else if (wsjtxTargetIntentRef.current) {
+              socket.send(
+                JSON.stringify({ type: 'set_wsjt_x_target', enabled: true }),
+              );
+            }
           }
           onSocketMessageRef.current?.(message);
         } catch (error) {
@@ -612,11 +627,11 @@ export function useBackendSocket({
     };
   }, [
     isSocketDebugPanelEnabled,
+    loggerId,
     notifyOperationalError,
     numericLogId,
     numericRadioId,
     onRefreshContactsRef,
-    onRadioInUseRef,
     onRemoteContactDeletedRef,
     onRemoteContactRef,
     onSocketMessageRef,
@@ -637,5 +652,7 @@ export function useBackendSocket({
     isSocketDebugPanelEnabled,
     socketDebugEntries,
     sendRadioMessage,
+    wsjtxTarget,
+    setWsjtXTarget,
   };
 }

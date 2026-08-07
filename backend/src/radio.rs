@@ -39,8 +39,10 @@ pub enum ServerMessage {
         log_id: i64,
         message: String,
     },
-    RadioInUse {
-        message: String,
+    WsjtXTarget {
+        radio_id: i64,
+        logger_id: Option<String>,
+        log_id: Option<i64>,
     },
     #[serde(rename = "dxcluster_spot")]
     DxClusterSpot {
@@ -124,6 +126,9 @@ pub enum ClientMessage {
     StopKeying,
     SetWpm {
         wpm: u8,
+    },
+    SetWsjtXTarget {
+        enabled: bool,
     },
     #[serde(rename = "set_dxcluster_enabled")]
     SetDxClusterEnabled {
@@ -424,7 +429,7 @@ mod tests {
     }
 
     #[test]
-    fn serializes_wsjtx_and_radio_ownership_errors() {
+    fn serializes_wsjtx_errors_and_target_state() {
         let wsjtx = serde_json::to_value(ServerMessage::WsjtXError {
             radio_id: 2,
             log_id: 7,
@@ -441,15 +446,19 @@ mod tests {
             })
         );
 
-        let in_use = serde_json::to_value(ServerMessage::RadioInUse {
-            message: "radio in use".to_string(),
+        let target = serde_json::to_value(ServerMessage::WsjtXTarget {
+            radio_id: 2,
+            logger_id: Some("logger-1".to_string()),
+            log_id: Some(7),
         })
-        .expect("radio-in-use error should serialize");
+        .expect("WSJT-X target should serialize");
         assert_eq!(
-            in_use,
+            target,
             serde_json::json!({
-                "type": "radio_in_use",
-                "message": "radio in use"
+                "type": "wsjt_x_target",
+                "radio_id": 2,
+                "logger_id": "logger-1",
+                "log_id": 7
             })
         );
     }
@@ -465,6 +474,20 @@ mod tests {
         match message {
             ClientMessage::Ping { request_id } => assert_eq!(request_id, "ping-123"),
             other => panic!("unexpected client message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn deserializes_wsjtx_target_client_message() {
+        let message: ClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "set_wsjt_x_target",
+            "enabled": true
+        }))
+        .expect("WSJT-X target message should deserialize");
+
+        match message {
+            ClientMessage::SetWsjtXTarget { enabled } => assert!(enabled),
+            other => panic!("unexpected message: {other:?}"),
         }
     }
 
