@@ -38,7 +38,9 @@ use axum::{
 };
 use bandmap::{BandMapEvent, BandMapManager, CqSpotInput, InUseSpotInput, LocalSpotInput};
 use clap::Parser;
-use contest_rules::{ContestRules, ContestRulesStore, ExchangeField, SerialScope};
+use contest_rules::{
+    ContestRules, ContestRulesStore, ExchangeDirection, ExchangeField, FieldInputKind, SerialScope,
+};
 use db::{
     AuthConfig, Contact, Database, NewLog, RadioPayload, UpdateLog, contact_adif_value, contact_id,
     contact_log_id, contact_meta_value, set_contact_meta,
@@ -2290,9 +2292,9 @@ struct SerialState {
 
 fn sent_serial_field<'a>(rules: &'a ContestRules, field_adif: &str) -> Option<&'a ExchangeField> {
     rules.exchange.iter().find(|field| {
-        field.is_sent
+        field.direction == ExchangeDirection::Sent
             && field.adif.eq_ignore_ascii_case(field_adif)
-            && exchange_field_type_kind(&field.field_type) == "SERIAL"
+            && field.input.kind == FieldInputKind::Serial
     })
 }
 
@@ -2310,25 +2312,28 @@ fn normalized_param_value(value: Option<&serde_json::Value>) -> Option<String> {
 fn category_transmitter(rules: &ContestRules, log: &db::Log) -> Option<String> {
     let cabrillo = rules.cabrillo.as_ref()?;
     if let Some(field) = cabrillo
-        .fixed_fields
+        .fixed_headers
         .iter()
         .find(|field| field.name.eq_ignore_ascii_case("CATEGORY-TRANSMITTER"))
     {
         return normalized_param_value(Some(&serde_json::Value::String(field.value.clone())));
     }
 
-    let field = cabrillo
-        .log_fields
-        .iter()
-        .find(|field| field.name.eq_ignore_ascii_case("CATEGORY-TRANSMITTER"))?;
+    let field = rules.setup_fields.iter().find(|field| {
+        field
+            .cabrillo_header
+            .as_deref()
+            .is_some_and(|header| header.eq_ignore_ascii_case("CATEGORY-TRANSMITTER"))
+    })?;
     let configured = log
         .contest_params
         .as_object()
-        .and_then(|params| params.get(&field.name));
+        .and_then(|params| params.get(&field.key));
     normalized_param_value(configured)
         .or_else(|| normalized_param_value(field.default.as_ref()))
         .or_else(|| {
-            (field.valid_values.len() == 1).then(|| field.valid_values[0].trim().to_uppercase())
+            (field.validation.values.len() == 1)
+                .then(|| field.validation.values[0].trim().to_uppercase())
         })
 }
 
@@ -2377,7 +2382,7 @@ fn serial_state_from_contacts(
     let reservation_required = serial_reservation_required(rules, log, field);
     if scope == SerialScope::Band {
         let mut next_by_band = BTreeMap::new();
-        for band in &rules.allowed_bands {
+        for band in &rules.bands {
             let maximum = contacts
                 .iter()
                 .filter(|contact| {
@@ -2433,7 +2438,7 @@ async fn serial_state(
     let Some(field) = sent_serial_field(rules, query.field_adif.trim()) else {
         return Json(serde_json::json!({
             "ok": false,
-            "error": format!("{} is not a sent serial field for contest {}", query.field_adif, rules.contest),
+            "error": format!("{} is not a sent serial field for contest {}", query.field_adif, rules.id),
         }));
     };
     let contacts = match app_state.db.contacts(log_id).await {
@@ -2474,13 +2479,13 @@ async fn allocate_serial(
     let Some(serial_field) = sent_serial_field(rules, field_adif) else {
         return Json(serde_json::json!({
             "ok": false,
-            "error": format!("{} is not a sent serial field for contest {}", field_adif, rules.contest),
+            "error": format!("{} is not a sent serial field for contest {}", field_adif, rules.id),
         }));
     };
     if !serial_reservation_required(rules, &log, serial_field) {
         return Json(serde_json::json!({
             "ok": false,
-            "error": format!("{} does not require serial reservation for contest {}", field_adif, rules.contest),
+            "error": format!("{} does not require serial reservation for contest {}", field_adif, rules.id),
         }));
     }
 
@@ -2492,15 +2497,6 @@ async fn allocate_serial(
         Ok(allocation) => Json(serde_json::json!({ "ok": true, "allocation": allocation })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
-}
-
-fn exchange_field_type_kind(field_type: &str) -> String {
-    field_type
-        .split(':')
-        .next()
-        .unwrap_or("STRING")
-        .trim()
-        .to_uppercase()
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -2849,7 +2845,7 @@ mod tests {
         let log = db::Log {
             id: 1,
             name: "Sweepstakes".to_string(),
-            contest_id: rules.contest.clone(),
+            contest_id: rules.id.clone(),
             station_callsign: "N0CALL".to_string(),
             contest_params: json!({
                 "Precedence": "A",
@@ -2883,7 +2879,7 @@ mod tests {
         let log = db::Log {
             id: 1,
             name: "Per-band serials".to_string(),
-            contest_id: rules.contest.clone(),
+            contest_id: rules.id.clone(),
             station_callsign: "N0CALL".to_string(),
             contest_params: json!({}),
         };
@@ -2917,7 +2913,7 @@ mod tests {
         let multi_log = db::Log {
             id: 1,
             name: "Multi-two".to_string(),
-            contest_id: multi_rules.contest.clone(),
+            contest_id: multi_rules.id.clone(),
             station_callsign: "N0CALL".to_string(),
             contest_params: json!({
                 "CATEGORY-OPERATOR": "MULTI-OP",
@@ -2955,7 +2951,7 @@ mod tests {
         let log_for = |transmitter: &str, station: &str| db::Log {
             id: 1,
             name: "CQ WPX".to_string(),
-            contest_id: rules.contest.clone(),
+            contest_id: rules.id.clone(),
             station_callsign: "N0CALL".to_string(),
             contest_params: json!({
                 "CATEGORY-OPERATOR": "MULTI-OP",

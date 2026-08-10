@@ -16,8 +16,10 @@ function logLabel(log) {
 }
 
 function fixedConfigValue(field, log) {
-  const sourceParam = field?.source_param;
-  const value = sourceParam ? log?.contest_params?.[sourceParam] : field?.default;
+  const sourceParam = field?.source;
+  const value = sourceParam
+    ? log?.contest_params?.[sourceParam]
+    : field?.default;
   if (value === undefined || value === null) return '';
   return sanitizeConfiguredValue(field, String(value));
 }
@@ -276,12 +278,13 @@ function ImportAdifScreen() {
       </div>
       <div className="import-mapping-list">
         {exchangeFields.map((field) => {
-          const mapping = mappings[field.adif] ?? defaultMapping(field, log, []);
+          const mapping =
+            mappings[field.adif] ?? defaultMapping(field, log, []);
           const selectValue = mappingValue(mapping);
           return (
             <div className="import-mapping-row" key={field.adif}>
               <label>
-                {field.name} ({field.adif})
+                {field.label} ({field.adif})
                 <select
                   value={selectValue}
                   onChange={(event) => updateMapping(field, event.target.value)}

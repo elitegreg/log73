@@ -1,0 +1,33 @@
+schema: 2
+profiles:
+  hf-bands:
+    bands:
+      - 160
+      - 80
+      - 40
+      - 20
+      - 15
+      - 10
+  hf-vhf-bands:
+    bands:
+      - 160
+      - 80
+      - 40
+      - 20
+      - 15
+      - 10
+      - 6
+      - 2
+  cw-mode:
+    modes:
+      - CW
+  cw-weekly:
+    profiles:
+      - hf-bands
+      - cw-mode
+    scoring:
+      qso_points:
+        points: 1
+      dupe_key:
+        - CALL
+        - BAND

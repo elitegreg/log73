@@ -153,7 +153,7 @@ function MainWindow({
   });
   const setCwWpmRef = useRef(onSetCwWpm);
   const previousRadioFrequencyHzRef = useRef(null);
-  const allowedBands = settings?.allowed_bands ?? [];
+  const allowedBands = settings?.bands ?? [];
   const bandCatalog = settings?.band_catalog ?? [];
   const currentBand = bandForFrequency(radioFrequencyHz, bandCatalog);
   const currentBandValue = currentBand ? currentBand.name : 'unknown';
@@ -238,7 +238,7 @@ function MainWindow({
 
     for (const field of settings?.exchange ?? []) {
       fields[field.adif] = String(
-        values?.[field.name] ??
+        values?.[field.id] ??
           fieldDefault(field, radioMode, log?.contest_params ?? {}),
       )
         .trim()
@@ -424,11 +424,11 @@ function MainWindow({
   }
 
   function fieldEditable(field) {
-    const typeKind = String(field?.type ?? '')
-      .split(':')[0]
-      .trim()
-      .toUpperCase();
-    return field?.fixed !== true && !(field?.is_sent && typeKind === 'SERIAL');
+    const typeKind = String(field?.input?.kind ?? '').toUpperCase();
+    return (
+      field?.fixed !== true &&
+      !(field?.direction === 'sent' && typeKind === 'SERIAL')
+    );
   }
 
   function exchangeValidation(field, values = exchangeValues) {
@@ -515,7 +515,7 @@ function MainWindow({
 
       const invalidField = firstInvalidExchangeField(values);
       if (invalidField) {
-        exchangeInputRefs.current[invalidField.name]?.focus();
+        exchangeInputRefs.current[invalidField.id]?.focus();
       }
       return false;
     }
@@ -541,7 +541,7 @@ function MainWindow({
         QSO_DATE_TIME_ON: Math.floor(timeOn.getTime() / EPOCH_MS_PER_SECOND),
         STATION_CALLSIGN: stationCallsign,
         OPERATOR: operatorCallsign,
-        CONTEST_ID: settings.contest,
+        CONTEST_ID: settings.id,
         CALL: normalizedCallSign,
         BAND: currentBand?.name ?? '',
         FREQ: radioFrequencyHz,
@@ -575,9 +575,9 @@ function MainWindow({
     return [
       { name: 'CALL', value: callSign, ref: callSignRef, editable: true },
       ...(settings?.exchange ?? []).map((field) => ({
-        name: field.name,
+        name: field.id,
         value: exchangeValue(field, values),
-        ref: { current: exchangeInputRefs.current[field.name] },
+        ref: { current: exchangeInputRefs.current[field.id] },
         editable: fieldEditable(field),
       })),
     ];
@@ -665,7 +665,7 @@ function MainWindow({
       return callsignValidation().ok;
     }
     const field = (settings?.exchange ?? []).find(
-      (item) => item.name === fieldName,
+      (item) => item.id === fieldName,
     );
     if (!field || !fieldEditable(field)) return false;
     const value = String(exchangeValue(field, values)).trim();
@@ -684,7 +684,7 @@ function MainWindow({
 
       const value = String(exchangeValue(field, values)).trim();
       if (value === '' || !exchangeValidation(field, values).ok) {
-        return field.name;
+        return field.id;
       }
     }
 
@@ -839,7 +839,7 @@ function MainWindow({
 
   function handleExchangeKeyDown(event, index) {
     const currentField = settings.exchange[index];
-    const currentFieldName = currentField?.name;
+    const currentFieldName = currentField?.id;
 
     if (
       event.key === 'Enter' &&
@@ -948,7 +948,7 @@ function MainWindow({
         <span>
           Log73 | Log: {log?.name ?? 'Loading...'} | Radio:{' '}
           {radio?.name ?? 'Loading...'} | Contest:{' '}
-          {settings?.contest ?? 'Loading...'} | Mode: {radioMode}, Freq:{' '}
+          {settings?.id ?? 'Loading...'} | Mode: {radioMode}, Freq:{' '}
           {formatFrequency(radioFrequencyHz)}
         </span>
         <div className="logger-title-right">

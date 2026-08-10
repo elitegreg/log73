@@ -1,6 +1,6 @@
 import {
   fieldDefault,
-  parseFieldType,
+  parseFieldInput,
   sanitizeExchangeValue,
 } from '../domain/contactFields.js';
 import { callsignPrefix } from '../domain/dxcc.js';
@@ -64,7 +64,7 @@ export function exchangeDefaults(
 ) {
   const defaults = Object.fromEntries(
     (settings?.exchange ?? []).map((field) => [
-      field.name,
+      field.id,
       fieldDefault(field, radioMode, contestParams),
     ]),
   );
@@ -80,13 +80,13 @@ export function exchangeDefaults(
 
   const serialField = (settings?.exchange ?? []).find(
     (field) =>
-      field.is_sent &&
+      field.direction === 'sent' &&
       String(field.adif).toUpperCase() ===
         String(serialAllocation.fieldAdif).toUpperCase() &&
-      parseFieldType(field.type, radioMode).kind === 'SERIAL',
+      parseFieldInput(field.input, radioMode).kind === 'SERIAL',
   );
   if (serialField) {
-    defaults[serialField.name] = sanitizeExchangeValue(
+    defaults[serialField.id] = sanitizeExchangeValue(
       serialField,
       serialAllocation.current,
       radioMode,
@@ -108,7 +108,7 @@ function contactAutofillCallsign(contact) {
 
 function contactExchangeRawValue(contact, field) {
   const adif = contact?.adif ?? {};
-  for (const key of [field?.adif, field?.name].filter(Boolean)) {
+  for (const key of [field?.adif, field?.label].filter(Boolean)) {
     if (Object.prototype.hasOwnProperty.call(adif, key)) {
       return adif[key];
     }
@@ -124,7 +124,7 @@ function shouldReplaceWithAutofillValue(field, currentValue, defaultValue) {
 }
 
 function isSerialExchangeField(field, radioMode) {
-  return parseFieldType(field?.type, radioMode).kind === 'SERIAL';
+  return parseFieldInput(field?.input, radioMode).kind === 'SERIAL';
 }
 
 export function previousContactExchangeAutofill({
@@ -165,12 +165,12 @@ export function previousContactExchangeAutofill({
     const previousValue = sanitizeExchangeValue(field, rawValue, radioMode);
     if (String(previousValue).trim() === '') continue;
 
-    const currentValue = nextValues[field.name] ?? '';
+    const currentValue = nextValues[field.id] ?? '';
     if (
       !shouldReplaceWithAutofillValue(
         field,
         currentValue,
-        defaults[field.name] ?? '',
+        defaults[field.id] ?? '',
       )
     ) {
       continue;
@@ -178,8 +178,8 @@ export function previousContactExchangeAutofill({
 
     if (String(currentValue ?? '') === previousValue) continue;
 
-    nextValues[field.name] = previousValue;
-    copiedFields.push(field.name);
+    nextValues[field.id] = previousValue;
+    copiedFields.push(field.id);
   }
 
   return {
@@ -198,9 +198,9 @@ export function shouldAdvanceFromCallsignAutofill({
 } = {}) {
   return Boolean(
     esmEnabled &&
-      operatingMode !== 'Run' &&
-      autofillResult?.matchedContact &&
-      hasEditableExchangeField,
+    operatingMode !== 'Run' &&
+    autofillResult?.matchedContact &&
+    hasEditableExchangeField,
   );
 }
 
@@ -232,11 +232,15 @@ export function loggerFrequencyChangeAction({
   thresholdHz,
   pendingBandMapTuneFrequencyHz = null,
 } = {}) {
-  if (!Number.isFinite(previousFrequencyHz) || !Number.isFinite(nextFrequencyHz)) {
+  if (
+    !Number.isFinite(previousFrequencyHz) ||
+    !Number.isFinite(nextFrequencyHz)
+  ) {
     return 'none';
   }
   if (Number.isFinite(pendingBandMapTuneFrequencyHz)) {
-    return Math.abs(nextFrequencyHz - pendingBandMapTuneFrequencyHz) < thresholdHz
+    return Math.abs(nextFrequencyHz - pendingBandMapTuneFrequencyHz) <
+      thresholdHz
       ? 'clear-pending-bandmap-tune'
       : 'none';
   }
@@ -272,7 +276,9 @@ export function bandNamesEqual(left, right) {
 }
 
 function normalizedBandName(value) {
-  return String(value ?? '').trim().toUpperCase();
+  return String(value ?? '')
+    .trim()
+    .toUpperCase();
 }
 
 export function createContactId(date, callSign) {

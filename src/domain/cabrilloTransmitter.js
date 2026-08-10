@@ -8,20 +8,20 @@ function normalizedValue(value) {
 }
 
 function logField(settings, name) {
-  return (settings?.cabrillo?.log_fields ?? []).find(
-    (field) => normalizedValue(field?.name) === name,
+  return (settings?.setup_fields ?? []).find(
+    (field) => normalizedValue(field?.cabrillo_header) === name,
   );
 }
 
 function categoryValue(settings, log, name) {
-  const fixedField = (settings?.cabrillo?.fixed_fields ?? []).find(
+  const fixedField = (settings?.cabrillo?.fixed_headers ?? []).find(
     (field) => normalizedValue(field?.name) === name,
   );
   if (fixedField) return normalizedValue(fixedField.value);
 
   const field = logField(settings, name);
   return normalizedValue(
-    log?.contest_params?.[field?.name ?? name] ?? field?.default,
+    log?.contest_params?.[field?.key ?? name] ?? field?.default,
   );
 }
 

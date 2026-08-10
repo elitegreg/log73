@@ -79,8 +79,8 @@ test('adifFieldOptions sorts fields and labels examples', () => {
 
 test('fixedValueMappingErrors rejects blank fixed set values', () => {
   const fields = [
-    { name: 'Class', adif: 'SRX_STRING' },
-    { name: 'Section', adif: 'ARRL_SECT' },
+    { label: 'Class', adif: 'SRX_STRING' },
+    { label: 'Section', adif: 'ARRL_SECT' },
   ];
   const mappings = {
     SRX_STRING: { kind: 'fixed_value', value: '   ' },

@@ -41,12 +41,16 @@ export function contactAdif(contact) {
 
 export function metaValue(contact, key) {
   const meta = contactMeta(contact);
-  return Object.prototype.hasOwnProperty.call(meta, key) ? meta[key] : undefined;
+  return Object.prototype.hasOwnProperty.call(meta, key)
+    ? meta[key]
+    : undefined;
 }
 
 export function adifValue(contact, key) {
   const adif = contactAdif(contact);
-  return Object.prototype.hasOwnProperty.call(adif, key) ? adif[key] : undefined;
+  return Object.prototype.hasOwnProperty.call(adif, key)
+    ? adif[key]
+    : undefined;
 }
 
 export function contactSortValue(contact) {
@@ -61,7 +65,9 @@ export function sortContacts(contacts) {
 }
 
 function contactCallsign(contact) {
-  return String(adifValue(contact, 'CALL') ?? '').trim().toUpperCase();
+  return String(adifValue(contact, 'CALL') ?? '')
+    .trim()
+    .toUpperCase();
 }
 
 function compareText(left, right) {
@@ -179,16 +185,13 @@ export function saveLocalContacts(logId, contacts) {
 }
 
 export function serialFieldTypeKind(field) {
-  return String(field?.type ?? 'String')
-    .split(':')[0]
-    .trim()
-    .toUpperCase();
+  return String(field?.input?.kind ?? 'string').toUpperCase();
 }
 
 export function sentSerialField(settings) {
   return (settings?.exchange ?? []).find(
     (field) =>
-      field?.is_sent === true && serialFieldTypeKind(field) === 'SERIAL',
+      field?.direction === 'sent' && serialFieldTypeKind(field) === 'SERIAL',
   );
 }
 

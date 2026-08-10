@@ -2,21 +2,21 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import ConfiguredFields from '../components/ConfiguredFields';
 import { sanitizeConfiguredValue } from '../domain/contactFields';
-import { validateCallsign, validateConfiguredField } from '../domain/validation';
+import {
+  validateCallsign,
+  validateConfiguredField,
+} from '../domain/validation';
 import { apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
 
 function createFields(contest) {
-  return [
-    ...(contest?.log_params ?? []),
-    ...(contest?.cabrillo?.log_fields ?? []),
-  ];
+  return contest?.setup_fields ?? [];
 }
 
 function defaultParamValues(contest) {
   return Object.fromEntries(
-    createFields(contest).map((param) => [param.name, param.default ?? '']),
+    createFields(contest).map((param) => [param.key, param.default ?? '']),
   );
 }
 
@@ -30,8 +30,8 @@ function normalizedParamValue(field, value) {
 function normalizedParamObject(fields, values) {
   return Object.fromEntries(
     fields.map((field) => [
-      field.name,
-      normalizedParamValue(field, values[field.name]),
+      field.key,
+      normalizedParamValue(field, values[field.key]),
     ]),
   );
 }
@@ -73,9 +73,9 @@ function CreateLogScreen() {
         setContestSummaries(rules);
         if (!isEditing && rules.length > 0) {
           setContestId((currentContestId) =>
-            rules.some((rule) => rule.contest === currentContestId)
+            rules.some((rule) => rule.id === currentContestId)
               ? currentContestId
-              : rules[0].contest,
+              : rules[0].id,
           );
         }
       })
@@ -133,7 +133,7 @@ function CreateLogScreen() {
   function updateContestParam(param, value) {
     setContestParams((current) => ({
       ...current,
-      [param.name]: sanitizeConfiguredValue(param, value),
+      [param.key]: sanitizeConfiguredValue(param, value),
     }));
   }
 
@@ -150,17 +150,17 @@ function CreateLogScreen() {
     const invalidField = currentFields.find((field) => {
       const validation = validateConfiguredField(
         field,
-        normalizedParams[field.name] ?? '',
+        normalizedParams[field.key] ?? '',
       );
       return !validation.ok;
     });
     if (invalidField) {
       const validation = validateConfiguredField(
         invalidField,
-        normalizedParams[invalidField.name] ?? '',
+        normalizedParams[invalidField.key] ?? '',
       );
       notifyError(validation.error, {
-        dedupeKey: `CreateLogScreen.invalid:${invalidField.name}`,
+        dedupeKey: `CreateLogScreen.invalid:${invalidField.key}`,
       });
       return;
     }
@@ -229,8 +229,8 @@ function CreateLogScreen() {
           disabled={isEditing}
         >
           {contestSummaries.map((contest) => (
-            <option key={contest.contest} value={contest.contest}>
-              {contest.display_name || contest.contest}
+            <option key={contest.id} value={contest.id}>
+              {contest.name || contest.id}
             </option>
           ))}
         </select>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { parseFieldType } from '../domain/contactFields';
+import { parseFieldInput } from '../domain/contactFields';
 
 function ConfiguredFields({
   fields,
@@ -9,14 +9,14 @@ function ConfiguredFields({
   disabled = false,
 }) {
   return fields.map((field) => {
-    const { kind, maxLength } = parseFieldType(field.type, radioMode);
+    const { kind, maxLength } = parseFieldInput(field.input, radioMode);
     const widget = String(field.widget ?? '').toLowerCase();
-    const validValues = field.valid_values ?? [];
-    const value = values[field.name] ?? '';
+    const validValues = field.validation?.values ?? [];
+    const value = values[field.key] ?? '';
     const commonProps = {
       value,
       onChange: (event) => onChange(field, event.target.value),
-      required: field.required !== false,
+      required: field.validation?.required !== false,
       disabled,
     };
 
@@ -43,7 +43,7 @@ function ConfiguredFields({
       input = (
         <input
           {...commonProps}
-          pattern={field.regex ?? undefined}
+          pattern={field.validation?.pattern ?? undefined}
           inputMode={
             kind === 'NUMERIC' || kind === 'SERIAL' ? 'numeric' : 'text'
           }
@@ -55,8 +55,8 @@ function ConfiguredFields({
     }
 
     return (
-      <label key={field.name}>
-        {field.label ?? field.name}
+      <label key={field.id}>
+        {field.label ?? field.key}
         {input}
         {field.help_text ? (
           <span className="field-help">{field.help_text}</span>

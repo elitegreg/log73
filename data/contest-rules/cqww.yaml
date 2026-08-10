@@ -1,184 +1,101 @@
+schema: 2
 contests:
-  - id: 'CQ-WW-CW'
-    display_name: 'CQ World Wide DX Contest (CW)'
-    allowed_bands: [160, 80, 40, 20, 15, 10]
-    allowed_modes: ['CW']
+  CQ-WW-CW:
+    name: CQ World Wide DX Contest (CW)
+    value_sets: {}
+    setup_fields:
+      - id: param-cq-zone
+        key: CQ_ZONE
+        label: CQ Zone
+        type: String:2
+        required: true
+        regex: ^(?:[1-9]|[1-3][0-9]|40)$
+        help_text: CQ zone number for the station location (1-40).
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP]
+      - id: header-category-assisted
+        preset: category-assisted
+        default: NON-ASSISTED
+        valid_values: [ASSISTED, NON-ASSISTED]
+      - id: header-category-band
+        preset: category-band
+        default: ALL
+        valid_values: [ALL, 160M, 80M, 40M, 20M, 15M, 10M]
+      - id: header-category-power
+        preset: category-power
+        default: LOW
+        valid_values: [HIGH, LOW, QRP]
+      - id: header-category-station
+        preset: category-station
+        default: FIXED
+        valid_values: [FIXED, DISTRIBUTED, MOBILE]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE, TWO, UNLIMITED]
+        multi_single_has_mult_transmitter: true
+      - id: header-category-overlay
+        preset: category-overlay
+        type: String:16
+        required: false
+        valid_values: [CLASSIC, ROOKIE, YOUTH]
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: zone-sent
+        label: Zone(s)
+        type: String:2
+        adif: MY_CQ_ZONE
+        direction: sent
+        fixed: true
+        regex: ^(?:[1-9]|[1-3][0-9]|40)$
+        source: CQ_ZONE
+      - id: rst-received
+        preset: rst-received
+      - id: zone-received
+        label: Zone
+        type: String:2
+        adif: CQZ
+        direction: received
+        regex: ^(?:[1-9]|[1-3][0-9]|40)$
     scoring:
       qso_points:
-        category_band_param: 'CATEGORY-BAND'
-        geography:
-          country_field: 'APP_LOG73_DXCC_PFX'
-          station_country_field: 'APP_LOG73_MY_DXCC_PFX'
-          continent_field: 'CONT'
-          station_continent_field: 'MY_CONT'
-          same_country: 0
-          different_country_north_america: 2
-          different_country_same_continent: 1
-          different_continent: 3
-          unresolved: 0
-      dupe_key: ['CALL', 'BAND']
+        category_band_param: CATEGORY-BAND
+        geography: {country_field: APP_LOG73_DXCC_PFX, station_country_field: APP_LOG73_MY_DXCC_PFX, continent_field: CONT, station_continent_field: MY_CONT, same_country: 0, different_country_north_america: 2, different_country_same_continent: 1, different_continent: 3, unresolved: 0}
+      dupe_key:
+        - CALL
+        - BAND
       multipliers:
-        - name: 'Zone'
-          field: 'CQZ'
-          key: ['CQZ', 'BAND']
-        - name: 'Country'
-          field: 'APP_LOG73_DXCC_PFX'
-          key: ['APP_LOG73_DXCC_PFX', 'BAND']
-          exclude_call_suffixes: ['/MM']
-    log_params:
-      - name: 'CQ_ZONE'
-        label: 'CQ Zone'
-        type: 'String:2'
-        required: true
-        regex: '^(?:[1-9]|[1-3][0-9]|40)$'
-        help_text: 'CQ zone number for the station location (1-40).'
-    exchange:
-      - name: 'RST(s)'
-        type: 'RST'
-        adif: 'RST_SENT'
-        default: 599
-        is_sent: true
-      - name: 'Zone(s)'
-        type: 'String:2'
-        adif: 'MY_CQ_ZONE'
-        fixed: true
-        source_param: 'CQ_ZONE'
-        regex: '^(?:[1-9]|[1-3][0-9]|40)$'
-        is_sent: true
-      - name: 'RST(r)'
-        type: 'RST'
-        adif: 'RST_RCVD'
-        default: 599
-        is_sent: false
-      - name: 'Zone'
-        type: 'String:2'
-        adif: 'CQZ'
-        regex: '^(?:[1-9]|[1-3][0-9]|40)$'
-        is_sent: false
-    qso_columns: ['RST(r)', 'Zone', 'Mult', 'Pts', 'Op']
-    qso_column_fields:
-      Freq: 'FREQ'
-      Mode: 'MODE'
-      Call: 'CALL'
-      Op: 'OPERATOR'
-      'RST(s)': 'RST_SENT'
-      'Zone(s)': 'MY_CQ_ZONE'
-      'RST(r)': 'RST_RCVD'
-      Zone: 'CQZ'
+        - {id: mult-zone, name: Zone, field: CQZ, key: [CQZ, BAND]}
+        - {id: mult-country, name: Country, field: APP_LOG73_DXCC_PFX, key: [APP_LOG73_DXCC_PFX, BAND], exclude_call_suffixes: [/MM]}
     cabrillo:
-      fixed_fields:
-        - name: 'CATEGORY-MODE'
-          value: 'CW'
-      log_fields:
-        - name: 'CATEGORY-OPERATOR'
-          label: 'Category Operator'
-          type: 'String:16'
-          widget: 'select'
-          default: 'SINGLE-OP'
-          valid_values: ['SINGLE-OP', 'MULTI-OP']
-        - name: 'CATEGORY-ASSISTED'
-          label: 'Category Assisted'
-          type: 'String:16'
-          widget: 'select'
-          default: 'NON-ASSISTED'
-          valid_values: ['ASSISTED', 'NON-ASSISTED']
-        - name: 'CATEGORY-BAND'
-          label: 'Category Band'
-          type: 'String:8'
-          widget: 'select'
-          default: 'ALL'
-          valid_values: ['ALL', '160M', '80M', '40M', '20M', '15M', '10M']
-        - name: 'CATEGORY-POWER'
-          label: 'Category Power'
-          type: 'String:16'
-          widget: 'select'
-          default: 'LOW'
-          valid_values: ['HIGH', 'LOW', 'QRP']
-        - name: 'CATEGORY-STATION'
-          label: 'Category Station'
-          type: 'String:16'
-          widget: 'select'
-          default: 'FIXED'
-          valid_values: ['FIXED', 'DISTRIBUTED', 'MOBILE']
-        - name: 'CATEGORY-TRANSMITTER'
-          label: 'Category Transmitter'
-          type: 'String:16'
-          widget: 'select'
-          default: 'ONE'
-          valid_values: ['ONE', 'TWO', 'UNLIMITED']
-          multi_single_has_mult_transmitter: true
-        - name: 'CATEGORY-OVERLAY'
-          label: 'Category Overlay'
-          type: 'String:16'
-          widget: 'select'
-          required: false
-          valid_values: ['CLASSIC', 'ROOKIE', 'YOUTH']
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}
       export_fields:
-        - name: 'LOCATION'
-          label: 'Location'
-          type: 'String:32'
-          help_text: 'State, province, ARRL section, or DX.'
-        - name: 'CLUB'
-          label: 'Club'
-          type: 'String:75'
-          required: false
-          preserve_case: true
-        - name: 'EMAIL'
-          label: 'Email'
-          type: 'String:75'
-          required: false
-          regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
-          preserve_case: true
-        - name: 'GRID-LOCATOR'
-          label: 'Grid Locator'
-          type: 'String:6'
-          required: false
-        - name: 'NAME'
-          label: 'Name'
-          type: 'String:75'
-          preserve_case: true
-        - name: 'ADDRESS'
-          label: 'Address'
-          type: 'String:45'
-          widget: 'textarea'
-          max_lines: 6
-          required: false
-          preserve_case: true
-        - name: 'ADDRESS-CITY'
-          label: 'Address City'
-          type: 'String:45'
-          required: false
-          preserve_case: true
-        - name: 'ADDRESS-STATE-PROVINCE'
-          label: 'Address State/Province'
-          type: 'String:45'
-          required: false
-          preserve_case: true
-        - name: 'ADDRESS-POSTALCODE'
-          label: 'Address Postal Code'
-          type: 'String:16'
-          required: false
-          preserve_case: true
-        - name: 'ADDRESS-COUNTRY'
-          label: 'Address Country'
-          type: 'String:45'
-          required: false
-          preserve_case: true
-        - name: 'SOAPBOX'
-          label: 'Soapbox'
-          type: 'String:75'
-          widget: 'textarea'
-          required: false
-          preserve_case: true
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, help_text: 'State, province, ARRL section, or DX.'}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-grid-locator, key: GRID-LOCATOR, label: Grid Locator, type: String:6, required: false}
+        - {id: export-name, key: NAME, label: Name, type: String:75, preserve_case: true}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-address-city, key: ADDRESS-CITY, label: Address City, type: String:45, required: false, preserve_case: true}
+        - {id: export-address-state-province, key: ADDRESS-STATE-PROVINCE, label: Address State/Province, type: String:45, required: false, preserve_case: true}
+        - {id: export-address-postalcode, key: ADDRESS-POSTALCODE, label: Address Postal Code, type: String:16, required: false, preserve_case: true}
+        - {id: export-address-country, key: ADDRESS-COUNTRY, label: Address Country, type: String:45, required: false, preserve_case: true}
+        - {id: export-soapbox, preset: export-soapbox-optional}
     metadata:
-      source: 'https://cqww.com/rules.htm'
-      notes: 'Countries use DXCC/WAE primary prefixes; received CQ zone is the logged exchange.'
-
-  - id: 'CQ-WW-SSB'
-    extends: 'CQ-WW-CW'
-    display_name: 'CQ World Wide DX Contest (SSB)'
-    allowed_modes: ['SSB']
+      source: https://cqww.com/rules.htm
+      notes: Countries use DXCC/WAE primary prefixes; received CQ zone is the logged exchange.
+    profiles:
+      - hf-bands
+      - cw-mode
+  CQ-WW-SSB:
+    name: CQ World Wide DX Contest (SSB)
+    modes:
+      - SSB
     cabrillo:
-      fixed_fields:
-        - name: 'CATEGORY-MODE'
-          value: 'SSB'
+      fixed_headers:
+        - {value: SSB, id: fixed-category-mode}
+    extends: CQ-WW-CW

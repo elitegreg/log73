@@ -33,8 +33,20 @@ import {
 test('exchangeDefaults uses the allocated sent serial and leaves received serial blank', () => {
   const settings = {
     exchange: [
-      { name: 'Serial(s)', type: 'Serial:4', adif: 'STX', is_sent: true },
-      { name: 'Serial', type: 'Serial:4', adif: 'SRX', is_sent: false },
+      {
+        id: 'serial-sent',
+        label: 'Serial(s)',
+        input: { kind: 'serial', max_length: 4 },
+        adif: 'STX',
+        direction: 'sent',
+      },
+      {
+        id: 'serial-received',
+        label: 'Serial',
+        input: { kind: 'serial', max_length: 4 },
+        adif: 'SRX',
+        direction: 'received',
+      },
     ],
   };
 
@@ -50,8 +62,8 @@ test('exchangeDefaults uses the allocated sent serial and leaves received serial
       },
     ),
     {
-      'Serial(s)': '12',
-      Serial: '',
+      'serial-sent': '12',
+      'serial-received': '',
     },
   );
   assert.deepEqual(
@@ -66,8 +78,8 @@ test('exchangeDefaults uses the allocated sent serial and leaves received serial
       },
     ),
     {
-      'Serial(s)': '',
-      Serial: '',
+      'serial-sent': '',
+      'serial-received': '',
     },
   );
 });
@@ -77,7 +89,7 @@ test('availableModeOptions prefers backend-provided mode catalog', () => {
     'CW',
     'RTTY',
   ]);
-  assert.deepEqual(availableModeOptions({ allowed_modes: ['cw'] }), [
+  assert.deepEqual(availableModeOptions({ modes: ['CW'] }), [
     'CW',
     'CW-R',
     'SSB',
@@ -103,7 +115,9 @@ test('band helpers use backend-provided band catalog', () => {
 });
 
 test('typedModeFromCallsignInput matches exact mode tokens only', () => {
-  const settings = { allowed_modes: ['cw', 'rtty', 'ssb'] };
+  const settings = {
+    mode_catalog: ['CW', 'CW-R', 'DATA', 'RTTY', 'SSB', 'FM', 'AM'],
+  };
 
   assert.equal(typedModeFromCallsignInput('cw', settings), 'CW');
   assert.equal(typedModeFromCallsignInput('cw-r', settings), 'CW-R');
@@ -353,9 +367,27 @@ test('correctedEsmCallsignText returns suffix-only or full callsign corrections'
 test('previousContactExchangeAutofill copies non-serial fields from exact callsign match', () => {
   const settings = {
     exchange: [
-      { name: 'Serial', type: 'Serial:4', adif: 'STX', is_sent: true },
-      { name: 'Name', type: 'String:10', adif: 'NAME' },
-      { name: 'QTH', type: 'String:5', adif: 'QTH' },
+      {
+        id: 'serial',
+        label: 'Serial',
+        input: { kind: 'serial', max_length: 4 },
+        adif: 'STX',
+        direction: 'sent',
+      },
+      {
+        id: 'name',
+        label: 'Name',
+        input: { kind: 'string', max_length: 10 },
+        adif: 'NAME',
+        direction: 'received',
+      },
+      {
+        id: 'qth',
+        label: 'QTH',
+        input: { kind: 'string', max_length: 5 },
+        adif: 'QTH',
+        direction: 'received',
+      },
     ],
   };
   const newestContact = {
@@ -374,25 +406,37 @@ test('previousContactExchangeAutofill copies non-serial fields from exact callsi
       { adif: { CALL: 'K1ABC', STX: '122', NAME: 'older', QTH: 'ma' } },
     ],
     callsign: ' k1abc ',
-    exchangeValues: { Serial: '999', Name: '', QTH: '' },
+    exchangeValues: { serial: '999', name: '', qth: '' },
     radioMode: 'CW',
   });
 
   assert.equal(result.matchedContact, newestContact);
   assert.equal(result.changed, true);
-  assert.deepEqual(result.copiedFields, ['Name', 'QTH']);
+  assert.deepEqual(result.copiedFields, ['name', 'qth']);
   assert.deepEqual(result.values, {
-    Serial: '999',
-    Name: 'ALICE',
-    QTH: 'NY',
+    serial: '999',
+    name: 'ALICE',
+    qth: 'NY',
   });
 });
 
 test('previousContactExchangeAutofill preserves user-entered values and requires exact callsign', () => {
   const settings = {
     exchange: [
-      { name: 'Name', type: 'String:10', adif: 'NAME' },
-      { name: 'Section', type: 'String:3', adif: 'ARRL_SECT' },
+      {
+        id: 'name',
+        label: 'Name',
+        input: { kind: 'string', max_length: 10 },
+        adif: 'NAME',
+        direction: 'received',
+      },
+      {
+        id: 'section',
+        label: 'Section',
+        input: { kind: 'string', max_length: 3 },
+        adif: 'ARRL_SECT',
+        direction: 'received',
+      },
     ],
   };
 
@@ -400,23 +444,23 @@ test('previousContactExchangeAutofill preserves user-entered values and requires
     settings,
     contacts: [{ adif: { CALL: 'K1ABC', NAME: 'Alice', ARRL_SECT: 'SC' } }],
     callsign: 'K1A',
-    exchangeValues: { Name: '', Section: '' },
+    exchangeValues: { name: '', section: '' },
   });
 
   assert.equal(prefixOnly.matchedContact, null);
   assert.equal(prefixOnly.changed, false);
-  assert.deepEqual(prefixOnly.values, { Name: '', Section: '' });
+  assert.deepEqual(prefixOnly.values, { name: '', section: '' });
 
   const exact = previousContactExchangeAutofill({
     settings,
     contacts: [{ adif: { CALL: 'k1abc', NAME: 'Alice', ARRL_SECT: 'SC' } }],
     callsign: 'K1ABC',
-    exchangeValues: { Name: 'BOB', Section: '' },
+    exchangeValues: { name: 'BOB', section: '' },
   });
 
   assert.equal(exact.changed, true);
-  assert.deepEqual(exact.copiedFields, ['Section']);
-  assert.deepEqual(exact.values, { Name: 'BOB', Section: 'SC' });
+  assert.deepEqual(exact.copiedFields, ['section']);
+  assert.deepEqual(exact.values, { name: 'BOB', section: 'SC' });
 });
 
 test('esmEnterAction follows run mode matrix states', () => {

@@ -26,14 +26,13 @@ test('callsign completions are limited', () => {
 });
 
 test('exchange completions use valid values', () => {
-  const field = { valid_values: ['ABBE', 'AIKE', 'SC', 'NC'] };
+  const field = { validation: { values: ['ABBE', 'AIKE', 'SC', 'NC'] } };
   assert.deepEqual(exchangeCompletionMatches(field, 'a'), ['ABBE', 'AIKE']);
 });
 
 test('exchange completions include values from combined geographic sets', () => {
   const field = {
-    in_sets: ['Counties', 'States', 'Canadian Provinces'],
-    valid_values: ['BAL', 'MS', 'SC', 'SD', 'SK'],
+    validation: { values: ['BAL', 'MS', 'SC', 'SD', 'SK'] },
   };
   assert.deepEqual(exchangeCompletionMatches(field, 's'), [
     'MS',
@@ -49,7 +48,9 @@ test('exchange completions are empty when there are no valid values', () => {
 
 test('exchange completions are limited', () => {
   const field = {
-    valid_values: Array.from({ length: 120 }, (_, index) => `A${index}`),
+    validation: {
+      values: Array.from({ length: 120 }, (_, index) => `A${index}`),
+    },
   };
   assert.equal(exchangeCompletionMatches(field, 'a').length, 100);
   assert.equal(exchangeCompletionMatches(field, 'a', 7).length, 7);

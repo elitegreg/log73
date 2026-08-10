@@ -23,10 +23,6 @@ function contactFieldValue(settings, contact, field) {
   const directValue = jsonString(adif?.[field]);
   if (directValue !== null) return normalizedFieldValue(field, directValue);
 
-  const mappedField = settings?.qso_column_fields?.[field];
-  const mappedValue = mappedField ? jsonString(adif?.[mappedField]) : null;
-  if (mappedValue !== null) return normalizedFieldValue(field, mappedValue);
-
   return '';
 }
 
@@ -37,13 +33,13 @@ function keyForFields(settings, contact, fields) {
 }
 
 function possibleDupeFields(settings) {
-  return (settings?.dupe_key ?? []).filter((field) =>
+  return (settings?.scoring?.dupe_key ?? []).filter((field) =>
     POSSIBLE_DUPE_FIELDS.has(field.toUpperCase()),
   );
 }
 
 export function dupeAlertText(settings, currentContact, historicContacts) {
-  const dupeFields = settings?.dupe_key ?? [];
+  const dupeFields = settings?.scoring?.dupe_key ?? [];
   const possibleFields = possibleDupeFields(settings);
   if (dupeFields.length === 0 || possibleFields.length === 0) return '';
 
@@ -85,10 +81,6 @@ export function dupeAlertText(settings, currentContact, historicContacts) {
   return alertText;
 }
 
-export function dupeAlertTextForAdif(
-  settings,
-  currentAdif,
-  historicContacts,
-) {
+export function dupeAlertTextForAdif(settings, currentAdif, historicContacts) {
   return dupeAlertText(settings, { adif: currentAdif }, historicContacts);
 }

@@ -20,16 +20,16 @@ export function defaultExportValues(settings, log, storedValues = {}) {
   return Object.fromEntries(
     (settings?.cabrillo?.export_fields ?? []).map((field) => {
       let value = '';
-      if (Object.hasOwn(storedValues, field.name)) {
-        value = storedValues[field.name] ?? '';
-      } else if (Object.hasOwn(contestParams, field.name)) {
-        value = contestParams[field.name] ?? '';
+      if (Object.hasOwn(storedValues, field.key)) {
+        value = storedValues[field.key] ?? '';
+      } else if (Object.hasOwn(contestParams, field.key)) {
+        value = contestParams[field.key] ?? '';
       } else if (field.default !== undefined && field.default !== null) {
         value = field.default;
       } else {
-        value = fieldFallbackValue(field.name, contestParams);
+        value = fieldFallbackValue(field.key, contestParams);
       }
-      return [field.name, String(value)];
+      return [field.key, String(value)];
     }),
   );
 }

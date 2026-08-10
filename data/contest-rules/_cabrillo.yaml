@@ -1,0 +1,36 @@
+schema: 2
+presets:
+  export-club-optional:
+    key: CLUB
+    label: Club
+    type: String:75
+    required: false
+    preserve_case: true
+  export-email-optional:
+    key: EMAIL
+    label: Email
+    type: String:75
+    required: false
+    regex: ^[^\s@]+@[^\s@]+\.[^\s@]+$
+    preserve_case: true
+  export-name-optional:
+    key: NAME
+    label: Name
+    type: String:75
+    required: false
+    preserve_case: true
+  export-address-optional:
+    key: ADDRESS
+    label: Address
+    type: String:45
+    widget: textarea
+    max_lines: 6
+    required: false
+    preserve_case: true
+  export-soapbox-optional:
+    key: SOAPBOX
+    label: Soapbox
+    type: String:75
+    widget: textarea
+    required: false
+    preserve_case: true

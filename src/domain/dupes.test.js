@@ -3,8 +3,7 @@ import test from 'node:test';
 import { dupeAlertText, dupeAlertTextForAdif } from './dupes.js';
 
 const settings = {
-  dupe_key: ['CALL', 'BAND', 'MODE', 'SRX_STRING'],
-  qso_column_fields: {},
+  scoring: { dupe_key: ['CALL', 'BAND', 'MODE', 'SRX_STRING'] },
 };
 
 function contact(adif) {
@@ -13,7 +12,7 @@ function contact(adif) {
 
 test('dupeAlertText is blank without dupe key fields', () => {
   assert.equal(
-    dupeAlertText({ dupe_key: [] }, contact({ CALL: 'K1ABC' }), [
+    dupeAlertText({ scoring: { dupe_key: [] } }, contact({ CALL: 'K1ABC' }), [
       contact({ CALL: 'K1ABC' }),
     ]),
     '',
@@ -40,8 +39,7 @@ test('dupeAlertText detects exact dupes', () => {
 
 test('dupeAlertTextForAdif detects a live Field Day entry against logged contacts', () => {
   const fieldDaySettings = {
-    dupe_key: ['CALL', 'BAND', 'MODE'],
-    qso_column_fields: {},
+    scoring: { dupe_key: ['CALL', 'BAND', 'MODE'] },
   };
   const currentAdif = {
     CALL: 'W4MEL',
@@ -59,11 +57,7 @@ test('dupeAlertTextForAdif detects a live Field Day entry against logged contact
   ];
 
   assert.equal(
-    dupeAlertTextForAdif(
-      fieldDaySettings,
-      currentAdif,
-      historicContacts,
-    ),
+    dupeAlertTextForAdif(fieldDaySettings, currentAdif, historicContacts),
     'Dupe',
   );
 });
@@ -87,8 +81,7 @@ test('dupeAlertText detects possible dupes before exact exchange is known', () =
 
 test('dupeAlertText possible key uses only call, band, and mode fields from dupe key', () => {
   const callOnlyPossibleSettings = {
-    dupe_key: ['CALL', 'SRX_STRING'],
-    qso_column_fields: {},
+    scoring: { dupe_key: ['CALL', 'SRX_STRING'] },
   };
 
   assert.equal(
@@ -101,13 +94,9 @@ test('dupeAlertText possible key uses only call, band, and mode fields from dupe
   );
 });
 
-test('dupeAlertText normalizes callsigns and mapped field values like scoring', () => {
+test('dupeAlertText normalizes callsigns and canonical field values like scoring', () => {
   const mappedSettings = {
-    dupe_key: ['CALL', 'Band', 'Mode'],
-    qso_column_fields: {
-      Band: 'BAND',
-      Mode: 'MODE',
-    },
+    scoring: { dupe_key: ['CALL', 'BAND', 'MODE'] },
   };
 
   assert.equal(
@@ -133,5 +122,8 @@ test('dupeAlertText keeps scanning newest-first contacts after unrelated callsig
     contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' }),
   ];
 
-  assert.equal(dupeAlertText(settings, currentContact, historicContacts), 'Dupe');
+  assert.equal(
+    dupeAlertText(settings, currentContact, historicContacts),
+    'Dupe',
+  );
 });

@@ -1,303 +1,147 @@
+schema: 2
 contests:
-  - id: 'TN-QSO-PARTY (In State)'
-    display_name: 'Tennessee QSO Party (In State)'
-    allowed_bands: [160, 80, 40, 20, 15, 10, 6, 2]
-    allowed_modes: ['CW', 'SSB']
+  TN-QSO-PARTY (In State):
+    name: Tennessee QSO Party (In State)
+    modes:
+      - CW
+      - SSB
+    value_sets:
+      Tennessee Counties:
+        values_from_file: tennessee-counties.dat
+      States:
+        use: us-states
+        exclude: [TN]
+      Canadian Provinces:
+        use: canadian-provinces
+    setup_fields:
+      - id: param-county
+        key: County
+        label: Tennessee County
+        type: String:4
+        required: true
+        in_sets: [Tennessee Counties]
+      - id: header-category-mode
+        preset: category-mode
+        default: MIXED
+        valid_values: [CW, SSB, MIXED]
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]
+      - id: header-category-power
+        preset: category-power
+        default: LOW
+        valid_values: [HIGH, LOW, QRP]
+      - id: header-category-station
+        preset: category-station
+        default: FIXED
+        valid_values: [FIXED, MOBILE, ROVER]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE, UNLIMITED]
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: county-sent
+        label: County
+        type: String:4
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        in_sets: [Tennessee Counties]
+        source: County
+      - id: rst-received
+        preset: rst-received
+      - id: location-received
+        label: Location
+        type: String:4
+        adif: SRX_STRING
+        direction: received
+        regex: ^\S+$
+        valid_values_or_regex: true
+        in_sets: [Tennessee Counties, States, Canadian Provinces]
     scoring:
       qso_points:
         points: 3
-      dupe_key: ['CALL', 'BAND', 'MODE', 'STX_STRING', 'SRX_STRING']
+      dupe_key:
+        - CALL
+        - BAND
+        - MODE
+        - STX_STRING
+        - SRX_STRING
       multipliers:
-        - name: 'Tennessee County'
-          field: 'SRX_STRING'
-          key: ['SRX_STRING', 'BAND']
-          in_sets: ['Tennessee Counties']
-        - name: 'State'
-          field: 'SRX_STRING'
-          key: ['SRX_STRING', 'BAND']
-          in_sets: ['States']
-        - name: 'Canadian Province'
-          field: 'SRX_STRING'
-          key: ['SRX_STRING', 'BAND']
-          in_sets: ['Canadian Provinces']
-        - name: 'DXCC Entity'
-          field: 'DXCC'
-          key: ['DXCC', 'BAND']
-          exclude_values: ['1', '6', '110', '291']
+        - {id: mult-tennessee-county, name: Tennessee County, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [Tennessee Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [States]}
+        - {id: mult-canadian-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [Canadian Provinces]}
+        - {id: mult-dxcc-entity, name: DXCC Entity, field: DXCC, key: [DXCC, BAND], exclude_values: ['1', '6', '110', '291']}
       bonus_points:
-        - name: 'TCG Headquarters'
-          field: 'CALL'
-          key: ['CALL', 'BAND', 'MODE', 'STX_STRING']
-          values:
-            K4TCG: 100
+        - {id: bonus-tcg-headquarters, name: TCG Headquarters, field: CALL, key: [CALL, BAND, MODE, STX_STRING], values: {K4TCG: 100}}
     cabrillo:
-      contest_id: 'TN-QSO-PARTY'
-      fixed_fields:
-        - name: 'CATEGORY-BAND'
-          value: 'ALL'
-      log_fields:
-        - name: 'CATEGORY-MODE'
-          label: 'Category Mode'
-          type: 'String:16'
-          widget: 'select'
-          default: 'MIXED'
-          valid_values: ['CW', 'SSB', 'MIXED']
-        - name: 'CATEGORY-OPERATOR'
-          label: 'Category Operator'
-          type: 'String:16'
-          widget: 'select'
-          default: 'SINGLE-OP'
-          valid_values: ['SINGLE-OP', 'MULTI-OP', 'CHECKLOG']
-        - name: 'CATEGORY-POWER'
-          label: 'Category Power'
-          type: 'String:16'
-          widget: 'select'
-          default: 'LOW'
-          valid_values: ['HIGH', 'LOW', 'QRP']
-        - name: 'CATEGORY-STATION'
-          label: 'Category Station'
-          type: 'String:16'
-          widget: 'select'
-          default: 'FIXED'
-          valid_values: ['FIXED', 'MOBILE', 'ROVER']
-        - name: 'CATEGORY-TRANSMITTER'
-          label: 'Category Transmitter'
-          type: 'String:16'
-          widget: 'select'
-          default: 'ONE'
-          valid_values: ['ONE', 'UNLIMITED']
+      fixed_headers:
+        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
       export_fields:
-        - name: 'CLUB'
-          label: 'Club'
-          type: 'String:75'
-          required: false
-          preserve_case: true
-        - name: 'EMAIL'
-          label: 'Email'
-          type: 'String:75'
-          regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
-          preserve_case: true
-        - name: 'LOCATION'
-          label: 'Location'
-          type: 'String:4'
-          help_text: 'Tennessee county, state, province/territory, or DXCC prefix.'
-          in_sets: ['Tennessee Counties', 'States', 'Canadian Provinces']
-          regex: '^\S+$'
-          valid_values_or_regex: true
-        - name: 'NAME'
-          label: 'Name'
-          type: 'String:75'
-          preserve_case: true
-        - name: 'ADDRESS'
-          label: 'Address'
-          type: 'String:45'
-          widget: 'textarea'
-          max_lines: 6
-          preserve_case: true
-        - name: 'SOAPBOX'
-          label: 'Soapbox'
-          type: 'String:75'
-          widget: 'textarea'
-          required: false
-          preserve_case: true
-    define:
-      - name: 'Tennessee Counties'
-        values:
-          - ANDE
-          - BEDF
-          - BENT
-          - BLED
-          - BLOU
-          - BRAD
-          - CAMP
-          - CANN
-          - CARR
-          - CART
-          - CHEA
-          - CHES
-          - CLAI
-          - CLAY
-          - COCK
-          - COFF
-          - CROC
-          - CUMB
-          - DAVI
-          - DECA
-          - DEKA
-          - DICK
-          - DYER
-          - FAYE
-          - FENT
-          - FRAN
-          - GIBS
-          - GILE
-          - GRAI
-          - GREE
-          - GRUN
-          - HAMB
-          - HAMI
-          - HANC
-          - HARD
-          - HARN
-          - HAWK
-          - HAYW
-          - HEND
-          - HENR
-          - HICK
-          - HOUS
-          - HUMP
-          - JACK
-          - JEFF
-          - JOHN
-          - KNOX
-          - LAKE
-          - LAUD
-          - LAWR
-          - LEWI
-          - LINC
-          - LOUD
-          - MACO
-          - MADI
-          - MARI
-          - MARS
-          - MAUR
-          - MCMI
-          - MCNA
-          - MEIG
-          - MONR
-          - MONT
-          - MOOR
-          - MORG
-          - OBIO
-          - OVER
-          - PERR
-          - PICK
-          - POLK
-          - PUTN
-          - RHEA
-          - ROAN
-          - ROBE
-          - RUTH
-          - SCOT
-          - SEQU
-          - SEVI
-          - SHEL
-          - SMIT
-          - STEW
-          - SULL
-          - SUMN
-          - TIPT
-          - TROU
-          - UNIC
-          - UNIO
-          - VANB
-          - WARR
-          - WASH
-          - WAYN
-          - WEAK
-          - WHIT
-          - WILL
-          - WILS
-      - name: 'States'
-        values_from_file: us_states.dat
-        exclude: ['TN']
-      - name: 'Canadian Provinces'
-        values_from_file: canadian_provinces.dat
-    log_params:
-      - name: 'County'
-        label: 'Tennessee County'
-        type: 'String:4'
-        required: true
-        in_sets: ['Tennessee Counties']
-    exchange:
-      - name: 'RST(s)'
-        type: 'RST'
-        adif: 'RST_SENT'
-        default: 599
-        is_sent: true
-      - name: 'County'
-        type: 'String:4'
-        adif: 'STX_STRING'
-        fixed: true
-        source_param: 'County'
-        is_sent: true
-        in_sets: ['Tennessee Counties']
-      - name: 'RST(r)'
-        type: 'RST'
-        adif: 'RST_RCVD'
-        default: 599
-        is_sent: false
-      - name: 'Location'
-        type: 'String:4'
-        adif: 'SRX_STRING'
-        is_sent: false
-        in_sets: ['Tennessee Counties', 'States', 'Canadian Provinces']
-        regex: '^\S+$'
-        valid_values_or_regex: true
-    qso_columns: ['RST(s)', 'RST(r)', 'Location', 'Mult', 'Pts', 'Op']
-    qso_column_fields:
-      Freq: 'FREQ'
-      Mode: 'MODE'
-      Call: 'CALL'
-      Op: 'OPERATOR'
-      'RST(s)': 'RST_SENT'
-      County: 'STX_STRING'
-      'RST(r)': 'RST_RCVD'
-      Location: 'SRX_STRING'
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, key: EMAIL, label: Email, type: String:75, regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$', preserve_case: true}
+        - {id: export-location, key: LOCATION, label: Location, type: String:4, regex: ^\S+$, valid_values_or_regex: true, in_sets: [Tennessee Counties, States, Canadian Provinces], help_text: 'Tennessee county, state, province/territory, or DXCC prefix.'}
+        - {id: export-name, key: NAME, label: Name, type: String:75, preserve_case: true}
+        - {id: export-address, key: ADDRESS, label: Address, type: String:45, widget: textarea, max_lines: 6, preserve_case: true}
+        - {id: export-soapbox, preset: export-soapbox-optional}
     metadata:
-      notes: 'Based on the supplied 2025 rules. Digital modes, 1.25m/70cm, and the mobile/rover 10-QSO county multiplier and 500-point activation bonus are not supported.'
-
-  - id: 'TN-QSO-PARTY'
-    extends: 'TN-QSO-PARTY (In State)'
-    display_name: 'Tennessee QSO Party'
+      notes: >-
+        Based on the supplied 2025 rules. Digital modes, 1.25m/70cm, and the mobile/rover 10-QSO
+        county multiplier and 500-point activation bonus are not supported.
+    profiles:
+      - hf-vhf-bands
+  TN-QSO-PARTY:
+    name: Tennessee QSO Party
+    setup_fields:
+      - id: param-county
+        remove: true
+      - id: param-location
+        key: Location
+        label: County, State, Province, or DXCC Prefix
+        type: String:4
+        required: true
+        regex: ^\S+$
+        valid_values_or_regex: true
+        in_sets: [Tennessee Counties, States, Canadian Provinces]
+        before: header-category-mode
+      - id: header-category-mode
+        after: param-location
+    exchange:
+      - id: county-sent
+        remove: true
+      - id: location-received
+        remove: true
+      - id: location-sent
+        label: Location
+        type: String:4
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        regex: ^\S+$
+        valid_values_or_regex: true
+        in_sets: [Tennessee Counties, States, Canadian Provinces]
+        source: Location
+        after: rst-sent
+      - id: rst-received
+        after: location-sent
+      - id: county-received
+        label: County
+        type: String:4
+        adif: SRX_STRING
+        direction: received
+        in_sets: [Tennessee Counties]
+        after: rst-received
     scoring:
       multipliers:
-        - name: 'Tennessee County'
-          field: 'SRX_STRING'
-          key: ['SRX_STRING', 'BAND']
-          in_sets: ['Tennessee Counties']
-    log_params:
-      - name: 'Location'
-        label: 'County, State, Province, or DXCC Prefix'
-        type: 'String:4'
-        required: true
-        in_sets: ['Tennessee Counties', 'States', 'Canadian Provinces']
-        regex: '^\S+$'
-        valid_values_or_regex: true
-    exchange:
-      - name: 'RST(s)'
-        type: 'RST'
-        adif: 'RST_SENT'
-        default: 599
-        is_sent: true
-      - name: 'Location'
-        type: 'String:4'
-        adif: 'STX_STRING'
-        fixed: true
-        source_param: 'Location'
-        is_sent: true
-        in_sets: ['Tennessee Counties', 'States', 'Canadian Provinces']
-        regex: '^\S+$'
-        valid_values_or_regex: true
-      - name: 'RST(r)'
-        type: 'RST'
-        adif: 'RST_RCVD'
-        default: 599
-        is_sent: false
-      - name: 'County'
-        type: 'String:4'
-        adif: 'SRX_STRING'
-        is_sent: false
-        in_sets: ['Tennessee Counties']
-    qso_columns: ['RST(s)', 'RST(r)', 'County', 'Mult', 'Pts', 'Op']
-    qso_column_fields:
-      Freq: 'FREQ'
-      Mode: 'MODE'
-      Call: 'CALL'
-      Op: 'OPERATOR'
-      'RST(s)': 'RST_SENT'
-      Location: 'STX_STRING'
-      'RST(r)': 'RST_RCVD'
-      County: 'SRX_STRING'
+        - {id: mult-state, remove: true}
+        - {id: mult-canadian-province, remove: true}
+        - {id: mult-dxcc-entity, remove: true}
     metadata:
-      notes: 'Outside-Tennessee stations score only Tennessee county contacts. Digital modes, 1.25m/70cm, and the mobile/rover 10-QSO county multiplier and 500-point activation bonus are not supported.'
+      notes: >-
+        Outside-Tennessee stations score only Tennessee county contacts. Digital modes, 1.25m/70cm,
+        and the mobile/rover 10-QSO county multiplier and 500-point activation bonus are not
+        supported.
+    extends: TN-QSO-PARTY (In State)

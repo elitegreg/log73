@@ -5,18 +5,20 @@ import { sanitizeLogCellUpdate } from './logWindowHelpers.js';
 test('inline RST edits preserve a CW RST when the active radio is SSB', () => {
   const exchangeFields = [
     {
-      name: 'RST(r)',
-      type: 'RST',
+      id: 'rst-received',
+      label: 'RST(r)',
+      input: { kind: 'rst' },
       adif: 'RST_RCVD',
     },
   ];
+  const column = { field: 'RST_RCVD' };
 
   assert.equal(
-    sanitizeLogCellUpdate(exchangeFields, 'RST(r)', '599', 'CW'),
+    sanitizeLogCellUpdate(exchangeFields, column, '599', 'CW'),
     '599',
   );
   assert.equal(
-    sanitizeLogCellUpdate(exchangeFields, 'RST(r)', '599', 'SSB'),
+    sanitizeLogCellUpdate(exchangeFields, column, '599', 'SSB'),
     '59',
   );
 });

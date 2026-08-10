@@ -1,300 +1,138 @@
+schema: 2
 contests:
-  - id: 'KS-QSO-PARTY (In State)'
-    display_name: 'Kansas QSO Party (In State)'
-    allowed_bands: [80, 40, 20, 15, 10, 6]
-    allowed_modes: ['CW', 'SSB']
+  KS-QSO-PARTY (In State):
+    name: Kansas QSO Party (In State)
+    bands:
+      - 80
+      - 40
+      - 20
+      - 15
+      - 10
+      - 6
+    modes:
+      - CW
+      - SSB
+    value_sets:
+      DX:
+        use: dx
+      Kansas Counties:
+        values_from_file: kansas-counties.dat
+      States:
+        use: us-states
+        exclude: [KS]
+      Canadian Provinces:
+        use: canadian-provinces
+    setup_fields:
+      - id: param-county
+        key: County
+        label: Kansas County
+        type: String:3
+        required: true
+        in_sets: [Kansas Counties]
+      - id: header-category-mode
+        preset: category-mode
+        valid_values: [CW, SSB, MIXED]
+      - id: header-category-operator
+        preset: category-operator
+        valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]
+      - id: header-category-power
+        preset: category-power
+        valid_values: [HIGH, LOW, QRP]
+      - id: header-category-station
+        preset: category-station
+        valid_values: [FIXED, MOBILE, PORTABLE]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        valid_values: [ONE, UNLIMITED]
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: county-sent
+        label: County
+        type: String:3
+        adif: STX_STRING
+        direction: sent
+        in_sets: [Kansas Counties]
+        source: County
+      - id: rst-received
+        preset: rst-received
+      - id: exchange-received
+        label: Exchange
+        type: String:3
+        adif: SRX_STRING
+        direction: received
+        in_sets: [Kansas Counties, States, Canadian Provinces, DX]
     scoring:
       qso_points:
-        rules:
-          - when:
-              field: 'MODE'
-              values: ['SSB']
-            points: 2
-          - points: 3
-      dupe_key: ['CALL', 'BAND', 'MODE', 'STX_STRING', 'SRX_STRING']
+        rules: [{id: qso-rule-1, when: {field: MODE, values: [SSB]}, points: 2}, {id: qso-rule-2, points: 3}]
+      dupe_key:
+        - CALL
+        - BAND
+        - MODE
+        - STX_STRING
+        - SRX_STRING
       multipliers:
-        - name: 'Kansas'
-          field: 'SRX_STRING'
-          key: ['SRX_STRING']
-          in_sets: ['Kansas Counties']
-          fixed_key: 'KS'
-        - name: 'State/Province/DX'
-          field: 'SRX_STRING'
-          key: ['SRX_STRING']
-          in_sets: ['States', 'Canadian Provinces', 'DX']
+        - {id: mult-kansas, name: Kansas, field: SRX_STRING, key: [SRX_STRING], in_sets: [Kansas Counties], fixed_key: KS}
+        - {id: mult-state-province-dx, name: State/Province/DX, field: SRX_STRING, key: [SRX_STRING], in_sets: [States, Canadian Provinces, DX]}
       bonus_points:
-        - name: 'Bonus Station'
-          field: 'CALL'
-          key: ['CALL']
-          values:
-            KS0KS: 100
+        - {id: bonus-bonus-station, name: Bonus Station, field: CALL, key: [CALL], values: {KS0KS: 100}}
     cabrillo:
-      contest_id: 'KS-QSO-PARTY'
-      fixed_fields:
-        - name: 'CATEGORY-BAND'
-          value: 'ALL'
-      log_fields:
-        - name: 'CATEGORY-MODE'
-          label: 'Category Mode'
-          type: 'String:16'
-          widget: 'select'
-          valid_values: ['CW', 'SSB', 'MIXED']
-        - name: 'CATEGORY-OPERATOR'
-          label: 'Category Operator'
-          type: 'String:16'
-          widget: 'select'
-          valid_values: ['SINGLE-OP', 'MULTI-OP', 'CHECKLOG']
-        - name: 'CATEGORY-POWER'
-          label: 'Category Power'
-          type: 'String:16'
-          widget: 'select'
-          valid_values: ['HIGH', 'LOW', 'QRP']
-        - name: 'CATEGORY-STATION'
-          label: 'Category Station'
-          type: 'String:16'
-          widget: 'select'
-          valid_values: ['FIXED', 'MOBILE', 'PORTABLE']
-        - name: 'CATEGORY-TRANSMITTER'
-          label: 'Category Transmitter'
-          type: 'String:16'
-          widget: 'select'
-          valid_values: ['ONE', 'UNLIMITED']
+      fixed_headers:
+        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
       export_fields:
-        - name: 'NAME'
-          label: 'Name'
-          type: 'String:75'
-          preserve_case: true
-        - name: 'ADDRESS'
-          label: 'Address'
-          type: 'String:45'
-          widget: 'textarea'
-          max_lines: 6
-          preserve_case: true
-        - name: 'LOCATION'
-          label: 'Location'
-          type: 'String:32'
-          help_text: 'Kansas county, state, province, or DX.'
-        - name: 'EMAIL'
-          label: 'Email'
-          type: 'String:75'
-          regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
-          preserve_case: true
-        - name: 'CLUB'
-          label: 'Club'
-          type: 'String:75'
-          required: false
-          preserve_case: true
-        - name: 'SOAPBOX'
-          label: 'Soapbox'
-          type: 'String:75'
-          widget: 'textarea'
-          required: false
-          preserve_case: true
-    define:
-      - name: 'DX'
-        values: ['DX']
-      - name: 'Kansas Counties'
-        values:
-          - ALL
-          - AND
-          - ATC
-          - BAR
-          - BRT
-          - BOU
-          - BRO
-          - BUT
-          - CHS
-          - CHT
-          - CHE
-          - CHY
-          - CLK
-          - CLY
-          - CLO
-          - COF
-          - COM
-          - COW
-          - CRA
-          - DEC
-          - DIC
-          - DON
-          - DOU
-          - EDW
-          - ELK
-          - ELL
-          - ELS
-          - FIN
-          - FOR
-          - FRA
-          - GEA
-          - GOV
-          - GRM
-          - GRT
-          - GRY
-          - GLY
-          - GRE
-          - HAM
-          - HPR
-          - HVY
-          - HAS
-          - HOG
-          - JAC
-          - JEF
-          - JEW
-          - JOH
-          - KEA
-          - KIN
-          - KIO
-          - LAB
-          - LAN
-          - LEA
-          - LCN
-          - LIN
-          - LOG
-          - LYO
-          - MRN
-          - MSH
-          - MCP
-          - MEA
-          - MIA
-          - MIT
-          - MGY
-          - MOR
-          - MTN
-          - NEM
-          - NEO
-          - NES
-          - NOR
-          - OSA
-          - OSB
-          - OTT
-          - PAW
-          - PHI
-          - POT
-          - PRA
-          - RAW
-          - REN
-          - REP
-          - RIC
-          - RIL
-          - ROO
-          - RUS
-          - RSL
-          - SAL
-          - SCO
-          - SED
-          - SEW
-          - SHA
-          - SHE
-          - SMN
-          - SMI
-          - STA
-          - STN
-          - STE
-          - SUM
-          - THO
-          - TRE
-          - WAB
-          - WAL
-          - WAS
-          - WIC
-          - WIL
-          - WOO
-          - WYA
-      - name: 'States'
-        values_from_file: us_states.dat
-        exclude: ['KS']
-      - name: 'Canadian Provinces'
-        values_from_file: canadian_provinces.dat
-    log_params:
-      - name: 'County'
-        label: 'Kansas County'
-        type: 'String:3'
-        required: true
-        in_sets: ['Kansas Counties']
-    exchange:
-      - name: 'RST(s)'
-        type: 'RST'
-        adif: 'RST_SENT'
-        default: 599
-        is_sent: true
-      - name: 'County'
-        type: 'String:3'
-        adif: 'STX_STRING'
-        source_param: 'County'
-        is_sent: true
-        in_sets: ['Kansas Counties']
-      - name: 'RST(r)'
-        type: 'RST'
-        adif: 'RST_RCVD'
-        default: 599
-        is_sent: false
-      - name: 'Exchange'
-        type: 'String:3'
-        adif: 'SRX_STRING'
-        is_sent: false
-        in_sets: ['Kansas Counties', 'States', 'Canadian Provinces', 'DX']
-    qso_columns: ['RST(s)', 'RST(r)', 'Exchange', 'Mult', 'Pts', 'Op']
-    qso_column_fields:
-      Freq: 'FREQ'
-      Mode: 'MODE'
-      Call: 'CALL'
-      Op: 'OPERATOR'
-      'RST(s)': 'RST_SENT'
-      County: 'STX_STRING'
-      'RST(r)': 'RST_RCVD'
-      Exchange: 'SRX_STRING'
+        - {id: export-name, key: NAME, label: Name, type: String:75, preserve_case: true}
+        - {id: export-address, key: ADDRESS, label: Address, type: String:45, widget: textarea, max_lines: 6, preserve_case: true}
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, help_text: 'Kansas county, state, province, or DX.'}
+        - {id: export-email, key: EMAIL, label: Email, type: String:75, regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$', preserve_case: true}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
     metadata:
-      source: 'https://www.ksqsoparty.org/rules/KSQPRules2026.pdf?1='
-      notes: 'CW and SSB only. Kansas stations may change their sent county while mobile or rover; a county change makes them a new station for QSO and multiplier credit.'
-
-  - id: 'KS-QSO-PARTY'
-    extends: 'KS-QSO-PARTY (In State)'
-    display_name: 'Kansas QSO Party'
+      source: https://www.ksqsoparty.org/rules/KSQPRules2026.pdf?1=
+      notes: >-
+        CW and SSB only. Kansas stations may change their sent county while mobile or rover; a
+        county change makes them a new station for QSO and multiplier credit.
+  KS-QSO-PARTY:
+    name: Kansas QSO Party
+    setup_fields:
+      - id: param-county
+        remove: true
+      - id: param-location
+        key: Location
+        label: State, Province, or DX
+        type: String:2
+        required: true
+        in_sets: [States, Canadian Provinces, DX]
+        before: header-category-mode
+      - id: header-category-mode
+        after: param-location
+    exchange:
+      - id: county-sent
+        remove: true
+      - id: exchange-received
+        remove: true
+      - id: location-sent
+        label: Location
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        in_sets: [States, Canadian Provinces, DX]
+        source: Location
+        after: rst-sent
+      - id: rst-received
+        after: location-sent
+      - id: county-received
+        label: County
+        type: String:3
+        adif: SRX_STRING
+        direction: received
+        in_sets: [Kansas Counties]
+        after: rst-received
     scoring:
       multipliers:
-        - name: 'Kansas County'
-          field: 'SRX_STRING'
-          key: ['SRX_STRING']
-          in_sets: ['Kansas Counties']
-    log_params:
-      - name: 'Location'
-        label: 'State, Province, or DX'
-        type: 'String:2'
-        required: true
-        in_sets: ['States', 'Canadian Provinces', 'DX']
-    exchange:
-      - name: 'RST(s)'
-        type: 'RST'
-        adif: 'RST_SENT'
-        default: 599
-        is_sent: true
-      - name: 'Location'
-        type: 'String:2'
-        adif: 'STX_STRING'
-        fixed: true
-        source_param: 'Location'
-        is_sent: true
-        in_sets: ['States', 'Canadian Provinces', 'DX']
-      - name: 'RST(r)'
-        type: 'RST'
-        adif: 'RST_RCVD'
-        default: 599
-        is_sent: false
-      - name: 'County'
-        type: 'String:3'
-        adif: 'SRX_STRING'
-        is_sent: false
-        in_sets: ['Kansas Counties']
-    qso_columns: ['RST(s)', 'RST(r)', 'County', 'Mult', 'Pts', 'Op']
-    qso_column_fields:
-      Freq: 'FREQ'
-      Mode: 'MODE'
-      Call: 'CALL'
-      Op: 'OPERATOR'
-      'RST(s)': 'RST_SENT'
-      Location: 'STX_STRING'
-      'RST(r)': 'RST_RCVD'
-      County: 'SRX_STRING'
+        - {id: mult-kansas, remove: true}
+        - {id: mult-state-province-dx, remove: true}
+        - {id: mult-kansas-county, name: Kansas County, field: SRX_STRING, key: [SRX_STRING], in_sets: [Kansas Counties]}
     metadata:
-      source: 'https://www.ksqsoparty.org/rules/KSQPRules2026.pdf?1='
-      notes: 'Outside-Kansas stations score Kansas county multipliers only. CW and SSB only.'
+      notes: Outside-Kansas stations score Kansas county multipliers only. CW and SSB only.
+    extends: KS-QSO-PARTY (In State)

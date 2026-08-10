@@ -34,5 +34,5 @@ export function exchangeCompletionMatches(
   value,
   maxMatches = MAX_COMPLETION_MATCHES,
 ) {
-  return matchingValues(field?.valid_values ?? [], value, 1, maxMatches);
+  return matchingValues(field?.validation?.values ?? [], value, 1, maxMatches);
 }

@@ -7,19 +7,20 @@ import {
 
 function settings({ flagged = false } = {}) {
   return {
-    cabrillo: {
-      log_fields: [
-        {
-          name: 'CATEGORY-OPERATOR',
-          default: 'SINGLE-OP',
-        },
-        {
-          name: 'CATEGORY-TRANSMITTER',
-          default: 'ONE',
-          multi_single_has_mult_transmitter: flagged,
-        },
-      ],
-    },
+    setup_fields: [
+      {
+        key: 'CATEGORY-OPERATOR',
+        cabrillo_header: 'CATEGORY-OPERATOR',
+        default: 'SINGLE-OP',
+      },
+      {
+        key: 'CATEGORY-TRANSMITTER',
+        cabrillo_header: 'CATEGORY-TRANSMITTER',
+        default: 'ONE',
+        multi_single_has_mult_transmitter: flagged,
+      },
+    ],
+    cabrillo: {},
   };
 }
 
@@ -87,7 +88,7 @@ test('unflagged multi-single and ineligible categories do not prompt', () => {
 
 test('category defaults and fixed fields are used when log values are absent', () => {
   const fixedSettings = settings();
-  fixedSettings.cabrillo.fixed_fields = [
+  fixedSettings.cabrillo.fixed_headers = [
     { name: 'CATEGORY-OPERATOR', value: 'MULTI-OP' },
     { name: 'CATEGORY-TRANSMITTER', value: 'TWO' },
   ];

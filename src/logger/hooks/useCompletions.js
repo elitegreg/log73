@@ -116,14 +116,14 @@ export function useCompletions({
   ]);
 
   const activeExchangeCompletionField = (settings?.exchange ?? []).find(
-    (field) => field.name === activeCompletionField && field.fixed !== true,
+    (field) => field.id === activeCompletionField && field.fixed !== true,
   );
   const completionMatches =
     activeCompletionField === 'CALL'
       ? supercheckpartialMatches
       : exchangeCompletionMatches(
           activeExchangeCompletionField,
-          exchangeValues[activeExchangeCompletionField?.name],
+          exchangeValues[activeExchangeCompletionField?.id],
         );
   const currentDxccInfo = lookupDxcc(dxccData, callSign);
   const stationDxccInfo = lookupDxcc(dxccData, stationCallsign);

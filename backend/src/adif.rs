@@ -270,7 +270,7 @@ fn import_record(
         let Some(mapping) = mappings.get(&field.adif) else {
             return Err(ImportError {
                 line,
-                error: format!("{} mapping is required", field.name),
+                error: format!("{} mapping is required", field.label),
             });
         };
         let value = mapping_value(log, field, record, mapping)?;
@@ -297,13 +297,13 @@ fn mapping_value(
                 .filter(|value| !value.trim().is_empty())
                 .ok_or_else(|| ImportError {
                     line,
-                    error: format!("{} source field {source} is missing", field.name),
+                    error: format!("{} source field {source} is missing", field.label),
                 })?
         }
         ImportMapping::FixedConfig => {
             fixed_config_value(log, field).ok_or_else(|| ImportError {
                 line,
-                error: format!("{} does not have a configured fixed value", field.name),
+                error: format!("{} does not have a configured fixed value", field.label),
             })?
         }
         ImportMapping::FixedValue { value } => value.trim().to_string(),
@@ -312,14 +312,14 @@ fn mapping_value(
     if value.is_empty() {
         return Err(ImportError {
             line,
-            error: format!("{} value is required", field.name),
+            error: format!("{} value is required", field.label),
         });
     }
     Ok(value)
 }
 
 fn fixed_config_value(log: &Log, field: &ExchangeField) -> Option<String> {
-    if let Some(source_param) = &field.source_param {
+    if let Some(source_param) = &field.source {
         let value = log.contest_params.as_object()?.get(source_param)?;
         return value_string(value).filter(|value| !value.is_empty());
     }
@@ -554,55 +554,31 @@ mod tests {
     }
 
     fn test_rules() -> ContestRules {
+        use crate::contest_rules::{ExchangeDirection, test_exchange_field};
+
+        let mut county = test_exchange_field(
+            "county-sent",
+            "County",
+            "String:4",
+            "STX_STRING",
+            ExchangeDirection::Sent,
+        );
+        county.fixed = true;
+        county.source = Some("County".to_string());
         ContestRules {
-            contest: "SC-QSO-PARTY".to_string(),
-            display_name: "SC QSO Party".to_string(),
-            allowed_bands: Vec::new(),
-            allowed_modes: Vec::new(),
-            define: Vec::new(),
+            id: "SC-QSO-PARTY".to_string(),
+            name: "SC QSO Party".to_string(),
             exchange: vec![
-                crate::contest_rules::ExchangeField {
-                    name: "County".to_string(),
-                    field_type: "String:4".to_string(),
-                    adif: "STX_STRING".to_string(),
-                    fixed: Some(true),
-                    default: None,
-                    source_param: Some("County".to_string()),
-                    regex: None,
-                    valid_values_or_regex: false,
-                    in_sets: Vec::new(),
-                    valid_values: Vec::new(),
-                    serial_scope: Default::default(),
-                    only_when: None,
-                    is_sent: true,
-                },
-                crate::contest_rules::ExchangeField {
-                    name: "Exchange".to_string(),
-                    field_type: "String:4".to_string(),
-                    adif: "SRX_STRING".to_string(),
-                    fixed: None,
-                    default: None,
-                    source_param: None,
-                    regex: None,
-                    valid_values_or_regex: false,
-                    in_sets: Vec::new(),
-                    valid_values: Vec::new(),
-                    serial_scope: Default::default(),
-                    only_when: None,
-                    is_sent: false,
-                },
+                county,
+                test_exchange_field(
+                    "exchange-received",
+                    "Exchange",
+                    "String:4",
+                    "SRX_STRING",
+                    ExchangeDirection::Received,
+                ),
             ],
-            qso_columns: Vec::new(),
-            qso_column_fields: BTreeMap::new(),
-            log_params: Vec::new(),
-            qso_points: None,
-            dupe_key: Vec::new(),
-            multipliers: Vec::new(),
-            bonus_points: Vec::new(),
-            param_multipliers: Vec::new(),
-            multiplier_count_bonus_points: Vec::new(),
-            cabrillo: None,
-            metadata: None,
+            ..ContestRules::default()
         }
     }
 

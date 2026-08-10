@@ -1,0 +1,18 @@
+schema: 2
+value_sets:
+  us-states:
+    values_from_file: us_states.dat
+  canadian-provinces:
+    values_from_file: canadian_provinces.dat
+  arrl-sections:
+    values_from_file: arrl_sections.dat
+  rac-sections:
+    values_from_file: rac_sections.dat
+  dx:
+    values:
+      - DX
+  district-of-columbia:
+    values:
+      - DC
+  north-american-countries:
+    values_from_file: north-american-countries.dat

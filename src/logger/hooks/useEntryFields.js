@@ -42,12 +42,13 @@ export function useEntryFields({
   useEffect(() => {
     if (!serialAllocation?.required || !serialAllocation.fieldAdif) return;
     const serialField = (settings?.exchange ?? []).find(
-      (field) => field.is_sent && field.adif === serialAllocation.fieldAdif,
+      (field) =>
+        field.direction === 'sent' && field.adif === serialAllocation.fieldAdif,
     );
     if (!serialField) return;
     setExchangeValues((currentValues) => ({
       ...currentValues,
-      [serialField.name]:
+      [serialField.id]:
         serialAllocation.current === null ||
         serialAllocation.current === undefined
           ? ''
@@ -121,9 +122,9 @@ export function useEntryFields({
     if (spotExchangeFields && settings?.exchange) {
       for (const field of settings.exchange) {
         const rawValue =
-          spotExchangeFields?.[field.adif] ?? spotExchangeFields?.[field.name];
+          spotExchangeFields?.[field.adif] ?? spotExchangeFields?.[field.label];
         if (rawValue === undefined || rawValue === null) continue;
-        nextExchangeValues[field.name] = sanitizeExchangeValue(
+        nextExchangeValues[field.id] = sanitizeExchangeValue(
           field,
           rawValue,
           radioMode,
@@ -143,7 +144,7 @@ export function useEntryFields({
   function updateExchangeField(field, value) {
     setExchangeValues((current) => ({
       ...current,
-      [field.name]: sanitizeExchangeValue(field, value, radioMode),
+      [field.id]: sanitizeExchangeValue(field, value, radioMode),
     }));
   }
 
@@ -171,7 +172,7 @@ export function useEntryFields({
 
   function exchangeValue(field, values = exchangeValues) {
     return (
-      values?.[field.name] ??
+      values?.[field.id] ??
       fieldDefault(field, radioMode, log?.contest_params ?? {})
     );
   }
@@ -237,7 +238,12 @@ export function useEntryFields({
       operatingMode,
       autofillResult,
       hasEditableExchangeField: (settings?.exchange ?? []).some(
-        (field) => field.fixed !== true,
+        (field) =>
+          field.fixed !== true &&
+          !(
+            field.direction === 'sent' &&
+            String(field?.input?.kind).toUpperCase() === 'SERIAL'
+          ),
       ),
     });
   }

@@ -64,8 +64,9 @@ export function adifFieldOptionLabel(field) {
   const value = String(field?.value ?? '')
     .replace(/\s+/g, ' ')
     .trim();
-  if (!value) return field.name;
-  return `${field.name} (e.g. '${value.slice(0, 40)}')`;
+  const label = field?.label ?? field?.name ?? '';
+  if (!value) return label;
+  return `${label} (e.g. '${value.slice(0, 40)}')`;
 }
 
 export function fixedValueMappingErrors(fields, mappings) {
@@ -78,7 +79,7 @@ export function fixedValueMappingErrors(fields, mappings) {
       );
     })
     .map((field) => ({
-      error: `${field.name} fixed value is required`,
+      error: `${field.label} fixed value is required`,
     }));
 }
 

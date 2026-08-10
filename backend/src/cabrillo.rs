@@ -1,5 +1,5 @@
 use crate::bands::{Band, band_by_name};
-use crate::contest_rules::{ContestParam, ContestRules, ExchangeField};
+use crate::contest_rules::{ContestRules, ExchangeDirection, ExchangeField, SetupField};
 use crate::db::{Contact, Log, contact_adif_value};
 use crate::qso_time::qso_datetime_cabrillo;
 use serde_json::{Map, Value};
@@ -42,7 +42,7 @@ pub fn render_log(
     let cabrillo = rules
         .cabrillo
         .as_ref()
-        .ok_or_else(|| format!("contest {} does not define Cabrillo export", rules.contest))?;
+        .ok_or_else(|| format!("contest {} does not define Cabrillo export", rules.id))?;
     let empty_export_values = Map::new();
     let export_values = match export_params.as_object() {
         Some(values) => values,
@@ -59,35 +59,36 @@ pub fn render_log(
     let mut lines = vec![format!("START-OF-LOG: {START_OF_LOG_VERSION}")];
     append_header_line(&mut lines, "CREATED-BY", CREATED_BY_VALUE)?;
     append_header_line(&mut lines, "CALLSIGN", log.station_callsign.trim())?;
-    append_header_line(
-        &mut lines,
-        "CONTEST",
-        cabrillo.contest_id.as_deref().unwrap_or(&log.contest_id),
-    )?;
+    append_header_line(&mut lines, "CONTEST", cabrillo_contest_id(rules))?;
     append_header_line(&mut lines, "CLAIMED-SCORE", &claimed_score.to_string())?;
 
-    for field in &cabrillo.fixed_fields {
+    for field in &cabrillo.fixed_headers {
         if is_reserved_tag(&field.name) {
             continue;
         }
         append_header_value(&mut lines, &field.name, &field.value, None)?;
     }
 
-    for field in &cabrillo.log_fields {
-        if is_reserved_tag(&field.name) {
+    for field in rules
+        .setup_fields
+        .iter()
+        .filter(|field| field.cabrillo_header.is_some())
+    {
+        let header = field.cabrillo_header.as_deref().expect("filtered header");
+        if is_reserved_tag(header) {
             continue;
         }
         if let Some(value) = parameter_value(log_values, field) {
-            append_header_value(&mut lines, &field.name, &value, field.max_lines)?;
+            append_header_value(&mut lines, header, &value, field.max_lines)?;
         }
     }
 
     for field in &cabrillo.export_fields {
-        if is_reserved_tag(&field.name) {
+        if is_reserved_tag(&field.key) {
             continue;
         }
         if let Some(value) = parameter_value(export_values, field) {
-            append_header_value(&mut lines, &field.name, &value, field.max_lines)?;
+            append_header_value(&mut lines, &field.key, &value, field.max_lines)?;
         }
     }
 
@@ -99,6 +100,10 @@ pub fn render_log(
 
     lines.push("END-OF-LOG:".to_string());
     Ok(lines.join("\r\n") + "\r\n")
+}
+
+fn cabrillo_contest_id(rules: &ContestRules) -> &str {
+    rules.id.split_whitespace().next().unwrap_or(&rules.id)
 }
 
 fn is_reserved_tag(tag: &str) -> bool {
@@ -209,13 +214,19 @@ fn render_qso_line(
     let sent_fields = rules
         .exchange
         .iter()
-        .filter(|field| field.is_sent && crate::validation::exchange_field_applies(field, contact))
+        .filter(|field| {
+            field.direction == ExchangeDirection::Sent
+                && crate::validation::exchange_field_applies(field, contact)
+        })
         .map(|field| exchange_token(field, log, contact))
         .collect::<Result<Vec<_>, _>>()?;
     let received_fields = rules
         .exchange
         .iter()
-        .filter(|field| !field.is_sent && crate::validation::exchange_field_applies(field, contact))
+        .filter(|field| {
+            field.direction == ExchangeDirection::Received
+                && crate::validation::exchange_field_applies(field, contact)
+        })
         .map(|field| exchange_token(field, log, contact))
         .collect::<Result<Vec<_>, _>>()?;
 
@@ -242,44 +253,55 @@ fn render_qso_line(
 }
 
 fn uses_transmitter_id(rules: &ContestRules, log: &Log) -> bool {
-    let Some(cabrillo) = &rules.cabrillo else {
+    if rules.cabrillo.is_none() {
         return false;
-    };
+    }
     let Some(log_values) = log.contest_params.as_object() else {
         return false;
     };
-    let operator = cabrillo_header_value(cabrillo, log_values, "CATEGORY-OPERATOR");
+    let operator = cabrillo_header_value(rules, log_values, "CATEGORY-OPERATOR");
     if operator.as_deref() != Some("MULTI-OP") {
         return false;
     }
 
-    let transmitter = cabrillo_header_value(cabrillo, log_values, "CATEGORY-TRANSMITTER");
+    let transmitter = cabrillo_header_value(rules, log_values, "CATEGORY-TRANSMITTER");
     match transmitter.as_deref() {
         Some("TWO") => true,
-        Some("ONE") => cabrillo
-            .log_fields
+        Some("ONE") => rules
+            .setup_fields
             .iter()
-            .find(|field| normalized_tag(&field.name) == "CATEGORY-TRANSMITTER")
+            .find(|field| {
+                field
+                    .cabrillo_header
+                    .as_deref()
+                    .is_some_and(|header| normalized_tag(header) == "CATEGORY-TRANSMITTER")
+            })
             .is_some_and(|field| field.multi_single_has_mult_transmitter),
         _ => false,
     }
 }
 
 fn cabrillo_header_value(
-    cabrillo: &crate::contest_rules::CabrilloRules,
+    rules: &ContestRules,
     log_values: &Map<String, Value>,
     name: &str,
 ) -> Option<String> {
+    let cabrillo = rules.cabrillo.as_ref()?;
     cabrillo
-        .fixed_fields
+        .fixed_headers
         .iter()
         .find(|field| normalized_tag(&field.name) == name)
         .map(|field| field.value.trim().to_uppercase())
         .or_else(|| {
-            cabrillo
-                .log_fields
+            rules
+                .setup_fields
                 .iter()
-                .find(|field| normalized_tag(&field.name) == name)
+                .find(|field| {
+                    field
+                        .cabrillo_header
+                        .as_deref()
+                        .is_some_and(|header| normalized_tag(header) == name)
+                })
                 .and_then(|field| parameter_value(log_values, field))
                 .map(|value| value.trim().to_uppercase())
         })
@@ -289,7 +311,7 @@ fn exchange_token(field: &ExchangeField, log: &Log, contact: &Contact) -> Result
     if let Some(value) = token_string(contact_adif_value(contact, &field.adif)) {
         return Ok(value);
     }
-    if let Some(source_param) = &field.source_param
+    if let Some(source_param) = &field.source
         && let Some(value) = log
             .contest_params
             .as_object()
@@ -305,7 +327,7 @@ fn exchange_token(field: &ExchangeField, log: &Log, contact: &Contact) -> Result
     {
         return Ok(value);
     }
-    Err(format!("contact is missing {}", field.name))
+    Err(format!("contact is missing {}", field.label))
 }
 
 fn qso_frequency_token(contact: &Contact, bands: &[Band]) -> Result<String, String> {
@@ -338,9 +360,9 @@ fn cabrillo_mode_token(mode: &str) -> &'static str {
     }
 }
 
-fn parameter_value(values: &Map<String, Value>, field: &ContestParam) -> Option<String> {
+fn parameter_value(values: &Map<String, Value>, field: &SetupField) -> Option<String> {
     let value = values
-        .get(&field.name)
+        .get(&field.key)
         .and_then(|value| contact_string(Some(value)))
         .or_else(|| {
             field
@@ -348,7 +370,7 @@ fn parameter_value(values: &Map<String, Value>, field: &ContestParam) -> Option<
                 .as_ref()
                 .and_then(|value| contact_string(Some(value)))
         })?;
-    let value = if field.preserve_case == Some(true) {
+    let value = if field.preserve_case {
         value
     } else {
         value.to_uppercase()
@@ -385,10 +407,10 @@ fn contact_i64(value: Option<&Value>) -> Option<i64> {
 mod tests {
     use super::*;
     use crate::contest_rules::{
-        CabrilloFixedField, CabrilloRules, ContestParam, ContestRulesStore,
+        CabrilloFixedHeader, CabrilloRules, ContestRulesStore, ExchangeDirection, SetupField,
+        test_exchange_field, test_setup_field,
     };
     use serde_json::json;
-    use std::collections::BTreeMap;
     use std::path::PathBuf;
 
     fn test_bands() -> Vec<Band> {
@@ -430,141 +452,75 @@ mod tests {
     }
 
     fn test_rules() -> ContestRules {
+        let mut county = test_exchange_field(
+            "county-sent",
+            "County",
+            "String:4",
+            "STX_STRING",
+            ExchangeDirection::Sent,
+        );
+        county.fixed = true;
+        county.source = Some("County".to_string());
+        let mut category_mode = test_setup_field(
+            "category-mode",
+            "CATEGORY-MODE",
+            "Category Mode",
+            "String:8",
+        );
+        category_mode.validation.values = vec!["CW".to_string(), "MIXED".to_string()];
+        category_mode.widget = Some("select".to_string());
+        category_mode.cabrillo_header = Some("CATEGORY-MODE".to_string());
+
+        let mut name = test_setup_field("name", "NAME", "Name", "String:75");
+        name.preserve_case = true;
+        let mut address = test_setup_field("address", "ADDRESS", "Address", "String:45");
+        address.widget = Some("textarea".to_string());
+        address.max_lines = Some(6);
+        address.preserve_case = true;
+
         ContestRules {
-            contest: "SC-QSO-PARTY".to_string(),
-            display_name: "SC QSO Party".to_string(),
-            allowed_bands: vec!["20m".to_string()],
-            allowed_modes: vec!["CW".to_string(), "SSB".to_string()],
-            define: Vec::new(),
+            id: "SC-QSO-PARTY".to_string(),
+            name: "SC QSO Party".to_string(),
+            bands: vec!["20m".to_string()],
+            modes: vec!["CW".to_string(), "SSB".to_string()],
+            setup_fields: vec![category_mode],
             exchange: vec![
-                ExchangeField {
-                    name: "RST(s)".to_string(),
-                    field_type: "RST".to_string(),
-                    adif: "RST_SENT".to_string(),
-                    fixed: None,
-                    default: Some(json!(599)),
-                    source_param: None,
-                    regex: None,
-                    valid_values_or_regex: false,
-                    in_sets: Vec::new(),
-                    valid_values: Vec::new(),
-                    serial_scope: Default::default(),
-                    only_when: None,
-                    is_sent: true,
+                {
+                    let mut field = test_exchange_field(
+                        "rst-sent",
+                        "RST(s)",
+                        "RST",
+                        "RST_SENT",
+                        ExchangeDirection::Sent,
+                    );
+                    field.default = Some(json!(599));
+                    field
                 },
-                ExchangeField {
-                    name: "County".to_string(),
-                    field_type: "String:4".to_string(),
-                    adif: "STX_STRING".to_string(),
-                    fixed: Some(true),
-                    default: None,
-                    source_param: Some("County".to_string()),
-                    regex: None,
-                    valid_values_or_regex: false,
-                    in_sets: Vec::new(),
-                    valid_values: Vec::new(),
-                    serial_scope: Default::default(),
-                    only_when: None,
-                    is_sent: true,
-                },
-                ExchangeField {
-                    name: "RST(r)".to_string(),
-                    field_type: "RST".to_string(),
-                    adif: "RST_RCVD".to_string(),
-                    fixed: None,
-                    default: None,
-                    source_param: None,
-                    regex: None,
-                    valid_values_or_regex: false,
-                    in_sets: Vec::new(),
-                    valid_values: Vec::new(),
-                    serial_scope: Default::default(),
-                    only_when: None,
-                    is_sent: false,
-                },
-                ExchangeField {
-                    name: "Exchange".to_string(),
-                    field_type: "String:4".to_string(),
-                    adif: "SRX_STRING".to_string(),
-                    fixed: None,
-                    default: None,
-                    source_param: None,
-                    regex: None,
-                    valid_values_or_regex: false,
-                    in_sets: Vec::new(),
-                    valid_values: Vec::new(),
-                    serial_scope: Default::default(),
-                    only_when: None,
-                    is_sent: false,
-                },
+                county,
+                test_exchange_field(
+                    "rst-received",
+                    "RST(r)",
+                    "RST",
+                    "RST_RCVD",
+                    ExchangeDirection::Received,
+                ),
+                test_exchange_field(
+                    "exchange-received",
+                    "Exchange",
+                    "String:4",
+                    "SRX_STRING",
+                    ExchangeDirection::Received,
+                ),
             ],
-            qso_columns: Vec::new(),
-            qso_column_fields: BTreeMap::new(),
-            log_params: Vec::new(),
-            qso_points: None,
-            dupe_key: Vec::new(),
-            multipliers: Vec::new(),
-            bonus_points: Vec::new(),
-            param_multipliers: Vec::new(),
-            multiplier_count_bonus_points: Vec::new(),
             cabrillo: Some(CabrilloRules {
-                contest_id: None,
-                fixed_fields: vec![CabrilloFixedField {
+                fixed_headers: vec![CabrilloFixedHeader {
+                    id: "category-band".to_string(),
                     name: "CATEGORY-BAND".to_string(),
                     value: "ALL".to_string(),
                 }],
-                log_fields: vec![ContestParam {
-                    name: "CATEGORY-MODE".to_string(),
-                    label: "Category Mode".to_string(),
-                    field_type: "String:8".to_string(),
-                    required: None,
-                    regex: None,
-                    valid_values_or_regex: false,
-                    default: None,
-                    in_sets: Vec::new(),
-                    valid_values: vec!["CW".to_string(), "MIXED".to_string()],
-                    widget: Some("select".to_string()),
-                    help_text: None,
-                    max_lines: None,
-                    preserve_case: None,
-                    multi_single_has_mult_transmitter: false,
-                }],
-                export_fields: vec![
-                    ContestParam {
-                        name: "NAME".to_string(),
-                        label: "Name".to_string(),
-                        field_type: "String:75".to_string(),
-                        required: None,
-                        regex: None,
-                        valid_values_or_regex: false,
-                        default: None,
-                        in_sets: Vec::new(),
-                        valid_values: Vec::new(),
-                        widget: None,
-                        help_text: None,
-                        max_lines: None,
-                        preserve_case: Some(true),
-                        multi_single_has_mult_transmitter: false,
-                    },
-                    ContestParam {
-                        name: "ADDRESS".to_string(),
-                        label: "Address".to_string(),
-                        field_type: "String:45".to_string(),
-                        required: None,
-                        regex: None,
-                        valid_values_or_regex: false,
-                        default: None,
-                        in_sets: Vec::new(),
-                        valid_values: Vec::new(),
-                        widget: Some("textarea".to_string()),
-                        help_text: None,
-                        max_lines: Some(6),
-                        preserve_case: Some(true),
-                        multi_single_has_mult_transmitter: false,
-                    },
-                ],
+                export_fields: vec![name, address],
             }),
-            metadata: None,
+            ..ContestRules::default()
         }
     }
 
@@ -608,32 +564,20 @@ mod tests {
         )
     }
 
-    fn category_param(name: &str, multi_single_has_mult_transmitter: bool) -> ContestParam {
-        ContestParam {
-            name: name.to_string(),
-            label: name.to_string(),
-            field_type: "String:16".to_string(),
-            required: None,
-            regex: None,
-            valid_values_or_regex: false,
-            default: None,
-            in_sets: Vec::new(),
-            valid_values: Vec::new(),
-            widget: Some("select".to_string()),
-            help_text: None,
-            max_lines: None,
-            preserve_case: None,
-            multi_single_has_mult_transmitter,
-        }
+    fn category_param(name: &str, multi_single_has_mult_transmitter: bool) -> SetupField {
+        let mut field = test_setup_field(&name.to_ascii_lowercase(), name, name, "String:16");
+        field.widget = Some("select".to_string());
+        field.cabrillo_header = Some(name.to_string());
+        field.multi_single_has_mult_transmitter = multi_single_has_mult_transmitter;
+        field
     }
 
     fn categorized_rules(multi_single_has_mult_transmitter: bool) -> ContestRules {
         let mut rules = test_rules();
-        let cabrillo = rules.cabrillo.as_mut().expect("Cabrillo rules");
-        cabrillo
-            .log_fields
+        rules
+            .setup_fields
             .push(category_param("CATEGORY-OPERATOR", false));
-        cabrillo.log_fields.push(category_param(
+        rules.setup_fields.push(category_param(
             "CATEGORY-TRANSMITTER",
             multi_single_has_mult_transmitter,
         ));
@@ -687,12 +631,11 @@ mod tests {
     }
 
     #[test]
-    fn render_log_uses_configured_cabrillo_contest_id() {
+    fn render_log_uses_the_first_word_of_the_rule_id_as_contest_id() {
         let mut rules = test_rules();
-        rules.cabrillo.as_mut().expect("Cabrillo rules").contest_id =
-            Some("MDC-QSO-PARTY".to_string());
+        rules.id = "SC-QSO-PARTY (In-state)".to_string();
         let mut log = test_log();
-        log.contest_id = "MDC-QSO-PARTY (In State)".to_string();
+        log.contest_id = "IGNORED-LOG-ID".to_string();
 
         let text = render_log(
             &rules,
@@ -706,7 +649,7 @@ mod tests {
         )
         .expect("export should render");
 
-        assert!(text.lines().any(|line| line == "CONTEST: MDC-QSO-PARTY"));
+        assert!(text.lines().any(|line| line == "CONTEST: SC-QSO-PARTY"));
     }
 
     #[test]

@@ -276,23 +276,9 @@ mod tests {
     fn module() -> Arc<ContestScoringModule> {
         crate::scoring::ScoringModules::new().get(
             &crate::contest_rules::ContestRules {
-                contest: "test".to_string(),
-                display_name: "Test".to_string(),
-                allowed_bands: Vec::new(),
-                allowed_modes: Vec::new(),
-                define: Vec::new(),
-                exchange: Vec::new(),
-                qso_columns: Vec::new(),
-                qso_column_fields: std::collections::BTreeMap::new(),
-                log_params: Vec::new(),
-                qso_points: None,
-                dupe_key: Vec::new(),
-                multipliers: Vec::new(),
-                bonus_points: Vec::new(),
-                param_multipliers: Vec::new(),
-                multiplier_count_bonus_points: Vec::new(),
-                cabrillo: None,
-                metadata: None,
+                id: "test".to_string(),
+                name: "Test".to_string(),
+                ..crate::contest_rules::ContestRules::default()
             },
             serde_json::Value::Null,
         )

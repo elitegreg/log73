@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { parseFieldType } from '../domain/contactFields';
+import { parseFieldInput } from '../domain/contactFields';
 import {
   epochFromLegacyQsoDateTime,
   formatUtcDateTime,
@@ -11,16 +11,15 @@ import { validateExchangeField } from '../domain/validation';
 import { useNotifications } from '../lib/notificationsContext';
 import { sanitizeLogCellUpdate } from './logWindowHelpers';
 
-const READ_ONLY_COLUMNS = new Set(['Mult', 'Pts']);
 const COLUMN_PADDING_CHARS = 2;
 const FIXED_COLUMN_WIDTHS = {
-  'Date/Time (UTC)': 19,
-  Freq: 7,
-  Mode: 3,
-  Call: 12,
-  Mult: 2,
-  Pts: 2,
-  Op: 12,
+  'date-time': 19,
+  frequency: 7,
+  mode: 3,
+  call: 12,
+  multipliers: 2,
+  points: 2,
+  operator: 12,
 };
 const VIRTUAL_ROW_HEIGHT_PX = 22;
 const VIRTUAL_OVERSCAN_ROWS = 8;
@@ -62,7 +61,8 @@ function detailRowsForContact(entry) {
     )
     .sort(
       (left, right) =>
-        left.key.localeCompare(right.key) || left.sectionIndex - right.sectionIndex,
+        left.key.localeCompare(right.key) ||
+        left.sectionIndex - right.sectionIndex,
     )
     .map(({ key, value }) => [key, value]);
 }
@@ -113,23 +113,13 @@ function formatFrequency(entry, field = 'FREQ') {
   return (frequencyHz / 1000).toFixed(3).replace(/0+$/, '').replace(/\.$/, '');
 }
 
-function fieldMapFromSettings(settings) {
-  const fieldMap = { ...(settings?.qso_column_fields ?? {}) };
-
-  for (const field of settings?.exchange ?? []) {
-    if (field.name && field.adif) fieldMap[field.name] = field.adif;
-  }
-
-  return fieldMap;
-}
-
 function columnWidthChars(settings, column, radioMode) {
-  const headerWidth = String(column).length;
-  let dataWidth = FIXED_COLUMN_WIDTHS[column];
+  const headerWidth = String(column.label).length;
+  let dataWidth = FIXED_COLUMN_WIDTHS[column.id];
 
   const exchangeField = exchangeFieldForColumn(settings, column);
   if (!dataWidth && exchangeField) {
-    dataWidth = parseFieldType(exchangeField.type, radioMode).maxLength;
+    dataWidth = parseFieldInput(exchangeField.input, radioMode).maxLength;
   }
 
   return Math.max(dataWidth ?? 4, headerWidth, 4);
@@ -152,12 +142,11 @@ function columnWidthStyle(settings, column, radioMode, columns) {
   return { width: columnWidthPercent(settings, column, radioMode, columns) };
 }
 
-function exchangeValueForColumn(settings, column, entry, columnFieldMap) {
+function exchangeValueForColumn(settings, column, entry) {
   const exchangeField = exchangeFieldForColumn(settings, column);
   if (!exchangeField) return null;
-  const adifField = columnFieldMap[column] ?? exchangeField.adif;
   const adif = entryAdif(entry);
-  return adif[adifField] ?? adif[column] ?? entry[adifField] ?? entry[column] ?? '';
+  return adif[column.field] ?? entry[column.field] ?? '';
 }
 
 function contactMode(entry, fallbackMode = 'CW') {
@@ -165,37 +154,30 @@ function contactMode(entry, fallbackMode = 'CW') {
   return String(adif.MODE ?? adif.Mode ?? fallbackMode).toUpperCase();
 }
 
-function cellValidation(settings, column, entry, columnFieldMap, radioMode) {
+function cellValidation(settings, column, entry, radioMode) {
   const exchangeField = exchangeFieldForColumn(settings, column);
-  if (!exchangeField || exchangeField.is_sent) return { ok: true, error: '' };
+  if (!exchangeField) {
+    return { ok: true, error: '' };
+  }
   return validateExchangeField(
     exchangeField,
-    exchangeValueForColumn(settings, column, entry, columnFieldMap),
+    exchangeValueForColumn(settings, column, entry),
     contactMode(entry, radioMode),
     entryAdif(entry),
   );
 }
 
-function formatCell(column, entry, columnFieldMap) {
-  if (column === 'Date/Time (UTC)') {
+function formatCell(column, entry) {
+  if (column.format === 'date_time_utc') {
     return formatDateTime(entry);
   }
 
-  if (column === 'Freq') {
-    return formatFrequency(entry, columnFieldMap[column]);
+  if (column.format === 'frequency_khz') {
+    return formatFrequency(entry, column.field);
   }
 
-  if (column === 'Mult') {
-    return entryMeta(entry).mult ?? entry[column] ?? '';
-  }
-
-  if (column === 'Pts') {
-    return entryMeta(entry).pts ?? entry[column] ?? '';
-  }
-
-  const adifField = columnFieldMap[column];
-  const adif = entryAdif(entry);
-  return adif[adifField] ?? adif[column] ?? '';
+  const values = column.source === 'meta' ? entryMeta(entry) : entryAdif(entry);
+  return values[column.field] ?? entry[column.field] ?? '';
 }
 
 function contactKey(entry, index) {
@@ -224,19 +206,8 @@ function contactRowTitle(entry) {
     : 'Contact upload failed.';
 }
 
-function isSentSerialExchangeField(field) {
-  return (
-    field?.is_sent === true && parseFieldType(field?.type).kind === 'SERIAL'
-  );
-}
-
-function editableFieldForColumn(settings, column, columnFieldMap) {
-  if (READ_ONLY_COLUMNS.has(column)) return null;
-  if (isSentSerialExchangeField(exchangeFieldForColumn(settings, column))) {
-    return null;
-  }
-  if (column === 'Date/Time (UTC)') return 'QSO_DATE_TIME_ON';
-  return columnFieldMap[column] ?? column;
+function editableFieldForColumn(column) {
+  return column.editable ? column.field : null;
 }
 
 function parseDateTimeUtc(value) {
@@ -244,7 +215,9 @@ function parseDateTimeUtc(value) {
 }
 
 function exchangeFieldForColumn(settings, column) {
-  return (settings?.exchange ?? []).find((field) => field.name === column);
+  return (settings?.exchange ?? []).find(
+    (field) => field.adif === column.field,
+  );
 }
 
 function sanitizeUpdateInput(settings, column, value, radioMode) {
@@ -252,7 +225,7 @@ function sanitizeUpdateInput(settings, column, value, radioMode) {
 }
 
 function parseUpdateValue(settings, column, value, radioMode, entry = null) {
-  if (column === 'Date/Time (UTC)') {
+  if (column.format === 'date_time_utc') {
     const epoch = parseDateTimeUtc(value);
     if (epoch === null) {
       return {
@@ -264,7 +237,7 @@ function parseUpdateValue(settings, column, value, radioMode, entry = null) {
     return { ok: true, value: epoch };
   }
 
-  if (column === 'Freq') {
+  if (column.format === 'frequency_khz') {
     const parsedFrequency = Number.parseFloat(String(value));
     if (!Number.isFinite(parsedFrequency) || parsedFrequency <= 0) {
       return { ok: false, error: 'Enter a valid frequency.' };
@@ -276,17 +249,17 @@ function parseUpdateValue(settings, column, value, radioMode, entry = null) {
     };
   }
 
-  if (column === 'Mode') {
+  if (column.field === 'MODE') {
     const mode = adifModeForLoggerMode(value);
     if (
-      (settings?.allowed_modes ?? []).length > 0 &&
-      !settings.allowed_modes.some(
+      (settings?.modes ?? []).length > 0 &&
+      !settings.modes.some(
         (allowedMode) => String(allowedMode).trim().toUpperCase() === mode,
       )
     ) {
       return {
         ok: false,
-        error: `Enter one of: ${settings.allowed_modes.join(', ')}.`,
+        error: `Enter one of: ${settings.modes.join(', ')}.`,
       };
     }
 
@@ -301,7 +274,7 @@ function parseUpdateValue(settings, column, value, radioMode, entry = null) {
     validationMode,
   ).trim();
   const exchangeField = exchangeFieldForColumn(settings, column);
-  if (exchangeField && !exchangeField.is_sent) {
+  if (exchangeField) {
     const validation = validateExchangeField(
       exchangeField,
       sanitizedValue,
@@ -341,11 +314,7 @@ function LogWindow({
   onLoadMoreContacts,
 }) {
   const { notifyError } = useNotifications();
-  const columns = settings?.qso_columns ?? [];
-  const columnFieldMap = useMemo(
-    () => fieldMapFromSettings(settings),
-    [settings],
-  );
+  const columns = settings?.qso_table?.columns ?? [];
   const [selectedKeys, setSelectedKeys] = useState(() => new Set());
   const [contextMenu, setContextMenu] = useState(null);
   const [detailsContact, setDetailsContact] = useState(null);
@@ -501,11 +470,7 @@ function LogWindow({
 
   function beginUpdate() {
     if (!contextMenu) return;
-    const field = editableFieldForColumn(
-      settings,
-      contextMenu.column,
-      columnFieldMap,
-    );
+    const field = editableFieldForColumn(contextMenu.column);
     if (!field) return;
     const contactIndex = contacts.findIndex(
       (entry, index) => contactKey(entry, index) === contextMenu.contactKey,
@@ -515,9 +480,7 @@ function LogWindow({
     setEditingCell({
       key: contextMenu.contactKey,
       column: contextMenu.column,
-      value: String(
-        formatCell(contextMenu.column, contacts[contactIndex], columnFieldMap),
-      ),
+      value: String(formatCell(contextMenu.column, contacts[contactIndex])),
     });
     setContextMenu(null);
   }
@@ -539,11 +502,7 @@ function LogWindow({
 
   function finishUpdate() {
     if (!editingCell) return;
-    const field = editableFieldForColumn(
-      settings,
-      editingCell.column,
-      columnFieldMap,
-    );
+    const field = editableFieldForColumn(editingCell.column);
     if (!field) return;
 
     const contactIndex = contacts.findIndex(
@@ -559,7 +518,7 @@ function LogWindow({
     );
     if (!parsed.ok) {
       notifyError(parsed.error, {
-        dedupeKey: `LogWindow.inlineEdit:${editingCell.column}:${parsed.error}`,
+        dedupeKey: `LogWindow.inlineEdit:${editingCell.column.id}:${parsed.error}`,
       });
       inputRef.current?.focus();
       return;
@@ -575,7 +534,7 @@ function LogWindow({
       <div className="log-title-bar">
         <div className="log-title-main">
           Log: {log?.name ?? 'Loading log...'} -{' '}
-          {settings?.contest ?? 'Loading contest...'}
+          {settings?.id ?? 'Loading contest...'}
           {contactsLoadMessage ? (
             <span className="log-title-status"> ({contactsLoadMessage})</span>
           ) : null}
@@ -590,7 +549,7 @@ function LogWindow({
           <colgroup>
             {columns.map((column) => (
               <col
-                key={column}
+                key={column.id}
                 style={columnWidthStyle(settings, column, radioMode, columns)}
               />
             ))}
@@ -598,7 +557,7 @@ function LogWindow({
           <thead>
             <tr>
               {columns.map((column) => (
-                <th key={column}>{column}</th>
+                <th key={column.id}>{column.label}</th>
               ))}
             </tr>
           </thead>
@@ -633,17 +592,16 @@ function LogWindow({
                       {columns.map((column) => {
                         const isEditing =
                           editingCell?.key === key &&
-                          editingCell.column === column;
+                          editingCell.column.id === column.id;
                         const validation = cellValidation(
                           settings,
                           column,
                           entry,
-                          columnFieldMap,
                           radioMode,
                         );
                         return (
                           <td
-                            key={column}
+                            key={column.id}
                             className={
                               validation.ok ? undefined : 'invalid-cell'
                             }
@@ -680,7 +638,7 @@ function LogWindow({
                                 }}
                               />
                             ) : (
-                              formatCell(column, entry, columnFieldMap)
+                              formatCell(column, entry)
                             )}
                           </td>
                         );
@@ -720,13 +678,7 @@ function LogWindow({
               </button>
               <button
                 type="button"
-                disabled={
-                  !editableFieldForColumn(
-                    settings,
-                    contextMenu.column,
-                    columnFieldMap,
-                  )
-                }
+                disabled={!editableFieldForColumn(contextMenu.column)}
                 onClick={beginUpdate}
               >
                 Update selected{' '}

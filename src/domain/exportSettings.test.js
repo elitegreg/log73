@@ -9,8 +9,8 @@ test('defaultExportValues prefers stored values over log params and YAML default
   const settings = {
     cabrillo: {
       export_fields: [
-        { name: 'NAME', default: 'Rule Default' },
-        { name: 'EMAIL', default: 'rule@example.com' },
+        { key: 'NAME', default: 'Rule Default' },
+        { key: 'EMAIL', default: 'rule@example.com' },
       ],
     },
   };
@@ -33,7 +33,7 @@ test('defaultExportValues prefers stored values over log params and YAML default
 test('defaultExportValues falls back LOCATION to existing contest params', () => {
   const settings = {
     cabrillo: {
-      export_fields: [{ name: 'LOCATION' }],
+      export_fields: [{ key: 'LOCATION' }],
     },
   };
   const log = {
@@ -50,7 +50,7 @@ test('defaultExportValues falls back LOCATION to existing contest params', () =>
 test('defaultExportValues preserves blank stored values', () => {
   const settings = {
     cabrillo: {
-      export_fields: [{ name: 'LOCATION', default: 'SC' }],
+      export_fields: [{ key: 'LOCATION', default: 'SC' }],
     },
   };
   const log = {

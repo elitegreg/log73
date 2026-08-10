@@ -1,5 +1,5 @@
 import React from 'react';
-import { parseFieldType } from '../../domain/contactFields';
+import { parseFieldInput } from '../../domain/contactFields';
 import {
   validateCallsign,
   validateExchangeField,
@@ -56,7 +56,7 @@ function EntryFields({
         />
       </label>
       {settings?.exchange?.map((field, index) => {
-        const { kind, maxLength } = parseFieldType(field.type, radioMode);
+        const { kind, maxLength } = parseFieldInput(field.input, radioMode);
         const value = exchangeValue(field);
         const validation = validateExchangeField(
           field,
@@ -64,21 +64,22 @@ function EntryFields({
           radioMode,
           conditionFields,
         );
-        const fieldWidthChars = Math.max(maxLength + 1, field.name.length, 4);
+        const fieldWidthChars = Math.max(maxLength + 1, field.label.length, 4);
         const readOnly =
-          field.fixed === true || (field.is_sent && kind === 'SERIAL');
+          field.fixed === true ||
+          (field.direction === 'sent' && kind === 'SERIAL');
 
         return (
           <label
             className="entry-field"
-            key={field.name}
+            key={field.id}
             style={{ flex: `${fieldWidthChars} 1 ${fieldWidthChars}em` }}
           >
-            <span>{field.name}</span>
+            <span>{field.label}</span>
             <input
               ref={(element) => {
-                if (element) exchangeInputRefs.current[field.name] = element;
-                else delete exchangeInputRefs.current[field.name];
+                if (element) exchangeInputRefs.current[field.id] = element;
+                else delete exchangeInputRefs.current[field.id];
               }}
               type="text"
               inputMode={
@@ -92,7 +93,7 @@ function EntryFields({
               }
               onKeyDown={(event) => handleExchangeKeyDown(event, index)}
               onFocus={() =>
-                setActiveCompletionField(readOnly ? null : field.name)
+                setActiveCompletionField(readOnly ? null : field.id)
               }
               onBlur={() => setActiveCompletionField(null)}
               readOnly={readOnly}

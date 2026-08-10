@@ -36,7 +36,7 @@ This manual assumes a production-style install similar to:
 ```text
 /opt/log73/bin/log73-backend
 ~/.config/log73/
-~/.local/share/log73/contest-rules/*.yaml
+~/.local/share/log73/contest-rules/*.{yaml,dat}
 ~/.local/share/log73/MASTER.SCP
 ~/.local/share/log73/cty.csv
 ~/.local/share/log73/bands_1.csv

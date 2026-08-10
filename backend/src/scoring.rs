@@ -17,7 +17,7 @@ impl ScoringModules {
     }
 
     pub fn get(&self, rules: &ContestRules, contest_params: Value) -> Arc<ContestScoringModule> {
-        let cache_key = scoring_module_key(&rules.contest, &contest_params);
+        let cache_key = scoring_module_key(&rules.id, &contest_params);
         let mut modules = self.modules.lock().expect("scoring modules mutex poisoned");
         if let Some(module) = modules.get(&cache_key) {
             return Arc::clone(module);
@@ -81,7 +81,7 @@ impl ContestScoringModule {
     }
 
     pub fn has_multipliers(&self) -> bool {
-        !self.rules.multipliers.is_empty()
+        !self.rules.scoring.multipliers.is_empty()
     }
 
     pub fn score_factor(&self) -> i64 {
@@ -89,17 +89,21 @@ impl ContestScoringModule {
     }
 
     pub fn dupe_key_for(&self, contact: &Contact) -> Option<String> {
-        if self.rules.dupe_key.is_empty() {
+        if self.rules.scoring.dupe_key.is_empty() {
             return None;
         }
-        Some(scoring_key(contact, &self.rules, &self.rules.dupe_key))
+        Some(scoring_key(
+            contact,
+            &self.rules,
+            &self.rules.scoring.dupe_key,
+        ))
     }
 
     pub fn qso_points_for(&self, contact: &Contact) -> i64 {
         if !contact_in_category_band(&self.rules, &self.contest_params, contact) {
             return 0;
         }
-        let Some(qso_points) = &self.rules.qso_points else {
+        let Some(qso_points) = &self.rules.scoring.qso_points else {
             return 0;
         };
 
@@ -111,6 +115,7 @@ impl ContestScoringModule {
             return Vec::new();
         }
         self.rules
+            .scoring
             .multipliers
             .iter()
             .filter(|multiplier| multiplier_matches(multiplier, contact, &self.rules))
@@ -126,7 +131,7 @@ impl ContestScoringModule {
 
     pub fn bonus_keys_for(&self, contact: &Contact) -> Vec<(String, i64)> {
         let mut keys = Vec::new();
-        for bonus in &self.rules.bonus_points {
+        for bonus in &self.rules.scoring.bonus_points {
             let Some(value) = field_value(contact, &self.rules, &bonus.field) else {
                 continue;
             };
@@ -152,6 +157,7 @@ impl ContestScoringModule {
     {
         let multiplier_keys = multiplier_keys.into_iter().collect::<Vec<_>>();
         self.rules
+            .scoring
             .multiplier_count_bonus_points
             .iter()
             .map(|bonus| {
@@ -174,25 +180,7 @@ impl ContestScoringModule {
 impl Default for ContestScoringModule {
     fn default() -> Self {
         Self {
-            rules: ContestRules {
-                contest: String::new(),
-                display_name: String::new(),
-                allowed_bands: Vec::new(),
-                allowed_modes: Vec::new(),
-                define: Vec::new(),
-                exchange: Vec::new(),
-                qso_columns: Vec::new(),
-                qso_column_fields: Default::default(),
-                log_params: Vec::new(),
-                qso_points: None,
-                dupe_key: Vec::new(),
-                multipliers: Vec::new(),
-                bonus_points: Vec::new(),
-                param_multipliers: Vec::new(),
-                multiplier_count_bonus_points: Vec::new(),
-                cabrillo: None,
-                metadata: None,
-            },
+            rules: ContestRules::default(),
             contest_params: Value::Null,
             score_factor: 1,
         }
@@ -334,6 +322,7 @@ pub fn score_contacts(
 
 fn score_factor_for(rules: &ContestRules, contest_params: &Value) -> i64 {
     rules
+        .scoring
         .param_multipliers
         .iter()
         .map(|multiplier| {
@@ -442,26 +431,18 @@ fn condition_matches(
     };
     let suffix_value = json_string(contact_adif_value(contact, &condition.field))
         .or_else(|| json_string(contact_meta_value(contact, &condition.field)))
-        .or_else(|| {
-            rules
-                .qso_column_fields
-                .get(&condition.field)
-                .and_then(|adif| json_string(contact_adif_value(contact, adif)))
-        })
         .map(|value| value.trim().to_uppercase())
         .unwrap_or_else(|| value.clone());
 
     let valid_values = condition
-        .valid_values
+        .values
         .iter()
-        .chain(condition.values.iter())
         .map(|value| value.to_uppercase())
         .collect::<HashSet<_>>();
 
     let excluded_values = condition
-        .excluded_valid_values
+        .exclude_values
         .iter()
-        .chain(condition.exclude_values.iter())
         .map(|value| value.to_uppercase())
         .collect::<HashSet<_>>();
     let suffixes_match = condition.suffixes.is_empty()
@@ -521,14 +502,14 @@ fn multiplier_matches(
         return false;
     }
 
-    multiplier.valid_values.is_empty()
+    multiplier.values.is_empty()
         || multiplier
-            .valid_values
+            .values
             .iter()
             .any(|valid_value| valid_value.eq_ignore_ascii_case(&value))
 }
 
-fn field_value(contact: &Map<String, Value>, rules: &ContestRules, field: &str) -> Option<String> {
+fn field_value(contact: &Map<String, Value>, _rules: &ContestRules, field: &str) -> Option<String> {
     if field.eq_ignore_ascii_case("MODE_CLASS") {
         let mode = json_string(contact_adif_value(contact, "MODE"))?;
         return Some(match mode.trim().to_uppercase().as_str() {
@@ -548,12 +529,6 @@ fn field_value(contact: &Map<String, Value>, rules: &ContestRules, field: &str) 
     }
     json_string(contact_adif_value(contact, field))
         .or_else(|| json_string(contact_meta_value(contact, field)))
-        .or_else(|| {
-            rules
-                .qso_column_fields
-                .get(field)
-                .and_then(|adif| json_string(contact_adif_value(contact, adif)))
-        })
         .map(|value| normalized_field_value(field, &value))
         .filter(|value| !value.is_empty())
 }
@@ -564,6 +539,7 @@ fn contact_in_category_band(
     contact: &Contact,
 ) -> bool {
     let Some(param_name) = rules
+        .scoring
         .qso_points
         .as_ref()
         .and_then(|qso_points| qso_points.category_band_param.as_deref())
@@ -1101,8 +1077,9 @@ fn collect_changed_contacts(
 mod tests {
     use super::*;
     use crate::contest_rules::{
-        BonusPointRule, CabrilloRules, ContestParam, ContestRules, ContestRulesStore,
-        GeographyQsoPoints, MultiplierCountBonusRule, ParamMultiplierRule, QsoPointRule, QsoPoints,
+        BonusPointRule, ContestRules, ContestRulesStore, GeographyQsoPoints,
+        MultiplierCountBonusRule, ParamMultiplierRule, QsoPointRule, QsoPoints, ScoringRules,
+        test_multiplier_rule, test_scoring_condition, test_setup_field,
     };
     use serde_json::json;
     use std::{collections::BTreeMap, path::PathBuf};
@@ -1120,53 +1097,39 @@ mod tests {
             .zip(score_factors)
             .map(|(value, factor)| ((*value).to_string(), factor))
             .collect::<BTreeMap<_, _>>();
+        let mut category_power = test_setup_field(
+            "category-power",
+            "CATEGORY-POWER",
+            "Category Power",
+            "String:16",
+        );
+        category_power.validation.values = category_power_values
+            .iter()
+            .map(|value| (*value).to_string())
+            .collect();
         ContestRules {
-            contest: "TEST".to_string(),
-            display_name: "Test".to_string(),
-            allowed_bands: Vec::new(),
-            allowed_modes: Vec::new(),
-            define: Vec::new(),
-            exchange: Vec::new(),
-            qso_columns: Vec::new(),
-            qso_column_fields: BTreeMap::new(),
-            log_params: Vec::new(),
-            qso_points: Some(qso_points),
-            dupe_key: dupe_key.into_iter().map(str::to_string).collect(),
-            multipliers,
-            bonus_points,
-            param_multipliers: (!factor_values.is_empty())
-                .then_some(ParamMultiplierRule {
-                    param: "CATEGORY-POWER".to_string(),
-                    values: factor_values,
-                })
+            id: "TEST".to_string(),
+            name: "Test".to_string(),
+            setup_fields: (!category_power_values.is_empty())
+                .then_some(category_power)
                 .into_iter()
                 .collect(),
-            multiplier_count_bonus_points: Vec::new(),
-            cabrillo: (!category_power_values.is_empty()).then_some(CabrilloRules {
-                contest_id: None,
-                fixed_fields: Vec::new(),
-                log_fields: vec![ContestParam {
-                    name: "CATEGORY-POWER".to_string(),
-                    label: "Category Power".to_string(),
-                    field_type: "String:16".to_string(),
-                    required: None,
-                    regex: None,
-                    valid_values_or_regex: false,
-                    default: None,
-                    in_sets: Vec::new(),
-                    valid_values: category_power_values
-                        .into_iter()
-                        .map(str::to_string)
-                        .collect(),
-                    widget: None,
-                    help_text: None,
-                    max_lines: None,
-                    preserve_case: None,
-                    multi_single_has_mult_transmitter: false,
-                }],
-                export_fields: Vec::new(),
-            }),
-            metadata: None,
+            scoring: ScoringRules {
+                qso_points: Some(qso_points),
+                dupe_key: dupe_key.into_iter().map(str::to_string).collect(),
+                multipliers,
+                bonus_points,
+                param_multipliers: (!factor_values.is_empty())
+                    .then_some(ParamMultiplierRule {
+                        id: "category-power".to_string(),
+                        param: "CATEGORY-POWER".to_string(),
+                        values: factor_values,
+                    })
+                    .into_iter()
+                    .collect(),
+                multiplier_count_bonus_points: Vec::new(),
+            },
+            ..ContestRules::default()
         }
     }
 
@@ -1184,22 +1147,13 @@ mod tests {
             points: None,
             rules: vec![
                 QsoPointRule {
-                    when: Some(ScoringCondition {
-                        field: "MODE".to_string(),
-                        in_set: None,
-                        in_sets: Vec::new(),
-                        values: vec!["SSB".to_string()],
-                        valid_values: Vec::new(),
-                        exclude_in_sets: Vec::new(),
-                        exclude_values: Vec::new(),
-                        excluded_valid_values: Vec::new(),
-                        suffixes: Vec::new(),
-                        exclude_suffixes: Vec::new(),
-                    }),
+                    id: "ssb".to_string(),
+                    when: Some(test_scoring_condition("MODE", &["SSB"])),
                     when_all: Vec::new(),
                     points: 1,
                 },
                 QsoPointRule {
+                    id: "default".to_string(),
                     when: None,
                     when_all: Vec::new(),
                     points: 2,
@@ -1211,18 +1165,9 @@ mod tests {
     }
 
     fn state_multiplier() -> MultiplierRule {
-        MultiplierRule {
-            name: "State".to_string(),
-            field: "STATE".to_string(),
-            key: vec!["STATE".to_string()],
-            in_sets: Vec::new(),
-            valid_values: Vec::new(),
-            when: None,
-            when_all: Vec::new(),
-            exclude_call_suffixes: Vec::new(),
-            exclude_values: Vec::new(),
-            fixed_key: None,
-        }
+        let mut multiplier = test_multiplier_rule("state", "State", "STATE");
+        multiplier.key = vec!["STATE".to_string()];
+        multiplier
     }
 
     fn geography_points() -> QsoPoints {
@@ -1246,6 +1191,7 @@ mod tests {
 
     fn bonus_station(points: i64) -> BonusPointRule {
         BonusPointRule {
+            id: "bonus-station".to_string(),
             name: "Bonus Station".to_string(),
             field: "CALL".to_string(),
             key: vec!["CALL".to_string(), "BAND".to_string()],
@@ -1380,41 +1326,31 @@ mod tests {
 
     #[test]
     fn conditional_point_rules_distinguish_arrl_160_domestic_and_dx_contacts() {
-        let domestic = || ScoringCondition {
-            field: "DXCC".to_string(),
-            in_set: None,
-            in_sets: Vec::new(),
-            values: vec!["1".to_string(), "291".to_string()],
-            valid_values: Vec::new(),
-            exclude_in_sets: Vec::new(),
-            exclude_values: Vec::new(),
-            excluded_valid_values: Vec::new(),
-            suffixes: Vec::new(),
-            exclude_suffixes: Vec::new(),
-        };
-        let station_domestic = || ScoringCondition {
-            field: "MY_DXCC".to_string(),
-            ..domestic()
-        };
+        let domestic = || test_scoring_condition("DXCC", &["1", "291"]);
+        let station_domestic = || test_scoring_condition("MY_DXCC", &["1", "291"]);
         let points = QsoPoints {
             points: None,
             rules: vec![
                 QsoPointRule {
+                    id: "both-domestic".to_string(),
                     when: None,
                     when_all: vec![domestic(), station_domestic()],
                     points: 2,
                 },
                 QsoPointRule {
+                    id: "worked-domestic".to_string(),
                     when: Some(domestic()),
                     when_all: Vec::new(),
                     points: 5,
                 },
                 QsoPointRule {
+                    id: "station-domestic".to_string(),
                     when: Some(station_domestic()),
                     when_all: Vec::new(),
                     points: 5,
                 },
                 QsoPointRule {
+                    id: "default".to_string(),
                     when: None,
                     when_all: Vec::new(),
                     points: 0,
@@ -1800,7 +1736,8 @@ mod tests {
             vec![1, 2, 3],
             vec!["HIGH", "LOW", "QRP"],
         );
-        rules.param_multipliers.push(ParamMultiplierRule {
+        rules.scoring.param_multipliers.push(ParamMultiplierRule {
+            id: "category-station".to_string(),
             param: "CATEGORY-STATION".to_string(),
             values: BTreeMap::from([
                 ("FIXED".to_string(), 1),
@@ -1907,8 +1844,10 @@ mod tests {
             Vec::new(),
         );
         rules
+            .scoring
             .multiplier_count_bonus_points
             .push(MultiplierCountBonusRule {
+                id: "state-sweep".to_string(),
                 name: "State Sweep".to_string(),
                 multiplier: "State".to_string(),
                 thresholds: BTreeMap::from([(2, 250), (3, 500)]),
@@ -2482,8 +2421,10 @@ mod tests {
             Vec::new(),
         );
         rules
+            .scoring
             .multiplier_count_bonus_points
             .push(MultiplierCountBonusRule {
+                id: "state-sweep".to_string(),
                 name: "State Sweep".to_string(),
                 multiplier: "State".to_string(),
                 thresholds: BTreeMap::from([(2, 250), (3, 500)]),

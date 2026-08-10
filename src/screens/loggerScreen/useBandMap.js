@@ -94,7 +94,7 @@ export function visibleBandMapSpotStoreForCurrentBand({
   radioFrequencyHz,
 }) {
   const baseStore = store ?? createBandMapSpotStore();
-  const allowedBands = settings?.allowed_bands ?? [];
+  const allowedBands = settings?.bands ?? [];
   const bandCatalog = settings?.band_catalog ?? [];
   const currentBand = bandForFrequency(Number(radioFrequencyHz), bandCatalog);
 
@@ -155,15 +155,21 @@ export function useBandMap({
     sync.generation += 1;
   }, []);
 
-  const warnBandMapSequenceGap = useCallback((reason, expectedSequence, result) => {
-    console.warn('[BandMap] WARNING: sequence gap detected; refreshing snapshot.', {
-      reason,
-      expectedSequence,
-      receivedSequence: result?.messageSequence ?? null,
-      currentSequence: expectedSequence - 1,
-      messageType: result?.message?.type ?? null,
-    });
-  }, []);
+  const warnBandMapSequenceGap = useCallback(
+    (reason, expectedSequence, result) => {
+      console.warn(
+        '[BandMap] WARNING: sequence gap detected; refreshing snapshot.',
+        {
+          reason,
+          expectedSequence,
+          receivedSequence: result?.messageSequence ?? null,
+          currentSequence: expectedSequence - 1,
+          messageType: result?.message?.type ?? null,
+        },
+      );
+    },
+    [],
+  );
 
   const refreshBandMapSnapshot = useCallback(
     async (reason) => {

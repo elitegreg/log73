@@ -1,139 +1,91 @@
+schema: 2
 contests:
-  - id: 'ARRL-FIELD-DAY'
-    display_name: 'ARRL Field Day'
-    allowed_bands: [160, 80, 40, 20, 15, 10, 6, 2]
-    allowed_modes: ['SSB', 'FM', 'CW']
+  ARRL-FIELD-DAY:
+    name: ARRL Field Day
+    modes:
+      - SSB
+      - FM
+      - CW
+    value_sets:
+      DX:
+        use: dx
+      ARRL Sections:
+        use: arrl-sections
+      RAC Sections:
+        use: rac-sections
+    setup_fields:
+      - id: param-class
+        key: Class
+        label: Class
+        type: String:3
+        required: true
+        regex: ^\d+[A-F]$
+      - id: param-section
+        key: Section
+        label: Section
+        type: String:3
+        required: true
+        in_sets: [ARRL Sections, RAC Sections]
+      - id: header-category-operator
+        preset: category-operator
+        valid_values: [SINGLE-OP, MULTI-OP]
+      - id: header-category-power
+        preset: category-power
+        valid_values: [HIGH, LOW, QRP]
+      - id: header-category-station
+        preset: category-station
+        valid_values: [FIXED, MOBILE, PORTABLE]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        valid_values: [ONE, UNLIMITED]
+    exchange:
+      - id: class-sent
+        label: Class(s)
+        type: String:3
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        regex: ^\d+[A-F]$
+        source: Class
+      - id: section-sent
+        label: Section(s)
+        type: String:3
+        adif: MY_ARRL_SECT
+        direction: sent
+        fixed: true
+        in_sets: [ARRL Sections, RAC Sections, DX]
+        source: Section
+      - id: class-received
+        label: Class
+        type: String:3
+        adif: SRX_STRING
+        direction: received
+        regex: ^\d+[A-F]$
+      - id: section-received
+        label: Section
+        type: String:3
+        adif: ARRL_SECT
+        direction: received
+        in_sets: [ARRL Sections, RAC Sections, DX]
     scoring:
       qso_points:
-        rules:
-          - when:
-              field: 'MODE'
-              values: ['SSB', 'FM']
-            points: 1
-          - points: 2
+        rules: [{id: qso-rule-1, when: {field: MODE, values: [SSB, FM]}, points: 1}, {id: qso-rule-2, points: 2}]
       dupe_key:
-        - 'CALL'
-        - 'BAND'
-        - 'MODE'
+        - CALL
+        - BAND
+        - MODE
       param_multipliers:
-        - param: 'CATEGORY-POWER'
-          values:
-            HIGH: 1
-            LOW: 2
-            QRP: 5
+        - {id: param-mult-category-power, param: CATEGORY-POWER, values: {HIGH: 1, LOW: 2, QRP: 5}}
     cabrillo:
-      fixed_fields:
-        - name: 'CATEGORY-BAND'
-          value: 'ALL'
-        - name: 'CATEGORY-MODE'
-          value: 'ALL'
-      log_fields:
-        - name: 'CATEGORY-OPERATOR'
-          label: 'Category Operator'
-          type: 'String:16'
-          widget: 'select'
-          valid_values: ['SINGLE-OP', 'MULTI-OP']
-        - name: 'CATEGORY-POWER'
-          label: 'Category Power'
-          type: 'String:16'
-          widget: 'select'
-          valid_values: ['HIGH', 'LOW', 'QRP']
-        - name: 'CATEGORY-STATION'
-          label: 'Category Station'
-          type: 'String:16'
-          widget: 'select'
-          valid_values: ['FIXED', 'MOBILE', 'PORTABLE']
-        - name: 'CATEGORY-TRANSMITTER'
-          label: 'Category Transmitter'
-          type: 'String:16'
-          widget: 'select'
-          valid_values: ['ONE', 'UNLIMITED']
+      fixed_headers:
+        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: ALL}
       export_fields:
-        - name: 'CLUB'
-          label: 'Club'
-          type: 'String:75'
-          required: false
-          preserve_case: true
-        - name: 'EMAIL'
-          label: 'Email'
-          type: 'String:75'
-          regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
-          preserve_case: true
-        - name: 'LOCATION'
-          label: 'Location'
-          type: 'String:32'
-          help_text: 'State, province, or DX'
-        - name: 'NAME'
-          label: 'Name'
-          type: 'String:75'
-          preserve_case: true
-        - name: 'ADDRESS'
-          label: 'Address'
-          type: 'String:45'
-          widget: 'textarea'
-          max_lines: 6
-          preserve_case: true
-        - name: 'SOAPBOX'
-          label: 'Soapbox'
-          type: 'String:75'
-          widget: 'textarea'
-          required: false
-          preserve_case: true
-    define:
-      - name: 'DX'
-        values:
-          - DX
-      - name: 'ARRL Sections'
-        values_from_file: arrl_sections.dat
-      - name: 'RAC Sections'
-        values_from_file: rac_sections.dat
-    log_params:
-      - name: 'Class'
-        label: 'Class'
-        type: 'String:3'
-        required: true
-        regex: '^\d+[A-F]$'
-      - name: 'Section'
-        label: 'Section'
-        type: 'String:3'
-        required: true
-        in_sets: ['ARRL Sections', 'RAC Sections']
-    exchange:
-      - name: 'Class(s)'
-        type: 'String:3'
-        adif: 'STX_STRING'
-        fixed: true
-        source_param: 'Class'
-        regex: '^\d+[A-F]$'
-        is_sent: true
-      - name: 'Section(s)'
-        type: 'String:3'
-        adif: 'MY_ARRL_SECT'
-        fixed: true
-        source_param: 'Section'
-        is_sent: true
-        in_sets: ['ARRL Sections', 'RAC Sections', 'DX']
-      - name: 'Class'
-        type: 'String:3'
-        adif: 'SRX_STRING'
-        regex: '^\d+[A-F]$'
-        is_sent: false
-      - name: 'Section'
-        type: 'String:3'
-        adif: 'ARRL_SECT'
-        is_sent: false
-        in_sets: ['ARRL Sections', 'RAC Sections', 'DX']
-    qso_columns:
-      - 'Class'
-      - 'Section'
-      - 'Pts'
-      - 'Op'
-    qso_column_fields:
-      Freq: 'FREQ'
-      Mode: 'MODE'
-      Call: 'CALL'
-      Op: 'OPERATOR'
-      'Class(s)': 'STX_STRING'
-      'Section(s)': 'MY_ARRL_SECT'
-      Class: 'SRX_STRING'
-      Section: 'ARRL_SECT'
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, key: EMAIL, label: Email, type: String:75, regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$', preserve_case: true}
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, help_text: 'State, province, or DX'}
+        - {id: export-name, key: NAME, label: Name, type: String:75, preserve_case: true}
+        - {id: export-address, key: ADDRESS, label: Address, type: String:45, widget: textarea, max_lines: 6, preserve_case: true}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    profiles:
+      - hf-vhf-bands

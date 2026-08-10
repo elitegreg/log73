@@ -1,51 +1,128 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use serde_yaml::{Mapping as YamlMapping, Value as YamlValue};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     fs,
     path::{Component, Path, PathBuf},
 };
 use tracing::info;
 
-fn is_false(value: &bool) -> bool {
-    !*value
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldInputKind {
+    String,
+    Rst,
+    Numeric,
+    Serial,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ValueSet {
-    pub name: String,
-    pub values: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExchangeField {
-    pub name: String,
-    #[serde(rename = "type")]
-    pub field_type: String,
-    pub adif: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fixed: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub default: Option<Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_param: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub regex: Option<String>,
-    /// Accept a configured value or a value matching `regex`, rather than
-    /// requiring both when both validators are present.
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub valid_values_or_regex: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub in_sets: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub valid_values: Vec<String>,
-    #[serde(default, skip_serializing_if = "SerialScope::is_global")]
-    pub serial_scope: SerialScope,
-    /// When set, this exchange is required only for matching contacts and must
-    /// otherwise be blank.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldInput {
+    pub kind: FieldInputKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub only_when: Option<ScoringCondition>,
-    pub is_sent: bool,
+    pub max_length: Option<usize>,
+}
+
+impl FieldInput {
+    pub fn parse(spec: &str) -> Result<Self, String> {
+        let mut parts = spec.split(':');
+        let kind = match parts
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_uppercase()
+            .as_str()
+        {
+            "STRING" => FieldInputKind::String,
+            "RST" => FieldInputKind::Rst,
+            "NUMERIC" => FieldInputKind::Numeric,
+            "SERIAL" => FieldInputKind::Serial,
+            other => return Err(format!("unknown field input type: {other}")),
+        };
+        let max_length = parts
+            .next()
+            .map(|value| {
+                value
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| format!("invalid field input length in {spec}"))
+            })
+            .transpose()?;
+        if parts.next().is_some() {
+            return Err(format!("invalid field input type: {spec}"));
+        }
+        Ok(Self { kind, max_length })
+    }
+
+    pub fn kind_name(&self) -> &'static str {
+        match self.kind {
+            FieldInputKind::String => "STRING",
+            FieldInputKind::Rst => "RST",
+            FieldInputKind::Numeric => "NUMERIC",
+            FieldInputKind::Serial => "SERIAL",
+        }
+    }
+
+    pub fn as_spec(&self) -> String {
+        match self.max_length {
+            Some(max_length) => format!("{}:{max_length}", self.kind_name()),
+            None => self.kind_name().to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationMatch {
+    #[default]
+    All,
+    Any,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FieldValidation {
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<String>,
+    #[serde(default, skip_serializing_if = "is_validation_all")]
+    pub match_mode: ValidationMatch,
+}
+
+fn is_validation_all(value: &ValidationMatch) -> bool {
+    *value == ValidationMatch::All
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SetupField {
+    pub id: String,
+    pub key: String,
+    pub label: String,
+    pub input: FieldInput,
+    pub validation: FieldValidation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub widget: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub help_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_lines: Option<usize>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub preserve_case: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cabrillo_header: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub multi_single_has_mult_transmitter: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExchangeDirection {
+    Sent,
+    Received,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,60 +134,62 @@ pub enum SerialScope {
     CategoryTransmitter,
 }
 
-impl SerialScope {
-    fn is_global(&self) -> bool {
-        *self == Self::Global
-    }
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TableVisibility {
+    #[default]
+    Auto,
+    Show,
+    Hide,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContestParam {
-    pub name: String,
+pub struct ExchangeField {
+    pub id: String,
     pub label: String,
-    #[serde(rename = "type")]
-    pub field_type: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub required: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub regex: Option<String>,
-    /// Accept a configured value or a value matching `regex`, rather than
-    /// requiring both when both validators are present.
+    pub input: FieldInput,
+    pub adif: String,
+    pub direction: ExchangeDirection,
+    pub validation: FieldValidation,
     #[serde(default, skip_serializing_if = "is_false")]
-    pub valid_values_or_regex: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fixed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub in_sets: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub valid_values: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub widget: Option<String>,
+    pub source: Option<String>,
+    #[serde(default, skip_serializing_if = "is_global_serial_scope")]
+    pub serial_scope: SerialScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub help_text: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_lines: Option<usize>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub preserve_case: Option<bool>,
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub multi_single_has_mult_transmitter: bool,
+    pub only_when: Option<ScoringCondition>,
+    #[serde(default, skip_serializing_if = "is_auto_visibility")]
+    pub table: TableVisibility,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+fn is_global_serial_scope(value: &SerialScope) -> bool {
+    *value == SerialScope::Global
+}
+
+fn is_auto_visibility(value: &TableVisibility) -> bool {
+    *value == TableVisibility::Auto
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CabrilloFixedField {
+pub struct CabrilloFixedHeader {
+    pub id: String,
     pub name: String,
     pub value: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CabrilloRules {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub contest_id: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub fixed_fields: Vec<CabrilloFixedField>,
+    pub fixed_headers: Vec<CabrilloFixedHeader>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub log_fields: Vec<ContestParam>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub export_fields: Vec<ContestParam>,
+    pub export_fields: Vec<SetupField>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,28 +207,25 @@ pub struct ContestMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoringCondition {
     pub field: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub in_set: Option<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub in_sets: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub valid_values: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub exclude_in_sets: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_values: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub excluded_valid_values: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub suffixes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_suffixes: Vec<String>,
+    #[serde(default, skip_serializing)]
+    in_set: Option<String>,
+    #[serde(default, skip_serializing)]
+    in_sets: Vec<String>,
+    #[serde(default, skip_serializing)]
+    exclude_in_sets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QsoPointRule {
+    pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<ScoringCondition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -224,14 +300,13 @@ pub struct GeographyQsoPoints {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiplierRule {
+    pub id: String,
     pub name: String,
     pub field: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub key: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub in_sets: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub valid_values: Vec<String>,
+    pub values: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub when: Option<ScoringCondition>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -240,13 +315,15 @@ pub struct MultiplierRule {
     pub exclude_call_suffixes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude_values: Vec<String>,
-    /// An optional literal used to collapse every matching contact into one multiplier.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixed_key: Option<String>,
+    #[serde(default, skip_serializing)]
+    in_sets: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BonusPointRule {
+    pub id: String,
     pub name: String,
     pub field: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -256,31 +333,38 @@ pub struct BonusPointRule {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParamMultiplierRule {
+    pub id: String,
     pub param: String,
     pub values: BTreeMap<String, i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MultiplierCountBonusRule {
+    pub id: String,
     pub name: String,
     pub multiplier: String,
+    #[serde(deserialize_with = "deserialize_thresholds")]
     pub thresholds: BTreeMap<usize, i64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ContestRules {
-    pub contest: String,
-    #[serde(default)]
-    pub display_name: String,
-    pub allowed_bands: Vec<String>,
-    pub allowed_modes: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub define: Vec<ValueSet>,
-    pub exchange: Vec<ExchangeField>,
-    pub qso_columns: Vec<String>,
-    pub qso_column_fields: BTreeMap<String, String>,
-    #[serde(default)]
-    pub log_params: Vec<ContestParam>,
+fn deserialize_thresholds<'de, D>(deserializer: D) -> Result<BTreeMap<usize, i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = BTreeMap::<String, i64>::deserialize(deserializer)?;
+    values
+        .into_iter()
+        .map(|(threshold, points)| {
+            threshold
+                .parse::<usize>()
+                .map(|threshold| (threshold, points))
+                .map_err(serde::de::Error::custom)
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ScoringRules {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub qso_points: Option<QsoPoints>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -293,17 +377,148 @@ pub struct ContestRules {
     pub param_multipliers: Vec<ParamMultiplierRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub multiplier_count_bonus_points: Vec<MultiplierCountBonusRule>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QsoColumnSource {
+    Adif,
+    Meta,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QsoColumnFormat {
+    #[default]
+    Text,
+    DateTimeUtc,
+    FrequencyKhz,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QsoColumn {
+    pub id: String,
+    pub label: String,
+    pub source: QsoColumnSource,
+    pub field: String,
+    #[serde(default)]
+    pub format: QsoColumnFormat,
+    pub editable: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct QsoTable {
+    pub columns: Vec<QsoColumn>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ContestRules {
+    pub id: String,
+    pub name: String,
+    pub bands: Vec<String>,
+    pub modes: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub value_sets: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub setup_fields: Vec<SetupField>,
+    pub exchange: Vec<ExchangeField>,
+    pub qso_table: QsoTable,
+    #[serde(default)]
+    pub scoring: ScoringRules,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cabrillo: Option<CabrilloRules>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<ContestMetadata>,
 }
 
+#[cfg(test)]
+pub(crate) fn test_exchange_field(
+    id: &str,
+    label: &str,
+    input: &str,
+    adif: &str,
+    direction: ExchangeDirection,
+) -> ExchangeField {
+    ExchangeField {
+        id: id.to_string(),
+        label: label.to_string(),
+        input: FieldInput::parse(input).expect("valid test field input"),
+        adif: adif.to_string(),
+        direction,
+        validation: FieldValidation {
+            required: false,
+            pattern: None,
+            values: Vec::new(),
+            match_mode: ValidationMatch::All,
+        },
+        fixed: false,
+        default: None,
+        source: None,
+        serial_scope: SerialScope::Global,
+        only_when: None,
+        table: TableVisibility::Auto,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_setup_field(id: &str, key: &str, label: &str, input: &str) -> SetupField {
+    SetupField {
+        id: id.to_string(),
+        key: key.to_string(),
+        label: label.to_string(),
+        input: FieldInput::parse(input).expect("valid test field input"),
+        validation: FieldValidation {
+            required: false,
+            pattern: None,
+            values: Vec::new(),
+            match_mode: ValidationMatch::All,
+        },
+        default: None,
+        widget: None,
+        help_text: None,
+        max_lines: None,
+        preserve_case: false,
+        cabrillo_header: None,
+        multi_single_has_mult_transmitter: false,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_scoring_condition(field: &str, values: &[&str]) -> ScoringCondition {
+    ScoringCondition {
+        field: field.to_string(),
+        values: values.iter().map(|value| (*value).to_string()).collect(),
+        exclude_values: Vec::new(),
+        suffixes: Vec::new(),
+        exclude_suffixes: Vec::new(),
+        in_set: None,
+        in_sets: Vec::new(),
+        exclude_in_sets: Vec::new(),
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_multiplier_rule(id: &str, name: &str, field: &str) -> MultiplierRule {
+    MultiplierRule {
+        id: id.to_string(),
+        name: name.to_string(),
+        field: field.to_string(),
+        key: Vec::new(),
+        values: Vec::new(),
+        when: None,
+        when_all: Vec::new(),
+        exclude_call_suffixes: Vec::new(),
+        exclude_values: Vec::new(),
+        fixed_key: None,
+        in_sets: Vec::new(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ContestSummary {
-    pub contest: String,
-    pub display_name: String,
-    pub log_params: Vec<ContestParam>,
+    pub id: String,
+    pub name: String,
+    pub setup_fields: Vec<SetupField>,
 }
 
 #[derive(Debug, Clone)]
@@ -312,8 +527,17 @@ pub struct ContestRulesStore {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RulesFile {
-    contests: Vec<RawContestRules>,
+    schema: u8,
+    #[serde(default)]
+    value_sets: BTreeMap<String, YamlValue>,
+    #[serde(default)]
+    presets: BTreeMap<String, YamlValue>,
+    #[serde(default)]
+    profiles: BTreeMap<String, YamlValue>,
+    #[serde(default)]
+    contests: BTreeMap<String, YamlValue>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -326,48 +550,30 @@ enum AllowedBandValue {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RawContestRules {
-    id: String,
     #[serde(default)]
-    extends: Option<String>,
+    name: Option<String>,
+    bands: Vec<AllowedBandValue>,
+    modes: Vec<String>,
     #[serde(default)]
-    display_name: Option<String>,
+    value_sets: BTreeMap<String, RawValueSet>,
     #[serde(default)]
-    allowed_bands: Option<Vec<AllowedBandValue>>,
+    setup_fields: Vec<RawSetupField>,
+    exchange: Vec<RawExchangeField>,
     #[serde(default)]
-    allowed_modes: Option<Vec<String>>,
+    qso_table: Option<RawQsoTable>,
     #[serde(default)]
-    define: Option<Vec<RawValueSet>>,
-    #[serde(default)]
-    exchange: Option<Vec<ExchangeField>>,
-    #[serde(default)]
-    qso_columns: Option<Vec<String>>,
-    #[serde(default)]
-    qso_column_fields: Option<BTreeMap<String, String>>,
-    #[serde(default)]
-    log_params: Option<Vec<ContestParam>>,
+    scoring: ScoringRules,
     #[serde(default)]
     cabrillo: Option<RawCabrilloRules>,
-    #[serde(default)]
-    scoring: Option<RawScoringRules>,
-    #[serde(default)]
-    qso_points: Option<QsoPoints>,
-    #[serde(default)]
-    dupe_key: Option<Vec<String>>,
-    #[serde(default)]
-    multipliers: Option<Vec<MultiplierRule>>,
-    #[serde(default)]
-    bonus_points: Option<Vec<BonusPointRule>>,
-    #[serde(default)]
-    param_multipliers: Option<Vec<ParamMultiplierRule>>,
-    #[serde(default)]
-    multiplier_count_bonus_points: Option<Vec<MultiplierCountBonusRule>>,
     #[serde(default)]
     metadata: Option<ContestMetadata>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RawValueSet {
-    name: String,
+    #[serde(default)]
+    r#use: Option<String>,
     #[serde(default)]
     values: Option<Vec<String>>,
     #[serde(default)]
@@ -376,40 +582,92 @@ struct RawValueSet {
     exclude: Vec<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-struct RawCabrilloRules {
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSetupField {
+    id: String,
+    key: String,
+    label: String,
+    #[serde(rename = "type")]
+    field_type: String,
     #[serde(default)]
-    contest_id: Option<String>,
+    required: Option<bool>,
     #[serde(default)]
-    fixed_fields: Option<Vec<CabrilloFixedField>>,
+    regex: Option<String>,
     #[serde(default)]
-    log_fields: Option<Vec<ContestParam>>,
+    valid_values_or_regex: bool,
     #[serde(default)]
-    export_fields: Option<Vec<ContestParam>>,
+    default: Option<Value>,
+    #[serde(default)]
+    in_sets: Vec<String>,
+    #[serde(default)]
+    valid_values: Vec<String>,
+    #[serde(default)]
+    widget: Option<String>,
+    #[serde(default)]
+    help_text: Option<String>,
+    #[serde(default)]
+    max_lines: Option<usize>,
+    #[serde(default)]
+    preserve_case: bool,
+    #[serde(default)]
+    cabrillo_header: Option<String>,
+    #[serde(default)]
+    multi_single_has_mult_transmitter: bool,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawExchangeField {
+    id: String,
+    label: String,
+    #[serde(rename = "type")]
+    field_type: String,
+    adif: String,
+    direction: ExchangeDirection,
+    #[serde(default)]
+    fixed: bool,
+    #[serde(default)]
+    default: Option<Value>,
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    regex: Option<String>,
+    #[serde(default)]
+    valid_values_or_regex: bool,
+    #[serde(default)]
+    in_sets: Vec<String>,
+    #[serde(default)]
+    valid_values: Vec<String>,
+    #[serde(default)]
+    serial_scope: SerialScope,
+    #[serde(default)]
+    only_when: Option<ScoringCondition>,
+    #[serde(default)]
+    table: TableVisibility,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawQsoTable {
+    columns: Vec<QsoColumn>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct RawScoringRules {
+struct RawCabrilloRules {
     #[serde(default)]
-    qso_points: Option<QsoPoints>,
+    fixed_headers: Vec<CabrilloFixedHeader>,
     #[serde(default)]
-    dupe_key: Option<Vec<String>>,
-    #[serde(default)]
-    multipliers: Option<Vec<MultiplierRule>>,
-    #[serde(default)]
-    bonus_points: Option<Vec<BonusPointRule>>,
-    #[serde(default)]
-    param_multipliers: Option<Vec<ParamMultiplierRule>>,
-    #[serde(default)]
-    multiplier_count_bonus_points: Option<Vec<MultiplierCountBonusRule>>,
+    export_fields: Vec<RawSetupField>,
 }
 
-fn allowed_band_name(value: &AllowedBandValue) -> String {
-    match value {
-        AllowedBandValue::Name(name) => name.trim().to_string(),
-        AllowedBandValue::Meters(meters) => format!("{meters}m"),
-    }
+#[derive(Default)]
+struct Catalog {
+    value_sets: BTreeMap<String, YamlValue>,
+    presets: BTreeMap<String, YamlValue>,
+    profiles: BTreeMap<String, YamlValue>,
+    contests: BTreeMap<String, YamlValue>,
 }
 
 impl ContestRulesStore {
@@ -422,40 +680,28 @@ impl ContestRulesStore {
             .into_iter()
             .map(|path| path.as_ref().to_path_buf())
             .collect::<Vec<_>>();
-        let mut raw_contests = BTreeMap::new();
-
-        info!(
-            paths = %format_paths(&search_paths),
-            "searching contest rules directories"
-        );
-        for path in &search_paths {
-            let stats = load_raw_contests_dir(path, &mut raw_contests)?;
-            info!(
-                path = %path.display(),
-                yaml_files = stats.yaml_files,
-                contests = stats.contests,
-                "finished contest rules directory"
-            );
-        }
-
-        let mut contests = BTreeMap::new();
-        let ids = raw_contests.keys().cloned().collect::<Vec<_>>();
-        for id in ids {
-            let contest = resolve_contest(
-                &id,
-                &raw_contests,
-                &search_paths,
-                &mut contests,
-                &mut Vec::new(),
-            )?;
-            contests.insert(id, contest);
-        }
-
-        if contests.is_empty() {
+        let catalog = load_catalog(&search_paths)?;
+        if catalog.contests.is_empty() {
             return Err(format!(
                 "no contest rules found in searched directories: {}",
                 format_paths(&search_paths)
             ));
+        }
+
+        let mut composed = BTreeMap::new();
+        for id in catalog.contests.keys() {
+            let value = compose_contest(id, &catalog, &mut composed, &mut Vec::new())?;
+            composed.insert(id.clone(), value);
+        }
+
+        let available_sets = resolve_global_value_sets(&catalog.value_sets, &search_paths)?;
+        let mut contests = BTreeMap::new();
+        for (id, value) in composed {
+            let expanded = expand_presets(&value, &catalog.presets, &mut Vec::new())?;
+            let raw: RawContestRules = serde_yaml::from_value(expanded)
+                .map_err(|error| format!("invalid resolved contest {id}: {error}"))?;
+            let contest = normalize_contest(&id, raw, &available_sets, &search_paths)?;
+            contests.insert(id, contest);
         }
 
         info!(contests = contests.len(), "loaded contest rules");
@@ -474,68 +720,974 @@ impl ContestRulesStore {
         self.contests
             .values()
             .map(|contest| ContestSummary {
-                contest: contest.contest.clone(),
-                display_name: contest.display_name.clone(),
-                log_params: contest.log_params.clone(),
+                id: contest.id.clone(),
+                name: contest.name.clone(),
+                setup_fields: contest.setup_fields.clone(),
             })
             .collect()
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-struct ContestRulesDirStats {
-    yaml_files: usize,
-    contests: usize,
+fn load_catalog(search_paths: &[PathBuf]) -> Result<Catalog, String> {
+    let mut catalog = Catalog::default();
+    for directory in search_paths {
+        info!(path = %directory.display(), "looking for contest rules directory");
+        let entries = match fs::read_dir(directory) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "unable to read contest rules dir {}: {error}",
+                    directory.display()
+                ));
+            }
+        };
+        let mut files = entries
+            .map(|entry| entry.map(|entry| entry.path()))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("unable to read contest rules entry: {error}"))?;
+        files.sort();
+        for path in files {
+            let extension = path.extension().and_then(|extension| extension.to_str());
+            if !matches!(extension, Some("yaml" | "yml")) {
+                continue;
+            }
+            let text = fs::read_to_string(&path)
+                .map_err(|error| format!("unable to read {}: {error}", path.display()))?;
+            let file: RulesFile = serde_yaml::from_str(&text)
+                .map_err(|error| format!("unable to parse {}: {error}", path.display()))?;
+            if file.schema != 2 {
+                return Err(format!(
+                    "unsupported contest-rules schema {} in {}; expected 2",
+                    file.schema,
+                    path.display()
+                ));
+            }
+            merge_catalog_entries(&mut catalog.value_sets, file.value_sets, "value set", &path)?;
+            merge_catalog_entries(&mut catalog.presets, file.presets, "preset", &path)?;
+            merge_catalog_entries(&mut catalog.profiles, file.profiles, "profile", &path)?;
+            merge_catalog_entries(&mut catalog.contests, file.contests, "contest", &path)?;
+        }
+    }
+    Ok(catalog)
 }
 
-fn load_raw_contests_dir(
+fn merge_catalog_entries(
+    target: &mut BTreeMap<String, YamlValue>,
+    entries: BTreeMap<String, YamlValue>,
+    kind: &str,
     path: &Path,
-    raw_contests: &mut BTreeMap<String, RawContestRules>,
-) -> Result<ContestRulesDirStats, String> {
-    info!(path = %path.display(), "looking for contest rules directory");
-    let entries = match fs::read_dir(path) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            info!(path = %path.display(), "contest rules directory not found; skipping");
-            return Ok(ContestRulesDirStats::default());
-        }
-        Err(error) => {
+) -> Result<(), String> {
+    for (name, value) in entries {
+        if target.insert(name.clone(), value).is_some() {
             return Err(format!(
-                "unable to read contest rules dir {}: {error}",
+                "duplicate {kind} {name} while loading {}",
                 path.display()
             ));
         }
-    };
+    }
+    Ok(())
+}
 
-    let mut stats = ContestRulesDirStats::default();
-    for entry in entries {
-        let entry =
-            entry.map_err(|error| format!("unable to read contest rules entry: {error}"))?;
-        let path = entry.path();
-        let Some(extension) = path.extension().and_then(|extension| extension.to_str()) else {
+fn compose_contest(
+    id: &str,
+    catalog: &Catalog,
+    cache: &mut BTreeMap<String, YamlValue>,
+    stack: &mut Vec<String>,
+) -> Result<YamlValue, String> {
+    if let Some(value) = cache.get(id) {
+        return Ok(value.clone());
+    }
+    let token = format!("contest:{id}");
+    push_resolution(&token, stack)?;
+    let body = catalog
+        .contests
+        .get(id)
+        .ok_or_else(|| format!("unknown contest: {id}"))?;
+    let mapping = body
+        .as_mapping()
+        .ok_or_else(|| format!("contest {id} must be a mapping"))?;
+    let mut value = YamlValue::Mapping(YamlMapping::new());
+    for profile in string_list(
+        mapping.get(YamlValue::String("profiles".to_string())),
+        "profiles",
+    )? {
+        let resolved = compose_profile(&profile, catalog, &mut BTreeMap::new(), stack)?;
+        value = merge_yaml(value, resolved, &format!("contest {id}"))?;
+    }
+    if let Some(parent) = optional_string(
+        mapping.get(YamlValue::String("extends".to_string())),
+        "extends",
+    )? {
+        let resolved = compose_contest(&parent, catalog, cache, stack)?;
+        value = merge_yaml(value, resolved, &format!("contest {id}"))?;
+    }
+    let mut own = mapping.clone();
+    own.remove(YamlValue::String("profiles".to_string()));
+    own.remove(YamlValue::String("extends".to_string()));
+    value = merge_yaml(value, YamlValue::Mapping(own), &format!("contest {id}"))?;
+    stack.pop();
+    cache.insert(id.to_string(), value.clone());
+    Ok(value)
+}
+
+fn compose_profile(
+    id: &str,
+    catalog: &Catalog,
+    cache: &mut BTreeMap<String, YamlValue>,
+    stack: &mut Vec<String>,
+) -> Result<YamlValue, String> {
+    if let Some(value) = cache.get(id) {
+        return Ok(value.clone());
+    }
+    let token = format!("profile:{id}");
+    push_resolution(&token, stack)?;
+    let body = catalog
+        .profiles
+        .get(id)
+        .ok_or_else(|| format!("unknown profile: {id}"))?;
+    let mapping = body
+        .as_mapping()
+        .ok_or_else(|| format!("profile {id} must be a mapping"))?;
+    let mut value = YamlValue::Mapping(YamlMapping::new());
+    for profile in string_list(
+        mapping.get(YamlValue::String("profiles".to_string())),
+        "profiles",
+    )? {
+        let resolved = compose_profile(&profile, catalog, cache, stack)?;
+        value = merge_yaml(value, resolved, &format!("profile {id}"))?;
+    }
+    let mut own = mapping.clone();
+    own.remove(YamlValue::String("profiles".to_string()));
+    value = merge_yaml(value, YamlValue::Mapping(own), &format!("profile {id}"))?;
+    stack.pop();
+    cache.insert(id.to_string(), value.clone());
+    Ok(value)
+}
+
+fn push_resolution(token: &str, stack: &mut Vec<String>) -> Result<(), String> {
+    if let Some(position) = stack.iter().position(|entry| entry == token) {
+        return Err(format!(
+            "contest-rules reference cycle: {} -> {token}",
+            stack[position..].join(" -> ")
+        ));
+    }
+    stack.push(token.to_string());
+    Ok(())
+}
+
+fn merge_yaml(base: YamlValue, overlay: YamlValue, context: &str) -> Result<YamlValue, String> {
+    match (base, overlay) {
+        (YamlValue::Mapping(mut base), YamlValue::Mapping(overlay)) => {
+            for (key, value) in overlay {
+                let merged = match base.remove(&key) {
+                    Some(existing) => merge_yaml(existing, value, context)?,
+                    None => value,
+                };
+                base.insert(key, merged);
+            }
+            Ok(YamlValue::Mapping(base))
+        }
+        (YamlValue::Sequence(base), YamlValue::Sequence(overlay))
+            if is_keyed_collection(&base) || is_keyed_collection(&overlay) =>
+        {
+            merge_keyed_collection(base, overlay, context).map(YamlValue::Sequence)
+        }
+        (_, overlay) => Ok(overlay),
+    }
+}
+
+fn is_keyed_collection(values: &[YamlValue]) -> bool {
+    !values.is_empty() && values.iter().all(|value| item_id(value).is_some())
+}
+
+fn item_id(value: &YamlValue) -> Option<&str> {
+    value
+        .as_mapping()?
+        .get(YamlValue::String("id".to_string()))?
+        .as_str()
+}
+
+fn merge_keyed_collection(
+    mut base: Vec<YamlValue>,
+    overlay: Vec<YamlValue>,
+    context: &str,
+) -> Result<Vec<YamlValue>, String> {
+    if base
+        .iter()
+        .chain(&overlay)
+        .any(|value| item_id(value).is_none())
+    {
+        return Err(format!("mixed keyed and unkeyed collection in {context}"));
+    }
+    validate_unique_ids(&base, context)?;
+    validate_unique_ids(&overlay, context)?;
+    if overlay.is_empty() {
+        return Ok(Vec::new());
+    }
+    for item in overlay {
+        let id = item_id(&item)
+            .ok_or_else(|| format!("mixed keyed and unkeyed collection in {context}"))?
+            .to_string();
+        let mapping = item.as_mapping().expect("item with id should be mapping");
+        let remove = mapping
+            .get(YamlValue::String("remove".to_string()))
+            .and_then(YamlValue::as_bool)
+            .unwrap_or(false);
+        let position = base
+            .iter()
+            .position(|candidate| item_id(candidate) == Some(&id));
+        if remove {
+            let Some(position) = position else {
+                return Err(format!("cannot remove unknown id {id} in {context}"));
+            };
+            base.remove(position);
+            continue;
+        }
+        let before = optional_string(
+            mapping.get(YamlValue::String("before".to_string())),
+            "before",
+        )?;
+        let after = optional_string(mapping.get(YamlValue::String("after".to_string())), "after")?;
+        if before.is_some() && after.is_some() {
+            return Err(format!("id {id} sets both before and after in {context}"));
+        }
+        let mut clean = mapping.clone();
+        clean.remove(YamlValue::String("remove".to_string()));
+        clean.remove(YamlValue::String("before".to_string()));
+        clean.remove(YamlValue::String("after".to_string()));
+        let clean = YamlValue::Mapping(clean);
+        let merged = if let Some(position) = position {
+            merge_yaml(base.remove(position), clean, context)?
+        } else {
+            clean
+        };
+        let target = if let Some(target) = before {
+            base.iter()
+                .position(|candidate| item_id(candidate) == Some(target.as_str()))
+                .ok_or_else(|| format!("unknown before target {target} for {id} in {context}"))?
+        } else if let Some(target) = after {
+            base.iter()
+                .position(|candidate| item_id(candidate) == Some(target.as_str()))
+                .map(|position| position + 1)
+                .ok_or_else(|| format!("unknown after target {target} for {id} in {context}"))?
+        } else if let Some(position) = position {
+            position.min(base.len())
+        } else {
+            base.len()
+        };
+        base.insert(target, merged);
+    }
+    validate_unique_ids(&base, context)?;
+    Ok(base)
+}
+
+fn validate_unique_ids(values: &[YamlValue], context: &str) -> Result<(), String> {
+    let mut ids = BTreeSet::new();
+    for value in values {
+        let Some(id) = item_id(value) else {
             continue;
         };
-        if extension != "yaml" && extension != "yml" {
-            continue;
-        }
-        let text = fs::read_to_string(&path)
-            .map_err(|error| format!("unable to read {}: {error}", path.display()))?;
-        let rules_file: RulesFile = serde_yaml::from_str(&text)
-            .map_err(|error| format!("unable to parse {}: {error}", path.display()))?;
-        let contest_count = rules_file.contests.len();
-        info!(
-            path = %path.display(),
-            contests = contest_count,
-            "loaded contest rules file"
-        );
-        stats.yaml_files += 1;
-        stats.contests += contest_count;
-        for contest in rules_file.contests {
-            raw_contests.insert(contest.id.clone(), contest);
+        if !ids.insert(id) {
+            return Err(format!("duplicate id {id} in {context}"));
         }
     }
+    Ok(())
+}
 
-    Ok(stats)
+fn expand_presets(
+    value: &YamlValue,
+    presets: &BTreeMap<String, YamlValue>,
+    stack: &mut Vec<String>,
+) -> Result<YamlValue, String> {
+    match value {
+        YamlValue::Mapping(mapping) => {
+            let preset_name = mapping
+                .get(YamlValue::String("preset".to_string()))
+                .and_then(YamlValue::as_str);
+            let mut expanded = if let Some(name) = preset_name {
+                let token = format!("preset:{name}");
+                push_resolution(&token, stack)?;
+                let preset = presets
+                    .get(name)
+                    .ok_or_else(|| format!("unknown preset: {name}"))?;
+                let preset = expand_presets(preset, presets, stack)?;
+                stack.pop();
+                let mut overlay = mapping.clone();
+                overlay.remove(YamlValue::String("preset".to_string()));
+                merge_yaml(
+                    preset,
+                    YamlValue::Mapping(overlay),
+                    &format!("preset {name}"),
+                )?
+            } else {
+                YamlValue::Mapping(mapping.clone())
+            };
+            let result = expanded
+                .as_mapping_mut()
+                .expect("expanded mapping should remain a mapping");
+            let keys = result.keys().cloned().collect::<Vec<_>>();
+            for key in keys {
+                let child = result.get(&key).expect("existing key").clone();
+                result.insert(key, expand_presets(&child, presets, stack)?);
+            }
+            Ok(expanded)
+        }
+        YamlValue::Sequence(values) => values
+            .iter()
+            .map(|value| expand_presets(value, presets, stack))
+            .collect::<Result<Vec<_>, _>>()
+            .map(YamlValue::Sequence),
+        _ => Ok(value.clone()),
+    }
+}
+
+fn resolve_global_value_sets(
+    raw: &BTreeMap<String, YamlValue>,
+    search_paths: &[PathBuf],
+) -> Result<BTreeMap<String, Vec<String>>, String> {
+    let parsed = raw
+        .iter()
+        .map(|(name, value)| {
+            serde_yaml::from_value::<RawValueSet>(value.clone())
+                .map(|value| (name.clone(), value))
+                .map_err(|error| format!("invalid value set {name}: {error}"))
+        })
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    let mut resolved = BTreeMap::new();
+    for name in parsed.keys() {
+        resolve_named_value_set(name, &parsed, search_paths, &mut resolved, &mut Vec::new())?;
+    }
+    Ok(resolved)
+}
+
+fn resolve_named_value_set(
+    name: &str,
+    raw: &BTreeMap<String, RawValueSet>,
+    search_paths: &[PathBuf],
+    resolved: &mut BTreeMap<String, Vec<String>>,
+    stack: &mut Vec<String>,
+) -> Result<Vec<String>, String> {
+    if let Some(values) = resolved.get(name) {
+        return Ok(values.clone());
+    }
+    push_resolution(&format!("value-set:{name}"), stack)?;
+    let value_set = raw
+        .get(name)
+        .ok_or_else(|| format!("unknown value set: {name}"))?;
+    let base = if let Some(parent) = &value_set.r#use {
+        resolve_named_value_set(parent, raw, search_paths, resolved, stack)?
+    } else {
+        Vec::new()
+    };
+    let values = resolve_value_set_body(value_set, base, search_paths, name)?;
+    stack.pop();
+    resolved.insert(name.to_string(), values.clone());
+    Ok(values)
+}
+
+fn resolve_value_set_body(
+    raw: &RawValueSet,
+    base: Vec<String>,
+    search_paths: &[PathBuf],
+    name: &str,
+) -> Result<Vec<String>, String> {
+    if raw.values.is_some() && raw.values_from_file.is_some() {
+        return Err(format!(
+            "value set {name} defines both values and values_from_file"
+        ));
+    }
+    let values = if let Some(values) = &raw.values {
+        values.clone()
+    } else if let Some(file_name) = &raw.values_from_file {
+        let path = value_set_file_path(file_name, search_paths)?;
+        fs::read_to_string(&path)
+            .map_err(|error| format!("unable to read value-set file {}: {error}", path.display()))?
+            .lines()
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && !value.starts_with('#'))
+            .map(str::to_string)
+            .collect()
+    } else if raw.r#use.is_some() {
+        base
+    } else {
+        return Err(format!(
+            "value set {name} must define use, values, or values_from_file"
+        ));
+    };
+    let excluded = raw
+        .exclude
+        .iter()
+        .map(|value| value.trim())
+        .collect::<BTreeSet<_>>();
+    Ok(values
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty() && !excluded.contains(value.as_str()))
+        .collect())
+}
+
+fn normalize_contest(
+    id: &str,
+    raw: RawContestRules,
+    global_sets: &BTreeMap<String, Vec<String>>,
+    search_paths: &[PathBuf],
+) -> Result<ContestRules, String> {
+    let available_sets = resolve_contest_value_sets(&raw.value_sets, global_sets, search_paths)?;
+    let mut referenced_sets = BTreeSet::new();
+    let setup_fields = raw
+        .setup_fields
+        .into_iter()
+        .map(|field| normalize_setup_field(field, &available_sets, &mut referenced_sets))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut exchange = raw
+        .exchange
+        .into_iter()
+        .map(|field| normalize_exchange_field(field, &available_sets, &mut referenced_sets))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut scoring = raw.scoring;
+    resolve_scoring_sets(&mut scoring, &available_sets, &mut referenced_sets)?;
+    let cabrillo = raw
+        .cabrillo
+        .map(|cabrillo| {
+            cabrillo
+                .export_fields
+                .into_iter()
+                .map(|field| normalize_setup_field(field, &available_sets, &mut referenced_sets))
+                .collect::<Result<Vec<_>, _>>()
+                .map(|export_fields| CabrilloRules {
+                    fixed_headers: cabrillo.fixed_headers,
+                    export_fields,
+                })
+        })
+        .transpose()?;
+    for field in &mut exchange {
+        if let Some(condition) = &mut field.only_when {
+            resolve_condition_sets(condition, &available_sets, &mut referenced_sets)?;
+        }
+    }
+    let mut contest = ContestRules {
+        id: id.to_string(),
+        name: raw.name.unwrap_or_else(|| id.to_string()),
+        bands: raw.bands.iter().map(allowed_band_name).collect(),
+        modes: raw.modes,
+        value_sets: referenced_sets
+            .into_iter()
+            .filter_map(|name| {
+                available_sets
+                    .get(&name)
+                    .cloned()
+                    .map(|values| (name, values))
+            })
+            .collect(),
+        setup_fields,
+        exchange,
+        qso_table: QsoTable::default(),
+        scoring,
+        cabrillo,
+        metadata: raw.metadata,
+    };
+    contest.qso_table = raw
+        .qso_table
+        .map(|table| QsoTable {
+            columns: table.columns,
+        })
+        .unwrap_or_else(|| derive_qso_table(&contest));
+    validate_contest(&contest)?;
+    Ok(contest)
+}
+
+fn resolve_contest_value_sets(
+    raw: &BTreeMap<String, RawValueSet>,
+    global: &BTreeMap<String, Vec<String>>,
+    search_paths: &[PathBuf],
+) -> Result<BTreeMap<String, Vec<String>>, String> {
+    let mut local = BTreeMap::new();
+    for name in raw.keys() {
+        resolve_contest_value_set(name, raw, global, search_paths, &mut local, &mut Vec::new())?;
+    }
+    let mut available = global.clone();
+    available.extend(local);
+    Ok(available)
+}
+
+fn resolve_contest_value_set(
+    name: &str,
+    raw: &BTreeMap<String, RawValueSet>,
+    global: &BTreeMap<String, Vec<String>>,
+    search_paths: &[PathBuf],
+    resolved: &mut BTreeMap<String, Vec<String>>,
+    stack: &mut Vec<String>,
+) -> Result<Vec<String>, String> {
+    if let Some(values) = resolved.get(name) {
+        return Ok(values.clone());
+    }
+    push_resolution(&format!("contest-value-set:{name}"), stack)?;
+    let value_set = raw
+        .get(name)
+        .ok_or_else(|| format!("unknown contest value set: {name}"))?;
+    let base = if let Some(parent) = &value_set.r#use {
+        if parent == name {
+            global.get(parent).cloned().ok_or_else(|| {
+                format!("unknown global value set {parent} extended by contest value set {name}")
+            })?
+        } else if raw.contains_key(parent) {
+            resolve_contest_value_set(parent, raw, global, search_paths, resolved, stack)?
+        } else {
+            global
+                .get(parent)
+                .cloned()
+                .ok_or_else(|| format!("unknown value set {parent} referenced by {name}"))?
+        }
+    } else {
+        Vec::new()
+    };
+    let values = resolve_value_set_body(value_set, base, search_paths, name)?;
+    stack.pop();
+    resolved.insert(name.to_string(), values.clone());
+    Ok(values)
+}
+
+fn normalize_setup_field(
+    raw: RawSetupField,
+    sets: &BTreeMap<String, Vec<String>>,
+    referenced: &mut BTreeSet<String>,
+) -> Result<SetupField, String> {
+    let values = field_values(&raw.in_sets, &raw.valid_values, sets, referenced)?;
+    Ok(SetupField {
+        id: raw.id,
+        key: raw.key,
+        label: raw.label,
+        input: FieldInput::parse(&raw.field_type)?,
+        validation: FieldValidation {
+            required: raw.required.unwrap_or(true),
+            pattern: raw.regex,
+            values,
+            match_mode: if raw.valid_values_or_regex {
+                ValidationMatch::Any
+            } else {
+                ValidationMatch::All
+            },
+        },
+        default: raw.default,
+        widget: raw.widget,
+        help_text: raw.help_text,
+        max_lines: raw.max_lines,
+        preserve_case: raw.preserve_case,
+        cabrillo_header: raw.cabrillo_header,
+        multi_single_has_mult_transmitter: raw.multi_single_has_mult_transmitter,
+    })
+}
+
+fn normalize_exchange_field(
+    raw: RawExchangeField,
+    sets: &BTreeMap<String, Vec<String>>,
+    referenced: &mut BTreeSet<String>,
+) -> Result<ExchangeField, String> {
+    let values = field_values(&raw.in_sets, &raw.valid_values, sets, referenced)?;
+    Ok(ExchangeField {
+        id: raw.id,
+        label: raw.label,
+        input: FieldInput::parse(&raw.field_type)?,
+        adif: raw.adif,
+        direction: raw.direction,
+        validation: FieldValidation {
+            required: true,
+            pattern: raw.regex,
+            values,
+            match_mode: if raw.valid_values_or_regex {
+                ValidationMatch::Any
+            } else {
+                ValidationMatch::All
+            },
+        },
+        fixed: raw.fixed,
+        default: raw.default,
+        source: raw.source,
+        serial_scope: raw.serial_scope,
+        only_when: raw.only_when,
+        table: raw.table,
+    })
+}
+
+fn field_values(
+    in_sets: &[String],
+    explicit: &[String],
+    sets: &BTreeMap<String, Vec<String>>,
+    referenced: &mut BTreeSet<String>,
+) -> Result<Vec<String>, String> {
+    let mut values = Vec::new();
+    for name in in_sets {
+        referenced.insert(name.clone());
+        values.extend(
+            sets.get(name)
+                .ok_or_else(|| format!("unknown value set referenced by in_sets: {name}"))?
+                .clone(),
+        );
+    }
+    values.extend(explicit.iter().cloned());
+    Ok(values)
+}
+
+fn resolve_scoring_sets(
+    scoring: &mut ScoringRules,
+    sets: &BTreeMap<String, Vec<String>>,
+    referenced: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    if let Some(points) = &mut scoring.qso_points {
+        for rule in &mut points.rules {
+            if let Some(condition) = &mut rule.when {
+                resolve_condition_sets(condition, sets, referenced)?;
+            }
+            for condition in &mut rule.when_all {
+                resolve_condition_sets(condition, sets, referenced)?;
+            }
+        }
+    }
+    for multiplier in &mut scoring.multipliers {
+        for name in std::mem::take(&mut multiplier.in_sets) {
+            referenced.insert(name.clone());
+            multiplier.values.extend(
+                sets.get(&name)
+                    .ok_or_else(|| format!("unknown multiplier value set: {name}"))?
+                    .clone(),
+            );
+        }
+        if multiplier.key.is_empty() {
+            multiplier.key.push(multiplier.field.clone());
+        }
+        if let Some(condition) = &mut multiplier.when {
+            resolve_condition_sets(condition, sets, referenced)?;
+        }
+        for condition in &mut multiplier.when_all {
+            resolve_condition_sets(condition, sets, referenced)?;
+        }
+    }
+    Ok(())
+}
+
+fn resolve_condition_sets(
+    condition: &mut ScoringCondition,
+    sets: &BTreeMap<String, Vec<String>>,
+    referenced: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    let mut names = std::mem::take(&mut condition.in_sets);
+    if let Some(name) = condition.in_set.take() {
+        names.push(name);
+    }
+    for name in names {
+        referenced.insert(name.clone());
+        condition.values.extend(
+            sets.get(&name)
+                .ok_or_else(|| format!("unknown scoring value set: {name}"))?
+                .clone(),
+        );
+    }
+    for name in std::mem::take(&mut condition.exclude_in_sets) {
+        referenced.insert(name.clone());
+        condition.exclude_values.extend(
+            sets.get(&name)
+                .ok_or_else(|| format!("unknown excluded scoring value set: {name}"))?
+                .clone(),
+        );
+    }
+    Ok(())
+}
+
+fn validate_contest(contest: &ContestRules) -> Result<(), String> {
+    validate_ids(
+        contest.setup_fields.iter().map(|field| field.id.as_str()),
+        "setup field",
+    )?;
+    validate_ids(
+        contest.setup_fields.iter().map(|field| field.key.as_str()),
+        "setup field key",
+    )?;
+    validate_ids(
+        contest.exchange.iter().map(|field| field.id.as_str()),
+        "exchange field",
+    )?;
+    validate_ids(
+        contest
+            .cabrillo
+            .iter()
+            .flat_map(|rules| rules.export_fields.iter())
+            .map(|field| field.id.as_str()),
+        "Cabrillo export field",
+    )?;
+    validate_ids(
+        contest
+            .cabrillo
+            .iter()
+            .flat_map(|rules| rules.export_fields.iter())
+            .map(|field| field.key.as_str()),
+        "Cabrillo export field key",
+    )?;
+    validate_ids(
+        contest
+            .cabrillo
+            .iter()
+            .flat_map(|rules| rules.fixed_headers.iter())
+            .map(|field| field.id.as_str()),
+        "Cabrillo fixed header",
+    )?;
+    validate_ids(
+        contest
+            .scoring
+            .qso_points
+            .iter()
+            .flat_map(|points| points.rules.iter())
+            .map(|rule| rule.id.as_str()),
+        "QSO point rule",
+    )?;
+    validate_ids(
+        contest
+            .scoring
+            .multipliers
+            .iter()
+            .map(|rule| rule.id.as_str()),
+        "multiplier rule",
+    )?;
+    validate_ids(
+        contest
+            .scoring
+            .bonus_points
+            .iter()
+            .map(|rule| rule.id.as_str()),
+        "bonus point rule",
+    )?;
+    validate_ids(
+        contest
+            .scoring
+            .param_multipliers
+            .iter()
+            .map(|rule| rule.id.as_str()),
+        "parameter multiplier rule",
+    )?;
+    validate_ids(
+        contest
+            .scoring
+            .multiplier_count_bonus_points
+            .iter()
+            .map(|rule| rule.id.as_str()),
+        "multiplier-count bonus rule",
+    )?;
+    validate_ids(
+        contest
+            .qso_table
+            .columns
+            .iter()
+            .map(|column| column.id.as_str()),
+        "QSO table column",
+    )?;
+    for field in &contest.exchange {
+        if field.serial_scope != SerialScope::Global && field.input.kind != FieldInputKind::Serial {
+            return Err(format!(
+                "exchange field {} sets serial_scope but is not serial",
+                field.id
+            ));
+        }
+        if field.direction == ExchangeDirection::Received && field.source.is_some() {
+            return Err(format!(
+                "received exchange field {} cannot define source",
+                field.id
+            ));
+        }
+    }
+    for multiplier in &contest.scoring.param_multipliers {
+        let field = contest
+            .setup_fields
+            .iter()
+            .find(|field| field.key.eq_ignore_ascii_case(&multiplier.param))
+            .ok_or_else(|| {
+                format!(
+                    "param_multipliers references unknown setup field: {}",
+                    multiplier.param
+                )
+            })?;
+        if multiplier.values.is_empty() || multiplier.values.values().any(|factor| *factor <= 0) {
+            return Err(format!(
+                "param_multipliers for {} must define positive factors",
+                multiplier.param
+            ));
+        }
+        for value in multiplier.values.keys() {
+            if !field.validation.values.is_empty()
+                && !field
+                    .validation
+                    .values
+                    .iter()
+                    .any(|candidate| candidate.eq_ignore_ascii_case(value))
+            {
+                return Err(format!(
+                    "param_multipliers value {value} is not valid for {}",
+                    multiplier.param
+                ));
+            }
+        }
+    }
+    for bonus in &contest.scoring.multiplier_count_bonus_points {
+        if !contest
+            .scoring
+            .multipliers
+            .iter()
+            .any(|multiplier| multiplier.name.eq_ignore_ascii_case(&bonus.multiplier))
+        {
+            return Err(format!(
+                "multiplier_count_bonus_points references unknown multiplier: {}",
+                bonus.multiplier
+            ));
+        }
+        if bonus.thresholds.is_empty()
+            || bonus
+                .thresholds
+                .iter()
+                .any(|(threshold, points)| *threshold == 0 || *points <= 0)
+        {
+            return Err(format!(
+                "multiplier_count_bonus_points {} must define positive thresholds and points",
+                bonus.name
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_ids<'a>(ids: impl IntoIterator<Item = &'a str>, kind: &str) -> Result<(), String> {
+    let mut seen = BTreeSet::new();
+    for id in ids {
+        if id.trim().is_empty() {
+            return Err(format!("{kind} id cannot be empty"));
+        }
+        if !seen.insert(id) {
+            return Err(format!("duplicate {kind} id: {id}"));
+        }
+    }
+    Ok(())
+}
+
+fn derive_qso_table(contest: &ContestRules) -> QsoTable {
+    let mut columns = vec![
+        QsoColumn {
+            id: "date-time".to_string(),
+            label: "Date/Time (UTC)".to_string(),
+            source: QsoColumnSource::Adif,
+            field: "QSO_DATE_TIME_ON".to_string(),
+            format: QsoColumnFormat::DateTimeUtc,
+            editable: true,
+        },
+        QsoColumn {
+            id: "frequency".to_string(),
+            label: "Freq".to_string(),
+            source: QsoColumnSource::Adif,
+            field: "FREQ".to_string(),
+            format: QsoColumnFormat::FrequencyKhz,
+            editable: true,
+        },
+        QsoColumn {
+            id: "mode".to_string(),
+            label: "Mode".to_string(),
+            source: QsoColumnSource::Adif,
+            field: "MODE".to_string(),
+            format: QsoColumnFormat::Text,
+            editable: true,
+        },
+        QsoColumn {
+            id: "call".to_string(),
+            label: "Call".to_string(),
+            source: QsoColumnSource::Adif,
+            field: "CALL".to_string(),
+            format: QsoColumnFormat::Text,
+            editable: true,
+        },
+    ];
+    for field in &contest.exchange {
+        let include = match field.table {
+            TableVisibility::Show => true,
+            TableVisibility::Hide => false,
+            TableVisibility::Auto => {
+                field.direction == ExchangeDirection::Received
+                    || !field.fixed
+                    || field.input.kind == FieldInputKind::Serial
+            }
+        };
+        if include {
+            columns.push(QsoColumn {
+                id: format!("exchange-{}", field.id),
+                label: field.label.clone(),
+                source: QsoColumnSource::Adif,
+                field: field.adif.clone(),
+                format: QsoColumnFormat::Text,
+                editable: !field.fixed
+                    && !(field.direction == ExchangeDirection::Sent
+                        && field.input.kind == FieldInputKind::Serial),
+            });
+        }
+    }
+    if !contest.scoring.multipliers.is_empty() {
+        columns.push(QsoColumn {
+            id: "multipliers".to_string(),
+            label: "Mult".to_string(),
+            source: QsoColumnSource::Meta,
+            field: "mult".to_string(),
+            format: QsoColumnFormat::Text,
+            editable: false,
+        });
+    }
+    if contest.scoring.qso_points.is_some() {
+        columns.push(QsoColumn {
+            id: "points".to_string(),
+            label: "Pts".to_string(),
+            source: QsoColumnSource::Meta,
+            field: "pts".to_string(),
+            format: QsoColumnFormat::Text,
+            editable: false,
+        });
+    }
+    columns.push(QsoColumn {
+        id: "operator".to_string(),
+        label: "Op".to_string(),
+        source: QsoColumnSource::Adif,
+        field: "OPERATOR".to_string(),
+        format: QsoColumnFormat::Text,
+        editable: true,
+    });
+    QsoTable { columns }
+}
+
+fn allowed_band_name(value: &AllowedBandValue) -> String {
+    match value {
+        AllowedBandValue::Name(name) => name.trim().to_string(),
+        AllowedBandValue::Meters(meters) => format!("{meters}m"),
+    }
+}
+
+fn optional_string(value: Option<&YamlValue>, name: &str) -> Result<Option<String>, String> {
+    value
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| format!("{name} must be a string"))
+        })
+        .transpose()
+}
+
+fn string_list(value: Option<&YamlValue>, name: &str) -> Result<Vec<String>, String> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    value
+        .as_sequence()
+        .ok_or_else(|| format!("{name} must be a list"))?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| format!("{name} entries must be strings"))
+        })
+        .collect()
 }
 
 fn format_paths(paths: &[PathBuf]) -> String {
@@ -559,7 +1711,6 @@ fn value_set_file_path(file_name: &Path, search_paths: &[PathBuf]) -> Result<Pat
             file_name.display()
         ));
     }
-
     for directory in search_paths.iter().rev() {
         let candidate = directory.join(file_name);
         match fs::metadata(&candidate) {
@@ -579,7 +1730,6 @@ fn value_set_file_path(file_name: &Path, search_paths: &[PathBuf]) -> Result<Pat
             }
         }
     }
-
     Err(format!(
         "value-set file {} not found in contest rules directories: {}",
         file_name.display(),
@@ -587,1780 +1737,289 @@ fn value_set_file_path(file_name: &Path, search_paths: &[PathBuf]) -> Result<Pat
     ))
 }
 
-fn resolve_value_set(raw: &RawValueSet, search_paths: &[PathBuf]) -> Result<ValueSet, String> {
-    let values = match (&raw.values, &raw.values_from_file) {
-        (Some(_), Some(file_name)) => {
-            return Err(format!(
-                "value set {} defines both values and values_from_file ({})",
-                raw.name,
-                file_name.display()
-            ));
-        }
-        (Some(values), None) => values.clone(),
-        (None, Some(file_name)) => {
-            let path = value_set_file_path(file_name, search_paths)?;
-            fs::read_to_string(&path)
-                .map_err(|error| {
-                    format!("unable to read value-set file {}: {error}", path.display())
-                })?
-                .lines()
-                .map(str::trim)
-                .filter(|value| !value.is_empty() && !value.starts_with('#'))
-                .map(str::to_string)
-                .collect()
-        }
-        (None, None) => {
-            return Err(format!(
-                "value set {} must define values or values_from_file",
-                raw.name
-            ));
-        }
-    };
-    let excluded = raw
-        .exclude
-        .iter()
-        .map(|value| value.trim())
-        .collect::<Vec<_>>();
-
-    Ok(ValueSet {
-        name: raw.name.clone(),
-        values: values
-            .into_iter()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty() && !excluded.contains(&value.as_str()))
-            .collect(),
-    })
-}
-
-fn resolve_value_sets(
-    raw_sets: &[RawValueSet],
-    search_paths: &[PathBuf],
-) -> Result<Vec<ValueSet>, String> {
-    raw_sets
-        .iter()
-        .map(|raw| resolve_value_set(raw, search_paths))
-        .collect()
-}
-
-fn apply_defines(current: &mut Vec<ValueSet>, updates: &[ValueSet]) {
-    for update in updates {
-        if let Some(existing) = current
-            .iter_mut()
-            .find(|value_set| value_set.name == update.name)
-        {
-            *existing = update.clone();
-        } else {
-            current.push(update.clone());
-        }
-    }
-}
-
-fn defined_values(define: &[ValueSet], in_sets: &[String]) -> Result<Vec<String>, String> {
-    let mut values = Vec::new();
-    for set_name in in_sets {
-        let value_set = define
-            .iter()
-            .find(|value_set| &value_set.name == set_name)
-            .ok_or_else(|| format!("unknown value set referenced by in_sets: {set_name}"))?;
-        values.extend(value_set.values.clone());
-    }
-    Ok(values)
-}
-
-fn scoring_condition_in_sets(condition: &ScoringCondition) -> Vec<String> {
-    let mut in_sets = condition.in_sets.clone();
-    if let Some(in_set) = &condition.in_set {
-        in_sets.push(in_set.clone());
-    }
-    in_sets
-}
-
-fn resolve_scoring_condition_in_sets(
-    define: &[ValueSet],
-    condition: &mut ScoringCondition,
-) -> Result<(), String> {
-    let in_sets = scoring_condition_in_sets(condition);
-    if !in_sets.is_empty() {
-        condition.valid_values = defined_values(define, &in_sets)?;
-    }
-    if !condition.exclude_in_sets.is_empty() {
-        condition.excluded_valid_values = defined_values(define, &condition.exclude_in_sets)?;
-    }
-    Ok(())
-}
-
-const STANDARD_QSO_COLUMNS: &[&str] = &["Date/Time (UTC)", "Freq", "Mode", "Call"];
-
-fn prepend_standard_qso_columns(contest: &mut ContestRules) {
-    let existing = contest.qso_columns.clone();
-    contest.qso_columns = STANDARD_QSO_COLUMNS
-        .iter()
-        .map(|column| (*column).to_string())
-        .chain(
-            existing
-                .into_iter()
-                .filter(|column| !STANDARD_QSO_COLUMNS.contains(&column.as_str())),
-        )
-        .collect();
-}
-
-fn field_type_kind(field_type: &str) -> String {
-    field_type
-        .split(':')
-        .next()
-        .unwrap_or("STRING")
-        .trim()
-        .to_uppercase()
-}
-
-fn apply_field_valid_values(
-    fields: &mut [ContestParam],
-    define: &[ValueSet],
-) -> Result<(), String> {
-    for field in fields {
-        if !field.in_sets.is_empty() {
-            field.valid_values = defined_values(define, &field.in_sets)?;
-        }
-    }
-    Ok(())
-}
-
-fn apply_scoring_rules(contest: &mut ContestRules, scoring: &RawScoringRules) {
-    if let Some(qso_points) = &scoring.qso_points {
-        contest.qso_points = Some(qso_points.clone());
-    }
-    if let Some(dupe_key) = &scoring.dupe_key {
-        contest.dupe_key = dupe_key.clone();
-    }
-    if let Some(multipliers) = &scoring.multipliers {
-        contest.multipliers = multipliers.clone();
-    }
-    if let Some(bonus_points) = &scoring.bonus_points {
-        contest.bonus_points = bonus_points.clone();
-    }
-    if let Some(param_multipliers) = &scoring.param_multipliers {
-        contest.param_multipliers = param_multipliers.clone();
-    }
-    if let Some(multiplier_count_bonus_points) = &scoring.multiplier_count_bonus_points {
-        contest.multiplier_count_bonus_points = multiplier_count_bonus_points.clone();
-    }
-}
-
-fn apply_cabrillo_rules(contest: &mut ContestRules, cabrillo: &RawCabrilloRules) {
-    let current = contest.cabrillo.get_or_insert_with(CabrilloRules::default);
-    if let Some(contest_id) = &cabrillo.contest_id {
-        current.contest_id = Some(contest_id.clone());
-    }
-    if let Some(fixed_fields) = &cabrillo.fixed_fields {
-        current.fixed_fields = fixed_fields.clone();
-    }
-    if let Some(log_fields) = &cabrillo.log_fields {
-        current.log_fields = log_fields.clone();
-    }
-    if let Some(export_fields) = &cabrillo.export_fields {
-        current.export_fields = export_fields.clone();
-    }
-}
-
-fn resolve_in_sets(contest: &mut ContestRules) -> Result<(), String> {
-    apply_field_valid_values(&mut contest.log_params, &contest.define)?;
-
-    for field in &mut contest.exchange {
-        if !field.in_sets.is_empty() {
-            field.valid_values = defined_values(&contest.define, &field.in_sets)?;
-        }
-        if let Some(condition) = &mut field.only_when {
-            resolve_scoring_condition_in_sets(&contest.define, condition)?;
-        }
-    }
-
-    if let Some(qso_points) = &mut contest.qso_points {
-        for rule in &mut qso_points.rules {
-            if let Some(condition) = &mut rule.when {
-                resolve_scoring_condition_in_sets(&contest.define, condition)?;
-            }
-            for condition in &mut rule.when_all {
-                resolve_scoring_condition_in_sets(&contest.define, condition)?;
-            }
-        }
-    }
-
-    for multiplier in &mut contest.multipliers {
-        if !multiplier.in_sets.is_empty() {
-            multiplier.valid_values = defined_values(&contest.define, &multiplier.in_sets)?;
-        }
-        if let Some(condition) = &mut multiplier.when {
-            resolve_scoring_condition_in_sets(&contest.define, condition)?;
-        }
-        for condition in &mut multiplier.when_all {
-            resolve_scoring_condition_in_sets(&contest.define, condition)?;
-        }
-    }
-
-    if let Some(cabrillo) = &mut contest.cabrillo {
-        apply_field_valid_values(&mut cabrillo.log_fields, &contest.define)?;
-        apply_field_valid_values(&mut cabrillo.export_fields, &contest.define)?;
-    }
-
-    Ok(())
-}
-
-fn scoring_param<'a>(contest: &'a ContestRules, name: &str) -> Option<&'a ContestParam> {
-    contest
-        .log_params
-        .iter()
-        .chain(
-            contest
-                .cabrillo
-                .iter()
-                .flat_map(|cabrillo| cabrillo.log_fields.iter()),
-        )
-        .find(|param| param.name.eq_ignore_ascii_case(name))
-}
-
-fn validate_scoring_config(contest: &ContestRules) -> Result<(), String> {
-    for field in &contest.exchange {
-        if field.serial_scope != SerialScope::Global
-            && field_type_kind(&field.field_type) != "SERIAL"
-        {
-            return Err(format!(
-                "exchange field {} sets serial_scope but is not a Serial field",
-                field.name
-            ));
-        }
-    }
-
-    for multiplier in &contest.param_multipliers {
-        let param = scoring_param(contest, &multiplier.param).ok_or_else(|| {
-            format!(
-                "param_multipliers references unknown log parameter: {}",
-                multiplier.param
-            )
-        })?;
-        if multiplier.values.is_empty() {
-            return Err(format!(
-                "param_multipliers for {} must define at least one value",
-                multiplier.param
-            ));
-        }
-        for (value, factor) in &multiplier.values {
-            if *factor <= 0 {
-                return Err(format!(
-                    "param_multipliers factor for {}={} must be positive",
-                    multiplier.param, value
-                ));
-            }
-            if !param.valid_values.is_empty()
-                && !param
-                    .valid_values
-                    .iter()
-                    .any(|valid| valid.eq_ignore_ascii_case(value))
-            {
-                return Err(format!(
-                    "param_multipliers value {} is not valid for {}",
-                    value, multiplier.param
-                ));
-            }
-        }
-    }
-
-    for bonus in &contest.multiplier_count_bonus_points {
-        if !contest
-            .multipliers
-            .iter()
-            .any(|multiplier| multiplier.name.eq_ignore_ascii_case(&bonus.multiplier))
-        {
-            return Err(format!(
-                "multiplier_count_bonus_points references unknown multiplier: {}",
-                bonus.multiplier
-            ));
-        }
-        if bonus.thresholds.is_empty() {
-            return Err(format!(
-                "multiplier_count_bonus_points {} must define at least one threshold",
-                bonus.name
-            ));
-        }
-        for (threshold, points) in &bonus.thresholds {
-            if *threshold == 0 || *points <= 0 {
-                return Err(format!(
-                    "multiplier_count_bonus_points {} thresholds and points must be positive",
-                    bonus.name
-                ));
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn resolve_contest(
-    id: &str,
-    raw_contests: &BTreeMap<String, RawContestRules>,
-    search_paths: &[PathBuf],
-    resolved: &mut BTreeMap<String, ContestRules>,
-    stack: &mut Vec<String>,
-) -> Result<ContestRules, String> {
-    if let Some(contest) = resolved.get(id) {
-        return Ok(contest.clone());
-    }
-    if stack.iter().any(|stack_id| stack_id == id) {
-        return Err(format!(
-            "contest inheritance cycle: {} -> {id}",
-            stack.join(" -> ")
-        ));
-    }
-
-    let raw = raw_contests
-        .get(id)
-        .ok_or_else(|| format!("contest rules {id} not found"))?;
-    stack.push(id.to_string());
-
-    let mut contest = if let Some(parent_id) = &raw.extends {
-        resolve_contest(parent_id, raw_contests, search_paths, resolved, stack)?
-    } else {
-        ContestRules {
-            contest: id.to_string(),
-            display_name: id.to_string(),
-            allowed_bands: Vec::new(),
-            allowed_modes: Vec::new(),
-            define: Vec::new(),
-            exchange: Vec::new(),
-            qso_columns: Vec::new(),
-            qso_column_fields: BTreeMap::new(),
-            log_params: Vec::new(),
-            qso_points: None,
-            dupe_key: Vec::new(),
-            multipliers: Vec::new(),
-            bonus_points: Vec::new(),
-            param_multipliers: Vec::new(),
-            multiplier_count_bonus_points: Vec::new(),
-            cabrillo: None,
-            metadata: None,
-        }
-    };
-
-    contest.contest = id.to_string();
-    if let Some(display_name) = &raw.display_name {
-        contest.display_name = display_name.clone();
-    } else if raw.extends.is_none() {
-        contest.display_name = id.to_string();
-    }
-    if let Some(allowed_bands) = &raw.allowed_bands {
-        contest.allowed_bands = allowed_bands.iter().map(allowed_band_name).collect();
-    }
-    if let Some(allowed_modes) = &raw.allowed_modes {
-        contest.allowed_modes = allowed_modes.clone();
-    }
-    if let Some(define) = &raw.define {
-        let define = resolve_value_sets(define, search_paths)?;
-        apply_defines(&mut contest.define, &define);
-    }
-    if let Some(exchange) = &raw.exchange {
-        contest.exchange = exchange.clone();
-    }
-    if let Some(qso_columns) = &raw.qso_columns {
-        contest.qso_columns = qso_columns.clone();
-    }
-    if let Some(qso_column_fields) = &raw.qso_column_fields {
-        contest.qso_column_fields = qso_column_fields.clone();
-    }
-    if let Some(log_params) = &raw.log_params {
-        contest.log_params = log_params.clone();
-    }
-    if let Some(cabrillo) = &raw.cabrillo {
-        apply_cabrillo_rules(&mut contest, cabrillo);
-    }
-    apply_scoring_rules(
-        &mut contest,
-        &RawScoringRules {
-            qso_points: raw.qso_points.clone(),
-            dupe_key: raw.dupe_key.clone(),
-            multipliers: raw.multipliers.clone(),
-            bonus_points: raw.bonus_points.clone(),
-            param_multipliers: raw.param_multipliers.clone(),
-            multiplier_count_bonus_points: raw.multiplier_count_bonus_points.clone(),
-        },
-    );
-    if let Some(scoring) = &raw.scoring {
-        apply_scoring_rules(&mut contest, scoring);
-    }
-    if let Some(metadata) = &raw.metadata {
-        contest.metadata = Some(metadata.clone());
-    }
-
-    resolve_in_sets(&mut contest)?;
-    validate_scoring_config(&contest)?;
-    prepend_standard_qso_columns(&mut contest);
-
-    stack.pop();
-    resolved.insert(id.to_string(), contest.clone());
-    Ok(contest)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{
-        fs,
-        path::{Path, PathBuf},
-        time::{SystemTime, UNIX_EPOCH},
-    };
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-    struct TestDir {
-        path: PathBuf,
-    }
+    struct TestDir(PathBuf);
 
     impl TestDir {
         fn new() -> Self {
             let unique = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .expect("system time should be after unix epoch")
+                .expect("time")
                 .as_nanos();
             let path = std::env::temp_dir().join(format!(
-                "log73-contest-rules-test-{}-{unique}",
+                "log73-contest-rules-v2-{}-{unique}",
                 std::process::id()
             ));
-            fs::create_dir_all(&path).expect("test dir should be created");
-            Self { path }
+            fs::create_dir_all(&path).expect("create test directory");
+            Self(path)
         }
 
-        fn path(&self) -> &Path {
-            &self.path
+        fn write(&self, name: &str, contents: &str) {
+            fs::write(self.0.join(name), contents).expect("write test file");
         }
     }
 
     impl Drop for TestDir {
         fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.path);
+            let _ = fs::remove_dir_all(&self.0);
         }
     }
 
-    fn write_rules_file(dir: &Path, file_name: &str, yaml: &str) {
-        fs::write(dir.join(file_name), yaml).expect("rules file should be written");
-    }
-
-    fn resolve_yaml_contest(yaml: &str, id: &str) -> ContestRules {
-        let rules_file: RulesFile = serde_yaml::from_str(yaml).expect("yaml should parse");
-        let raw_contests = rules_file
-            .contests
-            .into_iter()
-            .map(|contest| (contest.id.clone(), contest))
-            .collect::<BTreeMap<_, _>>();
-
-        resolve_contest(
-            id,
-            &raw_contests,
-            &[],
-            &mut BTreeMap::new(),
-            &mut Vec::new(),
-        )
-        .expect("contest should resolve")
-    }
+    const MINIMAL: &str = r#"
+schema: 2
+contests:
+  TEST:
+    name: Test
+    bands: [20]
+    modes: [CW]
+    exchange:
+      - id: rst-received
+        label: RST
+        type: RST
+        adif: RST_RCVD
+        direction: received
+"#;
 
     #[test]
-    fn serial_scope_defaults_global_and_accepts_configured_scopes() {
-        let global = resolve_yaml_contest(
-            r#"
-contests:
-  - id: GLOBAL
-    allowed_bands: [20]
-    allowed_modes: ['CW']
-    exchange:
-      - name: Serial
-        type: 'Serial:4'
-        adif: 'STX'
-        is_sent: true
-    qso_columns: []
-    qso_column_fields: {}
-"#,
-            "GLOBAL",
-        );
-        assert_eq!(global.exchange[0].serial_scope, SerialScope::Global);
-
-        let per_band = resolve_yaml_contest(
-            r#"
-contests:
-  - id: PER-BAND
-    allowed_bands: [20, 15]
-    allowed_modes: ['CW']
-    exchange:
-      - name: Serial
-        type: 'Serial:4'
-        serial_scope: 'band'
-        adif: 'STX'
-        is_sent: true
-    qso_columns: []
-    qso_column_fields: {}
-"#,
-            "PER-BAND",
-        );
-        assert_eq!(per_band.exchange[0].serial_scope, SerialScope::Band);
-
-        let category_transmitter = resolve_yaml_contest(
-            r#"
-contests:
-  - id: CATEGORY
-    allowed_bands: [20]
-    allowed_modes: ['CW']
-    exchange:
-      - name: Serial
-        type: 'Serial:6'
-        serial_scope: 'category_transmitter'
-        adif: 'STX'
-        is_sent: true
-    qso_columns: []
-    qso_column_fields: {}
-"#,
-            "CATEGORY",
-        );
-        assert_eq!(
-            category_transmitter.exchange[0].serial_scope,
-            SerialScope::CategoryTransmitter
+    fn loads_minimal_v2_and_derives_table() {
+        let dir = TestDir::new();
+        dir.write("test.yaml", MINIMAL);
+        let store = ContestRulesStore::load_dirs([&dir.0]).expect("rules load");
+        let rules = store.get("TEST").expect("test contest");
+        assert_eq!(rules.id, "TEST");
+        assert_eq!(rules.bands, ["20m"]);
+        assert!(
+            rules
+                .qso_table
+                .columns
+                .iter()
+                .any(|column| column.field == "RST_RCVD")
         );
     }
 
     #[test]
-    fn geography_points_accept_scalars_and_band_overrides() {
-        let contest = resolve_yaml_contest(
+    fn resolves_catalogs_data_files_and_the_public_api_shape() {
+        let dir = TestDir::new();
+        dir.write("locations.dat", "# accepted locations\nSC\nNC\nGA\n");
+        dir.write(
+            "catalog.yaml",
             r#"
+schema: 2
+value_sets:
+  locations:
+    values_from_file: locations.dat
+  locations-without-ga:
+    use: locations
+    exclude: [GA]
+presets:
+  received-location:
+    label: Location
+    type: String:2
+    adif: SRX_STRING
+    direction: received
+    in_sets: [locations-without-ga]
+profiles:
+  hf-cw:
+    bands: [40, 20]
+    modes: [CW]
+"#,
+        );
+        dir.write(
+            "contest.yaml",
+            r#"
+schema: 2
 contests:
-  - id: GEOGRAPHY
-    allowed_bands: [40, 20]
-    allowed_modes: ['CW']
-    exchange: []
-    qso_columns: []
-    qso_column_fields: {}
+  TEST:
+    name: Test Contest
+    profiles: [hf-cw]
+    value_sets:
+      local-final:
+        use: local-base
+        exclude: [NC]
+      local-base:
+        use: locations-without-ga
+    setup_fields:
+      - id: county
+        key: County
+        label: County
+        type: String:2
+        in_sets: [local-final]
+    exchange:
+      - id: fixed-sent
+        label: Fixed
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: County
+      - id: mutable-sent
+        label: Mutable
+        type: String:2
+        adif: MY_STATE
+        direction: sent
+      - id: serial-sent
+        label: Serial
+        type: Serial:4
+        adif: STX
+        direction: sent
+      - id: serial-received
+        label: Serial
+        type: Serial:4
+        adif: SRX
+        direction: received
+      - id: location-received
+        preset: received-location
     scoring:
       qso_points:
-        geography:
-          country_field: APP_LOG73_DXCC_PFX
-          station_country_field: APP_LOG73_MY_DXCC_PFX
-          continent_field: CONT
-          station_continent_field: MY_CONT
-          same_country: 1
-          different_country_north_america:
-            default: 2
-            by_band:
-              40m: 4
-          different_country_same_continent: 1
-          different_continent:
-            default: 3
-            by_band:
-              40m: 6
+        points: 1
 "#,
-            "GEOGRAPHY",
         );
-        let geography = contest
-            .qso_points
-            .as_ref()
-            .and_then(|points| points.geography.as_ref())
-            .expect("geography should resolve");
 
-        assert_eq!(geography.same_country.for_band(Some("40m")), 1);
-        assert_eq!(
-            geography
-                .different_country_north_america
-                .for_band(Some("40M")),
-            4
-        );
-        assert_eq!(
-            geography
-                .different_country_north_america
-                .for_band(Some("20m")),
-            2
-        );
-        assert_eq!(geography.different_continent.for_band(Some("40m")), 6);
-        assert_eq!(geography.different_continent.for_band(None), 3);
-        assert_eq!(geography.unresolved.for_band(Some("40m")), 0);
+        let store = ContestRulesStore::load_dirs([&dir.0]).expect("rules load");
+        let rules = store.get("TEST").expect("test contest");
+        assert_eq!(rules.bands, ["40m", "20m"]);
+        assert_eq!(rules.modes, ["CW"]);
+        assert_eq!(rules.value_sets["locations-without-ga"], ["SC", "NC"]);
+        assert_eq!(rules.value_sets["local-final"], ["SC"]);
+        assert_eq!(rules.exchange[4].validation.values, ["SC", "NC"]);
+
+        let columns = rules
+            .qso_table
+            .columns
+            .iter()
+            .map(|column| (column.field.as_str(), column.editable))
+            .collect::<Vec<_>>();
+        assert!(!columns.iter().any(|(field, _)| *field == "STX_STRING"));
+        assert!(columns.contains(&("MY_STATE", true)));
+        assert!(columns.contains(&("STX", false)));
+        assert!(columns.contains(&("SRX", true)));
+        assert!(columns.contains(&("SRX_STRING", true)));
+        assert!(columns.contains(&("pts", false)));
+
+        let api = serde_json::to_value(rules).expect("serialize resolved rules");
+        assert_eq!(api["id"], "TEST");
+        assert_eq!(api["exchange"][4]["input"]["kind"], "string");
+        assert_eq!(api["exchange"][4]["validation"]["values"][0], "SC");
+        assert!(api["exchange"][4].get("preset").is_none());
+        assert!(api["exchange"][4].get("in_sets").is_none());
+        assert!(api.get("allowed_bands").is_none());
     }
 
     #[test]
-    fn user_rules_override_installed_rules_and_union_is_loaded() {
-        let installed = TestDir::new();
-        let user = TestDir::new();
-
-        write_rules_file(
-            installed.path(),
-            "installed.yaml",
+    fn explicit_qso_table_replaces_the_derived_table() {
+        let dir = TestDir::new();
+        dir.write(
+            "table.yaml",
             r#"
+schema: 2
 contests:
-  - id: SHARED
-    display_name: Installed Shared
-    allowed_bands: [20]
-    allowed_modes: ['CW']
+  TEST:
+    bands: [20]
+    modes: [CW]
     exchange: []
-    qso_columns: []
-    qso_column_fields: {}
-  - id: INSTALLED_ONLY
-    display_name: Installed Only
-    allowed_bands: [40]
-    allowed_modes: ['SSB']
-    exchange: []
-    qso_columns: []
-    qso_column_fields: {}
-"#,
-        );
-        write_rules_file(
-            user.path(),
-            "user.yaml",
-            r#"
-contests:
-  - id: SHARED
-    display_name: User Shared
-    allowed_bands: [15]
-    allowed_modes: ['RTTY']
-    exchange: []
-    qso_columns: []
-    qso_column_fields: {}
-  - id: USER_ONLY
-    display_name: User Only
-    allowed_bands: [10]
-    allowed_modes: ['CW']
-    exchange: []
-    qso_columns: []
-    qso_column_fields: {}
+    qso_table:
+      columns:
+        - id: custom
+          label: Custom
+          source: adif
+          field: COMMENT
+          editable: false
 "#,
         );
 
-        let store = ContestRulesStore::load_dirs([installed.path(), user.path()])
-            .expect("rules should load");
-
-        assert_eq!(
-            store.get("SHARED").map(|contest| &contest.display_name),
-            Some(&"User Shared".to_string())
-        );
-        assert!(store.get("INSTALLED_ONLY").is_some());
-        assert!(store.get("USER_ONLY").is_some());
+        let store = ContestRulesStore::load_dirs([&dir.0]).expect("rules load");
+        let columns = &store.get("TEST").expect("test contest").qso_table.columns;
+        assert_eq!(columns.len(), 1);
+        assert_eq!(columns[0].id, "custom");
+        assert_eq!(columns[0].field, "COMMENT");
     }
 
     #[test]
-    fn file_backed_value_sets_use_user_data_and_apply_exclusions() {
-        let installed = TestDir::new();
-        let user = TestDir::new();
-
-        write_rules_file(
-            installed.path(),
-            "contest.yaml",
-            r#"
-contests:
-  - id: TEST
-    allowed_bands: [20]
-    allowed_modes: ['CW']
-    define:
-      - name: Sections
-        values_from_file: sections.dat
-        exclude: ['SC']
-    exchange:
-      - name: Section
-        type: 'String:3'
-        adif: 'SRX_STRING'
-        is_sent: false
-        in_sets: ['Sections']
-    qso_columns: []
-    qso_column_fields: {}
-"#,
-        );
-        fs::write(installed.path().join("sections.dat"), "AA\nSC\n")
-            .expect("installed data file should be written");
-        fs::write(user.path().join("sections.dat"), "BB\nSC\n\n# comment\n")
-            .expect("user data file should be written");
-
-        let store = ContestRulesStore::load_dirs([installed.path(), user.path()])
-            .expect("rules should load");
-        let contest = store.get("TEST").expect("test contest should load");
-
-        assert_eq!(contest.define[0].values, vec!["BB".to_string()]);
-        assert_eq!(contest.exchange[0].valid_values, vec!["BB".to_string()]);
+    fn keyed_overlays_patch_remove_and_place_entries() {
+        let base: YamlValue =
+            serde_yaml::from_str("items: [{id: one, value: 1}, {id: two, value: 2}]").unwrap();
+        let overlay: YamlValue = serde_yaml::from_str(
+            "items: [{id: one, value: 3}, {id: two, remove: true}, {id: zero, value: 0, before: one}]",
+        )
+        .unwrap();
+        let merged = merge_yaml(base, overlay, "test").unwrap();
+        let ids = merged["items"]
+            .as_sequence()
+            .unwrap()
+            .iter()
+            .map(|value| item_id(value).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["zero", "one"]);
+        assert_eq!(merged["items"][1]["value"].as_i64(), Some(3));
     }
 
     #[test]
-    fn file_backed_value_sets_report_missing_and_unsafe_files() {
-        let rules = TestDir::new();
-        write_rules_file(
-            rules.path(),
-            "contest.yaml",
-            r#"
-contests:
-  - id: MISSING
-    allowed_bands: [20]
-    allowed_modes: ['CW']
-    define:
-      - name: Sections
-        values_from_file: missing.dat
-    exchange: []
-    qso_columns: []
-    qso_column_fields: {}
-"#,
+    fn rejects_reference_cycles() {
+        let dir = TestDir::new();
+        dir.write(
+            "cycle.yaml",
+            "schema: 2\nprofiles:\n  one: {profiles: [two]}\n  two: {profiles: [one]}\ncontests:\n  TEST: {profiles: [one]}\n",
         );
-        let error = ContestRulesStore::load_dirs([rules.path()])
-            .expect_err("a missing value-set file should fail loading");
-        assert!(error.contains("missing.dat"));
-        assert!(error.contains("not found"));
+        let error = ContestRulesStore::load_dirs([&dir.0]).expect_err("cycle should fail");
+        assert!(error.contains("reference cycle"));
+    }
 
-        write_rules_file(
-            rules.path(),
-            "contest.yaml",
+    #[test]
+    fn rejects_legacy_schema_and_value_set_path_traversal() {
+        let legacy = TestDir::new();
+        legacy.write("legacy.yaml", "schema: 1\ncontests: {}\n");
+        let error = ContestRulesStore::load_dirs([&legacy.0]).expect_err("v1 should fail");
+        assert!(error.contains("expected 2"));
+
+        let traversal = TestDir::new();
+        traversal.write(
+            "traversal.yaml",
             r#"
+schema: 2
+value_sets:
+  unsafe:
+    values_from_file: ../outside.dat
 contests:
-  - id: UNSAFE
-    allowed_bands: [20]
-    allowed_modes: ['CW']
-    define:
-      - name: Sections
-        values_from_file: ../outside.dat
+  TEST:
+    bands: [20]
+    modes: [CW]
     exchange: []
-    qso_columns: []
-    qso_column_fields: {}
 "#,
         );
-        let error = ContestRulesStore::load_dirs([rules.path()])
-            .expect_err("a path outside contest-rules should fail loading");
+        let error =
+            ContestRulesStore::load_dirs([&traversal.0]).expect_err("traversal should fail");
         assert!(error.contains("must be a file name"));
     }
 
     #[test]
-    fn missing_rules_dirs_are_ignored_when_other_rules_exist() {
-        let installed = TestDir::new();
-        let missing_user = TestDir::new();
-        let missing_user_path = missing_user.path().to_path_buf();
-        drop(missing_user);
-
-        write_rules_file(
-            installed.path(),
-            "installed.yaml",
-            r#"
-contests:
-  - id: INSTALLED_ONLY
-    display_name: Installed Only
-    allowed_bands: [40]
-    allowed_modes: ['SSB']
-    exchange: []
-    qso_columns: []
-    qso_column_fields: {}
-"#,
-        );
-
-        let store = ContestRulesStore::load_dirs([installed.path(), missing_user_path.as_path()])
-            .expect("rules should load");
-
-        assert!(store.get("INSTALLED_ONLY").is_some());
-    }
-
-    #[test]
-    fn empty_rules_error_lists_searched_dirs() {
-        let first = TestDir::new();
-        let second = TestDir::new();
-        let first_path = first.path().to_path_buf();
-        let second_path = second.path().to_path_buf();
-        drop(first);
-        drop(second);
-
-        let error = ContestRulesStore::load_dirs([first_path.as_path(), second_path.as_path()])
-            .expect_err("missing rules should fail when no other rules exist");
-
-        assert!(error.contains("no contest rules found"));
-        assert!(error.contains(&first_path.display().to_string()));
-        assert!(error.contains(&second_path.display().to_string()));
-    }
-
-    #[test]
-    fn nested_scoring_block_populates_internal_scoring_fields() {
-        let contest = resolve_yaml_contest(
-            r#"
-contests:
-  - id: TEST
-    allowed_bands: [20]
-    allowed_modes: ['CW']
-    define:
-      - name: 'Modes'
-        values: ['CW']
-      - name: 'Sections'
-        values: ['SC']
-    exchange: []
-    qso_columns: []
-    qso_column_fields: {}
-    scoring:
-      qso_points:
-        rules:
-          - when:
-              field: 'MODE'
-              in_set: 'Modes'
-            points: 2
-      dupe_key: ['CALL', 'MODE']
-      multipliers:
-        - name: 'Section'
-          field: 'SECTION'
-          key: ['SECTION']
-          in_sets: ['Sections']
-      bonus_points:
-        - name: 'Bonus Station'
-          field: 'CALL'
-          key: ['CALL']
-          values:
-            W1AW: 100
-      param_multipliers:
-        - param: 'CATEGORY-POWER'
-          values:
-            HIGH: 1
-            LOW: 2
-            QRP: 5
-      multiplier_count_bonus_points:
-        - name: 'Section Sweep'
-          multiplier: 'Section'
-          thresholds:
-            2: 100
-    cabrillo:
-      log_fields:
-        - name: 'CATEGORY-POWER'
-          label: 'Category Power'
-          type: 'String:16'
-          valid_values: ['HIGH', 'LOW', 'QRP']
-"#,
-            "TEST",
-        );
-
-        let qso_points = contest.qso_points.expect("qso points should be set");
-        assert_eq!(qso_points.rules.len(), 1);
-        assert_eq!(qso_points.rules[0].points, 2);
-        assert_eq!(
-            qso_points.rules[0]
-                .when
-                .as_ref()
-                .expect("condition should exist")
-                .valid_values,
-            vec!["CW".to_string()]
-        );
-        assert_eq!(
-            contest.dupe_key,
-            vec!["CALL".to_string(), "MODE".to_string()]
-        );
-        assert_eq!(contest.multipliers.len(), 1);
-        assert_eq!(contest.multipliers[0].valid_values, vec!["SC".to_string()]);
-        assert_eq!(contest.bonus_points.len(), 1);
-        assert_eq!(contest.bonus_points[0].values.get("W1AW"), Some(&100));
-        assert_eq!(contest.param_multipliers.len(), 1);
-        assert_eq!(contest.param_multipliers[0].values.get("LOW"), Some(&2));
-        assert_eq!(contest.multiplier_count_bonus_points.len(), 1);
-    }
-
-    #[test]
-    fn removed_power_multiplier_is_rejected() {
-        let rules = TestDir::new();
-        write_rules_file(
-            rules.path(),
-            "contest.yaml",
-            r#"
-contests:
-  - id: TEST
-    allowed_bands: [20]
-    allowed_modes: ['CW']
-    exchange: []
-    qso_columns: []
-    qso_column_fields: {}
-    scoring:
-      power_multiplier: [1, 2, 5]
-"#,
-        );
-
-        let error = ContestRulesStore::load_dirs([rules.path()])
-            .expect_err("removed power_multiplier should fail loading");
-        assert!(error.contains("power_multiplier"));
-        assert!(error.contains("unknown field"));
-    }
-
-    #[test]
-    fn nested_scoring_fields_override_flat_fields_after_inheritance() {
-        let contest = resolve_yaml_contest(
-            r#"
-contests:
-  - id: BASE
-    allowed_bands: [20]
-    allowed_modes: ['CW']
-    exchange: []
-    qso_columns: []
-    qso_column_fields: {}
-    qso_points:
-      points: 1
-    dupe_key: ['CALL']
-  - id: CHILD
-    extends: BASE
-    scoring:
-      dupe_key: ['CALL', 'BAND']
-"#,
-            "CHILD",
-        );
-
-        assert_eq!(contest.qso_points.and_then(|points| points.points), Some(1));
-        assert_eq!(
-            contest.dupe_key,
-            vec!["CALL".to_string(), "BAND".to_string()]
-        );
-    }
-
-    #[test]
-    fn cabrillo_fields_inherit_and_resolve_valid_values() {
-        let contest = resolve_yaml_contest(
-            r#"
-contests:
-  - id: BASE
-    allowed_bands: [20]
-    allowed_modes: ['CW']
-    define:
-      - name: 'Modes'
-        values: ['CW', 'SSB']
-    exchange: []
-    qso_columns: []
-    qso_column_fields: {}
-    cabrillo:
-      fixed_fields:
-        - name: 'CATEGORY-BAND'
-          value: 'ALL'
-      log_fields:
-        - name: 'CATEGORY-MODE'
-          label: 'Category Mode'
-          type: 'String:8'
-          widget: 'select'
-          in_sets: ['Modes']
-      export_fields:
-        - name: 'NAME'
-          label: 'Name'
-          type: 'String:75'
-          preserve_case: true
-  - id: CHILD
-    extends: BASE
-    cabrillo:
-      export_fields:
-        - name: 'EMAIL'
-          label: 'Email'
-          type: 'String:75'
-"#,
-            "CHILD",
-        );
-
-        let cabrillo = contest.cabrillo.expect("cabrillo should exist");
-        assert_eq!(cabrillo.fixed_fields.len(), 1);
-        assert_eq!(cabrillo.log_fields.len(), 1);
-        assert_eq!(
-            cabrillo.log_fields[0].valid_values,
-            vec!["CW".to_string(), "SSB".to_string()]
-        );
-        assert_eq!(cabrillo.export_fields.len(), 1);
-        assert_eq!(cabrillo.export_fields[0].name, "EMAIL");
-    }
-
-    #[test]
-    fn bundled_sc_qso_party_rules_resolve_file_backed_value_sets() {
+    fn bundled_catalog_resolves_all_contest_variants() {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let contest = store
-            .get("SC-QSO-PARTY")
-            .expect("SC QSO Party rules should load");
+        let store = ContestRulesStore::load_dirs([rules_dir]).expect("bundled rules load");
 
-        let states = contest
-            .define
-            .iter()
-            .find(|value_set| value_set.name == "States")
-            .expect("States value set should exist");
-        assert!(states.values.contains(&"AL".to_string()));
-        assert!(!states.values.contains(&"SC".to_string()));
-
-        let received_state = contest
-            .exchange
-            .iter()
-            .find(|field| field.name == "State")
-            .expect("received State exchange field should exist");
-        assert!(received_state.valid_values.contains(&"DC".to_string()));
-        assert!(received_state.valid_values.contains(&"AB".to_string()));
-    }
-
-    #[test]
-    fn bundled_hi_qso_party_rules_resolve_both_locations() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let in_state = store
-            .get("HI-QSO-PARTY (In State)")
-            .expect("in-state Hawaii QSO Party rules should load");
-        let outside = store
-            .get("HI-QSO-PARTY")
-            .expect("outside-Hawaii QSO Party rules should load");
-
-        let districts = in_state
-            .define
-            .iter()
-            .find(|value_set| value_set.name == "Hawaii Districts")
-            .expect("Hawaii districts should exist");
-        assert_eq!(districts.values.len(), 14);
-        assert!(districts.values.contains(&"HIL".to_string()));
-        assert!(districts.values.contains(&"LNI".to_string()));
-        assert!(districts.values.contains(&"WHN".to_string()));
-
-        let states = in_state
-            .define
-            .iter()
-            .find(|value_set| value_set.name == "States")
-            .expect("states should exist");
-        assert!(!states.values.contains(&"HI".to_string()));
-        assert!(states.values.contains(&"AK".to_string()));
-
-        assert_eq!(in_state.allowed_modes, vec!["CW", "SSB"]);
-        assert_eq!(in_state.log_params[0].name, "District");
-        assert_eq!(outside.log_params[0].name, "Location");
-        assert_eq!(
-            outside.multipliers[0].key,
-            vec!["SRX_STRING".to_string(), "BAND".to_string()]
-        );
-
-        let received = outside
-            .exchange
-            .iter()
-            .find(|field| field.name == "District")
-            .expect("outside-Hawaii received district should exist");
-        assert_eq!(received.valid_values.len(), 14);
-
-        for rules in [in_state, outside] {
-            let cabrillo = rules
-                .cabrillo
-                .as_ref()
-                .expect("Hawaii QSO Party Cabrillo rules should exist");
-            assert_eq!(cabrillo.contest_id.as_deref(), Some("HI-QSO-PARTY"));
-            let transmitter = cabrillo
-                .log_fields
-                .iter()
-                .find(|field| field.name == "CATEGORY-TRANSMITTER")
-                .expect("category transmitter should exist");
-            assert_eq!(transmitter.default, Some(Value::String("ONE".to_string())));
-            assert_eq!(transmitter.valid_values, vec!["ONE", "UNLIMITED"]);
+        assert_eq!(store.summaries().len(), 39);
+        for id in [
+            "ARRL-10",
+            "ARRL-SS-CW",
+            "CQ-WPX-SSB",
+            "NA-SPRINT-CW (North America)",
+            "SC-QSO-PARTY (In State)",
+        ] {
+            assert!(store.get(id).is_some(), "missing bundled contest {id}");
         }
-    }
-
-    #[test]
-    fn bundled_mdc_qso_party_rules_resolve_both_locations() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let in_state = store
-            .get("MDC-QSO-PARTY (In State)")
-            .expect("in-state MDC QSO Party rules should load");
-        let outside = store
-            .get("MDC-QSO-PARTY")
-            .expect("outside-MDC QSO Party rules should load");
-
-        let jurisdictions = in_state
-            .define
-            .iter()
-            .find(|value_set| value_set.name == "Counties")
-            .expect("Counties should exist");
-        assert_eq!(jurisdictions.values.len(), 25);
-        assert!(jurisdictions.values.contains(&"BAL".to_string()));
-        assert!(jurisdictions.values.contains(&"BCT".to_string()));
-        assert!(jurisdictions.values.contains(&"WDC".to_string()));
-
-        let states = in_state
-            .define
-            .iter()
-            .find(|value_set| value_set.name == "States")
-            .expect("states should exist");
-        assert!(!states.values.contains(&"MD".to_string()));
-        assert!(states.values.contains(&"AK".to_string()));
-        assert!(states.values.contains(&"HI".to_string()));
-
-        assert_eq!(in_state.param_multipliers.len(), 2);
-        assert_eq!(in_state.param_multipliers[0].values.get("QRP"), Some(&3));
-        assert_eq!(in_state.param_multipliers[1].values.get("ROVER"), Some(&4));
-        assert_eq!(in_state.multiplier_count_bonus_points.len(), 1);
-        assert_eq!(
-            in_state.multiplier_count_bonus_points[0]
-                .thresholds
-                .get(&25),
-            Some(&500)
-        );
-        assert_eq!(
-            in_state
-                .cabrillo
-                .as_ref()
-                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
-            Some("MDC-QSO-PARTY")
-        );
-
-        assert_eq!(outside.multipliers.len(), 1);
-        assert_eq!(outside.multipliers[0].name, "County");
-        assert_eq!(outside.log_params[0].name, "Location");
-        let in_state_received = in_state
-            .exchange
-            .iter()
-            .find(|field| field.name == "Location" && !field.is_sent)
-            .expect("in-state MDC received location should exist");
-        assert_eq!(in_state_received.field_type, "String:16");
-        assert_eq!(
-            in_state_received.in_sets,
-            vec!["Counties", "States", "Canadian Provinces"]
-        );
-        assert_eq!(in_state_received.regex.as_deref(), Some(r"^\S+$"));
-        assert!(in_state_received.valid_values_or_regex);
-        assert!(in_state_received.valid_values.contains(&"BAL".to_string()));
-        assert!(in_state_received.valid_values.contains(&"SC".to_string()));
-        assert!(in_state_received.valid_values.contains(&"SK".to_string()));
-        assert!(!in_state_received.valid_values.contains(&"DX".to_string()));
-        let received = outside
-            .exchange
-            .iter()
-            .find(|field| field.name == "County")
-            .expect("outside-MDC received county should exist");
-        assert_eq!(received.valid_values.len(), 25);
-    }
-
-    #[test]
-    fn bundled_tn_qso_party_rules_resolve_both_locations() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let in_state = store
-            .get("TN-QSO-PARTY (In State)")
-            .expect("in-state Tennessee QSO Party rules should load");
-        let outside = store
-            .get("TN-QSO-PARTY")
-            .expect("outside-Tennessee QSO Party rules should load");
-
-        let counties = in_state
-            .define
-            .iter()
-            .find(|value_set| value_set.name == "Tennessee Counties")
-            .expect("Tennessee Counties should exist");
-        assert_eq!(counties.values.len(), 95);
-        assert!(counties.values.contains(&"ANDE".to_string()));
-        assert!(counties.values.contains(&"WILS".to_string()));
-
-        let states = in_state
-            .define
-            .iter()
-            .find(|value_set| value_set.name == "States")
-            .expect("States should exist");
-        assert!(!states.values.contains(&"TN".to_string()));
-        assert!(states.values.contains(&"AK".to_string()));
-        assert!(states.values.contains(&"HI".to_string()));
-
-        assert_eq!(in_state.allowed_modes, vec!["CW", "SSB"]);
-        let sent_county = in_state
-            .exchange
-            .iter()
-            .find(|field| field.name == "County" && field.is_sent)
-            .expect("in-state sent county should exist");
-        assert_eq!(sent_county.fixed, Some(true));
-
-        let received_location = in_state
-            .exchange
-            .iter()
-            .find(|field| field.name == "Location" && !field.is_sent)
-            .expect("in-state received location should exist");
-        assert_eq!(received_location.field_type, "String:4");
-        assert_eq!(
-            received_location.in_sets,
-            vec!["Tennessee Counties", "States", "Canadian Provinces"]
-        );
-        assert_eq!(received_location.regex.as_deref(), Some(r"^\S+$"));
-        assert!(received_location.valid_values_or_regex);
-        assert!(received_location.valid_values.contains(&"ANDE".to_string()));
-        assert!(received_location.valid_values.contains(&"SC".to_string()));
-        assert!(received_location.valid_values.contains(&"SK".to_string()));
-
-        assert_eq!(outside.log_params[0].name, "Location");
-        assert_eq!(outside.log_params[0].field_type, "String:4");
-        assert_eq!(
-            outside.log_params[0].in_sets,
-            vec!["Tennessee Counties", "States", "Canadian Provinces"]
-        );
-        assert_eq!(outside.log_params[0].regex.as_deref(), Some(r"^\S+$"));
-        assert!(outside.log_params[0].valid_values_or_regex);
-        assert_eq!(outside.multipliers.len(), 1);
-        assert_eq!(outside.multipliers[0].name, "Tennessee County");
-    }
-
-    #[test]
-    fn bundled_oh_qso_party_rules_resolve_both_locations() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let in_state = store
-            .get("OH-QSO-PARTY (In State)")
-            .expect("in-state Ohio QSO Party rules should load");
-        let outside = store
-            .get("OH-QSO-PARTY")
-            .expect("outside-Ohio QSO Party rules should load");
-
-        let counties = in_state
-            .define
-            .iter()
-            .find(|value_set| value_set.name == "Ohio Counties")
-            .expect("Ohio Counties should exist");
-        assert_eq!(counties.values.len(), 88);
-        assert!(counties.values.contains(&"ADAM".to_string()));
-        assert!(counties.values.contains(&"WYAN".to_string()));
-
-        let states = in_state
-            .define
-            .iter()
-            .find(|value_set| value_set.name == "States")
-            .expect("States should exist");
-        assert!(!states.values.contains(&"OH".to_string()));
-        assert!(!states.values.contains(&"DC".to_string()));
-        assert!(states.values.contains(&"MD".to_string()));
-
-        assert_eq!(in_state.allowed_modes, vec!["CW", "SSB"]);
-        assert_eq!(in_state.log_params[0].name, "County");
-        assert_eq!(outside.log_params[0].name, "Location");
-        assert_eq!(in_state.exchange[1].fixed, None);
-        assert_eq!(outside.exchange[1].fixed, None);
-        assert_eq!(outside.multipliers.len(), 1);
-        assert_eq!(outside.multipliers[0].key, vec!["SRX_STRING", "MODE"]);
-        assert_eq!(
-            in_state
-                .cabrillo
-                .as_ref()
-                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
-            Some("OH-QSO-PARTY")
-        );
-    }
-
-    #[test]
-    fn bundled_arrl_field_day_uses_parameter_multiplier() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let contest = store
-            .get("ARRL-FIELD-DAY")
-            .expect("ARRL Field Day rules should load");
-
-        assert_eq!(contest.param_multipliers.len(), 1);
-        assert_eq!(
-            contest.param_multipliers[0].values,
-            BTreeMap::from([
-                ("HIGH".to_string(), 1),
-                ("LOW".to_string(), 2),
-                ("QRP".to_string(), 5),
-            ])
-        );
-    }
-
-    #[test]
-    fn bundled_wfd_rules_support_the_2026_exchange_and_objective_multiplier() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let contest = store
-            .get("WFD")
-            .expect("Winter Field Day rules should load");
-
-        assert_eq!(
-            contest.allowed_bands,
-            ["160m", "80m", "40m", "20m", "15m", "10m", "6m", "2m"]
-        );
-        assert_eq!(contest.allowed_modes, ["CW", "SSB", "FM"]);
-        assert_eq!(contest.dupe_key, ["CALL", "BAND", "MODE_CLASS"]);
-        assert_eq!(
-            contest.qso_points.as_ref().map(|points| points.rules.len()),
-            Some(2)
-        );
-        assert_eq!(contest.param_multipliers.len(), 1);
-        assert_eq!(contest.param_multipliers[0].values.get("32"), Some(&33));
-
-        let sent_exchange = contest
-            .exchange
-            .iter()
-            .find(|field| field.name == "Exchange(s)")
-            .expect("sent exchange should exist");
-        assert_eq!(sent_exchange.source_param.as_deref(), Some("X-EXCHANGE"));
-        assert_eq!(sent_exchange.regex.as_deref(), Some(r"^\d+[HIOM]$"));
-
-        let cabrillo = contest
-            .cabrillo
-            .as_ref()
-            .expect("Cabrillo rules should exist");
-        assert_eq!(cabrillo.contest_id.as_deref(), Some("WFD"));
-        assert!(
-            cabrillo
-                .log_fields
-                .iter()
-                .any(|field| field.name == "X-EXCHANGE")
-        );
-        assert!(
-            cabrillo
-                .log_fields
-                .iter()
-                .any(|field| field.name == "LOCATION")
-        );
-    }
-
-    #[test]
-    fn bundled_cqww_rules_resolve_cw_and_ssb_variants() {
-        let yaml = include_str!("../../data/contest-rules/cqww.yaml");
-        let cw = resolve_yaml_contest(yaml, "CQ-WW-CW");
-        let ssb = resolve_yaml_contest(yaml, "CQ-WW-SSB");
-
-        assert_eq!(cw.allowed_modes, vec!["CW".to_string()]);
-        assert_eq!(ssb.allowed_modes, vec!["SSB".to_string()]);
-        assert_eq!(
-            cw.allowed_bands,
-            vec!["160m", "80m", "40m", "20m", "15m", "10m"]
-        );
-        assert_eq!(cw.multipliers.len(), 2);
-        let transmitter_field = cw
-            .cabrillo
-            .as_ref()
-            .and_then(|cabrillo| {
-                cabrillo
-                    .log_fields
+        for rules in store.contests.values() {
+            validate_ids(
+                rules
+                    .qso_table
+                    .columns
                     .iter()
-                    .find(|field| field.name == "CATEGORY-TRANSMITTER")
-            })
-            .expect("CQWW should define CATEGORY-TRANSMITTER");
-        assert!(transmitter_field.multi_single_has_mult_transmitter);
-        assert_eq!(
-            serde_json::to_value(transmitter_field)
-                .expect("field should serialize")
-                .get("multi_single_has_mult_transmitter"),
-            Some(&Value::Bool(true))
-        );
-        assert!(
-            ssb.cabrillo
-                .as_ref()
-                .and_then(|cabrillo| {
-                    cabrillo
-                        .log_fields
-                        .iter()
-                        .find(|field| field.name == "CATEGORY-TRANSMITTER")
-                })
-                .is_some_and(|field| field.multi_single_has_mult_transmitter)
-        );
-        assert_eq!(
-            cw.qso_points
-                .as_ref()
-                .and_then(|points| points.geography.as_ref())
-                .map(|geography| geography.country_field.as_str()),
-            Some("APP_LOG73_DXCC_PFX")
-        );
-        assert_eq!(
-            cw.qso_points
-                .as_ref()
-                .and_then(|points| points.category_band_param.as_deref()),
-            Some("CATEGORY-BAND")
-        );
-        assert_eq!(
-            ssb.cabrillo
-                .as_ref()
-                .and_then(|cabrillo| cabrillo.fixed_fields.first())
-                .map(|field| field.value.as_str()),
-            Some("SSB")
-        );
-    }
-
-    #[test]
-    fn bundled_cqwpx_rules_resolve_cw_and_ssb_variants() {
-        let yaml = include_str!("../../data/contest-rules/cqwpx.yaml");
-        let cw = resolve_yaml_contest(yaml, "CQ-WPX-CW");
-        let ssb = resolve_yaml_contest(yaml, "CQ-WPX-SSB");
-
-        assert_eq!(cw.allowed_modes, vec!["CW".to_string()]);
-        assert_eq!(ssb.allowed_modes, vec!["SSB".to_string()]);
-        assert_eq!(
-            cw.allowed_bands,
-            vec!["160m", "80m", "40m", "20m", "15m", "10m"]
-        );
-        assert_eq!(cw.dupe_key, vec!["CALL", "BAND"]);
-        assert_eq!(cw.multipliers.len(), 1);
-        assert_eq!(cw.multipliers[0].field, "WPX_PREFIX");
-        assert_eq!(cw.multipliers[0].key, vec!["WPX_PREFIX"]);
-        assert_eq!(
-            cw.exchange
-                .iter()
-                .find(|field| field.adif == "STX")
-                .map(|field| field.serial_scope),
-            Some(SerialScope::CategoryTransmitter)
-        );
-        assert_eq!(
-            cw.qso_points
-                .as_ref()
-                .and_then(|points| points.geography.as_ref())
-                .map(|geography| geography.different_continent.for_band(Some("40m"))),
-            Some(6)
-        );
-        assert_eq!(
-            ssb.cabrillo
-                .as_ref()
-                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
-            Some("CQ-WPX-SSB")
-        );
-        assert_eq!(
-            ssb.cabrillo
-                .as_ref()
-                .and_then(|cabrillo| cabrillo.fixed_fields.first())
-                .map(|field| field.value.as_str()),
-            Some("SSB")
-        );
-    }
-
-    #[test]
-    fn bundled_arrl_dx_rules_resolve_wve_and_dx_cw_and_ssb_variants() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let cw = store.get("ARRL-DX-CW").expect("W/VE CW rules should load");
-        let cw_dx = store
-            .get("ARRL-DX-CW (DX)")
-            .expect("DX CW rules should load");
-        let ssb = store
-            .get("ARRL-DX-SSB")
-            .expect("W/VE SSB rules should load");
-        let ssb_dx = store
-            .get("ARRL-DX-SSB (DX)")
-            .expect("DX SSB rules should load");
-
-        assert_eq!(cw.allowed_modes, ["CW"]);
-        assert_eq!(cw_dx.allowed_modes, ["CW"]);
-        assert_eq!(ssb.allowed_modes, ["SSB"]);
-        assert_eq!(ssb_dx.allowed_modes, ["SSB"]);
-        assert_eq!(cw.dupe_key, ["CALL", "BAND"]);
-        assert_eq!(
-            cw.qso_points
-                .as_ref()
-                .and_then(|points| points.category_band_param.as_deref()),
-            Some("CATEGORY-BAND")
-        );
-        assert_eq!(cw.exchange[1].name, "Location(s)");
-        assert_eq!(cw.exchange[3].name, "Power");
-        assert_eq!(cw_dx.exchange[1].name, "Power(s)");
-        assert_eq!(cw_dx.exchange[3].name, "Location");
-        assert_eq!(cw_dx.multipliers[0].key, ["SRX_STRING", "BAND"]);
-        assert!(
-            cw_dx.multipliers[0]
-                .valid_values
-                .contains(&"LB".to_string())
-        );
-        assert!(
-            !cw_dx.multipliers[0]
-                .valid_values
-                .contains(&"AK".to_string())
-        );
-        assert!(
-            !cw_dx.multipliers[0]
-                .valid_values
-                .contains(&"HI".to_string())
-        );
-        assert_eq!(
-            ssb.cabrillo
-                .as_ref()
-                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
-            Some("ARRL-DX-SSB")
-        );
-        assert_eq!(
-            ssb_dx
-                .cabrillo
-                .as_ref()
-                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
-            Some("ARRL-DX-SSB")
-        );
-    }
-
-    #[test]
-    fn bundled_arrl_sweepstakes_rules_resolve_cw_and_ssb_variants() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let cw = store
-            .get("ARRL-SS-CW")
-            .expect("ARRL Sweepstakes CW rules should load");
-        let ssb = store
-            .get("ARRL-SS-SSB")
-            .expect("ARRL Sweepstakes SSB rules should load");
-
-        assert_eq!(cw.allowed_modes, ["CW"]);
-        assert_eq!(ssb.allowed_modes, ["SSB"]);
-        assert_eq!(cw.dupe_key, ["CALL"]);
-        assert_eq!(
-            cw.qso_points.as_ref().and_then(|points| points.points),
-            Some(2)
-        );
-        assert_eq!(cw.multipliers[0].valid_values.len(), 85);
-        assert_eq!(cw.exchange[0].field_type, "Serial:4");
-        assert_eq!(cw.exchange[0].adif, "STX");
-        assert_eq!(cw.exchange[4].adif, "SRX");
-        assert!(
-            cw.log_params
-                .iter()
-                .all(|param| param.name != "SERIAL_BATCH_SIZE")
-        );
-        assert!(
-            store
-                .get("MST")
-                .expect("MST rules should load")
-                .log_params
-                .iter()
-                .all(|param| param.name != "SERIAL_BATCH_SIZE")
-        );
-        assert_eq!(
-            ssb.cabrillo
-                .as_ref()
-                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
-            Some("ARRL-SS-SSB")
-        );
-    }
-
-    #[test]
-    fn bundled_arrl_160_rules_resolve_conditional_sections() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let contest = store.get("ARRL-160").expect("ARRL 160 rules should load");
-
-        assert_eq!(contest.allowed_bands, ["160m"]);
-        assert_eq!(contest.allowed_modes, ["CW"]);
-        assert_eq!(contest.dupe_key, ["CALL"]);
-        assert_eq!(
-            contest.qso_points.as_ref().map(|points| points.rules.len()),
-            Some(4)
-        );
-        let received_section = contest
-            .exchange
-            .iter()
-            .find(|field| field.name == "Section" && !field.is_sent)
-            .expect("received Section should exist");
-        assert!(received_section.valid_values.contains(&"EMA".to_string()));
-        assert_eq!(
-            received_section
-                .only_when
-                .as_ref()
-                .map(|condition| condition.valid_values.len()),
-            Some(15)
-        );
-    }
-
-    #[test]
-    fn bundled_arrl_10_rules_resolve_station_profiles_and_locations() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let domestic = store.get("ARRL-10").expect("ARRL-10 rules should load");
-        let dx = store
-            .get("ARRL-10 (DX)")
-            .expect("ARRL-10 DX rules should load");
-        let maritime = store
-            .get("ARRL-10 (/MM)")
-            .expect("ARRL-10 maritime rules should load");
-
-        assert_eq!(domestic.allowed_bands, ["10m"]);
-        assert_eq!(domestic.dupe_key, ["CALL", "MODE_CLASS"]);
-        assert!(
-            domestic.log_params[0]
-                .valid_values
-                .contains(&"DC".to_string())
-        );
-        assert!(
-            domestic.log_params[0]
-                .valid_values
-                .contains(&"LB".to_string())
-        );
-        assert!(
-            domestic.log_params[0]
-                .valid_values
-                .contains(&"CMX".to_string())
-        );
-        assert!(dx.log_params.is_empty());
-        assert_eq!(dx.exchange[1].adif, "STX");
-        assert_eq!(maritime.log_params[0].name, "ITU Region");
-        assert_eq!(maritime.exchange[1].adif, "APP_LOG73_STX_ITU_REGION");
-        for profile in [domestic, dx, maritime] {
-            let received = profile
-                .exchange
-                .iter()
-                .filter(|field| !field.is_sent)
-                .collect::<Vec<_>>();
-            assert_eq!(received.len(), 2);
-            assert_eq!(received[0].name, "RST(r)");
-            assert_eq!(received[1].name, "Location");
-            assert!(received[1].valid_values_or_regex);
-            assert!(received[1].valid_values.contains(&"CMX".to_string()));
-            assert!(received[1].valid_values.contains(&"2".to_string()));
+                    .map(|column| column.id.as_str()),
+                "QSO table column",
+            )
+            .unwrap_or_else(|error| panic!("{}: {error}", rules.id));
         }
-        assert_eq!(domestic.multipliers[0].key, ["SRX_STRING", "MODE_CLASS"]);
-        assert_eq!(
-            domestic.multipliers[2].when.as_ref().unwrap().suffixes,
-            ["/MM"]
-        );
-    }
-
-    #[test]
-    fn bundled_na_sprint_ssb_rules_resolve_na_and_dx_variants() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let north_america = store
-            .get("NA-SPRINT-SSB (North America)")
-            .expect("North America NA Sprint rules should load");
-        let dx = store
-            .get("NA-SPRINT-SSB (DX)")
-            .expect("DX NA Sprint rules should load");
-
-        assert_eq!(north_america.allowed_bands, ["80m", "40m", "20m"]);
-        assert_eq!(north_america.allowed_modes, ["SSB"]);
-        assert_eq!(north_america.dupe_key, ["CALL", "BAND"]);
-        assert_eq!(north_america.multipliers[0].valid_values.len(), 106);
-        assert!(
-            north_america.multipliers[0]
-                .valid_values
-                .contains(&"FO/C".to_string())
-        );
-
-        let north_america_received = north_america
-            .exchange
-            .iter()
-            .find(|field| field.name == "QTH" && !field.is_sent)
-            .expect("North America received QTH should exist");
-        assert!(
-            north_america_received
-                .valid_values
-                .contains(&"DX".to_string())
-        );
-
-        let dx_received = dx
-            .exchange
-            .iter()
-            .find(|field| field.name == "QTH" && !field.is_sent)
-            .expect("DX received QTH should exist");
-        assert!(!dx_received.valid_values.contains(&"DX".to_string()));
-        assert!(dx_received.valid_values.contains(&"MA".to_string()));
-        assert_eq!(
-            dx.qso_points
-                .as_ref()
-                .and_then(|points| points.rules.first())
-                .map(|rule| rule.points),
-            Some(1)
-        );
-        assert_eq!(
-            dx.cabrillo
-                .as_ref()
-                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
-            Some("NA-SPRINT-SSB")
-        );
-    }
-
-    #[test]
-    fn bundled_na_sprint_cw_rules_resolve_na_and_dx_variants() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let north_america = store
-            .get("NA-SPRINT-CW (North America)")
-            .expect("North America NA Sprint CW rules should load");
-        let dx = store
-            .get("NA-SPRINT-CW (DX)")
-            .expect("DX NA Sprint CW rules should load");
-
-        assert_eq!(north_america.allowed_bands, ["80m", "40m", "20m"]);
-        assert_eq!(north_america.allowed_modes, ["CW"]);
-        assert_eq!(north_america.dupe_key, ["CALL", "BAND"]);
-        assert!(
-            north_america.multipliers[0]
-                .valid_values
-                .contains(&"4U1UN".to_string())
-        );
-        assert!(
-            north_america.multipliers[0]
-                .valid_values
-                .contains(&"VP9".to_string())
-        );
-
-        let north_america_received = north_america
-            .exchange
-            .iter()
-            .find(|field| field.name == "QTH" && !field.is_sent)
-            .expect("North America received QTH should exist");
-        assert!(
-            north_america_received
-                .valid_values
-                .contains(&"DX".to_string())
-        );
-
-        let dx_received = dx
-            .exchange
-            .iter()
-            .find(|field| field.name == "QTH" && !field.is_sent)
-            .expect("DX received QTH should exist");
-        assert!(!dx_received.valid_values.contains(&"DX".to_string()));
-        assert!(dx_received.valid_values.contains(&"MA".to_string()));
-        assert_eq!(
-            dx.qso_points
-                .as_ref()
-                .and_then(|points| points.rules.first())
-                .map(|rule| rule.points),
-            Some(1)
-        );
-        let cabrillo = north_america.cabrillo.as_ref().expect("Cabrillo rules");
-        assert_eq!(cabrillo.contest_id.as_deref(), Some("NA-SPRINT-CW"));
-        assert!(
-            cabrillo.fixed_fields.iter().any(|field| {
-                field.name == "CATEGORY-ASSISTED" && field.value == "NON-ASSISTED"
-            })
-        );
-    }
-
-    #[test]
-    fn bundled_naqp_rules_resolve_cw_and_ssb_na_and_dx_variants() {
-        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
-        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
-            .expect("bundled contest rules should load");
-        let cw_north_america = store
-            .get("NAQP-CW (North America)")
-            .expect("North America NAQP CW rules should load");
-        let cw_dx = store
-            .get("NAQP-CW (DX)")
-            .expect("DX NAQP CW rules should load");
-        let ssb_north_america = store
-            .get("NAQP-SSB (North America)")
-            .expect("North America NAQP SSB rules should load");
-        let ssb_dx = store
-            .get("NAQP-SSB (DX)")
-            .expect("DX NAQP SSB rules should load");
-
-        assert_eq!(
-            cw_north_america.allowed_bands,
-            ["160m", "80m", "40m", "20m", "15m", "10m"]
-        );
-        assert_eq!(cw_north_america.allowed_modes, ["CW"]);
-        assert_eq!(ssb_north_america.allowed_modes, ["SSB"]);
-        assert_eq!(cw_north_america.dupe_key, ["CALL", "BAND"]);
-        assert_eq!(cw_north_america.multipliers[0].key, ["SRX_STRING", "BAND"]);
-        assert!(
-            cw_north_america.multipliers[0]
-                .valid_values
-                .contains(&"VP9".to_string())
-        );
-        assert!(cw_dx.log_params.is_empty());
-        assert_eq!(cw_dx.exchange.len(), 3);
-        assert_eq!(ssb_dx.exchange.len(), 3);
-        assert_eq!(
-            cw_north_america
-                .cabrillo
-                .as_ref()
-                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
-            Some("NAQP-CW")
-        );
-        assert_eq!(
-            ssb_north_america
-                .cabrillo
-                .as_ref()
-                .and_then(|cabrillo| cabrillo.contest_id.as_deref()),
-            Some("NAQP-SSB")
-        );
-        assert!(
-            ssb_north_america
-                .cabrillo
-                .as_ref()
-                .expect("Cabrillo rules")
-                .fixed_fields
-                .iter()
-                .any(|field| field.name == "CATEGORY-BAND" && field.value == "ALL")
-        );
     }
 }

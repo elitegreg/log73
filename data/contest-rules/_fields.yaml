@@ -1,0 +1,62 @@
+schema: 2
+presets:
+  rst-sent:
+    label: RST(s)
+    type: RST
+    adif: RST_SENT
+    default: 599
+    direction: sent
+  rst-received:
+    label: RST(r)
+    type: RST
+    adif: RST_RCVD
+    default: 599
+    direction: received
+  category-assisted:
+    key: CATEGORY-ASSISTED
+    label: Category Assisted
+    type: String:16
+    widget: select
+    cabrillo_header: CATEGORY-ASSISTED
+  category-band:
+    key: CATEGORY-BAND
+    label: Category Band
+    type: String:8
+    widget: select
+    cabrillo_header: CATEGORY-BAND
+  category-mode:
+    key: CATEGORY-MODE
+    label: Category Mode
+    type: String:16
+    widget: select
+    cabrillo_header: CATEGORY-MODE
+  category-operator:
+    key: CATEGORY-OPERATOR
+    label: Category Operator
+    type: String:16
+    widget: select
+    cabrillo_header: CATEGORY-OPERATOR
+  category-overlay:
+    key: CATEGORY-OVERLAY
+    label: Category Overlay
+    type: String:24
+    widget: select
+    cabrillo_header: CATEGORY-OVERLAY
+  category-power:
+    key: CATEGORY-POWER
+    label: Category Power
+    type: String:16
+    widget: select
+    cabrillo_header: CATEGORY-POWER
+  category-station:
+    key: CATEGORY-STATION
+    label: Category Station
+    type: String:16
+    widget: select
+    cabrillo_header: CATEGORY-STATION
+  category-transmitter:
+    key: CATEGORY-TRANSMITTER
+    label: Category Transmitter
+    type: String:16
+    widget: select
+    cabrillo_header: CATEGORY-TRANSMITTER

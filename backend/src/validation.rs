@@ -1,6 +1,7 @@
 use crate::bands::{Band, band_by_name, band_for_frequency};
 use crate::contest_rules::{
-    ContestParam, ContestRules, ContestRulesStore, ExchangeField, ScoringCondition,
+    ContestRules, ContestRulesStore, ExchangeDirection, ExchangeField, FieldInputKind,
+    ScoringCondition, SetupField, ValidationMatch,
 };
 use crate::cw;
 use crate::db::{
@@ -476,7 +477,9 @@ async fn validate_immutable_sent_serial_fields(
     let sent_serial_fields = rules
         .exchange
         .iter()
-        .filter(|field| field.is_sent && parse_field_type(&field.field_type, "CW").kind == "SERIAL")
+        .filter(|field| {
+            field.direction == ExchangeDirection::Sent && field.input.kind == FieldInputKind::Serial
+        })
         .collect::<Vec<_>>();
     if sent_serial_fields.is_empty() {
         return Ok(());
@@ -497,7 +500,7 @@ async fn validate_immutable_sent_serial_fields(
         let previous = serial_field_value(contact_adif_value(&existing, &field.adif));
         let next = serial_field_value(contact_adif_value(contact, &field.adif));
         if previous != next {
-            return Err(format!("{} cannot be changed after logging", field.name));
+            return Err(format!("{} cannot be changed after logging", field.label));
         }
     }
 
@@ -608,15 +611,11 @@ pub fn validate_rit_adjustment_hz(hz: i32) -> Result<(), String> {
     Ok(())
 }
 
-fn persisted_log_fields(rules: &ContestRules) -> Vec<&ContestParam> {
-    let mut fields = rules.log_params.iter().collect::<Vec<_>>();
-    if let Some(cabrillo) = &rules.cabrillo {
-        fields.extend(cabrillo.log_fields.iter());
-    }
-    fields
+fn persisted_log_fields(rules: &ContestRules) -> Vec<&SetupField> {
+    rules.setup_fields.iter().collect()
 }
 
-fn cabrillo_export_fields(rules: &ContestRules) -> Vec<&ContestParam> {
+fn cabrillo_export_fields(rules: &ContestRules) -> Vec<&SetupField> {
     rules
         .cabrillo
         .as_ref()
@@ -632,7 +631,7 @@ fn validate_persisted_log_params(
 }
 
 fn validate_configured_params(
-    fields: Vec<&ContestParam>,
+    fields: Vec<&SetupField>,
     contest_params: &Value,
 ) -> Result<(), String> {
     let empty_params = serde_json::Map::new();
@@ -643,7 +642,7 @@ fn validate_configured_params(
     };
     let known_params = fields
         .iter()
-        .map(|param| param.name.as_str())
+        .map(|param| param.key.as_str())
         .collect::<HashSet<_>>();
 
     for key in params.keys() {
@@ -654,13 +653,13 @@ fn validate_configured_params(
     }
 
     for param in fields {
-        validate_contest_param(param, params.get(&param.name))?;
+        validate_contest_param(param, params.get(&param.key))?;
     }
 
     Ok(())
 }
 
-fn validate_contest_param(param: &ContestParam, value: Option<&Value>) -> Result<(), String> {
+fn validate_contest_param(param: &SetupField, value: Option<&Value>) -> Result<(), String> {
     let label = param.label.as_str();
     let value = json_trimmed_string(value).unwrap_or_default();
     let multiline = param
@@ -671,7 +670,7 @@ fn validate_contest_param(param: &ContestParam, value: Option<&Value>) -> Result
         || param.max_lines.is_some();
 
     if value.is_empty() {
-        if param.required == Some(false) {
+        if !param.validation.required {
             return Ok(());
         }
         return Err(format!("{label} is required"));
@@ -693,11 +692,11 @@ fn validate_contest_param(param: &ContestParam, value: Option<&Value>) -> Result
             }
             validate_typed_field(
                 label,
-                &param.field_type,
+                &param.input.as_spec(),
                 line,
-                &param.valid_values,
-                param.regex.as_deref(),
-                param.valid_values_or_regex,
+                &param.validation.values,
+                param.validation.pattern.as_deref(),
+                param.validation.match_mode == ValidationMatch::Any,
                 "CW",
             )?;
         }
@@ -710,11 +709,11 @@ fn validate_contest_param(param: &ContestParam, value: Option<&Value>) -> Result
 
     validate_typed_field(
         label,
-        &param.field_type,
+        &param.input.as_spec(),
         &value,
-        &param.valid_values,
-        param.regex.as_deref(),
-        param.valid_values_or_regex,
+        &param.validation.values,
+        param.validation.pattern.as_deref(),
+        param.validation.match_mode == ValidationMatch::Any,
         "CW",
     )
 }
@@ -741,7 +740,7 @@ fn validate_contact(
 
     let contest_id = json_trimmed_string(contact_adif_value(contact, "CONTEST_ID"))
         .ok_or_else(|| "contact contest id is required".to_string())?;
-    if !contest_id.eq_ignore_ascii_case(&rules.contest) {
+    if !contest_id.eq_ignore_ascii_case(&rules.id) {
         return Err("contact contest id does not match log contest".to_string());
     }
 
@@ -896,9 +895,9 @@ fn validate_contact_band_and_frequency(
     }
     let contact_band =
         band_by_name(bands, &band_text).ok_or_else(|| "band is invalid".to_string())?;
-    if !rules.allowed_bands.is_empty()
+    if !rules.bands.is_empty()
         && !rules
-            .allowed_bands
+            .bands
             .iter()
             .any(|allowed_band| allowed_band.eq_ignore_ascii_case(&contact_band.name))
     {
@@ -923,16 +922,13 @@ fn validate_contact_mode(rules: &ContestRules, contact: &Contact) -> Result<Stri
         return Err("mode is required".to_string());
     }
     let mode = mode.to_uppercase();
-    if !rules.allowed_modes.is_empty()
+    if !rules.modes.is_empty()
         && !rules
-            .allowed_modes
+            .modes
             .iter()
             .any(|allowed_mode| allowed_mode.eq_ignore_ascii_case(&mode))
     {
-        return Err(format!(
-            "mode must be one of: {}",
-            rules.allowed_modes.join(", ")
-        ));
+        return Err(format!("mode must be one of: {}", rules.modes.join(", ")));
     }
     Ok(mode)
 }
@@ -947,18 +943,18 @@ fn validate_exchange_field(
         if value.is_empty() {
             return Ok(());
         }
-        return Err(format!("{} must be blank", field.name));
+        return Err(format!("{} must be blank", field.label));
     }
     if value.is_empty() {
-        return Err(format!("{} is required", field.name));
+        return Err(format!("{} is required", field.label));
     }
     validate_typed_field(
-        &field.name,
-        &field.field_type,
+        &field.label,
+        &field.input.as_spec(),
         &value,
-        &field.valid_values,
-        field.regex.as_deref(),
-        field.valid_values_or_regex,
+        &field.validation.values,
+        field.validation.pattern.as_deref(),
+        field.validation.match_mode == ValidationMatch::Any,
         radio_mode,
     )
 }
@@ -978,7 +974,7 @@ fn contact_matches_condition(contact: &Contact, condition: &ScoringCondition) ->
     if value.is_empty() {
         return false;
     }
-    let mut valid_values = condition.valid_values.iter().chain(condition.values.iter());
+    let mut valid_values = condition.values.iter();
     valid_values
         .clone()
         .next()
@@ -1198,7 +1194,7 @@ fn validate_tuning_increment_hz(label: &str, value: u32) -> Result<(), String> {
 }
 
 fn allowed_bands(rules: &ContestRules) -> String {
-    rules.allowed_bands.join(", ")
+    rules.bands.join(", ")
 }
 
 fn contact_frequency_hz(value: Option<&Value>) -> Option<u64> {
@@ -1287,38 +1283,21 @@ mod tests {
     use serde_json::{Map, json};
 
     fn test_rules() -> ContestRules {
+        use crate::contest_rules::{ExchangeDirection, test_exchange_field};
+
         ContestRules {
-            contest: "TEST".to_string(),
-            display_name: "Test".to_string(),
-            allowed_bands: vec!["20m".to_string()],
-            allowed_modes: vec!["CW".to_string(), "SSB".to_string()],
-            define: Vec::new(),
-            exchange: vec![ExchangeField {
-                name: "RST(r)".to_string(),
-                field_type: "RST".to_string(),
-                adif: "RST_RCVD".to_string(),
-                fixed: None,
-                default: None,
-                source_param: None,
-                regex: None,
-                valid_values_or_regex: false,
-                in_sets: Vec::new(),
-                valid_values: Vec::new(),
-                serial_scope: Default::default(),
-                only_when: None,
-                is_sent: false,
-            }],
-            qso_columns: Vec::new(),
-            qso_column_fields: Default::default(),
-            log_params: Vec::new(),
-            qso_points: None,
-            dupe_key: Vec::new(),
-            multipliers: Vec::new(),
-            bonus_points: Vec::new(),
-            param_multipliers: Vec::new(),
-            multiplier_count_bonus_points: Vec::new(),
-            cabrillo: None,
-            metadata: None,
+            id: "TEST".to_string(),
+            name: "Test".to_string(),
+            bands: vec!["20m".to_string()],
+            modes: vec!["CW".to_string(), "SSB".to_string()],
+            exchange: vec![test_exchange_field(
+                "rst-received",
+                "RST(r)",
+                "RST",
+                "RST_RCVD",
+                ExchangeDirection::Received,
+            )],
+            ..ContestRules::default()
         }
     }
 
@@ -1550,22 +1529,14 @@ mod tests {
     fn conditionally_requires_or_forbids_exchange_fields() {
         let mut rules = test_rules();
         let field = &mut rules.exchange[0];
-        field.name = "Section".to_string();
-        field.field_type = "String:3".to_string();
+        field.label = "Section".to_string();
+        field.input = crate::contest_rules::FieldInput::parse("String:3").unwrap();
         field.adif = "ARRL_SECT".to_string();
-        field.valid_values = vec!["EMA".to_string(), "ONN".to_string()];
-        field.only_when = Some(ScoringCondition {
-            field: "DXCC".to_string(),
-            in_set: None,
-            in_sets: Vec::new(),
-            values: vec!["1".to_string(), "291".to_string()],
-            valid_values: Vec::new(),
-            exclude_in_sets: Vec::new(),
-            exclude_values: Vec::new(),
-            excluded_valid_values: Vec::new(),
-            suffixes: Vec::new(),
-            exclude_suffixes: Vec::new(),
-        });
+        field.validation.values = vec!["EMA".to_string(), "ONN".to_string()];
+        field.only_when = Some(crate::contest_rules::test_scoring_condition(
+            "DXCC",
+            &["1", "291"],
+        ));
 
         let mut domestic = test_contact();
         db::set_contact_adif(&mut domestic, "DXCC", json!(291));
@@ -1583,13 +1554,12 @@ mod tests {
     #[test]
     fn exchange_field_accepts_configured_values_or_no_space_regex() {
         let mut rules = test_rules();
-        rules.exchange[0].name = "Location".to_string();
-        rules.exchange[0].field_type = "String:16".to_string();
+        rules.exchange[0].label = "Location".to_string();
+        rules.exchange[0].input = crate::contest_rules::FieldInput::parse("String:16").unwrap();
         rules.exchange[0].adif = "SRX_STRING".to_string();
-        rules.exchange[0].in_sets = vec!["States".to_string()];
-        rules.exchange[0].valid_values = vec!["SC".to_string(), "NC".to_string()];
-        rules.exchange[0].regex = Some(r"^\S+$".to_string());
-        rules.exchange[0].valid_values_or_regex = true;
+        rules.exchange[0].validation.values = vec!["SC".to_string(), "NC".to_string()];
+        rules.exchange[0].validation.pattern = Some(r"^\S+$".to_string());
+        rules.exchange[0].validation.match_mode = crate::contest_rules::ValidationMatch::Any;
 
         let mut contact = test_contact();
         {

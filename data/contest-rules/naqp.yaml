@@ -1,260 +1,148 @@
+schema: 2
 contests:
-  - id: 'NAQP-CW (North America)'
-    display_name: 'North American QSO Party CW (North America)'
-    allowed_bands: [160, 80, 40, 20, 15, 10]
-    allowed_modes: ['CW']
+  NAQP-CW (North America):
+    name: North American QSO Party CW (North America)
+    value_sets:
+      US Multipliers:
+        use: us-states
+      District of Columbia:
+        use: district-of-columbia
+      Canadian Multipliers:
+        use: canadian-provinces
+      North American Countries:
+        use: north-american-countries
+      DX:
+        use: dx
+    setup_fields:
+      - id: param-qth
+        key: QTH
+        label: State, Province, or NA Country
+        type: String:5
+        required: true
+        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]
+      - id: header-category-assisted
+        preset: category-assisted
+        default: NON-ASSISTED
+        valid_values: [NON-ASSISTED, ASSISTED]
+      - id: header-category-power
+        preset: category-power
+        default: LOW
+        valid_values: [QRP, LOW, HIGH]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE, TWO]
+      - id: header-name
+        key: NAME
+        label: Operator Name
+        type: String:20
+        required: true
+        regex: ^[A-Za-z]+$
+        preserve_case: true
+        cabrillo_header: NAME
+      - id: header-location
+        key: LOCATION
+        label: Cabrillo Location
+        type: String:32
+        required: true
+        help_text: 'US/Canada: state or province. All other stations: DX.'
+        cabrillo_header: LOCATION
+    exchange:
+      - id: name-sent
+        label: Name(s)
+        type: String:20
+        adif: MY_NAME
+        direction: sent
+        fixed: true
+        regex: ^[A-Za-z]+$
+        source: NAME
+      - id: qth-sent
+        label: QTH(s)
+        type: String:5
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]
+        source: QTH
+      - id: name-received
+        label: Name
+        type: String:20
+        adif: NAME
+        direction: received
+        regex: ^[A-Za-z]+$
+      - id: qth-received
+        label: QTH
+        type: String:5
+        adif: SRX_STRING
+        direction: received
+        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries, DX]
     scoring:
       qso_points:
         points: 1
-      dupe_key: ['CALL', 'BAND']
+      dupe_key:
+        - CALL
+        - BAND
       multipliers:
-        - name: 'North American Location'
-          field: 'SRX_STRING'
-          key: ['SRX_STRING', 'BAND']
-          in_sets: ['US Multipliers', 'District of Columbia', 'Canadian Multipliers', 'North American Countries']
-    define:
-      - name: 'US Multipliers'
-        values_from_file: us_states.dat
-      - name: 'District of Columbia'
-        values: ['DC']
-      - name: 'Canadian Multipliers'
-        values_from_file: canadian_provinces.dat
-      - name: 'North American Countries'
-        values:
-          - 4U1UN
-          - 6Y
-          - 8P
-          - C6
-          - CM
-          - FG
-          - FJ
-          - FM
-          - FO/C
-          - FS
-          - HH
-          - HI3
-          - HK0
-          - HP
-          - HR
-          - J3
-          - J6
-          - J7
-          - J8
-          - KG4
-          - KP1
-          - KP2
-          - KP4
-          - KP5
-          - OX
-          - PJ5
-          - PJ7
-          - TG
-          - TI
-          - TI9
-          - V2
-          - V3
-          - V4
-          - VP2E
-          - VP2M
-          - VP2V
-          - VP5
-          - VP9
-          - XE
-          - XF4
-          - YN
-          - YS
-          - YV0
-          - ZF
-      - name: 'DX'
-        values: ['DX']
-    log_params:
-      - name: 'QTH'
-        label: 'State, Province, or NA Country'
-        type: 'String:5'
-        required: true
-        in_sets: ['US Multipliers', 'District of Columbia', 'Canadian Multipliers', 'North American Countries']
-    exchange:
-      - name: 'Name(s)'
-        type: 'String:20'
-        adif: 'MY_NAME'
-        fixed: true
-        source_param: 'NAME'
-        regex: '^[A-Za-z]+$'
-        is_sent: true
-      - name: 'QTH(s)'
-        type: 'String:5'
-        adif: 'STX_STRING'
-        fixed: true
-        source_param: 'QTH'
-        is_sent: true
-        in_sets: ['US Multipliers', 'District of Columbia', 'Canadian Multipliers', 'North American Countries']
-      - name: 'Name'
-        type: 'String:20'
-        adif: 'NAME'
-        regex: '^[A-Za-z]+$'
-        is_sent: false
-      - name: 'QTH'
-        type: 'String:5'
-        adif: 'SRX_STRING'
-        is_sent: false
-        in_sets: ['US Multipliers', 'District of Columbia', 'Canadian Multipliers', 'North American Countries', 'DX']
-    qso_columns: ['Name', 'QTH', 'Mult', 'Pts', 'Op']
-    qso_column_fields:
-      Freq: 'FREQ'
-      Mode: 'MODE'
-      Call: 'CALL'
-      Op: 'OPERATOR'
-      'Name(s)': 'MY_NAME'
-      'QTH(s)': 'STX_STRING'
-      Name: 'NAME'
-      QTH: 'SRX_STRING'
+        - {id: mult-north-american-location, name: North American Location, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]}
     cabrillo:
-      contest_id: 'NAQP-CW'
-      fixed_fields:
-        - name: 'CATEGORY-BAND'
-          value: 'ALL'
-        - name: 'CATEGORY-MODE'
-          value: 'CW'
-      log_fields:
-        - name: 'CATEGORY-OPERATOR'
-          label: 'Category Operator'
-          type: 'String:16'
-          widget: 'select'
-          default: 'SINGLE-OP'
-          valid_values: ['SINGLE-OP', 'MULTI-OP', 'CHECKLOG']
-        - name: 'CATEGORY-ASSISTED'
-          label: 'Category Assisted'
-          type: 'String:16'
-          widget: 'select'
-          default: 'NON-ASSISTED'
-          valid_values: ['NON-ASSISTED', 'ASSISTED']
-        - name: 'CATEGORY-POWER'
-          label: 'Category Power'
-          type: 'String:16'
-          widget: 'select'
-          default: 'LOW'
-          valid_values: ['QRP', 'LOW', 'HIGH']
-        - name: 'CATEGORY-TRANSMITTER'
-          label: 'Category Transmitter'
-          type: 'String:16'
-          widget: 'select'
-          default: 'ONE'
-          valid_values: ['ONE', 'TWO']
-        - name: 'NAME'
-          label: 'Operator Name'
-          type: 'String:20'
-          required: true
-          regex: '^[A-Za-z]+$'
-          preserve_case: true
-        - name: 'LOCATION'
-          label: 'Cabrillo Location'
-          type: 'String:32'
-          required: true
-          help_text: 'US/Canada: state or province. All other stations: DX.'
+      fixed_headers:
+        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}
       export_fields:
-        - name: 'EMAIL'
-          label: 'Email'
-          type: 'String:75'
-          required: false
-          regex: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$'
-          preserve_case: true
-        - name: 'ADDRESS'
-          label: 'Address'
-          type: 'String:45'
-          widget: 'textarea'
-          max_lines: 6
-          required: false
-          preserve_case: true
-        - name: 'ADDRESS-CITY'
-          label: 'Address City'
-          type: 'String:45'
-          required: false
-          preserve_case: true
-        - name: 'ADDRESS-STATE-PROVINCE'
-          label: 'Address State/Province'
-          type: 'String:45'
-          required: false
-          preserve_case: true
-        - name: 'ADDRESS-POSTALCODE'
-          label: 'Address Postal Code'
-          type: 'String:16'
-          required: false
-          preserve_case: true
-        - name: 'ADDRESS-COUNTRY'
-          label: 'Address Country'
-          type: 'String:45'
-          required: false
-          preserve_case: true
-        - name: 'SOAPBOX'
-          label: 'Soapbox'
-          type: 'String:75'
-          widget: 'textarea'
-          required: false
-          preserve_case: true
+        - {id: export-email, key: EMAIL, label: Email, type: String:75, required: false, regex: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$', preserve_case: true}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-address-city, key: ADDRESS-CITY, label: Address City, type: String:45, required: false, preserve_case: true}
+        - {id: export-address-state-province, key: ADDRESS-STATE-PROVINCE, label: Address State/Province, type: String:45, required: false, preserve_case: true}
+        - {id: export-address-postalcode, key: ADDRESS-POSTALCODE, label: Address Postal Code, type: String:16, required: false, preserve_case: true}
+        - {id: export-address-country, key: ADDRESS-COUNTRY, label: Address Country, type: String:45, required: false, preserve_case: true}
+        - {id: export-soapbox, preset: export-soapbox-optional}
     metadata:
-      source: 'https://ncjweb.com/NAQP-Rules.pdf'
-      notes: 'Single-operator off-time limits, M2 10-minute band changes, signal limits, one name/callsign, power-category consistency, and submission deadline remain operator-enforced.'
-
-  - id: 'NAQP-CW (DX)'
-    extends: 'NAQP-CW (North America)'
-    display_name: 'North American QSO Party CW (DX)'
+      source: https://ncjweb.com/NAQP-Rules.pdf
+      notes: >-
+        Single-operator off-time limits, M2 10-minute band changes, signal limits, one
+        name/callsign, power-category consistency, and submission deadline remain operator-enforced.
+    profiles:
+      - hf-bands
+      - cw-mode
+  NAQP-CW (DX):
+    name: North American QSO Party CW (DX)
+    setup_fields:
+      - id: param-qth
+        remove: true
+    exchange:
+      - id: qth-sent
+        remove: true
+      - id: name-received
+        after: name-sent
+      - in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]
+        id: qth-received
     scoring:
       qso_points:
-        rules:
-          - when:
-              field: 'SRX_STRING'
-              in_sets: ['US Multipliers', 'District of Columbia', 'Canadian Multipliers', 'North American Countries']
-            points: 1
-          - points: 0
-    log_params: []
-    exchange:
-      - name: 'Name(s)'
-        type: 'String:20'
-        adif: 'MY_NAME'
-        fixed: true
-        source_param: 'NAME'
-        regex: '^[A-Za-z]+$'
-        is_sent: true
-      - name: 'Name'
-        type: 'String:20'
-        adif: 'NAME'
-        regex: '^[A-Za-z]+$'
-        is_sent: false
-      - name: 'QTH'
-        type: 'String:5'
-        adif: 'SRX_STRING'
-        is_sent: false
-        in_sets: ['US Multipliers', 'District of Columbia', 'Canadian Multipliers', 'North American Countries']
+        points: null
+        rules: [{id: qso-rule-1, when: {field: SRX_STRING, in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]}, points: 1}, {id: qso-rule-2, points: 0}]
     metadata:
-      source: 'https://ncjweb.com/NAQP-Rules.pdf'
-      notes: 'DX entrants send only their name and score North American contacts. Single-operator off-time limits, M2 10-minute band changes, signal limits, one name/callsign, power-category consistency, and submission deadline remain operator-enforced.'
-
-  - id: 'NAQP-SSB (North America)'
-    extends: 'NAQP-CW (North America)'
-    display_name: 'North American QSO Party SSB (North America)'
-    allowed_modes: ['SSB']
+      notes: >-
+        DX entrants send only their name and score North American contacts. Single-operator off-time
+        limits, M2 10-minute band changes, signal limits, one name/callsign, power-category
+        consistency, and submission deadline remain operator-enforced.
+    extends: NAQP-CW (North America)
+  NAQP-SSB (North America):
+    name: North American QSO Party SSB (North America)
+    modes:
+      - SSB
     cabrillo:
-      contest_id: 'NAQP-SSB'
-      fixed_fields:
-        - name: 'CATEGORY-BAND'
-          value: 'ALL'
-        - name: 'CATEGORY-MODE'
-          value: 'SSB'
-    metadata:
-      source: 'https://ncjweb.com/NAQP-Rules.pdf'
-      notes: 'Single-operator off-time limits, M2 10-minute band changes, signal limits, one name/callsign, power-category consistency, and submission deadline remain operator-enforced.'
-
-  - id: 'NAQP-SSB (DX)'
-    extends: 'NAQP-CW (DX)'
-    display_name: 'North American QSO Party SSB (DX)'
-    allowed_modes: ['SSB']
+      fixed_headers:
+        - {value: SSB, id: fixed-category-mode}
+    extends: NAQP-CW (North America)
+  NAQP-SSB (DX):
+    name: North American QSO Party SSB (DX)
+    modes:
+      - SSB
     cabrillo:
-      contest_id: 'NAQP-SSB'
-      fixed_fields:
-        - name: 'CATEGORY-BAND'
-          value: 'ALL'
-        - name: 'CATEGORY-MODE'
-          value: 'SSB'
-    metadata:
-      source: 'https://ncjweb.com/NAQP-Rules.pdf'
-      notes: 'DX entrants send only their name and score North American contacts. Single-operator off-time limits, M2 10-minute band changes, signal limits, one name/callsign, power-category consistency, and submission deadline remain operator-enforced.'
+      fixed_headers:
+        - {value: SSB, id: fixed-category-mode}
+    extends: NAQP-CW (DX)

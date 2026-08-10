@@ -15,8 +15,8 @@ import { useNotifications } from '../lib/notificationsContext';
 function normalizedExportValues(fields, values) {
   return Object.fromEntries(
     fields.map((field) => [
-      field.name,
-      String(values[field.name] ?? '')
+      field.key,
+      String(values[field.key] ?? '')
         .replace(/\r\n/g, '\n')
         .trim(),
     ]),
@@ -88,7 +88,7 @@ function ExportLogScreen() {
   function updateExportParam(field, value) {
     setExportParams((current) => ({
       ...current,
-      [field.name]: sanitizeConfiguredValue(field, value),
+      [field.key]: sanitizeConfiguredValue(field, value),
     }));
   }
 
@@ -102,17 +102,17 @@ function ExportLogScreen() {
     const invalidField = exportFields.find((field) => {
       const validation = validateConfiguredField(
         field,
-        normalizedParams[field.name] ?? '',
+        normalizedParams[field.key] ?? '',
       );
       return !validation.ok;
     });
     if (invalidField) {
       const validation = validateConfiguredField(
         invalidField,
-        normalizedParams[invalidField.name] ?? '',
+        normalizedParams[invalidField.key] ?? '',
       );
       notifyError(validation.error, {
-        dedupeKey: `ExportLogScreen.invalid:${invalidField.name}`,
+        dedupeKey: `ExportLogScreen.invalid:${invalidField.key}`,
       });
       return;
     }

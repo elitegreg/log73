@@ -1,194 +1,94 @@
+schema: 2
 contests:
-  - id: 'CQ-WPX-CW'
-    display_name: 'CQ World Wide WPX Contest (CW)'
-    allowed_bands: [160, 80, 40, 20, 15, 10]
-    allowed_modes: ['CW']
+  CQ-WPX-CW:
+    name: CQ World Wide WPX Contest (CW)
+    value_sets: {}
+    setup_fields:
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]
+      - id: header-category-assisted
+        preset: category-assisted
+        default: ASSISTED
+        valid_values: [ASSISTED, NON-ASSISTED]
+      - id: header-category-band
+        preset: category-band
+        default: ALL
+        valid_values: [ALL, 160M, 80M, 40M, 20M, 15M, 10M]
+      - id: header-category-power
+        preset: category-power
+        default: LOW
+        valid_values: [HIGH, LOW, QRP]
+      - id: header-category-station
+        preset: category-station
+        default: FIXED
+        valid_values: [FIXED, DISTRIBUTED]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE, TWO, UNLIMITED]
+      - id: header-category-overlay
+        preset: category-overlay
+        type: String:16
+        required: false
+        valid_values: [TB-WIRES, ROOKIE, CLASSIC, YOUTH]
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:6
+        adif: STX
+        direction: sent
+        regex: ^[1-9][0-9]{0,5}$
+        serial_scope: category_transmitter
+      - id: rst-received
+        preset: rst-received
+      - id: serial-received
+        label: Serial
+        type: Serial:6
+        adif: SRX
+        direction: received
+        regex: ^[1-9][0-9]{0,5}$
     scoring:
       qso_points:
-        category_band_param: 'CATEGORY-BAND'
-        geography:
-          country_field: 'APP_LOG73_DXCC_PFX'
-          station_country_field: 'APP_LOG73_MY_DXCC_PFX'
-          continent_field: 'CONT'
-          station_continent_field: 'MY_CONT'
-          same_country: 1
-          different_country_north_america:
-            default: 2
-            by_band:
-              160m: 4
-              80m: 4
-              40m: 4
-          different_country_same_continent:
-            default: 1
-            by_band:
-              160m: 2
-              80m: 2
-              40m: 2
-          different_continent:
-            default: 3
-            by_band:
-              160m: 6
-              80m: 6
-              40m: 6
-          unresolved: 0
-      dupe_key: ['CALL', 'BAND']
+        category_band_param: CATEGORY-BAND
+        geography: {country_field: APP_LOG73_DXCC_PFX, station_country_field: APP_LOG73_MY_DXCC_PFX, continent_field: CONT, station_continent_field: MY_CONT, same_country: 1, different_country_north_america: {default: 2, by_band: {160m: 4, 80m: 4, 40m: 4}}, different_country_same_continent: {default: 1, by_band: {160m: 2, 80m: 2, 40m: 2}}, different_continent: {default: 3, by_band: {160m: 6, 80m: 6, 40m: 6}}, unresolved: 0}
+      dupe_key:
+        - CALL
+        - BAND
       multipliers:
-        - name: 'Prefix'
-          field: 'WPX_PREFIX'
-          key: ['WPX_PREFIX']
-    exchange:
-      - name: 'RST(s)'
-        type: 'RST'
-        adif: 'RST_SENT'
-        default: 599
-        is_sent: true
-      - name: 'Serial(s)'
-        type: 'Serial:6'
-        adif: 'STX'
-        serial_scope: 'category_transmitter'
-        regex: '^[1-9][0-9]{0,5}$'
-        is_sent: true
-      - name: 'RST(r)'
-        type: 'RST'
-        adif: 'RST_RCVD'
-        default: 599
-        is_sent: false
-      - name: 'Serial'
-        type: 'Serial:6'
-        adif: 'SRX'
-        regex: '^[1-9][0-9]{0,5}$'
-        is_sent: false
-    qso_columns: ['RST(r)', 'Serial', 'Mult', 'Pts', 'Op']
-    qso_column_fields:
-      Freq: 'FREQ'
-      Mode: 'MODE'
-      Call: 'CALL'
-      Op: 'OPERATOR'
-      'RST(s)': 'RST_SENT'
-      'Serial(s)': 'STX'
-      'RST(r)': 'RST_RCVD'
-      Serial: 'SRX'
+        - {id: mult-prefix, name: Prefix, field: WPX_PREFIX, key: [WPX_PREFIX]}
     cabrillo:
-      contest_id: 'CQ-WPX-CW'
-      fixed_fields:
-        - name: 'CATEGORY-MODE'
-          value: 'CW'
-      log_fields:
-        - name: 'CATEGORY-OPERATOR'
-          label: 'Category Operator'
-          type: 'String:16'
-          widget: 'select'
-          default: 'SINGLE-OP'
-          valid_values: ['SINGLE-OP', 'MULTI-OP', 'CHECKLOG']
-        - name: 'CATEGORY-ASSISTED'
-          label: 'Category Assisted'
-          type: 'String:16'
-          widget: 'select'
-          default: 'ASSISTED'
-          valid_values: ['ASSISTED', 'NON-ASSISTED']
-        - name: 'CATEGORY-BAND'
-          label: 'Category Band'
-          type: 'String:8'
-          widget: 'select'
-          default: 'ALL'
-          valid_values: ['ALL', '160M', '80M', '40M', '20M', '15M', '10M']
-        - name: 'CATEGORY-POWER'
-          label: 'Category Power'
-          type: 'String:16'
-          widget: 'select'
-          default: 'LOW'
-          valid_values: ['HIGH', 'LOW', 'QRP']
-        - name: 'CATEGORY-STATION'
-          label: 'Category Station'
-          type: 'String:16'
-          widget: 'select'
-          default: 'FIXED'
-          valid_values: ['FIXED', 'DISTRIBUTED']
-        - name: 'CATEGORY-TRANSMITTER'
-          label: 'Category Transmitter'
-          type: 'String:16'
-          widget: 'select'
-          default: 'ONE'
-          valid_values: ['ONE', 'TWO', 'UNLIMITED']
-        - name: 'CATEGORY-OVERLAY'
-          label: 'Category Overlay'
-          type: 'String:16'
-          widget: 'select'
-          required: false
-          valid_values: ['TB-WIRES', 'ROOKIE', 'CLASSIC', 'YOUTH']
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}
       export_fields:
-        - name: 'LOCATION'
-          label: 'Location'
-          type: 'String:32'
-          help_text: 'State, province, ARRL section, or DX.'
-        - name: 'CLUB'
-          label: 'Club'
-          type: 'String:75'
-          required: false
-          preserve_case: true
-        - name: 'EMAIL'
-          label: 'Email'
-          type: 'String:75'
-          required: false
-          regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$'
-          preserve_case: true
-        - name: 'CERTIFICATE'
-          label: 'Paper Certificate'
-          type: 'String:3'
-          widget: 'select'
-          required: false
-          valid_values: ['YES', 'NO']
-        - name: 'GRID-LOCATOR'
-          label: 'Grid Locator'
-          type: 'String:6'
-          required: false
-        - name: 'NAME'
-          label: 'Name'
-          type: 'String:75'
-          preserve_case: true
-        - name: 'ADDRESS'
-          label: 'Address'
-          type: 'String:45'
-          widget: 'textarea'
-          max_lines: 6
-          required: false
-          preserve_case: true
-        - name: 'ADDRESS-CITY'
-          label: 'Address City'
-          type: 'String:45'
-          required: false
-          preserve_case: true
-        - name: 'ADDRESS-STATE-PROVINCE'
-          label: 'Address State/Province'
-          type: 'String:45'
-          required: false
-          preserve_case: true
-        - name: 'ADDRESS-POSTALCODE'
-          label: 'Address Postal Code'
-          type: 'String:16'
-          required: false
-          preserve_case: true
-        - name: 'ADDRESS-COUNTRY'
-          label: 'Address Country'
-          type: 'String:45'
-          required: false
-          preserve_case: true
-        - name: 'SOAPBOX'
-          label: 'Soapbox'
-          type: 'String:75'
-          widget: 'textarea'
-          required: false
-          preserve_case: true
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, help_text: 'State, province, ARRL section, or DX.'}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-certificate, key: CERTIFICATE, label: Paper Certificate, type: String:3, required: false, valid_values: [YES, NO], widget: select}
+        - {id: export-grid-locator, key: GRID-LOCATOR, label: Grid Locator, type: String:6, required: false}
+        - {id: export-name, key: NAME, label: Name, type: String:75, preserve_case: true}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-address-city, key: ADDRESS-CITY, label: Address City, type: String:45, required: false, preserve_case: true}
+        - {id: export-address-state-province, key: ADDRESS-STATE-PROVINCE, label: Address State/Province, type: String:45, required: false, preserve_case: true}
+        - {id: export-address-postalcode, key: ADDRESS-POSTALCODE, label: Address Postal Code, type: String:16, required: false, preserve_case: true}
+        - {id: export-address-country, key: ADDRESS-COUNTRY, label: Address Country, type: String:45, required: false, preserve_case: true}
+        - {id: export-soapbox, preset: export-soapbox-optional}
     metadata:
-      source: 'https://cqwpx.com/rules/'
-      notes: 'WPX prefixes count once across all bands. Operating-time, band-change, power, assistance, overlay, and category-combination restrictions remain operator-enforced.'
-
-  - id: 'CQ-WPX-SSB'
-    extends: 'CQ-WPX-CW'
-    display_name: 'CQ World Wide WPX Contest (SSB)'
-    allowed_modes: ['SSB']
+      source: https://cqwpx.com/rules/
+      notes: >-
+        WPX prefixes count once across all bands. Operating-time, band-change, power, assistance,
+        overlay, and category-combination restrictions remain operator-enforced.
+    profiles:
+      - hf-bands
+      - cw-mode
+  CQ-WPX-SSB:
+    name: CQ World Wide WPX Contest (SSB)
+    modes:
+      - SSB
     cabrillo:
-      contest_id: 'CQ-WPX-SSB'
-      fixed_fields:
-        - name: 'CATEGORY-MODE'
-          value: 'SSB'
+      fixed_headers:
+        - {value: SSB, id: fixed-category-mode}
+    extends: CQ-WPX-CW

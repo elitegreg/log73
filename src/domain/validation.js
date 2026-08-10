@@ -1,8 +1,8 @@
-import { parseFieldType } from './contactFields.js';
+import { parseFieldInput } from './contactFields.js';
 import { modeIsCw } from './modes.js';
 
 export function fieldValueLabel(field) {
-  return field?.label ?? field?.name ?? 'Field';
+  return field?.label ?? field?.key ?? field?.id ?? 'Field';
 }
 
 function validateSingleValue(field, value, radioMode) {
@@ -10,7 +10,7 @@ function validateSingleValue(field, value, radioMode) {
   const trimmedValue = String(value ?? '').trim();
   const normalizedValue = trimmedValue.toUpperCase();
 
-  const { kind } = parseFieldType(field?.type, radioMode);
+  const { kind } = parseFieldInput(field?.input, radioMode);
   if (kind === 'RST') {
     const expectedLength = modeIsCw(radioMode) ? 3 : 2;
     if (
@@ -29,17 +29,19 @@ function validateSingleValue(field, value, radioMode) {
     return { ok: false, error: `${label} must be numeric.` };
   }
 
-  const hasValidValues = (field?.valid_values ?? []).length > 0;
+  const validValues = field?.validation?.values ?? [];
+  const pattern = field?.validation?.pattern;
+  const hasValidValues = validValues.length > 0;
   const matchesValidValue =
     !hasValidValues ||
-    field.valid_values.some(
+    validValues.some(
       (validValue) => String(validValue).toUpperCase() === normalizedValue,
     );
 
   let matchesRegex = true;
-  if (field?.regex) {
+  if (pattern) {
     try {
-      const regex = new RegExp(field.regex);
+      const regex = new RegExp(pattern);
       matchesRegex = regex.test(trimmedValue);
     } catch {
       return {
@@ -50,7 +52,7 @@ function validateSingleValue(field, value, radioMode) {
   }
 
   const validationMatches =
-    hasValidValues && field?.regex && field?.valid_values_or_regex === true
+    hasValidValues && pattern && field?.validation?.match_mode === 'any'
       ? matchesValidValue || matchesRegex
       : matchesValidValue && matchesRegex;
   if (!validationMatches) {
@@ -122,7 +124,7 @@ export function validateConfiguredField(field, value, radioMode = 'CW') {
     Number.isInteger(field?.max_lines);
 
   if (normalizedValue === '') {
-    if (field?.required === false) {
+    if (field?.validation?.required === false) {
       return { ok: true, error: '' };
     }
     return { ok: false, error: `${label} is required.` };
@@ -162,10 +164,9 @@ export function validateExchangeField(
     const conditionValue = String(conditionFields?.[condition.field] ?? '')
       .trim()
       .toUpperCase();
-    const candidates = [
-      ...(condition.valid_values ?? []),
-      ...(condition.values ?? []),
-    ].map((candidate) => String(candidate).trim().toUpperCase());
+    const candidates = (condition.values ?? []).map((candidate) =>
+      String(candidate).trim().toUpperCase(),
+    );
     const applies =
       conditionValue !== '' &&
       (candidates.length === 0 || candidates.includes(conditionValue));

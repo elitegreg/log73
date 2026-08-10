@@ -1,14 +1,13 @@
 import { modeIsCw } from './modes.js';
 
-export function parseFieldType(type = '', radioMode = 'CW') {
-  const [rawKind = 'STRING', length = '8'] = type.split(':');
-  const kind = rawKind.toUpperCase();
+export function parseFieldInput(input = {}, radioMode = 'CW') {
+  const kind = String(input?.kind ?? 'string').toUpperCase();
   const maxLength =
     kind === 'RST'
       ? modeIsCw(radioMode)
         ? 3
         : 2
-      : Number.parseInt(length, 10) || 8;
+      : Number.parseInt(input?.max_length, 10) || 8;
   return { kind, maxLength };
 }
 
@@ -49,7 +48,7 @@ function sanitizeSingleLine(
 }
 
 export function sanitizeConfiguredValue(field, value, radioMode = 'CW') {
-  const { kind, maxLength } = parseFieldType(field?.type, radioMode);
+  const { kind, maxLength } = parseFieldInput(field?.input, radioMode);
   const preserveCase = field?.preserve_case === true;
   const widget = String(field?.widget ?? '').toLowerCase();
   const maxLines =
@@ -80,7 +79,7 @@ export function sanitizeExchangeValue(field, value, radioMode = 'CW') {
 }
 
 export function fieldDefault(field, radioMode, contestParams = {}) {
-  const sourceParam = field?.source_param;
+  const sourceParam = field?.source;
   const rawValue = sourceParam ? contestParams?.[sourceParam] : field?.default;
 
   if (rawValue === undefined || rawValue === null) {
@@ -105,7 +104,7 @@ export function sentExchangeToken(
   contestParams = {},
 ) {
   const value =
-    exchangeValues?.[field?.name] ??
+    exchangeValues?.[field?.id] ??
     fieldDefault(field, radioMode, contestParams);
   const normalized = String(value ?? '')
     .trim()
@@ -125,7 +124,7 @@ export function buildSentExchange(
   contestParams = {},
 ) {
   return (settings?.exchange ?? [])
-    .filter((field) => field.is_sent)
+    .filter((field) => field.direction === 'sent')
     .map((field) =>
       sentExchangeToken(field, exchangeValues, radioMode, contestParams),
     )

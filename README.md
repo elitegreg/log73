@@ -538,52 +538,13 @@ Committed contacts are loaded from the backend. Pending/updating contacts are ca
 
 ## Contest rules
 
-Contest rules are loaded from YAML files in `<data-dir>/contest-rules/` by default. In a source checkout, run the backend with `--data-dir ./data` to use `data/contest-rules/`.
-Scoring-related YAML settings live under a `scoring` block (`qso_points`, `dupe_key`, `multipliers`, `bonus_points`, `param_multipliers`, `multiplier_count_bonus_points`). `qso_points.geography` can compare stamped worked/station country and continent fields. Each geography point value may be an integer or a `{ default, by_band }` mapping for band-specific values. `qso_points.category_band_param` can limit scoring to a Cabrillo category band. Multiplier rules may use `exclude_call_suffixes` or `exclude_values`; the virtual `WPX_PREFIX` field derives CQ WPX prefixes from `CALL`. `param_multipliers` maps persisted log parameters to score factors, and multiplier-count bonuses award the highest reached threshold for a named multiplier.
-Contest-specific Cabrillo metadata lives under a `cabrillo` block (`contest_id`, `fixed_fields`, `log_fields`, `export_fields`). A `CATEGORY-TRANSMITTER` log field can set `multi_single_has_mult_transmitter: true` when multi-single QSOs require a run/mult transmitter ID.
-ADIF export uses committed QSO data from the database and derives `QSO_DATE` and `TIME_ON` from the stored `QSO_DATE_TIME_ON` epoch.
+Contest rules use the versioned v2 authoring schema and are loaded from YAML files in `<data-dir>/contest-rules/`. In a source checkout, run the backend with `--data-dir ./data` to use the bundled rules. The catalog currently resolves 39 contest variants.
 
-Current contest rule IDs include:
+V2 supports reusable value sets, field presets, overlay-only profiles, contest inheritance, and keyed list merging. Long flat value lists can live in `.dat` files. The loader expands those authoring features into one resolved object containing structured setup/exchange fields, scoring, Cabrillo configuration, referenced values, and a typed QSO table. The table is derived by default and can be replaced explicitly.
 
-```text
-ARRL-FIELD-DAY           ARRL Field Day
-CWT                      CWOps CWT
-CQ-WW-CW                 CQ World Wide DX Contest (CW)
-CQ-WW-SSB                CQ World Wide DX Contest (SSB)
-CQ-WPX-CW                CQ World Wide WPX Contest (CW)
-CQ-WPX-SSB               CQ World Wide WPX Contest (SSB)
-HI-QSO-PARTY             Hawaii QSO Party outside Hawaii
-HI-QSO-PARTY (In State)  Hawaii QSO Party in Hawaii
-K1USNSST                 K1USN SST
-MDC-QSO-PARTY            Maryland-DC QSO Party outside MDC
-MDC-QSO-PARTY (In State) Maryland-DC QSO Party in Maryland/DC
-MST                      MST (Medium Speed Test)
-OH-QSO-PARTY             Ohio QSO Party out-of-state
-OH-QSO-PARTY (In State)  Ohio QSO Party in Ohio
-SC-QSO-PARTY             SC QSO Party out-of-state
-SC-QSO-PARTY (In State)  SC QSO Party in-state
-TN-QSO-PARTY             Tennessee QSO Party out-of-state
-TN-QSO-PARTY (In State)  Tennessee QSO Party in-state
-```
+`GET /api/contest-rules` returns contest summaries with their setup fields. `GET /api/contest-settings?contest_id=<id>` returns the complete resolved v2 object; it does not expose authoring-only preset, profile, inheritance, or value-set references.
 
-Log creation dynamically requests required rule parameters where needed:
-
-- `ARRL-FIELD-DAY`: `Class`, `Section`
-- `CWT`: `NAME`, `EXCHANGE`
-- `HI-QSO-PARTY`: `Location`
-- `HI-QSO-PARTY (In State)`: `District`
-- `K1USNSST`: `NAME`, `QTH`
-- `MDC-QSO-PARTY`: `Location`
-- `MDC-QSO-PARTY (In State)`: `Jurisdiction`
-- `OH-QSO-PARTY`: `Location`
-- `OH-QSO-PARTY (In State)`: `County`
-- `SC-QSO-PARTY`: `State`
-- `SC-QSO-PARTY (In State)`: `County`
-- `TN-QSO-PARTY`: `Location`
-- `TN-QSO-PARTY (In State)`: `County`
-
-Those values seed sent exchange fields in the logger, which are fixed unless a contest permits a mobile location change. Sent `Serial` fields are global by default, may set `serial_scope: band` for independent per-band counters, or may use `serial_scope: category_transmitter` to select global scope for `ONE` and band scope for `TWO`/`UNLIMITED`. The backend derives initial serials from committed contacts, and logger clients advance them from local and websocket contact events. Only global serials used with a `CATEGORY-TRANSMITTER` value other than `ONE` are reserved; those reservations contain exactly one serial and an unused value is cached in browser local storage. The HI, MDC, and SC QSO Party rules also define Cabrillo category fields at log-create/edit time and additional export-time fields for Cabrillo download.
-For `SC-QSO-PARTY (In State)`, the received value is labeled `Exchange` because it may be a county, state/province, or `DX`.
+See [Contest rule schema](docs/contest-rules.md) for the authoring format and merge behavior. ADIF export uses committed QSO data and derives `QSO_DATE` and `TIME_ON` from the stored `QSO_DATE_TIME_ON` epoch.
 
 ## UI themes
 

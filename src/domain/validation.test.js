@@ -7,9 +7,10 @@ import {
   validateExchangeField,
 } from './validation.js';
 
-test('fieldValueLabel uses label, name, then Field fallback', () => {
-  assert.equal(fieldValueLabel({ label: 'Section', name: 'Sect' }), 'Section');
-  assert.equal(fieldValueLabel({ name: 'Sect' }), 'Sect');
+test('fieldValueLabel uses label, key, id, then Field fallback', () => {
+  assert.equal(fieldValueLabel({ label: 'Section', key: 'Sect' }), 'Section');
+  assert.equal(fieldValueLabel({ key: 'Sect' }), 'Sect');
+  assert.equal(fieldValueLabel({ id: 'section' }), 'section');
   assert.equal(fieldValueLabel({}), 'Field');
 });
 
@@ -32,7 +33,7 @@ test('validateCallsign enforces logging rules', () => {
 
 test('validateExchangeField requires non-empty values', () => {
   const result = validateExchangeField(
-    { label: 'Section', type: 'String:3' },
+    { label: 'Section', input: { kind: 'string', max_length: 3 } },
     '',
   );
   assert.equal(result.ok, false);
@@ -41,10 +42,10 @@ test('validateExchangeField requires non-empty values', () => {
 
 test('validateExchangeField conditionally requires or forbids an exchange', () => {
   const field = {
-    name: 'Section',
-    type: 'String:3',
-    valid_values: ['EMA', 'ONN'],
-    only_when: { field: 'DXCC', valid_values: ['1', '291'] },
+    label: 'Section',
+    input: { kind: 'string', max_length: 3 },
+    validation: { values: ['EMA', 'ONN'] },
+    only_when: { field: 'DXCC', values: ['1', '291'] },
   };
   assert.equal(validateExchangeField(field, '', 'CW', { DXCC: 291 }).ok, false);
   assert.equal(
@@ -60,55 +61,80 @@ test('validateExchangeField conditionally requires or forbids an exchange', () =
 
 test('validateExchangeField validates RST by mode', () => {
   assert.equal(
-    validateExchangeField({ name: 'RST', type: 'RST' }, '599', 'CW').ok,
+    validateExchangeField({ label: 'RST', input: { kind: 'rst' } }, '599', 'CW')
+      .ok,
     true,
   );
   assert.equal(
-    validateExchangeField({ name: 'RST', type: 'RST' }, '599', 'CW-R').ok,
+    validateExchangeField(
+      { label: 'RST', input: { kind: 'rst' } },
+      '599',
+      'CW-R',
+    ).ok,
     true,
   );
   assert.equal(
-    validateExchangeField({ name: 'RST', type: 'RST' }, '59', 'CW').ok,
+    validateExchangeField({ label: 'RST', input: { kind: 'rst' } }, '59', 'CW')
+      .ok,
     false,
   );
   assert.equal(
-    validateExchangeField({ name: 'RST', type: 'RST' }, '59', 'SSB').ok,
+    validateExchangeField({ label: 'RST', input: { kind: 'rst' } }, '59', 'SSB')
+      .ok,
     true,
   );
 });
 
 test('validateExchangeField validates numeric fields', () => {
   assert.equal(
-    validateExchangeField({ name: 'Serial', type: 'Numeric:3' }, '123').ok,
+    validateExchangeField(
+      { label: 'Serial', input: { kind: 'numeric', max_length: 3 } },
+      '123',
+    ).ok,
     true,
   );
   assert.equal(
-    validateExchangeField({ name: 'Serial', type: 'Serial:3' }, '123').ok,
+    validateExchangeField(
+      { label: 'Serial', input: { kind: 'serial', max_length: 3 } },
+      '123',
+    ).ok,
     true,
   );
   assert.equal(
-    validateExchangeField({ name: 'Serial', type: 'Numeric:3' }, '12A').ok,
+    validateExchangeField(
+      { label: 'Serial', input: { kind: 'numeric', max_length: 3 } },
+      '12A',
+    ).ok,
     false,
   );
   assert.equal(
-    validateExchangeField({ name: 'Serial', type: 'Serial:3' }, '12A').ok,
+    validateExchangeField(
+      { label: 'Serial', input: { kind: 'serial', max_length: 3 } },
+      '12A',
+    ).ok,
     false,
   );
 });
 
 test('validateExchangeField validates configured values case-insensitively', () => {
-  const field = { name: 'State', type: 'String:4', valid_values: ['SC', 'NC'] };
+  const field = {
+    label: 'State',
+    input: { kind: 'string', max_length: 4 },
+    validation: { values: ['SC', 'NC'] },
+  };
   assert.equal(validateExchangeField(field, 'sc').ok, true);
   assert.equal(validateExchangeField(field, 'GA').ok, false);
 });
 
 test('validateConfiguredField accepts configured values or an alternate regex', () => {
   const field = {
-    name: 'Location',
-    type: 'String:4',
-    valid_values: ['CT', 'CMX', '1', '2', '3'],
-    regex: '^\\d{1,4}$',
-    valid_values_or_regex: true,
+    label: 'Location',
+    input: { kind: 'string', max_length: 4 },
+    validation: {
+      values: ['CT', 'CMX', '1', '2', '3'],
+      pattern: '^\\d{1,4}$',
+      match_mode: 'any',
+    },
   };
   assert.equal(validateConfiguredField(field, 'cmx').ok, true);
   assert.equal(validateConfiguredField(field, '1234').ok, true);
@@ -118,22 +144,29 @@ test('validateConfiguredField accepts configured values or an alternate regex', 
 
 test('validateExchangeField accepts TN and MDC locations without spaces', () => {
   const tnLocation = {
-    name: 'Location',
-    type: 'String:4',
-    valid_values: ['ANDE', 'SC', 'SK'],
-    regex: '^\\S+$',
-    valid_values_or_regex: true,
+    label: 'Location',
+    input: { kind: 'string', max_length: 4 },
+    validation: {
+      values: ['ANDE', 'SC', 'SK'],
+      pattern: '^\\S+$',
+      match_mode: 'any',
+    },
   };
   const mdcLocation = {
-    name: 'Location',
-    type: 'String:16',
-    valid_values: ['BAL', 'SC', 'SK'],
-    regex: '^\\S+$',
-    valid_values_or_regex: true,
+    label: 'Location',
+    input: { kind: 'string', max_length: 16 },
+    validation: {
+      values: ['BAL', 'SC', 'SK'],
+      pattern: '^\\S+$',
+      match_mode: 'any',
+    },
   };
 
   for (const field of [tnLocation, mdcLocation]) {
-    assert.equal(validateExchangeField(field, field.valid_values[0]).ok, true);
+    assert.equal(
+      validateExchangeField(field, field.validation.values[0]).ok,
+      true,
+    );
     assert.equal(validateExchangeField(field, 'DL').ok, true);
     assert.equal(validateExchangeField(field, 'D L').ok, false);
   }
@@ -141,24 +174,31 @@ test('validateExchangeField accepts TN and MDC locations without spaces', () => 
 
 test('validateExchangeField validates configured values when a field has in_sets', () => {
   const field = {
-    name: 'Location',
-    type: 'String:16',
-    in_sets: ['States'],
-    valid_values: ['SC', 'NC'],
+    label: 'Location',
+    input: { kind: 'string', max_length: 16 },
+    validation: { values: ['SC', 'NC'] },
   };
   assert.equal(validateExchangeField(field, 'sc').ok, true);
   assert.equal(validateExchangeField(field, 'Somewhere').ok, false);
 });
 
 test('validateExchangeField validates regex patterns', () => {
-  const field = { name: 'Class', type: 'String:3', regex: '^\\d+[A-F]$' };
+  const field = {
+    label: 'Class',
+    input: { kind: 'string', max_length: 3 },
+    validation: { pattern: '^\\d+[A-F]$' },
+  };
   assert.equal(validateExchangeField(field, '1A').ok, true);
   assert.equal(validateExchangeField(field, 'ABC').ok, false);
 });
 
 test('validateExchangeField reports invalid regex patterns', () => {
   const result = validateExchangeField(
-    { name: 'Field', type: 'String:3', regex: '[' },
+    {
+      label: 'Field',
+      input: { kind: 'string', max_length: 3 },
+      validation: { pattern: '[' },
+    },
     'ABC',
   );
   assert.equal(result.ok, false);
@@ -169,10 +209,10 @@ test('validateConfiguredField supports optional and multiline fields', () => {
   assert.equal(
     validateConfiguredField(
       {
-        name: 'Soapbox',
-        type: 'String:75',
+        label: 'Soapbox',
+        input: { kind: 'string', max_length: 75 },
         widget: 'textarea',
-        required: false,
+        validation: { required: false },
         max_lines: 2,
         preserve_case: true,
       },
@@ -183,8 +223,8 @@ test('validateConfiguredField supports optional and multiline fields', () => {
 
   const tooManyLines = validateConfiguredField(
     {
-      name: 'Address',
-      type: 'String:45',
+      label: 'Address',
+      input: { kind: 'string', max_length: 45 },
       widget: 'textarea',
       max_lines: 2,
       preserve_case: true,
