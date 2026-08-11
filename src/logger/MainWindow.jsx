@@ -108,7 +108,7 @@ function MainWindow({
   onExit,
 }) {
   const radioMode = radioState?.mode ?? 'CW';
-  const wsjtxDataLocked = wsjtxDataModeLocked(radio, radioMode);
+  const wsjtxDataLocked = wsjtxDataModeLocked(radio, radioMode, wsjtxTarget);
   const radioFrequencyHz =
     radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
   const {

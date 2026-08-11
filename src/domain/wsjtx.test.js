@@ -21,10 +21,20 @@ test('nextAvailableWsjtxPort ignores malformed input and honors the minimum', ()
   assert.equal(nextAvailableWsjtxPort(null, 1), 1024);
 });
 
-test('wsjtxDataModeLocked requires both enabled configuration and DATA mode', () => {
-  assert.equal(wsjtxDataModeLocked({ wsjtx_enabled: true }, ' data '), true);
-  assert.equal(wsjtxDataModeLocked({ wsjtx_enabled: true }, 'CW'), false);
-  assert.equal(wsjtxDataModeLocked({ wsjtx_enabled: false }, 'DATA'), false);
+test('wsjtxDataModeLocked requires an enabled target in DATA mode', () => {
+  assert.equal(
+    wsjtxDataModeLocked({ wsjtx_enabled: true }, ' data ', true),
+    true,
+  );
+  assert.equal(
+    wsjtxDataModeLocked({ wsjtx_enabled: true }, 'DATA', false),
+    false,
+  );
+  assert.equal(wsjtxDataModeLocked({ wsjtx_enabled: true }, 'CW', true), false);
+  assert.equal(
+    wsjtxDataModeLocked({ wsjtx_enabled: false }, 'DATA', true),
+    false,
+  );
 });
 
 test('WSJT-X target replaces ESM only for enabled DATA mode', () => {

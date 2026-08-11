@@ -1,6 +1,5 @@
 schema: 2
 contests:
-<<<<<<< HEAD
   ARRL-FIELD-DAY:
     name: ARRL Field Day
     modes:
@@ -69,12 +68,6 @@ contests:
         adif: ARRL_SECT
         direction: received
         in_sets: [ARRL Sections, RAC Sections, DX]
-=======
-  - id: 'ARRL-FIELD-DAY'
-    display_name: 'ARRL Field Day'
-    allowed_bands: [160, 80, 40, 20, 15, 10, 6, 2]
-    allowed_modes: ['SSB', 'FM', 'CW', 'DATA']
->>>>>>> 8070788 (feat: add initial WSJT-X support)
     scoring:
       qso_points:
         rules: [{id: qso-rule-1, when: {field: MODE, values: [SSB, FM]}, points: 1}, {id: qso-rule-2, points: 2}]

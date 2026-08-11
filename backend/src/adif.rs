@@ -157,17 +157,7 @@ pub fn import_wsjtx_contact(rules: &ContestRules, text: &str) -> Result<Contact,
         required_field(&record, name)?;
     }
 
-    let contest_id = rules
-        .cabrillo
-        .as_ref()
-        .and_then(|cabrillo| cabrillo.contest_id.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(&rules.contest);
-    adif.insert(
-        "CONTEST_ID".to_string(),
-        Value::String(contest_id.to_string()),
-    );
+    adif.insert("CONTEST_ID".to_string(), Value::String(rules.id.clone()));
 
     Ok(build_contact(
         Map::from_iter([("force".to_string(), Value::Bool(true))]),
@@ -750,11 +740,7 @@ mod tests {
 
     #[test]
     fn wsjtx_import_forces_contest_and_preserves_digital_mode() {
-        let mut rules = test_rules();
-        rules.cabrillo = Some(crate::contest_rules::CabrilloRules {
-            contest_id: Some("CABRILLO-ID".to_string()),
-            ..Default::default()
-        });
+        let rules = test_rules();
         let text = "WSJT-X<ADIF_VER:5>3.1.0<EOH><QSO_DATE:8>20240801<TIME_ON:6>123456<QSO_DATE_OFF:8>20240801<TIME_OFF:6>123500<STATION_CALLSIGN:6>N0CALL<CALL:4>W1AW<BAND:3>20m<FREQ:6>14.074<MODE:4>MFSK<SUBMODE:3>FT8<CONTEST_ID:4>LIES<EOR>";
 
         let contact = import_wsjtx_contact(&rules, text).expect("WSJT-X ADIF should import");
@@ -765,7 +751,7 @@ mod tests {
         );
         assert_eq!(
             crate::db::contact_adif_value(&contact, "CONTEST_ID"),
-            Some(&json!("CABRILLO-ID"))
+            Some(&json!("SC-QSO-PARTY"))
         );
         assert_eq!(
             crate::db::contact_adif_value(&contact, "MODE"),

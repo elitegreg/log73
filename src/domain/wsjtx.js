@@ -17,8 +17,11 @@ export function nextAvailableWsjtxPort(radios, start = DEFAULT_WSJTX_PORT) {
   return DEFAULT_WSJTX_PORT;
 }
 
-export function wsjtxDataModeLocked(radio, mode) {
-  return wsjtxTargetControlVisible(Boolean(radio?.wsjtx_enabled), mode);
+export function wsjtxDataModeLocked(radio, mode, wsjtxTarget) {
+  return (
+    Boolean(wsjtxTarget) &&
+    wsjtxTargetControlVisible(Boolean(radio?.wsjtx_enabled), mode)
+  );
 }
 
 export function wsjtxTargetControlVisible(wsjtxEnabled, mode) {
