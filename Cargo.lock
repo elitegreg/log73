@@ -2628,18 +2628,15 @@ dependencies = [
  "base64",
  "clap",
  "csv",
- "cw-serial-keyer",
  "dxcllistener",
  "dxclparser",
  "futures-util",
- "ham-radio-digital-interfacing",
  "log73-paths",
  "mime_guess",
  "radif",
- "radio-cat-rs",
+ "radio-io",
  "rand_core 0.6.4",
  "regex",
- "rodio",
  "rusqlite",
  "rust-embed",
  "serde",
@@ -2650,7 +2647,6 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
- "winkeyer-rs",
 ]
 
 [[package]]
@@ -3849,6 +3845,24 @@ dependencies = [
  "tokio",
  "tokio-serial",
  "tracing",
+]
+
+[[package]]
+name = "radio-io"
+version = "0.2.0"
+dependencies = [
+ "backon",
+ "cw-serial-keyer",
+ "futures-util",
+ "ham-radio-digital-interfacing",
+ "log73-paths",
+ "radio-cat-rs",
+ "rodio",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "winkeyer-rs",
 ]
 
 [[package]]

@@ -3,7 +3,6 @@ use crate::db::{Contact, contact_adif, contact_adif_value};
 use crate::dxcluster::{DxClusterRbnSpot, DxClusterSpot};
 use crate::log_cache::LogCacheProcessor;
 use crate::scoring::ContestScoringModule;
-use radio_cat_rs::Frequency;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -468,8 +467,7 @@ impl BandMapManager {
 
     fn band_name_for_frequency(&self, frequency_hz: u64) -> Option<String> {
         let bands = self.inner.bands.snapshot();
-        band_for_frequency(bands.as_ref(), Frequency::from_hz(frequency_hz))
-            .map(|band| band.name.clone())
+        band_for_frequency(bands.as_ref(), frequency_hz).map(|band| band.name.clone())
     }
 
     fn spawn_prune_task(&self) {
@@ -743,10 +741,7 @@ fn local_spot_candidate(
         .get("BAND")
         .and_then(json_string)
         .filter(|band_name| !band_name.trim().is_empty())
-        .or_else(|| {
-            band_for_frequency(bands, Frequency::from_hz(frequency_hz))
-                .map(|band| band.name.clone())
-        });
+        .or_else(|| band_for_frequency(bands, frequency_hz).map(|band| band.name.clone()));
     Some(BandMapSpotCandidate {
         received_at,
         spot_type: BandMapSpotType::Local,

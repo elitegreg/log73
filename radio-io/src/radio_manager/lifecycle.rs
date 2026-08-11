@@ -1,7 +1,7 @@
 use super::cat_runtime::{ManagedRadioRuntime, debug_radio_config, run_managed_radio};
 use crate::bands::BandCatalog;
-use crate::db::{Database, RadioConfig};
-use crate::radio::{RadioCommand, RadioState, RadioStatus, ServerMessage};
+use crate::config::RadioConfig;
+use crate::radio::{RadioCommand, RadioState, RadioStatus};
 use crate::voice_keyer::VoiceKeyer;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -11,7 +11,6 @@ use tracing::debug;
 
 #[derive(Clone)]
 pub struct RadioManager {
-    db: Database,
     voice_keyer: VoiceKeyer,
     bands: BandCatalog,
     radios: Arc<Mutex<HashMap<i64, ManagedRadioSlot>>>,
@@ -43,16 +42,16 @@ struct ManagedRadio {
 }
 
 impl RadioManager {
-    pub fn new(db: Database, voice_keyer: VoiceKeyer, bands: BandCatalog) -> Self {
+    pub fn new(voice_keyer: VoiceKeyer, bands: BandCatalog) -> Self {
         Self {
-            db,
             voice_keyer,
             bands,
             radios: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    pub async fn acquire(&self, radio_id: i64) -> Result<RadioHandle, String> {
+    pub async fn acquire(&self, mut config: RadioConfig) -> Result<RadioHandle, String> {
+        let radio_id = config.id;
         loop {
             let wait_for_shutdown = {
                 let mut radios = self.radios.lock().await;
@@ -87,12 +86,6 @@ impl RadioManager {
                 continue;
             }
 
-            let mut config = self
-                .db
-                .radio(radio_id)
-                .await
-                .map_err(|error| error.to_string())?
-                .ok_or_else(|| format!("radio not found: {radio_id}"))?;
             self.voice_keyer.sanitize_radio_config(&mut config);
 
             let mut wait_for_shutdown = None;
@@ -275,16 +268,8 @@ impl RadioHandle {
         self.current.read().await.clone()
     }
 
-    pub async fn current_status_message(&self) -> ServerMessage {
-        ServerMessage::RadioStatus(self.current_status.read().await.clone())
-    }
-
-    pub async fn current_message(&self) -> Option<ServerMessage> {
-        self.current
-            .read()
-            .await
-            .clone()
-            .map(ServerMessage::RadioState)
+    pub async fn current_status(&self) -> RadioStatus {
+        self.current_status.read().await.clone()
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<RadioState> {
@@ -306,12 +291,11 @@ impl RadioHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        cw::DEFAULT_CW_MESSAGES, db::RadioPayload, voice_messages::DEFAULT_VOICE_MESSAGES,
-    };
+    use crate::{cw::DEFAULT_CW_MESSAGES, voice_messages::DEFAULT_VOICE_MESSAGES};
 
-    fn test_radio() -> RadioPayload {
-        RadioPayload {
+    fn test_radio() -> RadioConfig {
+        RadioConfig {
+            id: 1,
             name: "Dummy".to_string(),
             radio_kind: "dummy".to_string(),
             transport_kind: "none".to_string(),
@@ -343,19 +327,15 @@ mod tests {
 
     #[tokio::test]
     async fn active_radio_is_shared_by_all_logger_sessions() {
-        let db = Database::open(":memory:").expect("database opens");
-        let radio = db
-            .create_radio(test_radio())
-            .await
-            .expect("radio is created");
-        let manager = RadioManager::new(db, VoiceKeyer::new(), BandCatalog::new(Vec::new()));
+        let radio = test_radio();
+        let manager = RadioManager::new(VoiceKeyer::new(), BandCatalog::new(Vec::new()));
 
         manager
-            .acquire(radio.id)
+            .acquire(radio.clone())
             .await
             .expect("first logger acquires radio");
         manager
-            .acquire(radio.id)
+            .acquire(radio.clone())
             .await
             .expect("logger for a different log shares radio");
 

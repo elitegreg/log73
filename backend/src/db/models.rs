@@ -1,5 +1,6 @@
 use crate::cw::DEFAULT_CW_MESSAGES;
 use crate::voice_messages::DEFAULT_VOICE_MESSAGES;
+pub use radio_io::RadioConfig;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -27,37 +28,6 @@ pub struct UpdateLog {
     pub station_callsign: String,
     #[serde(default)]
     pub contest_params: Value,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RadioConfig {
-    pub id: i64,
-    pub name: String,
-    pub radio_kind: String,
-    pub transport_kind: String,
-    pub tcp_host: String,
-    pub tcp_port: u16,
-    pub serial_port: String,
-    pub serial_baud_rate: u32,
-    pub options: String,
-    pub data_mode: String,
-    pub rtty_mode: String,
-    pub wsjtx_enabled: bool,
-    pub wsjtx_bind_address: String,
-    pub wsjtx_port: u16,
-    pub wsjtx_multicast_group: String,
-    pub cw_tuning_increment_hz: u32,
-    pub ssb_tuning_increment_hz: u32,
-    pub rit_clear_on_log: bool,
-    pub voice_input_device_id: Option<String>,
-    pub voice_output_device_id: Option<String>,
-    pub cw_keyer_type: String,
-    pub winkeyer_serial_port: String,
-    pub cw_serial_port: String,
-    pub cw_serial_baud_rate: u32,
-    pub cw_serial_line: String,
-    pub cw_messages: String,
-    pub voice_messages: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

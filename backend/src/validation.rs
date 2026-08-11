@@ -8,10 +8,9 @@ use crate::db::{
     self, Contact, Database, NewLog, RadioPayload, UpdateLog, contact_adif_value, contact_id,
     contact_log_id, contact_meta_value,
 };
-use crate::message_mode::is_valid_message_mode;
 use crate::modes::mode_is_cw;
 use crate::voice_messages;
-use radio_cat_rs::{Frequency, supported_drivers};
+use radio_io::{is_valid_message_mode, supported_drivers};
 use regex::Regex;
 use serde_json::Value;
 use std::{
@@ -924,7 +923,7 @@ fn validate_contact_band_and_frequency(
     let frequency_hz = contact_frequency_hz(contact_adif_value(contact, "FREQ"))
         .ok_or_else(|| "frequency is required".to_string())?;
     validate_radio_frequency_hz(frequency_hz)?;
-    let frequency_band = band_for_frequency(bands, Frequency::from_hz(frequency_hz))
+    let frequency_band = band_for_frequency(bands, frequency_hz)
         .ok_or_else(|| "frequency is outside supported amateur bands".to_string())?;
     if !frequency_band.name.eq_ignore_ascii_case(&contact_band.name) {
         return Err("frequency does not match band".to_string());

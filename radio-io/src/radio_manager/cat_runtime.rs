@@ -2,7 +2,7 @@ use super::commands::{apply_command, fail_unavailable_radio_command, logger_stat
 use super::cw_task::{CwTaskCommand, run_cw_task};
 use super::keyers::{CwSerialDevice, open_serial_keyer};
 use crate::bands::BandCatalog;
-use crate::db::RadioConfig;
+use crate::config::RadioConfig;
 use crate::radio::{RadioCommand, RadioState, RadioStatus};
 use crate::voice_keyer::VoiceKeyer;
 use backon::{BackoffBuilder, ExponentialBuilder};
@@ -554,7 +554,7 @@ fn command_error_requires_reconnect(error: &RadioError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::RadioConfig;
+    use crate::config::RadioConfig;
 
     fn test_config() -> RadioConfig {
         RadioConfig {

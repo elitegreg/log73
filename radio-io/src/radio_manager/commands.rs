@@ -1,6 +1,6 @@
 use super::rit::{next_rit_offset_hz, set_rit_offset_hz};
 use crate::bands::Band;
-use crate::db::RadioConfig;
+use crate::config::RadioConfig;
 use crate::radio::{
     RadioCommand, RadioState, logger_mode_from_cat_mode, mode_candidates_for_request,
 };

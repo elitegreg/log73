@@ -3,26 +3,18 @@ mod auth;
 mod bandmap;
 mod bands;
 mod cabrillo;
-mod cat_keyer;
 mod contest_rules;
-mod cw;
 mod db;
 mod dxcc;
 mod dxcluster;
 mod log_cache;
-mod message_mode;
-mod messages;
-mod modes;
 mod qso_time;
 mod radio;
-mod radio_manager;
 mod scoring;
 mod static_assets;
 mod stats;
 mod supercheckpartial;
 mod validation;
-mod voice_keyer;
-mod voice_messages;
 mod wsjtx;
 
 use axum::{
@@ -50,8 +42,9 @@ use dxcluster::{DxClusterEvent, DxClusterManager, format_dxcluster_frequency_khz
 use futures_util::{SinkExt, StreamExt};
 use log_cache::LogCache;
 use radio::{ClientMessage, RadioCommand, ServerMessage};
-use radio_cat_rs::{list_serial_ports, supported_drivers};
-use radio_manager::RadioManager;
+use radio_io::RadioManager;
+use radio_io::voice_keyer::VoiceKeyer;
+use radio_io::{cw, list_serial_ports, modes, supported_drivers, voice_keyer, voice_messages};
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use stats::StatsTracker;
 use std::{
@@ -67,7 +60,6 @@ use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
 use tower_http::trace::TraceLayer;
 use tracing::{Span, debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
-use voice_keyer::VoiceKeyer;
 use wsjtx::{WsjtXManager, WsjtXTargetState};
 
 #[derive(Clone)]
@@ -462,7 +454,7 @@ async fn main() {
         "loaded amateur radio band catalog"
     );
     let bandmap = BandMapManager::new(band_catalog.clone(), initial_bandmap_max_age);
-    let radio_manager = RadioManager::new(db.clone(), voice_keyer.clone(), band_catalog.clone());
+    let radio_manager = RadioManager::new(voice_keyer.clone(), band_catalog.clone());
     let scoring_modules = ScoringModules::new();
     let incremental_scoring = IncrementalScoreTracker::new();
     let stats = StatsTracker::new();
@@ -687,23 +679,18 @@ async fn handle_socket(
         return;
     }
 
-    let radio_handle = match app_state.radio_manager.acquire(radio_id).await {
-        Ok(handle) => handle,
-        Err(message) => {
-            warn!(session_id, radio_id, log_id, %message, "backend websocket could not acquire radio");
+    let config = match app_state.db.radio(radio_id).await {
+        Ok(Some(config)) => config,
+        Ok(None) => return,
+        Err(error) => {
+            warn!(session_id, radio_id, %error, "unable to load WSJT-X radio config");
             return;
         }
     };
-
-    let config = match app_state.db.radio(radio_id).await {
-        Ok(Some(config)) => config,
-        Ok(None) => {
-            app_state.radio_manager.release(radio_id).await;
-            return;
-        }
-        Err(error) => {
-            warn!(session_id, radio_id, %error, "unable to load WSJT-X radio config");
-            app_state.radio_manager.release(radio_id).await;
+    let radio_handle = match app_state.radio_manager.acquire(config.clone()).await {
+        Ok(handle) => handle,
+        Err(message) => {
+            warn!(session_id, radio_id, log_id, %message, "backend websocket could not acquire radio");
             return;
         }
     };
@@ -732,7 +719,7 @@ async fn handle_socket(
     info!(session_id, radio_id, "backend websocket connected");
     let (mut sender, mut receiver) = socket.split();
 
-    let current_status = radio_handle.current_status_message().await;
+    let current_status = ServerMessage::RadioStatus(radio_handle.current_status().await);
     if sender
         .send(Message::Text(
             serde_json::to_string(&current_status)
@@ -747,7 +734,10 @@ async fn handle_socket(
         return;
     }
 
-    if let Some(current) = radio_handle.current_message().await
+    if let Some(current) = radio_handle
+        .current_state()
+        .await
+        .map(ServerMessage::RadioState)
         && sender
             .send(Message::Text(
                 serde_json::to_string(&current)

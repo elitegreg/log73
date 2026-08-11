@@ -1,9 +1,18 @@
 use crate::bandmap::BandMapSpot;
-use crate::bands::{Band, band_for_frequency};
-use crate::db::RadioConfig;
 use crate::dxcluster::DxClusterSpot;
-use radio_cat_rs::{Frequency, Mode};
 use serde::{Deserialize, Serialize};
+
+pub use radio_io::{RadioCommand, RadioState, RadioStatus};
+
+#[cfg(test)]
+use radio_io::{
+    logger_mode_from_cat_mode, mode_candidates_for_request, mode_is_phone, normalize_mode,
+};
+
+#[cfg(test)]
+use crate::bands::Band;
+#[cfg(test)]
+use radio_io::Mode;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -70,18 +79,6 @@ pub enum ServerMessage {
     },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RadioStatus {
-    pub online: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct RadioState {
-    pub frequency_hz: u64,
-    pub mode: String,
-    pub rit_offset_hz: i32,
-}
-
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
@@ -140,108 +137,8 @@ pub enum ClientMessage {
     },
 }
 
-#[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
-pub enum RadioCommand {
-    SetFrequency(u64),
-    SetMode(String),
-    RitClear,
-    RitIncrement(i32),
-    RitDecrement(i32),
-    SendMessage {
-        mode: String,
-        keys: Vec<String>,
-        fields: serde_json::Map<String, serde_json::Value>,
-        completed: tokio::sync::oneshot::Sender<Result<(), String>>,
-    },
-    SendCwText {
-        text: String,
-        wait_for_completion: bool,
-        completed: tokio::sync::oneshot::Sender<Result<(), String>>,
-    },
-    StopKeying,
-    SetWpm(u8),
-    ReloadConfig(Box<RadioConfig>),
-}
-
 fn default_wait_for_completion() -> bool {
     true
-}
-
-pub fn normalize_mode(mode: &Mode) -> String {
-    match mode {
-        Mode::Lsb | Mode::Usb => "SSB".to_string(),
-        Mode::Cw => "CW".to_string(),
-        Mode::CwReverse => "CW-R".to_string(),
-        Mode::Fm | Mode::Wfm => "FM".to_string(),
-        Mode::Am => "AM".to_string(),
-        Mode::Rtty | Mode::RttyReverse => "RTTY".to_string(),
-        Mode::Psk
-        | Mode::PskReverse
-        | Mode::DataLsb
-        | Mode::DataUsb
-        | Mode::DataFm
-        | Mode::DataAm
-        | Mode::DigitalVoice => "DATA".to_string(),
-    }
-}
-
-pub fn logger_mode_from_cat_mode(
-    mode: &Mode,
-    previous_logger_mode: Option<&str>,
-    data_mode: &str,
-    rtty_mode: &str,
-) -> String {
-    match previous_logger_mode.map(|mode| mode.trim().to_uppercase()) {
-        Some(previous) if previous == "DATA" && configured_mode_is(data_mode, mode) => {
-            "DATA".to_string()
-        }
-        Some(previous) if previous == "RTTY" && configured_mode_is(rtty_mode, mode) => {
-            "RTTY".to_string()
-        }
-        _ => normalize_mode(mode),
-    }
-}
-
-pub fn mode_candidates_for_request(
-    requested: &str,
-    frequency_hz: u64,
-    bands: &[Band],
-    data_mode: &str,
-    rtty_mode: &str,
-) -> Vec<Mode> {
-    match requested.trim().to_uppercase().as_str() {
-        "CW" => vec![Mode::Cw],
-        "CW-R" => vec![Mode::CwReverse, Mode::Cw],
-        "FM" => vec![Mode::Fm],
-        "AM" => vec![Mode::Am],
-        "SSB" => vec![ssb_mode_for_frequency(frequency_hz, bands)],
-        "DATA" => data_mode.parse().into_iter().collect(),
-        "RTTY" => rtty_mode.parse().into_iter().collect(),
-        _ => Vec::new(),
-    }
-}
-
-pub fn mode_is_phone(mode: &str) -> bool {
-    matches!(mode.trim().to_uppercase().as_str(), "SSB" | "FM" | "AM")
-}
-
-fn ssb_mode_for_frequency(frequency_hz: u64, bands: &[Band]) -> Mode {
-    let frequency = Frequency::from_hz(frequency_hz);
-
-    match band_for_frequency(bands, frequency)
-        .map(|band| band.default_ssb_mode.trim().to_uppercase())
-        .as_deref()
-    {
-        Some("LSB") => Mode::Lsb,
-        _ => Mode::Usb,
-    }
-}
-
-fn configured_mode_is(configured_mode: &str, observed_mode: &Mode) -> bool {
-    configured_mode
-        .parse::<Mode>()
-        .is_ok_and(|mode| mode == *observed_mode)
 }
 
 #[cfg(test)]

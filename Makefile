@@ -43,7 +43,7 @@ backend-release: frontend-release
 	cargo build --release -p log73-backend
 
 backend-test:
-	cargo test -p log73-backend
+	cargo test -p log73-backend -p radio-io
 
 backend-fmt:
 	cargo fmt -p log73-backend

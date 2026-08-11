@@ -1,7 +1,7 @@
 use super::keyers::{CwSerialDevice, cw_keyer_for_config};
 use super::voice::{VoiceDataPttGuard, spawn_voice_playback_thread};
+use crate::config::RadioConfig;
 use crate::cw;
-use crate::db::RadioConfig;
 use crate::radio::mode_is_phone;
 use crate::voice_keyer::{VoiceKeyer, VoicePlaybackThread};
 use crate::voice_messages;

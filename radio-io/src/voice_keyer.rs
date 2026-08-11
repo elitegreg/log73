@@ -1,4 +1,4 @@
-use crate::db::RadioConfig;
+use crate::RadioConfig;
 use crate::voice_messages;
 use rodio::Source;
 use rodio::cpal::{self, traits::DeviceTrait, traits::HostTrait};
@@ -877,7 +877,7 @@ fn normalized_optional_id(value: Option<&str>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::RadioConfig;
+    use crate::RadioConfig;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Barrier, Condvar};
 

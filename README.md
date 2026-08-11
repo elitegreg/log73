@@ -8,8 +8,9 @@ The current architecture supports multiple logs, multiple radios, browser client
 Browser UI
   -> Rust backend
   -> SQLite database
-  -> radio-cat-rs transports
-  -> radios
+  -> radio-io library
+     -> radio-cat-rs transports and keyers
+     -> radios and WSJT-X
 
 Desktop launcher UI
   -> starts/stops Rust backend process
@@ -249,13 +250,16 @@ src/styles/*.css                      base styles and theme overrides
 
 backend/                              Rust backend
 backend/src/main.rs                   Axum routes, websocket handling, API handlers
+backend/src/wsjtx.rs                  WSJT-X contact import, validation, cache, and scoring adapter
+radio-io/                             Radio I/O library crate
+radio-io/src/radio_manager.rs         lazy/refcounted multi-radio manager and CW task
+radio-io/src/voice_keyer.rs           local voice-keyer audio loading, caching, and playback
+radio-io/src/wsjtx.rs                 WSJT-X UDP listener and raw event forwarding
 launcher/                             Rust iced desktop launcher
 launcher/src/main.rs                  launcher UI and backend process start/stop controls
 backend/src/auth.rs                   HTTP Basic Auth middleware
 backend/src/db.rs                     SQLite schema and data mapping
-backend/src/radio.rs                  radio/CW websocket messages, mode conversion helpers
-backend/src/radio_manager.rs          lazy/refcounted multi-radio manager and CW task
-backend/src/cw.rs                     CW message parsing, labels, and template rendering
+backend/src/radio.rs                  browser websocket messages for radio and backend events
 backend/src/static_assets.rs          embedded frontend asset serving
 backend/src/contest_rules.rs          contest rule loading, inheritance, and summaries
 backend/src/bands.rs                  amateur band helpers
