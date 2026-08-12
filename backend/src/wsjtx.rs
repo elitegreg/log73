@@ -4,12 +4,12 @@ use crate::{
     contest_rules::ContestRulesStore,
     db::{Database, RadioConfig},
     log_cache::LogCache,
-    radio::{RadioState, ServerMessage},
+    radio::ServerMessage,
     scoring::IncrementalScoreTracker,
     validation,
 };
-use radio_io::WsjtXEvent;
 pub use radio_io::WsjtXTargetState;
+use radio_io::{RadioState, WsjtXEvent};
 use tokio::sync::broadcast;
 use tracing::{debug, error, warn};
 
@@ -79,10 +79,6 @@ impl WsjtXManager {
 
     pub fn subscribe_targets(&self) -> broadcast::Receiver<WsjtXTargetState> {
         self.inner.subscribe_targets()
-    }
-
-    pub async fn reload_config(&self, radio_id: i64, config: RadioConfig) {
-        self.inner.reload_config(radio_id, config).await;
     }
 }
 

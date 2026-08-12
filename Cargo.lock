@@ -3851,6 +3851,7 @@ dependencies = [
 name = "radio-io"
 version = "0.2.0"
 dependencies = [
+ "axum",
  "backon",
  "cw-serial-keyer",
  "futures-util",

@@ -6,6 +6,7 @@ repository = "https://github.com/elitegreg/log73"
 authors = ["Greg Mitchell <greg@ng4m.dev>"]
 
 [dependencies]
+axum = { version = "0.8", features = ["ws"] }
 backon = "1.6.0"
 cw-serial-keyer = { git = "https://github.com/elitegreg/cw-serial-keyer-rs.git" }
 futures-util = "0.3"

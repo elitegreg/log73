@@ -24,6 +24,7 @@ function RadioControls({
   bandMapEnabled,
   onSetBandMapEnabled,
   backendSocketStatus,
+  radioSocketStatus,
   catStatus,
   manualEntryDisabled = false,
 }) {
@@ -108,6 +109,7 @@ function RadioControls({
             step="1"
             value={cwWpm}
             onChange={handleCwWpmChange}
+            disabled={radioSocketStatus !== 'connected'}
           />
         </label>
       )}
@@ -120,6 +122,16 @@ function RadioControls({
         />
       </label>
       <div className="backend-status-group">
+        <div
+          className="backend-socket-status"
+          title={`Radio I/O ${radioSocketStatus}`}
+        >
+          <span
+            className={`backend-socket-light ${radioSocketStatus === 'connected' ? 'connected' : 'disconnected'}`}
+            aria-hidden="true"
+          />
+          Radio I/O
+        </div>
         <div className="backend-socket-status" title={`CAT ${catStatus}`}>
           <span
             className={`backend-socket-light ${catStatus === 'online' ? 'connected' : 'disconnected'}`}

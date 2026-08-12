@@ -1,6 +1,56 @@
-use crate::{Band, RadioConfig, band_for_frequency};
+use crate::{Band, band_for_frequency};
 use radio_cat_rs::Mode;
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RadioClientMessage {
+    Ping {
+        request_id: String,
+    },
+    SetFrequency {
+        frequency_hz: u64,
+    },
+    SetMode {
+        mode: String,
+    },
+    #[serde(rename = "rit_clear")]
+    RitClear,
+    #[serde(rename = "rit_increment")]
+    RitIncrement {
+        hz: i32,
+    },
+    #[serde(rename = "rit_decrement")]
+    RitDecrement {
+        hz: i32,
+    },
+    SendMessage {
+        request_id: String,
+        mode: String,
+        keys: Vec<String>,
+        fields: serde_json::Map<String, serde_json::Value>,
+    },
+    SendCwText {
+        request_id: String,
+        text: String,
+        #[serde(default = "default_wait_for_completion")]
+        wait_for_completion: bool,
+    },
+    #[serde(rename = "stop_keying")]
+    StopKeying,
+    SetWpm {
+        wpm: u8,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RadioServerMessage {
+    RadioStatus(RadioStatus),
+    RadioState(RadioState),
+    Pong { request_id: String },
+    MessageSent { request_id: String },
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RadioStatus {
@@ -35,7 +85,10 @@ pub enum RadioCommand {
     },
     StopKeying,
     SetWpm(u8),
-    ReloadConfig(Box<RadioConfig>),
+}
+
+fn default_wait_for_completion() -> bool {
+    true
 }
 
 pub fn normalize_mode(mode: &Mode) -> String {
@@ -145,11 +198,48 @@ mod tests {
         assert_eq!(normalize_mode(&Mode::CwReverse), "CW-R");
         assert_eq!(normalize_mode(&Mode::DataFm), "DATA");
         assert_eq!(normalize_mode(&Mode::Am), "AM");
+        assert_eq!(normalize_mode(&Mode::DataUsb), "DATA");
+        assert_eq!(normalize_mode(&Mode::Psk), "DATA");
+        assert_eq!(normalize_mode(&Mode::DigitalVoice), "DATA");
         assert_eq!(normalize_mode(&Mode::RttyReverse), "RTTY");
     }
 
     #[test]
+    fn radio_protocol_serializes_status_and_deserializes_commands() {
+        let status = serde_json::to_value(RadioServerMessage::RadioStatus(RadioStatus {
+            online: true,
+        }))
+        .expect("status serializes");
+        assert_eq!(
+            status,
+            serde_json::json!({ "type": "radio_status", "online": true })
+        );
+
+        let command = serde_json::from_value::<RadioClientMessage>(serde_json::json!({
+            "type": "send_cw_text",
+            "request_id": "cw-1",
+            "text": "CQ"
+        }))
+        .expect("command deserializes");
+        assert!(matches!(
+            command,
+            RadioClientMessage::SendCwText {
+                wait_for_completion: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn mode_candidates_use_configured_digital_mappings() {
+        assert_eq!(
+            mode_candidates_for_request("CW", 14_000_000, &test_bands(), "DATA-USB", "RTTY"),
+            vec![Mode::Cw]
+        );
+        assert_eq!(
+            mode_candidates_for_request("CW-R", 14_000_000, &test_bands(), "DATA-USB", "RTTY"),
+            vec![Mode::CwReverse, Mode::Cw]
+        );
         assert_eq!(
             mode_candidates_for_request("DATA", 14_000_000, &test_bands(), "USB", "DATA-USB"),
             vec![Mode::Usb]
@@ -158,6 +248,39 @@ mod tests {
             mode_candidates_for_request("RTTY", 14_000_000, &test_bands(), "USB", "DATA-USB"),
             vec![Mode::DataUsb]
         );
+        assert_eq!(
+            mode_candidates_for_request("AM", 14_000_000, &test_bands(), "DATA-USB", "RTTY"),
+            vec![Mode::Am]
+        );
+    }
+
+    #[test]
+    fn mapped_mode_preserves_matching_digital_logger_state_only() {
+        assert_eq!(
+            logger_mode_from_cat_mode(&Mode::Usb, Some("DATA"), "USB", "RTTY"),
+            "DATA"
+        );
+        assert_eq!(
+            logger_mode_from_cat_mode(&Mode::Usb, Some("RTTY"), "DATA-USB", "USB"),
+            "RTTY"
+        );
+        assert_eq!(
+            logger_mode_from_cat_mode(&Mode::Usb, Some("SSB"), "USB", "USB"),
+            "SSB"
+        );
+        assert_eq!(
+            logger_mode_from_cat_mode(&Mode::Usb, Some("CW"), "USB", "USB"),
+            "SSB"
+        );
+    }
+
+    #[test]
+    fn classifies_phone_modes() {
+        assert!(mode_is_phone("SSB"));
+        assert!(mode_is_phone("fm"));
+        assert!(mode_is_phone(" am "));
+        assert!(!mode_is_phone("CW"));
+        assert!(!mode_is_phone("RTTY"));
     }
 
     #[test]

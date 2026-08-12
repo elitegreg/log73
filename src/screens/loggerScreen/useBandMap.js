@@ -118,6 +118,7 @@ export function useBandMap({
   logId,
   radioId,
   radioFrequencyHz,
+  sendBackendMessage,
   sendRadioMessage,
   notifyOperationalError,
   onBeforeActivateSpot,
@@ -138,12 +139,12 @@ export function useBandMap({
 
   const sendBandMapSubscription = useCallback(
     (nextEnabled) => {
-      sendRadioMessage?.({
+      sendBackendMessage?.({
         type: 'set_bandmap_enabled',
         enabled: nextEnabled,
       });
     },
-    [sendRadioMessage],
+    [sendBackendMessage],
   );
 
   const resetBandMapSync = useCallback((status) => {

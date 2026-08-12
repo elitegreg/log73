@@ -71,6 +71,7 @@ function MainWindow({
   cabrilloTransmitterId,
   radioState,
   backendSocketStatus,
+  radioSocketStatus,
   catStatus,
   messageLabels,
   messageSentEvent,
@@ -197,10 +198,10 @@ function MainWindow({
   }, [cwWpm]);
 
   useEffect(() => {
-    if (backendSocketStatus === 'connected') {
+    if (radioSocketStatus === 'connected') {
       setCwWpmRef.current?.(cwWpm);
     }
-  }, [backendSocketStatus, cwWpm]);
+  }, [radioSocketStatus, cwWpm]);
 
   useEffect(() => {
     onDebouncedCallsignChange?.(debouncedCallSign.trim().toUpperCase());
@@ -1038,6 +1039,7 @@ function MainWindow({
         bandMapEnabled={bandMapEnabled}
         onSetBandMapEnabled={onSetBandMapEnabled}
         backendSocketStatus={backendSocketStatus}
+        radioSocketStatus={radioSocketStatus}
         catStatus={catStatus}
         manualEntryDisabled={wsjtxDataLocked}
       />

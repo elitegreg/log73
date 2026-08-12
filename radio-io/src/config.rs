@@ -1,5 +1,16 @@
 use serde::Serialize;
 
+#[derive(Clone, Debug, Default)]
+pub struct RadioIoConfig {
+    pub radios: Vec<RadioConfig>,
+}
+
+impl RadioIoConfig {
+    pub fn new(radios: Vec<RadioConfig>) -> Self {
+        Self { radios }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RadioConfig {
     pub id: i64,

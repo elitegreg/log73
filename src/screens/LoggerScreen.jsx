@@ -26,6 +26,7 @@ import { useContactsOutbox } from './loggerScreen/useContactsOutbox';
 import { useLoggerContext } from './loggerScreen/useLoggerContext';
 import { useLoggerImage } from './loggerScreen/useLoggerImage';
 import { useOperationalErrorReporter } from './loggerScreen/useOperationalErrorReporter';
+import { useRadioSocket } from './loggerScreen/useRadioSocket';
 import { useSerialAllocator } from './loggerScreen/useSerialAllocator';
 import { createSessionId, getSessionId } from './loggerScreenHelpers';
 
@@ -67,14 +68,11 @@ function LoggerScreen() {
   const refreshContactsHandlerRef = useRef(null);
 
   const {
-    radioState,
     backendSocketStatus,
-    catStatus,
-    messageSentEvent,
     scoreSummary,
     isSocketDebugPanelEnabled,
     socketDebugEntries,
-    sendRadioMessage,
+    sendBackendMessage,
     wsjtxTarget,
     setWsjtXTarget,
   } = useBackendSocket({
@@ -88,6 +86,18 @@ function LoggerScreen() {
     onRemoteContactRef: remoteContactHandlerRef,
     onRemoteContactDeletedRef: remoteContactDeletedHandlerRef,
     onRefreshContactsRef: refreshContactsHandlerRef,
+  });
+
+  const {
+    radioState,
+    radioSocketStatus,
+    catStatus,
+    messageSentEvent,
+    sendRadioMessage,
+  } = useRadioSocket({
+    numericRadioId,
+    radioWebsocketUrl: radio?.radio_ws_url,
+    notifyOperationalError,
   });
 
   const {
@@ -106,6 +116,7 @@ function LoggerScreen() {
     logId: numericLogId,
     radioId: numericRadioId,
     radioFrequencyHz: radioState?.frequency_hz,
+    sendBackendMessage,
     sendRadioMessage,
     notifyOperationalError,
     onBeforeActivateSpot: () => bandMapActivateClearRef.current?.(),
@@ -332,6 +343,7 @@ function LoggerScreen() {
               cabrilloTransmitterId={cabrilloTransmitterId}
               radioState={radioState}
               backendSocketStatus={backendSocketStatus}
+              radioSocketStatus={radioSocketStatus}
               catStatus={catStatus}
               messageLabels={messageLabels}
               messageSentEvent={messageSentEvent}
@@ -374,7 +386,10 @@ function LoggerScreen() {
                 sendRadioMessage({ type: 'send_cw_text', ...payload })
               }
               onSendDxClusterSpot={(payload) =>
-                sendRadioMessage({ type: 'send_dxcluster_spot', ...payload })
+                sendBackendMessage({
+                  type: 'send_dxcluster_spot',
+                  ...payload,
+                })
               }
               onStopKeying={() => sendRadioMessage({ type: 'stop_keying' })}
               onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}

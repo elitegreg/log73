@@ -27,7 +27,7 @@ pub(super) struct ManagedRadioRuntime {
 }
 
 pub(super) async fn run_managed_radio(
-    mut config: RadioConfig,
+    config: RadioConfig,
     runtime: ManagedRadioRuntime,
     mut commands: mpsc::Receiver<RadioCommand>,
     mut shutdown: oneshot::Receiver<()>,
@@ -50,13 +50,6 @@ pub(super) async fn run_managed_radio(
                     _ = &mut shutdown => return,
                     command = commands.recv() => {
                         match command {
-                            Some(RadioCommand::ReloadConfig(new_config)) => {
-                                info!(radio_id = new_config.id, "reloading radio config while waiting to reconnect CAT");
-                                config = *new_config;
-                                reconnect_backoff = cat_reconnect_backoff().build();
-                                reconnect_deadline = None;
-                                break;
-                            }
                             Some(command) => {
                                 warn!(radio_id = config.id, ?command, "dropping radio command while waiting to reconnect CAT");
                                 fail_unavailable_radio_command(command, "radio disconnected");
@@ -82,11 +75,6 @@ pub(super) async fn run_managed_radio(
             _ = &mut shutdown => return,
             command = commands.recv() => {
                 match command {
-                    Some(RadioCommand::ReloadConfig(new_config)) => {
-                        info!(radio_id = new_config.id, "reloading radio config before CAT connect");
-                        config = *new_config;
-                        continue;
-                    }
                     Some(command) => {
                         warn!(radio_id = config.id, ?command, "dropping radio command while CAT is disconnected");
                         fail_unavailable_radio_command(command, "radio disconnected");
@@ -252,14 +240,6 @@ pub(super) async fn run_managed_radio(
                         RadioCommand::SetWpm(wpm) => {
                             debug!(radio_id = config.id, wpm, "forwarding cw set_wpm command");
                             let _ = cw_tx.send(CwTaskCommand::SetWpm(wpm)).await;
-                        }
-                        RadioCommand::ReloadConfig(new_config) => {
-                            debug_radio_config(&new_config, "reloading active radio config");
-                            set_radio_status(&current_status, &status_updates, false).await;
-                            shutdown_cw_task(cw_tx, cw_task).await;
-                            radio.shutdown();
-                            config = *new_config;
-                            break;
                         }
                         command => {
                             let is_rit_command = matches!(

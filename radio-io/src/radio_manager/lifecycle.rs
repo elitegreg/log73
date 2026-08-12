@@ -241,26 +241,6 @@ impl RadioManager {
             Some(ManagedRadioSlot::Active(_))
         )
     }
-
-    pub async fn reload_config(&self, radio_id: i64, config: RadioConfig) -> Result<(), String> {
-        let command_sender = {
-            let radios = self.radios.lock().await;
-            match radios.get(&radio_id) {
-                Some(ManagedRadioSlot::Active(radio)) => Some(radio.commands.clone()),
-                Some(ManagedRadioSlot::ShuttingDown { .. }) | None => None,
-            }
-        };
-
-        let Some(command_sender) = command_sender else {
-            return Ok(());
-        };
-
-        debug_radio_config(&config, "requesting active radio config reload");
-        command_sender
-            .send(RadioCommand::ReloadConfig(Box::new(config)))
-            .await
-            .map_err(|_| "radio task unavailable".to_string())
-    }
 }
 
 impl RadioHandle {

@@ -118,8 +118,20 @@ export async function saveDxclusterSpot(payload) {
   });
 }
 
-export function websocketUrl(params) {
-  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-  const search = new URLSearchParams(params);
-  return `${protocol}://${window.location.host}/ws?${search.toString()}`;
+export function websocketUrl(endpoint, params = {}, baseUrl) {
+  const resolvedBaseUrl = baseUrl ?? window.location.href;
+  const url = new URL(endpoint, resolvedBaseUrl);
+  if (url.protocol === 'http:') {
+    url.protocol = 'ws:';
+  } else if (url.protocol === 'https:') {
+    url.protocol = 'wss:';
+  } else if (url.protocol !== 'ws:' && url.protocol !== 'wss:') {
+    throw new Error(`unsupported websocket URL protocol: ${url.protocol}`);
+  }
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null) {
+      url.searchParams.set(key, String(value));
+    }
+  });
+  return url.toString();
 }

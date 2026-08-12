@@ -14,6 +14,10 @@ export default defineConfig({
         target: 'ws://127.0.0.1:7300',
         ws: true,
       },
+      '/radiows': {
+        target: 'ws://127.0.0.1:7300',
+        ws: true,
+      },
     },
   },
 });

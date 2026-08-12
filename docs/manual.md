@@ -191,6 +191,9 @@ For a sent serial exchange, the backend supplies the initial next value and the 
 
 ### Validation behavior
 
+A radio cannot be edited or deleted while it is in use. Close every logger using the radio before
+changing its configuration.
+
 - Radio name required (max 100 chars)
 - Radio driver must be supported
 - Transport must be `none`, `tcp`, or `serial`

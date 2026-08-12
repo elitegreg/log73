@@ -12,7 +12,6 @@ import {
   BACKEND_WS_INITIAL_RECONNECT_DELAY_MS,
   BACKEND_WS_MAX_RECONNECT_DELAY_MS,
   BACKEND_WS_PING_TIMEOUT_MS,
-  DEFAULT_RADIO_STATE,
   EMPTY_SCORE_SUMMARY,
 } from '../loggerScreenHelpers.js';
 import {
@@ -38,11 +37,8 @@ export function useBackendSocket({
   onRemoteContactDeletedRef,
   onRefreshContactsRef,
 }) {
-  const [radioState, setRadioState] = useState(DEFAULT_RADIO_STATE);
   const [backendSocketStatus, setBackendSocketStatus] =
     useState('disconnected');
-  const [catStatus, setCatStatus] = useState('offline');
-  const [messageSentEvent, setMessageSentEvent] = useState(null);
   const [scoreSummary, setScoreSummary] = useState(EMPTY_SCORE_SUMMARY);
   const [wsjtxTarget, setWsjtXTargetState] = useState(false);
   const [isSocketDebugPanelEnabled] = useState(readSocketDebugPanelEnabled);
@@ -51,7 +47,7 @@ export function useBackendSocket({
   const wsjtxTargetIntentRef = useRef(false);
   const socketDebugSequenceRef = useRef(0);
 
-  const sendRadioMessage = useCallback((message) => {
+  const sendBackendMessage = useCallback((message) => {
     const socket = backendSocketRef.current;
     if (socket?.readyState === WebSocket.OPEN)
       socket.send(JSON.stringify(message));
@@ -213,7 +209,6 @@ export function useBackendSocket({
         ...details,
       });
       setBackendSocketStatus('disconnected');
-      setCatStatus('offline');
       socket?.close();
       clearReconnectTimer();
       reconnectDelayMs = BACKEND_WS_INITIAL_RECONNECT_DELAY_MS;
@@ -450,7 +445,7 @@ export function useBackendSocket({
       clearReconnectTimer();
       clearConnectTimeoutTimer();
       const clearedPendingPingRequestId = clearSocketHealthState();
-      const url = websocketUrl({
+      const url = websocketUrl('/ws', {
         session_id: sessionId,
         logger_id: loggerId,
         log_id: numericLogId,
@@ -461,7 +456,6 @@ export function useBackendSocket({
         clearedPendingPingRequestId,
       });
       setBackendSocketStatus('connecting');
-      setCatStatus('offline');
       const socket = new WebSocket(url);
       socketCreatedAtByInstance.set(socket, Date.now());
       backendSocketRef.current = socket;
@@ -510,26 +504,7 @@ export function useBackendSocket({
               socketState: socketStateLabel(socket),
             });
           }
-          if (message.type === 'radio_status') {
-            setCatStatus(message.online ? 'online' : 'offline');
-          } else if (message.type === 'radio_state') {
-            debugSocket('radio_state_received', {
-              frequencyHz: message.frequency_hz,
-              mode: message.mode,
-              ritOffsetHz: message.rit_offset_hz,
-              socketState: socketStateLabel(socket),
-            });
-            setRadioState({
-              frequency_hz: message.frequency_hz,
-              mode: message.mode,
-              rit_offset_hz: Number(message.rit_offset_hz ?? 0),
-            });
-          } else if (message.type === 'message_sent') {
-            setMessageSentEvent({
-              requestId: message.request_id,
-              sequence: Date.now(),
-            });
-          } else if (message.type === 'log_entry') {
+          if (message.type === 'log_entry') {
             onRemoteContactRef.current?.(message.contact);
           } else if (message.type === 'contact_deleted') {
             onRemoteContactDeletedRef.current?.(message.id);
@@ -584,7 +559,6 @@ export function useBackendSocket({
             clearedPendingPingRequestId,
           });
           setBackendSocketStatus('disconnected');
-          setCatStatus('offline');
           scheduleReconnect();
         }
       });
@@ -598,7 +572,6 @@ export function useBackendSocket({
           clearedPendingPingRequestId,
         });
         setBackendSocketStatus('disconnected');
-        setCatStatus('offline');
         socket.close();
       });
     }
@@ -622,7 +595,6 @@ export function useBackendSocket({
       });
       const socket = backendSocketRef.current;
       backendSocketRef.current = null;
-      setCatStatus('offline');
       socket?.close();
     };
   }, [
@@ -644,14 +616,11 @@ export function useBackendSocket({
   }, [numericLogId]);
 
   return {
-    radioState,
     backendSocketStatus,
-    catStatus,
-    messageSentEvent,
     scoreSummary,
     isSocketDebugPanelEnabled,
     socketDebugEntries,
-    sendRadioMessage,
+    sendBackendMessage,
     wsjtxTarget,
     setWsjtXTarget,
   };

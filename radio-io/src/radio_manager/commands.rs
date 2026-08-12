@@ -58,8 +58,7 @@ pub(super) fn fail_unavailable_radio_command(command: RadioCommand, reason: &str
         | RadioCommand::SetMode(_)
         | RadioCommand::RitClear
         | RadioCommand::RitIncrement(_)
-        | RadioCommand::RitDecrement(_)
-        | RadioCommand::ReloadConfig(_) => {}
+        | RadioCommand::RitDecrement(_) => {}
     }
 }
 
@@ -219,8 +218,7 @@ pub(super) async fn apply_command(
         RadioCommand::SendMessage { .. }
         | RadioCommand::SendCwText { .. }
         | RadioCommand::StopKeying
-        | RadioCommand::SetWpm(_)
-        | RadioCommand::ReloadConfig(_) => Ok(()),
+        | RadioCommand::SetWpm(_) => Ok(()),
     }
 }
 

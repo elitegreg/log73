@@ -45,7 +45,6 @@ pub struct WsjtXTargetState {
 }
 
 enum ControllerCommand {
-    Reload(Box<RadioConfig>),
     Shutdown(oneshot::Sender<()>),
 }
 
@@ -245,21 +244,6 @@ impl WsjtXManager {
         self.inner.events.subscribe()
     }
 
-    pub async fn reload_config(&self, radio_id: i64, config: RadioConfig) {
-        let commands = self
-            .inner
-            .listeners
-            .lock()
-            .await
-            .get(&radio_id)
-            .map(|listener| listener.commands.clone());
-        if let Some(commands) = commands {
-            let _ = commands
-                .send(ControllerCommand::Reload(Box::new(config)))
-                .await;
-        }
-    }
-
     #[cfg(test)]
     async fn current_target(&self, radio_id: i64) -> WsjtXTargetState {
         let listeners = self.inner.listeners.lock().await;
@@ -292,7 +276,7 @@ fn no_target_state(radio_id: i64) -> WsjtXTargetState {
 
 async fn run_controller(
     radio_id: i64,
-    mut config: RadioConfig,
+    config: RadioConfig,
     initial_state: Option<RadioState>,
     mut updates: broadcast::Receiver<RadioState>,
     mut target_updates: watch::Receiver<Option<WsjtXTarget>>,
@@ -325,14 +309,6 @@ async fn run_controller(
                 running = reconcile_listener(running, radio_id, &config, &mode, &target_updates, &events).await;
             },
             command = commands.recv() => match command {
-                Some(ControllerCommand::Reload(next_config)) => {
-                    let needs_restart = listener_settings_changed(&config, &next_config);
-                    config = *next_config;
-                    if needs_restart {
-                        running = stop_listener(running, radio_id).await;
-                    }
-                    running = reconcile_listener(running, radio_id, &config, &mode, &target_updates, &events).await;
-                }
                 Some(ControllerCommand::Shutdown(completed)) => {
                     let _ = stop_listener(running, radio_id).await;
                     let _ = completed.send(());
@@ -527,13 +503,6 @@ fn server_config(config: &RadioConfig) -> Result<ServerConfig, String> {
     })
 }
 
-fn listener_settings_changed(previous: &RadioConfig, next: &RadioConfig) -> bool {
-    previous.wsjtx_enabled != next.wsjtx_enabled
-        || previous.wsjtx_bind_address != next.wsjtx_bind_address
-        || previous.wsjtx_port != next.wsjtx_port
-        || previous.wsjtx_multicast_group != next.wsjtx_multicast_group
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,18 +560,6 @@ mod tests {
                 interface: Ipv4Addr::UNSPECIFIED,
             }]
         );
-    }
-
-    #[test]
-    fn listener_restart_detection_uses_only_wsjtx_settings() {
-        let config = test_config();
-        let mut changed = config.clone();
-        changed.wsjtx_port = 2238;
-        assert!(listener_settings_changed(&config, &changed));
-
-        changed = config.clone();
-        changed.name = "Renamed".to_string();
-        assert!(!listener_settings_changed(&config, &changed));
     }
 
     #[test]

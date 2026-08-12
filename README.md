@@ -6,11 +6,12 @@ The current architecture supports multiple logs, multiple radios, browser client
 
 ```text
 Browser UI
-  -> Rust backend
-  -> SQLite database
-  -> radio-io library
-     -> radio-cat-rs transports and keyers
-     -> radios and WSJT-X
+  -> Rust backend (/api and /ws)
+     -> SQLite database
+  -> radio websocket URL supplied by the backend (/radiows today)
+     -> radio-io library
+        -> radio-cat-rs transports and keyers
+        -> radios and WSJT-X
 
 Desktop launcher UI
   -> starts/stops Rust backend process
@@ -25,7 +26,7 @@ Log73 is under active development. Contest definitions are loaded from YAML rule
 - HTTP Basic Auth for the whole app.
 - Structured backend logging with `tracing`, configurable by CLI.
 - Browser UI served by the Rust backend in production.
-- Separate frontend/backend development mode with Rsbuild proxying `/api` and `/ws`.
+- Separate frontend/backend development mode with Rsbuild proxying `/api`, `/ws`, and `/radiows`.
 - Multi-log selection and creation.
 - Multi-radio selection and creation.
 - Per-radio CAT settings:
@@ -34,8 +35,8 @@ Log73 is under active development. Contest definitions are loaded from YAML rule
 - Optional per-radio Winkeyer CW keying settings.
 - Run and S&P CW function-key labels/messages.
 - Selectable UI themes, persisted in browser local storage.
-- Lazy radio connections: a CAT connection opens only when a logger websocket uses that radio.
-- Reference-counted radio use: when the last logger websocket for a radio closes, the backend disconnects that radio.
+- Lazy radio connections: a CAT connection opens only when a radio websocket uses that radio.
+- Reference-counted radio use: when the last user of a radio disconnects, the backend disconnects that radio.
 - Per-radio serialized CAT command queue.
 - Realtime radio state updates over websocket.
 - SQLite-backed QSO storage.
@@ -48,7 +49,7 @@ The app can use HTTP Basic Auth.
 Login is disabled by default: if either login field is blank, the app is accessible without authentication.
 Use **Configure** from the main screen to set a username and password.
 
-When login is enabled, authentication protects the frontend, `/api/*`, and `/ws`.
+When login is enabled, authentication protects the frontend, `/api/*`, `/ws`, and `/radiows`.
 
 ## Prerequisites
 
@@ -107,7 +108,7 @@ Start the frontend dev server in another terminal:
 pnpm run dev
 ```
 
-In development, Rsbuild proxies `/api` and `/ws` to the backend on port `7300`.
+In development, Rsbuild proxies `/api`, `/ws`, and `/radiows` to the backend on port `7300`.
 
 Open the app, then:
 
@@ -241,6 +242,7 @@ src/screens/OpenLogScreen.jsx         log/radio selection screen
 src/screens/CreateLogScreen.jsx       create log screen
 src/screens/CreateRadioScreen.jsx     create radio screen, CAT transport, and Winkeyer settings
 src/screens/LoggerScreen.jsx          logger state, websocket, contact commit flow
+src/screens/loggerScreen/useRadioSocket.js radio websocket connection and state
 src/logger/MainWindow.jsx             main logger entry/radio/CW-control UI
 src/logger/LogWindow.jsx              QSO table
 src/lib/api.js                        API and websocket URL helpers
@@ -253,13 +255,14 @@ backend/src/main.rs                   Axum routes, websocket handling, API handl
 backend/src/wsjtx.rs                  WSJT-X contact import, validation, cache, and scoring adapter
 radio-io/                             Radio I/O library crate
 radio-io/src/radio_manager.rs         lazy/refcounted multi-radio manager and CW task
+radio-io/src/websocket.rs             radio HTTP/websocket endpoint and command dispatch
 radio-io/src/voice_keyer.rs           local voice-keyer audio loading, caching, and playback
 radio-io/src/wsjtx.rs                 WSJT-X UDP listener and raw event forwarding
 launcher/                             Rust iced desktop launcher
 launcher/src/main.rs                  launcher UI and backend process start/stop controls
 backend/src/auth.rs                   HTTP Basic Auth middleware
 backend/src/db.rs                     SQLite schema and data mapping
-backend/src/radio.rs                  browser websocket messages for radio and backend events
+backend/src/radio.rs                  CRUD/backend websocket messages
 backend/src/static_assets.rs          embedded frontend asset serving
 backend/src/contest_rules.rs          contest rule loading, inheritance, and summaries
 backend/src/bands.rs                  amateur band helpers
@@ -328,22 +331,34 @@ GET    /api/radios/voice-messages/default
 POST   /api/radios/voice-messages/validate
 ```
 
-Deletion rules:
+Radio responses include `radio_ws_url`. It is currently a relative URI such as
+`/radiows?radio_id=3`; clients also accept absolute HTTP(S) or WS(S) URLs so the
+radio I/O service can move to another process or host later.
+
+Radio mutation rules:
 
 - Deleting a log also deletes its QSOs.
-- Radios currently used by an active logger websocket cannot be deleted.
+- Radios currently used by either websocket cannot be updated or deleted.
+- The CRUD backend initializes radio I/O from the persisted radio list and synchronizes successful
+  creates, updates, and deletes into radio I/O's in-memory configuration.
 
 ## Websocket API
 
-Logger websocket:
+CRUD/backend websocket:
 
 ```text
-/ws?session_id=<uuid>&radio_id=<radio_id>
+/ws?session_id=<uuid>&logger_id=<uuid>&log_id=<log_id>&radio_id=<radio_id>
 ```
 
 The frontend stores `session_id` in browser local storage and includes it on locally logged contacts as `contact.meta.sessionId`. The backend uses it to avoid echoing the same committed contact back to the originating websocket.
 
-Server radio state message:
+Radio I/O websocket (the URI comes from `radio_ws_url`):
+
+```text
+/radiows?radio_id=<radio_id>
+```
+
+Server radio state messages:
 
 ```json
 { "type": "radio_status", "online": true }
@@ -359,10 +374,10 @@ Server log/contact messages:
 { "type": "contact_deleted", "id": 123, "log_id": 1 }
 ```
 
-Server CW completion message:
+Server keying completion message:
 
 ```json
-{ "type": "cw_sent", "request_id": "uuid-or-client-id" }
+{ "type": "message_sent", "request_id": "uuid-or-client-id" }
 ```
 
 Client radio commands:
@@ -375,7 +390,7 @@ Client radio commands:
 Client CW commands:
 
 ```json
-{ "type": "send_cw", "request_id": "uuid-or-client-id", "mode": "run", "key": "F1", "fields": { "CALL": "K1ABC" } }
+{ "type": "send_message", "request_id": "uuid-or-client-id", "mode": "run", "keys": ["F1"], "fields": { "CALL": "K1ABC" } }
 { "type": "stop_keying" }
 { "type": "set_wpm", "wpm": 25 }
 ```

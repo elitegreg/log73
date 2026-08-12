@@ -2,24 +2,10 @@ use crate::bandmap::BandMapSpot;
 use crate::dxcluster::DxClusterSpot;
 use serde::{Deserialize, Serialize};
 
-pub use radio_io::{RadioCommand, RadioState, RadioStatus};
-
-#[cfg(test)]
-use radio_io::{
-    logger_mode_from_cat_mode, mode_candidates_for_request, mode_is_phone, normalize_mode,
-};
-
-#[cfg(test)]
-use crate::bands::Band;
-#[cfg(test)]
-use radio_io::Mode;
-
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerMessage {
-    RadioStatus(RadioStatus),
-    RadioState(RadioState),
     Pong {
         request_id: String,
     },
@@ -39,9 +25,6 @@ pub enum ServerMessage {
         multipliers: i64,
         bonus_points: i64,
         total_score: i64,
-    },
-    MessageSent {
-        request_id: String,
     },
     WsjtXError {
         radio_id: i64,
@@ -85,44 +68,11 @@ pub enum ClientMessage {
     Ping {
         request_id: String,
     },
-    SetFrequency {
-        frequency_hz: u64,
-    },
-    SetMode {
-        mode: String,
-    },
-    #[serde(rename = "rit_clear")]
-    RitClear,
-    #[serde(rename = "rit_increment")]
-    RitIncrement {
-        hz: i32,
-    },
-    #[serde(rename = "rit_decrement")]
-    RitDecrement {
-        hz: i32,
-    },
-    SendMessage {
-        request_id: String,
-        mode: String,
-        keys: Vec<String>,
-        fields: serde_json::Map<String, serde_json::Value>,
-    },
-    SendCwText {
-        request_id: String,
-        text: String,
-        #[serde(default = "default_wait_for_completion")]
-        wait_for_completion: bool,
-    },
     #[serde(rename = "send_dxcluster_spot")]
     SendDxClusterSpot {
         frequency_hz: u64,
         call: String,
         comment: String,
-    },
-    #[serde(rename = "stop_keying")]
-    StopKeying,
-    SetWpm {
-        wpm: u8,
     },
     SetWsjtXTarget {
         enabled: bool,
@@ -137,50 +87,9 @@ pub enum ClientMessage {
     },
 }
 
-fn default_wait_for_completion() -> bool {
-    true
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn test_bands() -> Vec<Band> {
-        vec![
-            Band {
-                iaru_region: 2,
-                name: "40m".to_string(),
-                lower_hz: 7_000_000,
-                upper_hz: 7_300_000,
-                default_ssb_mode: "LSB".to_string(),
-                sort_order: 1,
-                cabrillo: "khz".to_string(),
-            },
-            Band {
-                iaru_region: 2,
-                name: "20m".to_string(),
-                lower_hz: 14_000_000,
-                upper_hz: 14_350_000,
-                default_ssb_mode: "USB".to_string(),
-                sort_order: 2,
-                cabrillo: "khz".to_string(),
-            },
-        ]
-    }
-
-    #[test]
-    fn serializes_radio_status_server_message() {
-        let message = ServerMessage::RadioStatus(RadioStatus { online: true });
-        let json = serde_json::to_value(message).expect("radio status should serialize");
-
-        assert_eq!(
-            json,
-            serde_json::json!({
-                "type": "radio_status",
-                "online": true
-            })
-        );
-    }
 
     #[test]
     fn serializes_pong_server_message() {
@@ -417,104 +326,6 @@ mod tests {
     }
 
     #[test]
-    fn deserializes_rit_client_messages() {
-        let clear_message: ClientMessage = serde_json::from_value(serde_json::json!({
-            "type": "rit_clear"
-        }))
-        .expect("rit_clear should deserialize");
-        assert!(matches!(clear_message, ClientMessage::RitClear));
-
-        let increment_message: ClientMessage = serde_json::from_value(serde_json::json!({
-            "type": "rit_increment",
-            "hz": 25
-        }))
-        .expect("rit_increment should deserialize");
-        match increment_message {
-            ClientMessage::RitIncrement { hz } => assert_eq!(hz, 25),
-            other => panic!("unexpected client message: {other:?}"),
-        }
-
-        let decrement_message: ClientMessage = serde_json::from_value(serde_json::json!({
-            "type": "rit_decrement",
-            "hz": 10
-        }))
-        .expect("rit_decrement should deserialize");
-        match decrement_message {
-            ClientMessage::RitDecrement { hz } => assert_eq!(hz, 10),
-            other => panic!("unexpected client message: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn deserializes_send_message_client_message() {
-        let message: ClientMessage = serde_json::from_value(serde_json::json!({
-            "type": "send_message",
-            "request_id": "msg-123",
-            "mode": "run",
-            "keys": ["F1", "F2"],
-            "fields": {
-                "CALL": "K1ABC"
-            }
-        }))
-        .expect("send_message should deserialize");
-
-        match message {
-            ClientMessage::SendMessage {
-                request_id,
-                mode,
-                keys,
-                fields,
-            } => {
-                assert_eq!(request_id, "msg-123");
-                assert_eq!(mode, "run");
-                assert_eq!(keys, vec!["F1".to_string(), "F2".to_string()]);
-                assert_eq!(fields.get("CALL"), Some(&serde_json::json!("K1ABC")));
-            }
-            other => panic!("unexpected client message: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn deserializes_send_cw_text_client_message() {
-        let message: ClientMessage = serde_json::from_value(serde_json::json!({
-            "type": "send_cw_text",
-            "request_id": "cw-123",
-            "text": "CQ ",
-            "wait_for_completion": false
-        }))
-        .expect("send_cw_text should deserialize");
-
-        match message {
-            ClientMessage::SendCwText {
-                request_id,
-                text,
-                wait_for_completion,
-            } => {
-                assert_eq!(request_id, "cw-123");
-                assert_eq!(text, "CQ ");
-                assert!(!wait_for_completion);
-            }
-            other => panic!("unexpected client message: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn deserializes_stop_keying_client_message() {
-        let message: ClientMessage = serde_json::from_value(serde_json::json!({
-            "type": "stop_keying"
-        }))
-        .expect("stop_keying should deserialize");
-
-        assert!(matches!(message, ClientMessage::StopKeying));
-        assert!(
-            serde_json::from_value::<ClientMessage>(serde_json::json!({
-                "type": "stop_cw"
-            }))
-            .is_err()
-        );
-    }
-
-    #[test]
     fn deserializes_send_dxcluster_spot_client_message() {
         let message: ClientMessage = serde_json::from_value(serde_json::json!({
             "type": "send_dxcluster_spot",
@@ -536,82 +347,5 @@ mod tests {
             }
             other => panic!("unexpected client message: {other:?}"),
         }
-    }
-
-    #[test]
-    fn normalizes_cat_modes_to_logger_modes() {
-        assert_eq!(normalize_mode(&Mode::Usb), "SSB");
-        assert_eq!(normalize_mode(&Mode::CwReverse), "CW-R");
-        assert_eq!(normalize_mode(&Mode::DataFm), "DATA");
-        assert_eq!(normalize_mode(&Mode::Am), "AM");
-        assert_eq!(normalize_mode(&Mode::DataUsb), "DATA");
-        assert_eq!(normalize_mode(&Mode::Psk), "DATA");
-        assert_eq!(normalize_mode(&Mode::DigitalVoice), "DATA");
-        assert_eq!(normalize_mode(&Mode::RttyReverse), "RTTY");
-    }
-
-    #[test]
-    fn mode_candidates_for_request_use_configured_digital_mappings() {
-        assert_eq!(
-            mode_candidates_for_request("CW", 14_000_000, &test_bands(), "DATA-USB", "RTTY"),
-            vec![Mode::Cw]
-        );
-        assert_eq!(
-            mode_candidates_for_request("CW-R", 14_000_000, &test_bands(), "DATA-USB", "RTTY"),
-            vec![Mode::CwReverse, Mode::Cw]
-        );
-        assert_eq!(
-            mode_candidates_for_request("DATA", 14_000_000, &test_bands(), "USB", "DATA-USB"),
-            vec![Mode::Usb]
-        );
-        assert_eq!(
-            mode_candidates_for_request("RTTY", 14_000_000, &test_bands(), "USB", "DATA-USB"),
-            vec![Mode::DataUsb]
-        );
-        assert_eq!(
-            mode_candidates_for_request("AM", 14_000_000, &test_bands(), "DATA-USB", "RTTY"),
-            vec![Mode::Am]
-        );
-    }
-
-    #[test]
-    fn mapped_mode_preserves_matching_digital_logger_state_only() {
-        assert_eq!(
-            logger_mode_from_cat_mode(&Mode::Usb, Some("DATA"), "USB", "RTTY"),
-            "DATA"
-        );
-        assert_eq!(
-            logger_mode_from_cat_mode(&Mode::Usb, Some("RTTY"), "DATA-USB", "USB"),
-            "RTTY"
-        );
-        assert_eq!(
-            logger_mode_from_cat_mode(&Mode::Usb, Some("SSB"), "USB", "USB"),
-            "SSB"
-        );
-        assert_eq!(
-            logger_mode_from_cat_mode(&Mode::Usb, Some("CW"), "USB", "USB"),
-            "SSB"
-        );
-    }
-
-    #[test]
-    fn classifies_phone_modes() {
-        assert!(mode_is_phone("SSB"));
-        assert!(mode_is_phone("fm"));
-        assert!(mode_is_phone(" am "));
-        assert!(!mode_is_phone("CW"));
-        assert!(!mode_is_phone("RTTY"));
-    }
-
-    #[test]
-    fn ssb_request_uses_band_dependent_sideband() {
-        assert_eq!(
-            mode_candidates_for_request("SSB", 7_200_000, &test_bands(), "DATA-USB", "RTTY"),
-            vec![Mode::Lsb]
-        );
-        assert_eq!(
-            mode_candidates_for_request("SSB", 14_200_000, &test_bands(), "DATA-USB", "RTTY"),
-            vec![Mode::Usb]
-        );
     }
 }
