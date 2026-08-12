@@ -259,11 +259,8 @@ export function useRadioSocket({
       });
     }
 
-    function handleVisibilityChange() {
-      if (document.hidden) {
-        clearHealthState();
-        return;
-      }
+    function handleForeground() {
+      if (document.hidden) return;
       const socket = radioSocketRef.current;
       if (socket?.readyState === WebSocket.OPEN) {
         checkRadioSocketHealth({ forcePing: true });
@@ -275,11 +272,23 @@ export function useRadioSocket({
       }
     }
 
+    function handleVisibilityChange() {
+      if (document.hidden) {
+        clearHealthState();
+        return;
+      }
+      handleForeground();
+    }
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleForeground);
+    window.addEventListener('pageshow', handleForeground);
     connectRadioSocket();
     return () => {
       shouldReconnect = false;
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleForeground);
+      window.removeEventListener('pageshow', handleForeground);
       clearTimer(reconnectTimerId);
       clearTimer(connectTimeoutTimerId);
       clearHealthState();
