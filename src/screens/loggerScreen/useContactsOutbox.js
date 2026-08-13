@@ -15,6 +15,7 @@ import {
   sortContacts,
 } from '../loggerScreenHelpers.js';
 import {
+  contactCommitPayload,
   mergeCommittedPage,
   mergeResetCommittedPage,
   nextContactToCommit,
@@ -225,10 +226,7 @@ export function useContactsOutbox({
       try {
         const responseBody = await apiJson(`/logs/${numericLogId}/contacts`, {
           method: 'POST',
-          body: JSON.stringify({
-            meta: { ...contactMeta(contact), logId: numericLogId },
-            adif: { ...contactAdif(contact) },
-          }),
+          body: JSON.stringify(contactCommitPayload(contact, numericLogId)),
         });
         if (responseBody.contact) {
           commitContactErrorNotifiedRef.current = false;

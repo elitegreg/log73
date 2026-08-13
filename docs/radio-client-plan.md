@@ -61,7 +61,7 @@ The following decisions are settled for the first implementation:
 - A loopback Axum server on an operating-system-assigned port.
 - Radio registration, heartbeat, offline state, and read-only snapshots in the backend.
 - Direct browser-to-loopback radio WebSocket connections.
-- A browser-persisted WSJT-X event outbox and idempotent backend ingestion.
+- Frontend conversion of WSJT-X Logged ADIF into the existing persisted QSO outbox.
 - Equivalent WSJT-X behavior for backend-owned radios.
 - Client-side designation and status on the log/radio selection screen.
 - Packaging, CI, tests, and user documentation for Linux, Windows, and macOS targets already listed in `dist-workspace.toml`.
@@ -80,46 +80,46 @@ The following decisions are settled for the first implementation:
 
 ### Original proposal traceability
 
-| Original detail | Planned treatment |
-| --- | --- |
-| Keep today's backend-attached multi-radio behavior | Retained as the SERVER-SIDE radio path and refactored to share, not replace, `radio-io`. |
-| Serve a WebSocket to the frontend | Axum binds `127.0.0.1:0` and serves the shared protocol at `/radiows`; the exact URL is registered with the backend. |
-| CW message keying | Reuse CAT, Winkeyer, and serial-line keyers plus current `send_message`, `send_cw_text`, stop, WPM, and completion messages. |
-| Voice message keying to a chosen output | Reuse `VoiceKeyer`/`VoicePlaybackThread`; enumerate the local output devices and preload local WAV bytes. |
-| Proxy WSJT-X log messages to Log73 upserts | Send Logged ADIF on the radio WebSocket, persist it in the selected logger, and call an idempotent backend ingestion/upsert endpoint. |
-| Share the `radio-io` crate | Both `log73-backend` and `log73-radio-client` host the same manager, WebSocket protocol, keyers, voice cache, and WSJT-X manager. |
-| Use the launcher's GUI crates | Use Iced `0.13` with the launcher's feature set, icon, async pattern, and native-platform approach. |
-| Use the same configurable directories/defaults | Reuse `log73-paths` and matching CLI overrides for config/data/app/log locations. |
-| Save `log72-radio-client.json` beside launcher config | Save corrected `log73-radio-client.json` in `log73_paths::config_dir()`. |
-| Configure/Start/Stop main screen and scrolling messages | Implemented as an explicit GUI state machine with guarded buttons and a bounded auto-scrolling event pane. |
-| Configure the same options as the current radio screen plus Basic Auth | Mirror all effective `CreateRadioScreen` fields and add backend URL, username, and masked password. |
-| Fetch CW/voice configuration and voice assets | Superseded by client ownership: configuration and files are local; the backend receives a read-only snapshot. Assets are still loaded into raw in-memory byte arrays before use. |
-| Register name and WebSocket URL through a new REST API | Stable UUID upsert plus lease/heartbeat; backend stores identity, name, URL, and read-only snapshot. |
-| Persist the radio but do not let the backend update/start it | Client rows persist offline, are not web-editable, and are excluded from the backend radio manager. |
-| Tell the frontend the WebSocket URL when opening a log | `/api/radios` returns the authoritative local or client URL; the frontend no longer overwrites its radio identity. |
-| Choose direct REST versus browser proxy for WSJT-X failures | Browser proxy selected; a durable browser outbox handles backend outages and idempotent replay. |
+| Original detail                                                        | Planned treatment                                                                                                                                                                |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Keep today's backend-attached multi-radio behavior                     | Retained as the SERVER-SIDE radio path and refactored to share, not replace, `radio-io`.                                                                                         |
+| Serve a WebSocket to the frontend                                      | Axum binds `127.0.0.1:0` and serves the shared protocol at `/radiows`; the exact URL is registered with the backend.                                                             |
+| CW message keying                                                      | Reuse CAT, Winkeyer, and serial-line keyers plus current `send_message`, `send_cw_text`, stop, WPM, and completion messages.                                                     |
+| Voice message keying to a chosen output                                | Reuse `VoiceKeyer`/`VoicePlaybackThread`; enumerate the local output devices and preload local WAV bytes.                                                                        |
+| Proxy WSJT-X log messages to Log73 upserts                             | Send Logged ADIF on the radio WebSocket, convert it to a normal pending QSO in the selected logger, and use the existing contact outbox/API.                                     |
+| Share the `radio-io` crate                                             | Both `log73-backend` and `log73-radio-client` host the same manager, WebSocket protocol, keyers, voice cache, and WSJT-X manager.                                                |
+| Use the launcher's GUI crates                                          | Use Iced `0.13` with the launcher's feature set, icon, async pattern, and native-platform approach.                                                                              |
+| Use the same configurable directories/defaults                         | Reuse `log73-paths` and matching CLI overrides for config/data/app/log locations.                                                                                                |
+| Save `log72-radio-client.json` beside launcher config                  | Save corrected `log73-radio-client.json` in `log73_paths::config_dir()`.                                                                                                         |
+| Configure/Start/Stop main screen and scrolling messages                | Implemented as an explicit GUI state machine with guarded buttons and a bounded auto-scrolling event pane.                                                                       |
+| Configure the same options as the current radio screen plus Basic Auth | Mirror all effective `CreateRadioScreen` fields and add backend URL, username, and masked password.                                                                              |
+| Fetch CW/voice configuration and voice assets                          | Superseded by client ownership: configuration and files are local; the backend receives a read-only snapshot. Assets are still loaded into raw in-memory byte arrays before use. |
+| Register name and WebSocket URL through a new REST API                 | Stable UUID upsert plus lease/heartbeat; backend stores identity, name, URL, and read-only snapshot.                                                                             |
+| Persist the radio but do not let the backend update/start it           | Client rows persist offline, are not web-editable, and are excluded from the backend radio manager.                                                                              |
+| Tell the frontend the WebSocket URL when opening a log                 | `/api/radios` returns the authoritative local or client URL; the frontend no longer overwrites its radio identity.                                                               |
+| Choose direct REST versus browser proxy for WSJT-X failures            | Browser proxy selected; the existing durable contact outbox handles backend outages after ADIF conversion.                                                                       |
 
 ## Existing code and implications
 
 The proposal is an extension and rearrangement of existing code, not a new radio stack.
 
-| Area | Existing code | Design implication |
-| --- | --- | --- |
-| Radio configuration UI | `src/screens/CreateRadioScreen.jsx` | This is the field and validation baseline for the Iced Configure screen. It already covers driver, transport, digital mappings, WSJT-X, tuning increments, RIT, sound devices, CW keyer, and message text. |
-| Radio WebSocket | `radio-io/src/websocket.rs` | Reuse the handler and protocol. It already validates frequency/mode/RIT/WPM/message commands and manages lazy `RadioManager` acquisition. Extend it with logger registration and WSJT-X events. |
-| Radio runtime | `radio-io/src/radio_manager.rs` and its submodules | CAT connection/reconnect, CW tasks, voice worker threads, RIT, and command dispatch remain shared by backend and Radio Client. |
-| Protocol messages | `radio-io/src/radio.rs` | Add WSJT-X target control, target-state, event, acknowledgment, and error variants here so both radio hosts serialize the same protocol. |
-| WSJT-X listener | `radio-io/src/wsjtx.rs` | It already opens UDP unicast/multicast listeners, gates them on DATA mode and an active target, and emits Logged ADIF/errors. It should become owned by the radio WebSocket host rather than by the backend logger WebSocket. |
-| Current WSJT-X persistence | `backend/src/wsjtx.rs` | Its ADIF conversion, validation, log-cache upsert, score update, and error handling should become an idempotent REST ingestion service called by the browser outbox. Direct subscription from this module to `radio-io` goes away. |
-| Browser radio connection | `src/screens/loggerScreen/useRadioSocket.js` | It already handles reconnect, idle ping/pong, status/state, and radio commands. It must treat `radio_ws_url` as authoritative, add logger identity, receive WSJT-X messages, and expose target state/control. |
-| Browser contact outbox | `src/screens/loggerScreen/useContactsOutbox.js` and `loggerScreenHelpers.js` | Reuse its local-storage-first, retrying pattern for a small raw WSJT-X event outbox. Do not make `radio-io` depend on backend availability. |
-| Backend logger WebSocket | `backend/src/main.rs::handle_socket` | It currently acquires a radio solely to drive backend WSJT-X. That ownership must be removed. It remains responsible for log events, scoring, band map, DX Cluster, and health checks. |
-| Backend radio persistence | `backend/src/db/radios.rs`, `models.rs`, and `schema.rs` | Add ownership/registration metadata while preserving bound, static SQL. Only backend-owned configs are loaded into the backend `RadioWebSocketState`. |
-| Voice keyer | `radio-io/src/voice_keyer.rs` and `voice_messages.rs` | It already loads fixed files into `Arc<[u8]>`, plays on worker threads, selects output devices, validates safe relative WAV paths, and prevents directory escapes. Template-based files currently fall back to disk at playback; that needs an in-memory relative-path cache for the Radio Client requirement. |
-| Shared paths | `paths/src/lib.rs` | Reuse `config_dir()`, `data_dir()`, and `app_root()`. Add a Radio Client log-file helper if useful rather than duplicating OS rules. |
-| Desktop implementation | `launcher/src/main.rs` | Match its Iced `0.13` setup, icon, theme, async `Task` pattern, settings persistence style, graceful shutdown, and process-status presentation where applicable. |
-| Selection screen | `src/screens/OpenLogScreen.jsx` | Add explicit origin and lease state to option labels/details; disable remote editing and offline opening. |
-| Distribution | workspace `Cargo.toml`, `dist-workspace.toml`, `Makefile`, WiX files, Linux packaging script, and release workflows | Add the new binary to normal builds and platform packages rather than requiring a source-only install. |
+| Area                       | Existing code                                                                                                       | Design implication                                                                                                                                                                                                                                                                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Radio configuration UI     | `src/screens/CreateRadioScreen.jsx`                                                                                 | This is the field and validation baseline for the Iced Configure screen. It already covers driver, transport, digital mappings, WSJT-X, tuning increments, RIT, sound devices, CW keyer, and message text.                                                                                                     |
+| Radio WebSocket            | `radio-io/src/websocket.rs`                                                                                         | Reuse the handler and protocol. It already validates frequency/mode/RIT/WPM/message commands and manages lazy `RadioManager` acquisition. Extend it with logger registration and WSJT-X events.                                                                                                                |
+| Radio runtime              | `radio-io/src/radio_manager.rs` and its submodules                                                                  | CAT connection/reconnect, CW tasks, voice worker threads, RIT, and command dispatch remain shared by backend and Radio Client.                                                                                                                                                                                 |
+| Protocol messages          | `radio-io/src/radio.rs`                                                                                             | Add WSJT-X target control, target-state, event, acknowledgment, and error variants here so both radio hosts serialize the same protocol.                                                                                                                                                                       |
+| WSJT-X listener            | `radio-io/src/wsjtx.rs`                                                                                             | It already opens UDP unicast/multicast listeners, gates them on DATA mode and an active target, and emits Logged ADIF/errors. It should become owned by the radio WebSocket host rather than by the backend logger WebSocket.                                                                                  |
+| Current WSJT-X persistence | `backend/src/wsjtx.rs`                                                                                              | Its direct subscription to `radio-io` goes away. The frontend converts radio-WebSocket Logged ADIF to an ordinary QSO, so normal backend contact validation, persistence, scoring, and events remain authoritative.                                                                                            |
+| Browser radio connection   | `src/screens/loggerScreen/useRadioSocket.js`                                                                        | It already handles reconnect, idle ping/pong, status/state, and radio commands. It must treat `radio_ws_url` as authoritative, add logger identity, receive WSJT-X messages, and expose target state/control.                                                                                                  |
+| Browser contact outbox     | `src/screens/loggerScreen/useContactsOutbox.js` and `loggerScreenHelpers.js`                                        | Feed converted WSJT-X contacts into this existing local-storage-first, retrying path. Do not create a parallel raw-event outbox.                                                                                                                                                                               |
+| Backend logger WebSocket   | `backend/src/main.rs::handle_socket`                                                                                | It currently acquires a radio solely to drive backend WSJT-X. That ownership must be removed. It remains responsible for log events, scoring, band map, DX Cluster, and health checks.                                                                                                                         |
+| Backend radio persistence  | `backend/src/db/radios.rs`, `models.rs`, and `schema.rs`                                                            | Add ownership/registration metadata while preserving bound, static SQL. Only backend-owned configs are loaded into the backend `RadioWebSocketState`.                                                                                                                                                          |
+| Voice keyer                | `radio-io/src/voice_keyer.rs` and `voice_messages.rs`                                                               | It already loads fixed files into `Arc<[u8]>`, plays on worker threads, selects output devices, validates safe relative WAV paths, and prevents directory escapes. Template-based files currently fall back to disk at playback; that needs an in-memory relative-path cache for the Radio Client requirement. |
+| Shared paths               | `paths/src/lib.rs`                                                                                                  | Reuse `config_dir()`, `data_dir()`, and `app_root()`. Add a Radio Client log-file helper if useful rather than duplicating OS rules.                                                                                                                                                                           |
+| Desktop implementation     | `launcher/src/main.rs`                                                                                              | Match its Iced `0.13` setup, icon, theme, async `Task` pattern, settings persistence style, graceful shutdown, and process-status presentation where applicable.                                                                                                                                               |
+| Selection screen           | `src/screens/OpenLogScreen.jsx`                                                                                     | Add explicit origin and lease state to option labels/details; disable remote editing and offline opening.                                                                                                                                                                                                      |
+| Distribution               | workspace `Cargo.toml`, `dist-workspace.toml`, `Makefile`, WiX files, Linux packaging script, and release workflows | Add the new binary to normal builds and platform packages rather than requiring a source-only install.                                                                                                                                                                                                         |
 
 Two current behaviors require deliberate changes:
 
@@ -450,20 +450,21 @@ Add radio-to-browser messages:
 }
 ```
 
-Optionally acknowledge durable browser receipt:
+After accepting the event into the normal contact outbox, acknowledge receipt:
 
 ```json
 { "type": "wsjtx_event_received", "event_id": "..." }
 ```
 
-The acknowledgment is operational telemetry, not a deletion trigger for a Radio Client queue: the first release does not persist WSJT-X messages in the Radio Client. The durable handoff point is the browser's local storage.
+The acknowledgment is operational telemetry, not a deletion trigger for a Radio Client queue: the first release does not persist WSJT-X messages in the Radio Client. The contact outbox remains responsible for browser-local persistence.
 
 ### Target arbitration
 
 Preserve current behavior from `radio-io/src/wsjtx.rs`:
 
-- The first logger connection for a radio becomes the WSJT-X target.
-- Later logger windows do not steal it automatically.
+- Logger connections register as candidates but start untargeted.
+- A logger becomes the WSJT-X target only when its DATA-mode WSJT-X checkbox is enabled.
+- Later logger windows do not steal the selected target automatically.
 - A logger can explicitly claim or clear the target.
 - Only one target exists per radio.
 - Closing the selected logger clears the target; it does not silently reassign another logger.
@@ -474,57 +475,20 @@ Move the `WsjtXManager` ownership into the radio WebSocket host/state so both ex
 
 `WsjtXEvent::LoggedAdif` should identify the target logger/log and carry a newly generated stable event UUID. Route it only to the target radio socket; do not broadcast a QSO to every browser connected to the radio.
 
-## Durable WSJT-X ingestion through the browser
+## WSJT-X ingestion through the normal QSO path
 
-### Browser outbox
+On `wsjtx_logged_adif`, the selected logger verifies the log ID and a 64 KiB input limit, parses exactly one complete QSO record, and creates an ordinary pending QSO. It uses the radio-host event UUID as `meta.clientId`, sets the current session/log metadata, `source: "wsjtx"`, and `force: true`, then inserts the QSO into the existing contact state. The source marker prevents generic local-contact normalization from changing preserved ADIF strings after a page reload. The existing contact outbox provides local persistence, retry, and `POST /api/logs/{log_id}/contacts`; no WSJT-X-specific endpoint or raw-event outbox exists.
 
-Add `useWsjtXOutbox` beside `useContactsOutbox` rather than mixing raw protocol records into the visible contacts array before the backend has parsed them.
+Every QSO-record ADIF field is copied into `qso.adif` with an uppercase field name and its parsed string value. The sole conversion is `QSO_DATE` plus `TIME_ON` into numeric `QSO_DATE_TIME_ON`; those two source fields are removed. `QSO_DATE_OFF`, `TIME_OFF`, `FREQ`, `CONTEST_ID`, `OPERATOR`, `SUBMODE`, comments, propagation fields, application fields, underscore-prefixed fields, and unknown future fields remain unchanged. The current operator and Cabrillo transmitter ID are added only when their corresponding incoming fields are absent.
 
-On `wsjtx_logged_adif`:
-
-1. Verify that the message log ID is the logger's current log ID.
-2. Validate basic size/type limits before storage.
-3. Persist `{eventId, radioId, logId, text, receivedAt}` under a per-log local-storage key before starting the REST request.
-4. Acknowledge receipt on the radio socket if acknowledgment is implemented.
-5. Process pending events sequentially through `POST /api/logs/{log_id}/wsjtx-events`.
-6. Remove an event only after a successful or already-processed response.
-7. Retry temporary network/server failures with capped backoff. Leave validation failures visible as failed events with an actionable notification instead of retrying forever.
-8. On page reload, resume persisted events before or alongside new arrivals.
-
-Use the same degraded-local-storage notification pattern as the contact outbox. Put explicit per-event and total storage limits around untrusted UDP text; one ADIF record should be small. A reasonable initial limit is 64 KiB per event and 1,000 pending events per log, with a loud error if the cap is reached rather than silently dropping the oldest QSO.
+The logger acknowledges `wsjtx_event_received` after accepting the event locally and ignores a repeated event already present under the same local client ID. The accepted product tradeoff is that the ordinary contact POST is not made transactionally idempotent for the rare case where the backend commits but its HTTP response is lost.
 
 An open logger window remains required. With no target, `radio-io` does not run the listener. This matches current targeting semantics and the chosen browser-proxy architecture.
-
-### Backend ingestion endpoint
-
-`POST /api/logs/{log_id}/wsjtx-events` accepts:
-
-```json
-{
-  "event_id": "radio-host-generated-uuid",
-  "radio_id": 17,
-  "adif": "<QSO_DATE:8>...<EOR>"
-}
-```
-
-Refactor the useful part of `backend/src/wsjtx.rs::WsjtXIngestor::ingest` into a request-callable service:
-
-- Verify the log exists.
-- Parse exactly one record with `adif::import_wsjtx_contact`.
-- Force the active log's contest ID as today.
-- Validate the resulting contact against contest rules and band data.
-- Upsert through `LogCache` so DXCC enrichment, scoring processors, statistics, band map, and Super Check Partial stay consistent.
-- Broadcast the committed `log_entry` and score update to all logger sessions.
-- Return the committed contact so the sending outbox can reconcile promptly.
-
-The endpoint must be idempotent because the browser may retry after the backend commits but before the response reaches it. Add a persisted source-event identifier and a unique `(LOG_ID, SOURCE, SOURCE_EVENT_ID)` constraint, or an equivalent static-SQL event table written transactionally with the QSO. A duplicate event returns the original committed contact and does not rescore or rebroadcast it as a new QSO.
-
-This endpoint keeps the mature Rust ADIF parser and validation in one place. The browser transports and queues raw Logged ADIF but does not need to duplicate contest-sensitive conversion logic in JavaScript.
 
 ### Error path
 
 - UDP/socket/protocol errors emitted by `radio-io` travel as `wsjtx_error` on the target radio socket and use the existing logger notification/error-reporting patterns.
-- Backend ADIF/validation/database errors are returned to the outbox. Permanent errors are marked failed and shown; transient failures remain pending.
+- Normal contact validation/database errors are returned to the existing outbox and handled by its existing failure/retry behavior.
 - Do not include Basic Auth credentials or full ADIF payloads in ordinary info logs. Debug logging should retain the repository's existing truncation rules.
 
 ## CW and voice keying
@@ -638,7 +602,7 @@ Retain current WebSocket validation limits for request IDs, text, fields, nestin
 - Redact credentials and Authorization headers from logs and errors.
 - Validate the registered URL as a `ws://127.0.0.1:<nonzero-port>/radiows` loopback URL before returning it to browsers. The backend does not connect to it.
 - Continue safe path/canonicalization checks for voice files.
-- Continue static SQL with bound parameters for registration, snapshot, lease-related persistence, and idempotency records.
+- Continue static SQL with bound parameters for registration, snapshot, and lease-related persistence.
 
 ## Packaging and repository integration
 
@@ -757,9 +721,9 @@ The feature is complete when:
 7. A logger connected to a client-side radio receives radio state and can issue all existing radio/CW/voice commands.
 8. Voice files used by normal and template messages are in memory before transmission.
 9. WSJT-X Logged ADIF for either radio origin travels radio-io → radio WebSocket → selected logger outbox → backend and produces a normal committed/scored QSO.
-10. A backend outage after browser receipt does not lose the WSJT-X QSO, and replay does not duplicate it.
+10. A backend outage after browser receipt leaves the WSJT-X QSO pending in the existing contact outbox for retry.
 11. Client heartbeat expiry changes the radio to offline without deleting it, and re-registration restores it.
-12. Basic Auth works for registration/heartbeat/ingestion without exposing credentials in logs.
+12. Basic Auth works for registration, heartbeat, and normal QSO submission without exposing credentials in logs.
 13. Linux/Windows/macOS release outputs include the Radio Client, and all automated tests/`make ci` pass before commit.
 
 ## Alternatives considered and future improvements
@@ -790,7 +754,7 @@ Origin validation, capability URLs, local TLS, and public-site-to-loopback restr
 
 ### General contact idempotency
 
-WSJT-X requires source-event idempotency. The same primitive could improve the existing manual contact outbox, which can also retry after a lost success response. Prefer a reusable ingestion/source ID in the data layer if it can be added without obscuring QSO semantics.
+The existing contact outbox can retry after a lost success response, which could duplicate either a manual or WSJT-X QSO. Product direction accepts this small surface area for now; do not add schema or endpoint complexity unless that decision changes.
 
 ### Automatic open-logger URL refresh
 
@@ -800,7 +764,7 @@ Because the Radio Client port changes on restart, an open logger should eventual
 
 - **Who owns radio settings?** The Radio Client; the backend copy is read-only.
 - **Where do client-side voice files live?** In the Radio Client data directory, not on the backend.
-- **How are WSJT-X contacts saved?** Through the selected logger window and backend REST ingestion.
+- **How are WSJT-X contacts saved?** The selected logger converts Logged ADIF into a normal pending QSO and uses the existing contact API.
 - **Does the existing server path stay different?** No; it is refactored to the same radio-WebSocket path.
 - **What persists when a client stops?** Stable identity, row, name, URL/snapshot history; online state expires.
 - **Can the backend edit the client radio?** No.
@@ -862,12 +826,12 @@ The tasks below are deliberately small enough for separate commits/reviews. Depe
 - Preserve local `begin_mutation` behavior.
 - Dependency: B1–B2.
 
-**B4. Idempotent WSJT-X REST ingestion**
+**B4. WSJT-X frontend QSO bridge**
 
-- Refactor current ingestor logic into a callable service.
-- Add persisted event idempotency.
-- Add endpoint, result/error types, scoring/event behavior, and retry tests.
-- Dependency: B1 for fresh-schema coordination; otherwise independent of B2.
+- Treat the radio URL as authoritative and move target state/control to the radio WebSocket.
+- Strictly convert one Logged ADIF record into a normal pending QSO while preserving all fields except the combined on-time pair.
+- Feed it into the existing contact outbox, acknowledge local receipt, report errors, and suppress repeated local event IDs.
+- Dependency: A3.
 
 **B5. Remove backend logger-WebSocket radio ownership**
 
@@ -910,11 +874,10 @@ The tasks below are deliberately small enough for separate commits/reviews. Depe
 - Preserve the returned URL/query, add logger/log identity, move WSJT-X target control/state from backend socket to radio socket, and keep reconnect/health behavior.
 - Dependency: A3.
 
-**D2. Durable WSJT-X outbox**
+**D2. WSJT-X browser regression coverage**
 
-- Persist raw events, acknowledge receipt, retry REST ingestion, classify permanent/transient errors, enforce limits, and resume on reload.
-- Integrate logger notifications and committed contact reconciliation.
-- Dependency: A3 and B4.
+- Verify ADIF field preservation, normal contact-outbox submission, target reconnect behavior, receipt acknowledgment, and actionable errors.
+- Dependency: B4.
 
 **D3. Client-side selection designation and controls**
 

@@ -116,7 +116,7 @@ export function normalizeContact(contact) {
   ) {
     meta.clientId = String(meta.id);
   }
-  if (adif.FREQ !== undefined) {
+  if (adif.FREQ !== undefined && meta.source !== 'wsjtx') {
     const frequency = Number.parseFloat(String(adif.FREQ));
     if (Number.isFinite(frequency)) {
       adif.FREQ = Math.round(

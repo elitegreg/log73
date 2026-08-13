@@ -50,6 +50,63 @@ export function parseFirstAdifRecord(text) {
   return { fields: {} };
 }
 
+// Strict parser used for live records. Unlike parseFirstAdifRecord, this
+// rejects malformed/truncated input and requires each QSO to end with EOR.
+export function parseAdifRecords(text) {
+  const source = String(text ?? '');
+  const bytes = new TextEncoder().encode(source);
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let index = 0;
+  let fields = {};
+  const records = [];
+
+  while (index < bytes.length) {
+    const tagStart = bytes.indexOf(60, index);
+    if (tagStart === -1) break;
+    const tagEnd = bytes.indexOf(62, tagStart + 1);
+    if (tagEnd === -1) throw new Error('unterminated ADIF tag');
+
+    let tag;
+    try {
+      tag = decoder.decode(bytes.slice(tagStart + 1, tagEnd)).trim();
+    } catch {
+      throw new Error('ADIF tag is not valid UTF-8');
+    }
+    const normalizedTag = tag.toUpperCase();
+    index = tagEnd + 1;
+
+    if (normalizedTag === 'EOH') {
+      fields = {};
+      continue;
+    }
+    if (normalizedTag === 'EOR') {
+      if (Object.keys(fields).length > 0) records.push(fields);
+      fields = {};
+      continue;
+    }
+
+    const parsedTag = parseFieldTag(tag);
+    if (!parsedTag) throw new Error(`invalid ADIF tag <${tag}>`);
+    if (index + parsedTag.length > bytes.length) {
+      throw new Error(`ADIF field ${parsedTag.name} is truncated`);
+    }
+
+    let value;
+    try {
+      value = decoder.decode(bytes.slice(index, index + parsedTag.length));
+    } catch {
+      throw new Error(`ADIF field ${parsedTag.name} is not valid UTF-8`);
+    }
+    index += parsedTag.length;
+    fields[parsedTag.name] = value;
+  }
+
+  if (Object.keys(fields).length > 0) {
+    throw new Error('ADIF QSO record is missing EOR');
+  }
+  return records;
+}
+
 export function adifFieldOptions(fields) {
   return Object.entries(fields ?? {})
     .map(([name, value]) => ({

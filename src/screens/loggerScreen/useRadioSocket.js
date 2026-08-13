@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { websocketUrl } from '../../lib/api.js';
 import { reportClientErrorLater } from '../../lib/errorReporting.js';
 import {
   BACKEND_WS_IDLE_PING_DELAY_MS,
@@ -8,19 +7,27 @@ import {
   BACKEND_WS_PING_TIMEOUT_MS,
   DEFAULT_RADIO_STATE,
 } from '../loggerScreenHelpers.js';
+import { radioSocketUrl } from './radioSocketController.js';
 
 const RADIO_WS_CONNECT_TIMEOUT_MS = 5000;
 
 export function useRadioSocket({
   numericRadioId,
+  numericLogId,
+  loggerId,
   radioWebsocketUrl,
   notifyOperationalError,
+  onWsjtXLoggedAdif,
 }) {
   const [radioState, setRadioState] = useState(DEFAULT_RADIO_STATE);
   const [radioSocketStatus, setRadioSocketStatus] = useState('disconnected');
   const [catStatus, setCatStatus] = useState('offline');
   const [messageSentEvent, setMessageSentEvent] = useState(null);
+  const [wsjtxTarget, setWsjtXTargetState] = useState(false);
   const radioSocketRef = useRef(null);
+  const wsjtxTargetIntentRef = useRef(false);
+  const onWsjtXLoggedAdifRef = useRef(onWsjtXLoggedAdif);
+  onWsjtXLoggedAdifRef.current = onWsjtXLoggedAdif;
 
   const sendRadioMessage = useCallback((message) => {
     const socket = radioSocketRef.current;
@@ -29,13 +36,29 @@ export function useRadioSocket({
     }
   }, []);
 
+  const setWsjtXTarget = useCallback((enabled) => {
+    const nextEnabled = Boolean(enabled);
+    wsjtxTargetIntentRef.current = nextEnabled;
+    setWsjtXTargetState(nextEnabled);
+    const socket = radioSocketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(
+        JSON.stringify({ type: 'set_wsjtx_target', enabled: nextEnabled }),
+      );
+    }
+  }, []);
+
   useEffect(() => {
     setRadioState(DEFAULT_RADIO_STATE);
     setMessageSentEvent(null);
+    setWsjtXTargetState(false);
     if (
       !radioWebsocketUrl ||
       !Number.isInteger(numericRadioId) ||
-      numericRadioId <= 0
+      numericRadioId <= 0 ||
+      !Number.isInteger(numericLogId) ||
+      numericLogId <= 0 ||
+      !loggerId
     ) {
       setRadioSocketStatus('disconnected');
       setCatStatus('offline');
@@ -163,8 +186,9 @@ export function useRadioSocket({
 
       let url;
       try {
-        url = websocketUrl(radioWebsocketUrl, {
-          radio_id: numericRadioId,
+        url = radioSocketUrl(radioWebsocketUrl, {
+          loggerId,
+          logId: numericLogId,
         });
       } catch (error) {
         setRadioSocketStatus('disconnected');
@@ -212,6 +236,11 @@ export function useRadioSocket({
         reconnectDelayMs = BACKEND_WS_INITIAL_RECONNECT_DELAY_MS;
         setRadioSocketStatus('connected');
         markSocketActivity();
+        if (wsjtxTargetIntentRef.current) {
+          socket.send(
+            JSON.stringify({ type: 'set_wsjtx_target', enabled: true }),
+          );
+        }
       });
 
       socket.addEventListener('message', (event) => {
@@ -232,8 +261,58 @@ export function useRadioSocket({
               requestId: message.request_id,
               sequence: Date.now(),
             });
+          } else if (message.type === 'wsjtx_target') {
+            const isThisLogger =
+              message.logger_id === loggerId &&
+              Number(message.log_id) === numericLogId;
+            setWsjtXTargetState(isThisLogger);
+            if (message.logger_id) {
+              wsjtxTargetIntentRef.current = isThisLogger;
+            } else if (wsjtxTargetIntentRef.current) {
+              socket.send(
+                JSON.stringify({ type: 'set_wsjtx_target', enabled: true }),
+              );
+            }
+          } else if (message.type === 'wsjtx_logged_adif') {
+            if (Number(message.log_id) !== numericLogId) {
+              notifyOperationalError(
+                'wsjtxWrongLog',
+                'Ignored a WSJT-X contact for another log.',
+                null,
+                {
+                  expectedLogId: numericLogId,
+                  receivedLogId: message.log_id,
+                  radioId: numericRadioId,
+                },
+              );
+            } else {
+              const accepted = onWsjtXLoggedAdifRef.current?.(message);
+              if (accepted !== false) {
+                socket.send(
+                  JSON.stringify({
+                    type: 'wsjtx_event_received',
+                    event_id: message.event_id,
+                  }),
+                );
+              }
+            }
+          } else if (message.type === 'wsjtx_error') {
+            notifyOperationalError(
+              'wsjtx',
+              'WSJT-X integration error.',
+              message.message,
+              { logId: numericLogId, radioId: numericRadioId },
+            );
           }
         } catch (error) {
+          if (messageIsWsjtXLoggedAdif(event.data)) {
+            notifyOperationalError(
+              'wsjtxLoggedAdif',
+              'Unable to add the WSJT-X contact to the log.',
+              error,
+              { logId: numericLogId, radioId: numericRadioId },
+            );
+          }
           reportClientErrorLater({
             source: 'LoggerScreen.radioWebsocketMessage',
             message: 'Unable to process radio websocket message.',
@@ -251,6 +330,7 @@ export function useRadioSocket({
         clearHealthState();
         setRadioSocketStatus('disconnected');
         setCatStatus('offline');
+        setWsjtXTargetState(false);
         scheduleReconnect();
       });
 
@@ -297,7 +377,13 @@ export function useRadioSocket({
       socket?.close();
       setCatStatus('offline');
     };
-  }, [numericRadioId, notifyOperationalError, radioWebsocketUrl]);
+  }, [
+    loggerId,
+    numericLogId,
+    numericRadioId,
+    notifyOperationalError,
+    radioWebsocketUrl,
+  ]);
 
   return {
     radioState,
@@ -305,5 +391,15 @@ export function useRadioSocket({
     catStatus,
     messageSentEvent,
     sendRadioMessage,
+    wsjtxTarget,
+    setWsjtXTarget,
   };
+}
+
+function messageIsWsjtXLoggedAdif(raw) {
+  try {
+    return JSON.parse(raw)?.type === 'wsjtx_logged_adif';
+  } catch {
+    return false;
+  }
 }

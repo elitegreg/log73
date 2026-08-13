@@ -16,4 +16,12 @@ test('date helpers parse and format UTC timestamps', () => {
   assert.equal(formatUtcDateTime(1700000123), '2023-11-14 22:15:23');
   assert.equal(parseUtcDateTime('2023-11-14 22:15:23'), 1700000123);
   assert.equal(parseUtcDateTime('2023-02-29 22:15:23'), null);
+  assert.equal(
+    epochFromLegacyQsoDateTime({ QSO_DATE: '20231114', TIME_ON: '2215' }),
+    1700000100,
+  );
+  assert.equal(
+    epochFromLegacyQsoDateTime({ QSO_DATE: '20230229', TIME_ON: '221523' }),
+    null,
+  );
 });

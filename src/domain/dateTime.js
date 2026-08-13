@@ -1,21 +1,15 @@
 export function epochFromLegacyQsoDateTime(entry) {
   const adif = entry?.adif ?? entry ?? {};
-  const date = String(adif.QSO_DATE ?? '');
-  const time = String(adif.TIME_ON ?? '');
+  const date = String(adif.QSO_DATE ?? '').trim();
+  const time = String(adif.TIME_ON ?? '').trim();
 
-  if (!/^\d{8}$/.test(date) || !/^\d{6}$/.test(time)) {
+  if (!/^\d{8}$/.test(date) || !/^(?:\d{4}|\d{6})$/.test(time)) {
     return null;
   }
-
-  return Math.floor(
-    Date.UTC(
-      Number.parseInt(date.slice(0, 4), 10),
-      Number.parseInt(date.slice(4, 6), 10) - 1,
-      Number.parseInt(date.slice(6, 8), 10),
-      Number.parseInt(time.slice(0, 2), 10),
-      Number.parseInt(time.slice(2, 4), 10),
-      Number.parseInt(time.slice(4, 6), 10),
-    ) / 1000,
+  const normalizedTime = time.padEnd(6, '0');
+  return parseUtcDateTime(
+    `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)} ` +
+      `${normalizedTime.slice(0, 2)}:${normalizedTime.slice(2, 4)}:${normalizedTime.slice(4, 6)}`,
   );
 }
 

@@ -85,7 +85,7 @@ function RadioControls({
             type="checkbox"
             checked={Boolean(wsjtxTarget)}
             onChange={(event) => onSetWsjtXTarget?.(event.target.checked)}
-            disabled={backendSocketStatus !== 'connected'}
+            disabled={radioSocketStatus !== 'connected'}
           />
         </label>
       ) : (

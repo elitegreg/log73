@@ -40,29 +40,15 @@ export function useBackendSocket({
   const [backendSocketStatus, setBackendSocketStatus] =
     useState('disconnected');
   const [scoreSummary, setScoreSummary] = useState(EMPTY_SCORE_SUMMARY);
-  const [wsjtxTarget, setWsjtXTargetState] = useState(false);
   const [isSocketDebugPanelEnabled] = useState(readSocketDebugPanelEnabled);
   const [socketDebugEntries, setSocketDebugEntries] = useState([]);
   const backendSocketRef = useRef(null);
-  const wsjtxTargetIntentRef = useRef(false);
   const socketDebugSequenceRef = useRef(0);
 
   const sendBackendMessage = useCallback((message) => {
     const socket = backendSocketRef.current;
     if (socket?.readyState === WebSocket.OPEN)
       socket.send(JSON.stringify(message));
-  }, []);
-
-  const setWsjtXTarget = useCallback((enabled) => {
-    const nextEnabled = Boolean(enabled);
-    wsjtxTargetIntentRef.current = nextEnabled;
-    setWsjtXTargetState(nextEnabled);
-    const socket = backendSocketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(
-        JSON.stringify({ type: 'set_wsjt_x_target', enabled: nextEnabled }),
-      );
-    }
   }, []);
 
   useEffect(() => {
@@ -515,23 +501,6 @@ export function useBackendSocket({
               bonusPoints: Number(message.bonus_points ?? 0),
               score: Number(message.total_score ?? 0),
             });
-          } else if (message.type === 'wsjt_x_error') {
-            notifyOperationalError(
-              'wsjtx',
-              'WSJT-X integration error.',
-              message.message,
-              { logId: numericLogId, radioId: numericRadioId },
-            );
-          } else if (message.type === 'wsjt_x_target') {
-            const isThisLogger = message.logger_id === loggerId;
-            setWsjtXTargetState(isThisLogger);
-            if (message.logger_id) {
-              wsjtxTargetIntentRef.current = isThisLogger;
-            } else if (wsjtxTargetIntentRef.current) {
-              socket.send(
-                JSON.stringify({ type: 'set_wsjt_x_target', enabled: true }),
-              );
-            }
           }
           onSocketMessageRef.current?.(message);
         } catch (error) {
@@ -621,7 +590,5 @@ export function useBackendSocket({
     isSocketDebugPanelEnabled,
     socketDebugEntries,
     sendBackendMessage,
-    wsjtxTarget,
-    setWsjtXTarget,
   };
 }

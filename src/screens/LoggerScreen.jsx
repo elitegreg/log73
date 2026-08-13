@@ -11,6 +11,7 @@ import {
   bandForFrequency,
 } from '../logger/mainWindowHelpers';
 import { cabrilloTransmitterPrompt } from '../domain/cabrilloTransmitter';
+import { wsjtxContactFromMessage } from '../domain/wsjtx';
 import TransmitterIdPrompt from '../logger/TransmitterIdPrompt';
 import {
   contactAdif,
@@ -28,6 +29,7 @@ import { useLoggerImage } from './loggerScreen/useLoggerImage';
 import { useOperationalErrorReporter } from './loggerScreen/useOperationalErrorReporter';
 import { useRadioSocket } from './loggerScreen/useRadioSocket';
 import { useSerialAllocator } from './loggerScreen/useSerialAllocator';
+import { appendPendingContact } from './loggerScreen/contactsOutboxState';
 import { createSessionId, getSessionId } from './loggerScreenHelpers';
 
 function LoggerScreen() {
@@ -66,6 +68,7 @@ function LoggerScreen() {
   const remoteContactHandlerRef = useRef(null);
   const remoteContactDeletedHandlerRef = useRef(null);
   const refreshContactsHandlerRef = useRef(null);
+  const wsjtxLoggedAdifHandlerRef = useRef(null);
 
   const {
     backendSocketStatus,
@@ -73,8 +76,6 @@ function LoggerScreen() {
     isSocketDebugPanelEnabled,
     socketDebugEntries,
     sendBackendMessage,
-    wsjtxTarget,
-    setWsjtXTarget,
   } = useBackendSocket({
     sessionId,
     loggerId,
@@ -94,10 +95,16 @@ function LoggerScreen() {
     catStatus,
     messageSentEvent,
     sendRadioMessage,
+    wsjtxTarget,
+    setWsjtXTarget,
   } = useRadioSocket({
     numericRadioId,
+    numericLogId,
+    loggerId,
     radioWebsocketUrl: radio?.radio_ws_url,
     notifyOperationalError,
+    onWsjtXLoggedAdif: (message) =>
+      wsjtxLoggedAdifHandlerRef.current?.(message),
   });
 
   const {
@@ -174,6 +181,21 @@ function LoggerScreen() {
       : null;
   const isTransmitterSelectionPending =
     transmitterPromptKey !== null && cabrilloTransmitterId === null;
+
+  wsjtxLoggedAdifHandlerRef.current = (message) => {
+    const contact = wsjtxContactFromMessage({
+      eventId: message.event_id,
+      text: message.text,
+      logId: numericLogId,
+      sessionId,
+      operatorCallsign,
+      cabrilloTransmitterId,
+    });
+    setAllContacts((currentContacts) =>
+      appendPendingContact(currentContacts, contact),
+    );
+    return true;
+  };
 
   const handleBackendSocketMessage = useCallback(
     (message) => {
