@@ -90,6 +90,10 @@
   background-color: #00a000;
 }
 
+.backend-socket-light.degraded {
+  background-color: #d09000;
+}
+
 .backend-socket-light.disconnected {
   background-color: #d00000;
 }

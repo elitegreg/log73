@@ -56,6 +56,11 @@ export const PHONE_CALLSIGN_CLEAR_THRESHOLD_HZ = 200;
 
 const PHONE_MODES = new Set(['SSB', 'FM', 'AM']);
 
+export function catIndicatorState(radioSocketStatus, catStatus) {
+  if (radioSocketStatus !== 'connected') return 'disconnected';
+  return catStatus === 'online' ? 'connected' : 'degraded';
+}
+
 export function exchangeDefaults(
   settings,
   radioMode,

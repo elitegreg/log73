@@ -368,7 +368,6 @@ function LoggerScreen() {
               backendSocketStatus={backendSocketStatus}
               radioSocketStatus={radioSocketStatus}
               catStatus={catStatus}
-              radioControlLocation={radio?.control_location}
               messageLabels={messageLabels}
               messageSentEvent={messageSentEvent}
               wsjtxTarget={wsjtxTarget}

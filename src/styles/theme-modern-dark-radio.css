@@ -123,6 +123,9 @@ body.theme-modern-dark-radio .log-context-menu button:disabled {
 body.theme-modern-dark-radio .backend-socket-light.connected {
   background-color: #22c55e;
 }
+body.theme-modern-dark-radio .backend-socket-light.degraded {
+  background-color: #eab308;
+}
 body.theme-modern-dark-radio .backend-socket-light.disconnected {
   background-color: #ef4444;
 }

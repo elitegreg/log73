@@ -126,6 +126,9 @@ body.theme-clean-light-desktop .log-context-menu button:disabled {
 body.theme-clean-light-desktop .backend-socket-light.connected {
   background-color: #16a34a;
 }
+body.theme-clean-light-desktop .backend-socket-light.degraded {
+  background-color: #ca8a04;
+}
 body.theme-clean-light-desktop .backend-socket-light.disconnected {
   background-color: #dc2626;
 }

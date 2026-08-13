@@ -1,6 +1,11 @@
 import React from 'react';
 import { wsjtxTargetControlVisible } from '../../domain/wsjtx';
-import { MODE_OPTIONS, isSelectableMode, modeIsCw } from '../mainWindowHelpers';
+import {
+  MODE_OPTIONS,
+  catIndicatorState,
+  isSelectableMode,
+  modeIsCw,
+} from '../mainWindowHelpers';
 
 function RadioControls({
   operatingMode,
@@ -26,7 +31,6 @@ function RadioControls({
   backendSocketStatus,
   radioSocketStatus,
   catStatus,
-  radioControlLocation,
   manualEntryDisabled = false,
 }) {
   const modeSelectable = isSelectableMode(radioMode);
@@ -34,6 +38,13 @@ function RadioControls({
     ? MODE_OPTIONS
     : [...MODE_OPTIONS, radioMode].filter(Boolean);
   const showWsjtXTarget = wsjtxTargetControlVisible(wsjtxEnabled, radioMode);
+  const catIndicator = catIndicatorState(radioSocketStatus, catStatus);
+  const catTitle =
+    catIndicator === 'connected'
+      ? 'CAT online'
+      : catIndicator === 'degraded'
+        ? 'CAT offline; radio control WebSocket is connected'
+        : `CAT radio control WebSocket ${radioSocketStatus}`;
 
   return (
     <div className="radio-controls">
@@ -123,22 +134,9 @@ function RadioControls({
         />
       </label>
       <div className="backend-status-group">
-        <div className="backend-socket-status" title="Radio control location">
-          {radioControlLocation === 'client' ? 'CLIENT-SIDE' : 'SERVER-SIDE'}
-        </div>
-        <div
-          className="backend-socket-status"
-          title={`Radio I/O ${radioSocketStatus}`}
-        >
+        <div className="backend-socket-status" title={catTitle}>
           <span
-            className={`backend-socket-light ${radioSocketStatus === 'connected' ? 'connected' : 'disconnected'}`}
-            aria-hidden="true"
-          />
-          Radio I/O
-        </div>
-        <div className="backend-socket-status" title={`CAT ${catStatus}`}>
-          <span
-            className={`backend-socket-light ${catStatus === 'online' ? 'connected' : 'disconnected'}`}
+            className={`backend-socket-light ${catIndicator}`}
             aria-hidden="true"
           />
           CAT

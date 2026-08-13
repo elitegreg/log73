@@ -120,6 +120,9 @@ body.theme-high-contrast .backend-socket-light {
 body.theme-high-contrast .backend-socket-light.connected {
   background-color: #00ff00;
 }
+body.theme-high-contrast .backend-socket-light.degraded {
+  background-color: #ffff00;
+}
 body.theme-high-contrast .backend-socket-light.disconnected {
   background-color: #ff0000;
 }
