@@ -1,9 +1,9 @@
-use crate::{AppPaths, settings};
+use crate::{AppPaths, backend_client, settings};
 use axum::{Extension, Router, routing::get};
 use radio_io::voice_keyer::VoiceKeyer;
 use radio_io::{Band, BandCatalog, RadioConfig, RadioManager, SingleRadioWebSocketState};
 use serde::Deserialize;
-use std::time::Duration;
+use std::{sync::mpsc, time::Duration};
 use tokio::{sync::oneshot, task::JoinHandle, time::timeout};
 
 const LOCAL_RADIO_ID: i64 = 1;
@@ -16,6 +16,8 @@ pub struct RunningHost {
     shutdown: Option<oneshot::Sender<()>>,
     server: JoinHandle<()>,
     radio: SingleRadioWebSocketState,
+    registration: backend_client::RegistrationTask,
+    backend_events: mpsc::Receiver<backend_client::BackendEvent>,
 }
 
 pub struct StartResult {
@@ -47,7 +49,7 @@ pub async fn start(paths: AppPaths) -> Result<StartResult, String> {
     let radio_manager = RadioManager::new(voice_keyer, bands);
     let radio = SingleRadioWebSocketState::new(
         radio_manager,
-        RadioConfig::new(LOCAL_RADIO_ID, client_settings.radio),
+        RadioConfig::new(LOCAL_RADIO_ID, client_settings.radio.clone()),
     );
     let app = Router::new()
         .route("/radiows", get(radio_io::single_radio_ws_handler))
@@ -67,6 +69,9 @@ pub async fn start(paths: AppPaths) -> Result<StartResult, String> {
             .await;
     });
     let websocket_url = format!("ws://{address}/radiows");
+    let (backend_events_tx, backend_events) = mpsc::channel();
+    let registration =
+        backend_client::start(&client_settings, websocket_url.clone(), backend_events_tx);
     events.push(format!(
         "Local radio WebSocket listening at {websocket_url}."
     ));
@@ -76,6 +81,8 @@ pub async fn start(paths: AppPaths) -> Result<StartResult, String> {
             shutdown: Some(shutdown),
             server,
             radio,
+            registration,
+            backend_events,
         },
         events,
     })
@@ -86,6 +93,8 @@ pub async fn stop(mut host: RunningHost) -> Vec<String> {
     if let Some(shutdown) = host.shutdown.take() {
         let _ = shutdown.send(());
     }
+    host.registration.stop().await;
+    events.push("Backend registration stopped.".to_string());
     match timeout(STOP_TIMEOUT, &mut host.server).await {
         Ok(_) => events.push("Local radio WebSocket stopped accepting connections.".to_string()),
         Err(_) => {
@@ -100,6 +109,12 @@ pub async fn stop(mut host: RunningHost) -> Vec<String> {
     host.radio.shutdown().await;
     events.push("Local radio runtime and keying resources stopped.".to_string());
     events
+}
+
+impl RunningHost {
+    pub fn drain_backend_events(&self) -> Vec<backend_client::BackendEvent> {
+        self.backend_events.try_iter().collect()
+    }
 }
 
 fn configured_hardware_warnings(

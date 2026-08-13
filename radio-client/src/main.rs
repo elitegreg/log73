@@ -1,3 +1,4 @@
+mod backend_client;
 mod configure;
 mod lifecycle;
 mod settings;
@@ -180,6 +181,7 @@ struct RadioClient {
     configure: Option<configure::ConfigureScreen>,
     lifecycle: LifecycleState,
     host: Option<lifecycle::RunningHost>,
+    backend_status: Option<backend_client::BackendStatus>,
     events: VecDeque<EventEntry>,
     pending_close_window: Option<window::Id>,
 }
@@ -194,6 +196,7 @@ impl RadioClient {
             configure: None,
             lifecycle,
             host: None,
+            backend_status: None,
             events: VecDeque::from([EventEntry::new("Radio Client is ready.")]),
             pending_close_window: None,
         }
@@ -207,6 +210,7 @@ enum Message {
     StopPressed,
     StartFinished(std::sync::Arc<std::sync::Mutex<Option<Result<lifecycle::StartResult, String>>>>),
     StopFinished(Vec<String>),
+    BackendTick,
     WindowCloseRequested(window::Id),
 }
 
@@ -219,6 +223,7 @@ impl Clone for Message {
             Self::StopPressed => Self::StopPressed,
             Self::StartFinished(result) => Self::StartFinished(result.clone()),
             Self::StopFinished(events) => Self::StopFinished(events.clone()),
+            Self::BackendTick => Self::BackendTick,
             Self::WindowCloseRequested(window_id) => Self::WindowCloseRequested(*window_id),
         }
     }
@@ -235,6 +240,7 @@ impl std::fmt::Debug for Message {
             Self::StopFinished(events) => {
                 formatter.debug_tuple("StopFinished").field(events).finish()
             }
+            Self::BackendTick => formatter.write_str("BackendTick"),
             Self::WindowCloseRequested(window_id) => formatter
                 .debug_tuple("WindowCloseRequested")
                 .field(window_id)
@@ -292,7 +298,10 @@ impl EventEntry {
 }
 
 fn subscription(_state: &RadioClient) -> Subscription<Message> {
-    window::close_requests().map(Message::WindowCloseRequested)
+    Subscription::batch([
+        window::close_requests().map(Message::WindowCloseRequested),
+        iced::time::every(std::time::Duration::from_millis(250)).map(|_| Message::BackendTick),
+    ])
 }
 
 fn update(state: &mut RadioClient, message: Message) -> Task<Message> {
@@ -368,6 +377,7 @@ fn update(state: &mut RadioClient, message: Message) -> Task<Message> {
                         state.push_event(event);
                     }
                     state.host = Some(result.host);
+                    state.backend_status = None;
                     if state.lifecycle == LifecycleState::Stopping
                         || state.pending_close_window.is_some()
                     {
@@ -390,9 +400,21 @@ fn update(state: &mut RadioClient, message: Message) -> Task<Message> {
                 state.push_event(event);
             }
             state.host = None;
+            state.backend_status = None;
             state.lifecycle = LifecycleState::Stopped;
             state.push_event("Local radio host stopped.");
             close_if_requested(state)
+        }
+        Message::BackendTick => {
+            if let Some(host) = &state.host {
+                for event in host.drain_backend_events() {
+                    if state.backend_status.as_ref() != Some(&event.status) {
+                        state.push_event(event.status.label());
+                    }
+                    state.backend_status = Some(event.status);
+                }
+            }
+            Task::none()
         }
         Message::WindowCloseRequested(window_id) => {
             state.pending_close_window = Some(window_id);
@@ -446,7 +468,11 @@ fn view(state: &RadioClient) -> Element<'_, Message> {
         details.push(format!("Local WebSocket: {}", host.websocket_url));
     }
     if state.lifecycle == LifecycleState::RunningLocal {
-        details.push("Backend registration begins in C4.".to_string());
+        if let Some(status) = &state.backend_status {
+            details.push(status.label());
+        } else {
+            details.push("Backend: registering…".to_string());
+        }
     }
     let event_lines = state
         .events
