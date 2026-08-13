@@ -381,7 +381,7 @@ fn field_string(fields: &Map<String, Value>, key: &str) -> String {
     }
 }
 
-fn validate_voice_file_path(path: &str) -> Result<(), String> {
+pub fn validate_voice_file_path(path: &str) -> Result<(), String> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
         return Err("voice message file path is required".to_string());

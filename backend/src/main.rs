@@ -431,6 +431,9 @@ async fn main() {
     let dxcluster = DxClusterManager::new();
     let voicekeyer_dir = paths.data_dir.join("voicekeyer");
     let voice_keyer = VoiceKeyer::with_voicekeyer_dir(voicekeyer_dir);
+    if let Err(error) = voice_keyer.load_voice_assets() {
+        warn!(%error, "failed to load voice asset cache at startup");
+    }
     let initial_bandmap_max_age = match db.dxcluster_config().await {
         Ok(config) => {
             let max_age = Duration::from_secs(u64::from(config.max_age_min) * 60);

@@ -12,6 +12,8 @@ use std::thread;
 use std::time::Duration;
 
 const DEFAULT_OUTPUT_DEVICE_KEY: &str = "__default_output__";
+const MAX_VOICE_ASSET_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_TOTAL_VOICE_ASSET_BYTES: u64 = 100 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AudioDeviceKind {
@@ -79,6 +81,7 @@ pub struct RegisteredVoiceFile {
 pub struct VoiceKeyer {
     audio: Arc<dyn AudioBackend>,
     files: Arc<RwLock<HashMap<String, RegisteredVoiceFileData>>>,
+    assets: Arc<RwLock<HashMap<String, Arc<[u8]>>>>,
     voicekeyer_dir: Arc<PathBuf>,
 }
 
@@ -354,6 +357,7 @@ impl VoiceKeyer {
         Self {
             audio,
             files: Arc::new(RwLock::new(HashMap::new())),
+            assets: Arc::new(RwLock::new(HashMap::new())),
             voicekeyer_dir: Arc::new(voicekeyer_dir),
         }
     }
@@ -379,21 +383,6 @@ impl VoiceKeyer {
     ) -> Result<(), String> {
         let key = normalize_voice_key(key)?;
         self.register_registry_bytes(file_name, key, bytes)
-    }
-
-    fn register_registry_file(
-        &self,
-        file_name: impl AsRef<Path>,
-        registry_key: impl Into<String>,
-    ) -> Result<(), String> {
-        let file_name_ref = file_name.as_ref();
-        let bytes = fs::read(file_name_ref).map_err(|error| {
-            format!(
-                "failed to read voice keyer file '{}' : {error}",
-                file_name_ref.display()
-            )
-        })?;
-        self.register_registry_bytes(file_name_ref.to_string_lossy(), registry_key, bytes)
     }
 
     fn register_registry_bytes(
@@ -453,8 +442,29 @@ impl VoiceKeyer {
         voice_messages::validate_with_voicekeyer_dir(config, &self.voicekeyer_dir)
     }
 
+    /// Recursively loads all safe voice assets into memory without following symlinks.
+    /// A failed reload keeps the previously loaded cache intact.
+    pub fn load_voice_assets(&self) -> Result<(), String> {
+        let root = self.voicekeyer_dir.canonicalize().map_err(|error| {
+            format!(
+                "failed to resolve voicekeyer/ directory '{}': {error}",
+                self.voicekeyer_dir.display()
+            )
+        })?;
+        let mut assets = HashMap::new();
+        let mut total_bytes = 0_u64;
+        index_voice_assets(&root, &root, &mut assets, &mut total_bytes)?;
+        let mut cached_assets = self
+            .assets
+            .write()
+            .map_err(|_| "voice asset cache unavailable".to_string())?;
+        *cached_assets = assets;
+        Ok(())
+    }
+
     pub fn sync_radio_messages(&self, config: &RadioConfig) -> Result<(), String> {
         self.validate_voice_messages(&config.voice_messages)?;
+        self.load_voice_assets()?;
         self.clear_radio_messages(config.id)?;
 
         let mut errors = Vec::new();
@@ -466,9 +476,7 @@ impl VoiceKeyer {
                 continue;
             }
             let registry_key = voice_message_registry_key(config.id, &entry.mode, &entry.key)?;
-            let path =
-                voice_messages::existing_voicekeyer_file_path(&self.voicekeyer_dir, file_path)?;
-            if let Err(error) = self.register_registry_file(path, registry_key) {
+            if let Err(error) = self.register_registry_asset(file_path, registry_key) {
                 errors.push(format!("{} {}: {error}", entry.mode, entry.key));
             }
         }
@@ -478,6 +486,33 @@ impl VoiceKeyer {
         } else {
             Err(errors.join("; "))
         }
+    }
+
+    fn register_registry_asset(
+        &self,
+        relative_path: &str,
+        registry_key: impl Into<String>,
+    ) -> Result<(), String> {
+        let relative_path = normalized_voice_asset_path(relative_path)?;
+        let bytes = self
+            .assets
+            .read()
+            .map_err(|_| "voice asset cache unavailable".to_string())?
+            .get(&relative_path)
+            .cloned()
+            .ok_or_else(|| format!("voice asset is not cached: {relative_path}"))?;
+        let mut files = self
+            .files
+            .write()
+            .map_err(|_| "voice keyer registry unavailable".to_string())?;
+        files.insert(
+            registry_key.into(),
+            RegisteredVoiceFileData {
+                file_name: relative_path,
+                bytes,
+            },
+        );
+        Ok(())
     }
 
     pub fn clear_radio_messages(&self, radio_id: i64) -> Result<(), String> {
@@ -552,19 +587,16 @@ impl VoiceKeyer {
         relative_path: &str,
         output_device_id: Option<&str>,
     ) -> Result<VoicePlayback, String> {
-        let path =
-            voice_messages::existing_voicekeyer_file_path(&self.voicekeyer_dir, relative_path)?;
-        let bytes = fs::read(&path).map_err(|error| {
-            format!(
-                "failed to read voice keyer file relative_path='{}' absolute_path='{}': {error}",
-                relative_path.trim(),
-                path.display()
-            )
-        })?;
-        self.audio.play_output(
-            normalized_optional_id(output_device_id),
-            Arc::<[u8]>::from(bytes),
-        )
+        let relative_path = normalized_voice_asset_path(relative_path)?;
+        let bytes = self
+            .assets
+            .read()
+            .map_err(|_| "voice asset cache unavailable".to_string())?
+            .get(&relative_path)
+            .cloned()
+            .ok_or_else(|| format!("voice asset is not cached: {relative_path}"))?;
+        self.audio
+            .play_output(normalized_optional_id(output_device_id), bytes)
     }
 
     pub fn input_devices(&self) -> Result<Vec<AudioDeviceInfo>, String> {
@@ -602,6 +634,86 @@ impl VoiceKeyer {
         };
         exists.then(|| id.to_string())
     }
+}
+
+fn index_voice_assets(
+    root: &Path,
+    directory: &Path,
+    assets: &mut HashMap<String, Arc<[u8]>>,
+    total_bytes: &mut u64,
+) -> Result<(), String> {
+    for entry in fs::read_dir(directory).map_err(|error| {
+        format!(
+            "failed to read voicekeyer directory '{}': {error}",
+            directory.display()
+        )
+    })? {
+        let entry = entry.map_err(|error| format!("failed to read voicekeyer entry: {error}"))?;
+        let file_type = entry.file_type().map_err(|error| {
+            format!(
+                "failed to inspect voice asset '{}': {error}",
+                entry.path().display()
+            )
+        })?;
+        if file_type.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if file_type.is_dir() {
+            index_voice_assets(root, &path, assets, total_bytes)?;
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+        let canonical_path = path.canonicalize().map_err(|error| {
+            format!(
+                "failed to resolve voice asset '{}': {error}",
+                path.display()
+            )
+        })?;
+        if !canonical_path.starts_with(root) {
+            return Err("voice message file path must stay within voicekeyer/".to_string());
+        }
+        let relative_path = canonical_path
+            .strip_prefix(root)
+            .map_err(|_| "voice message file path must stay within voicekeyer/".to_string())?
+            .to_string_lossy()
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        let relative_path = normalized_voice_asset_path(&relative_path)?;
+        let bytes = fs::read(&canonical_path).map_err(|error| {
+            format!(
+                "failed to read voice asset '{}': {error}",
+                canonical_path.display()
+            )
+        })?;
+        let byte_len = bytes.len() as u64;
+        if byte_len > MAX_VOICE_ASSET_BYTES {
+            return Err(format!(
+                "voice asset '{relative_path}' exceeds the 10 MiB file limit"
+            ));
+        }
+        *total_bytes = total_bytes
+            .checked_add(byte_len)
+            .ok_or_else(|| "voice asset cache exceeds the 100 MiB total limit".to_string())?;
+        if *total_bytes > MAX_TOTAL_VOICE_ASSET_BYTES {
+            return Err("voice asset cache exceeds the 100 MiB total limit".to_string());
+        }
+        if assets
+            .insert(relative_path.clone(), Arc::<[u8]>::from(bytes))
+            .is_some()
+        {
+            return Err(format!(
+                "duplicate normalized voice asset path: {relative_path}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn normalized_voice_asset_path(path: &str) -> Result<String, String> {
+    voice_messages::validate_voice_file_path(path)?;
+    Ok(path.trim().replace('\\', "/"))
 }
 
 #[derive(Default)]
@@ -1285,10 +1397,39 @@ F1 QRL,operator1/run.wav
         assert!(!registered_keys.contains(&run_key));
         assert!(registered_keys.contains(&sp_key));
 
+        fs::write(voicekeyer_dir.join("operator1/run.wav"), b"changed-on-disk")
+            .expect("file changes after cache load");
+        fs::remove_file(voicekeyer_dir.join("operator1/run.wav"))
+            .expect("file removes after cache load");
+
         keyer
             .play_relative_path("operator1/run.wav", None)
             .expect("template-backed file plays");
         assert_eq!(backend.plays.lock().unwrap()[0].data, b"run-audio");
+
+        let _ = fs::remove_dir_all(&voicekeyer_dir);
+    }
+
+    #[test]
+    fn failed_voice_asset_reload_keeps_previous_cache() {
+        let voicekeyer_dir =
+            std::env::temp_dir().join(format!("log73-voicekeyer-{}-reload", std::process::id()));
+        let _ = fs::remove_dir_all(&voicekeyer_dir);
+        fs::create_dir_all(&voicekeyer_dir).expect("voicekeyer dir creates");
+        fs::write(voicekeyer_dir.join("message.wav"), b"cached-audio").expect("voice asset writes");
+        let backend = Arc::new(FakeAudioBackend::default());
+        let keyer =
+            VoiceKeyer::with_backend_and_voicekeyer_dir(backend.clone(), voicekeyer_dir.clone());
+        keyer.load_voice_assets().expect("initial cache loads");
+
+        fs::write(voicekeyer_dir.join("invalid.txt"), b"invalid").expect("invalid asset writes");
+        assert!(keyer.load_voice_assets().is_err());
+        fs::remove_file(voicekeyer_dir.join("message.wav")).expect("source asset removes");
+
+        keyer
+            .play_relative_path("message.wav", None)
+            .expect("previous cache remains playable");
+        assert_eq!(backend.plays.lock().unwrap()[0].data, b"cached-audio");
 
         let _ = fs::remove_dir_all(&voicekeyer_dir);
     }
@@ -1314,7 +1455,7 @@ F1 QRL,operator1/run.wav
             .play_relative_path("operator1/run.wav", None)
             .expect_err("symlink escape should fail");
 
-        assert!(error.contains("must stay within voicekeyer/"));
+        assert!(error.contains("not cached"));
         assert!(backend.plays.lock().unwrap().is_empty());
 
         let _ = fs::remove_dir_all(&base);
