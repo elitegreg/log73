@@ -5,15 +5,17 @@ NFPM ?= $(shell command -v nfpm 2>/dev/null || { command -v go >/dev/null 2>&1 &
 
 .PHONY: all release deb help \
 	backend launcher frontend \
+	radio-client \
 	backend-build backend-release backend-test backend-fmt backend-lint \
 	launcher-build launcher-test launcher-fmt launcher-lint launcher-run \
-	frontend-build frontend-release frontend-test frontend-fmt frontend-lint
+	frontend-build frontend-release frontend-test frontend-fmt frontend-lint \
+	radio-client-build radio-client-test radio-client-fmt radio-client-lint radio-client-run
 
-all: backend-build launcher-build frontend-build
+all: backend-build launcher-build frontend-build radio-client-build
 
-ci: backend-lint frontend-lint backend-test frontend-test frontend-build
+ci: backend-lint frontend-lint backend-test frontend-test frontend-build radio-client-test radio-client-build
 
-release: backend-release launcher-build frontend-release
+release: backend-release launcher-build frontend-release radio-client-build
 
 deb:
 	@if ! command -v "$(DIST)" >/dev/null 2>&1 && [ ! -x "$(DIST)" ]; then \
@@ -35,6 +37,8 @@ backend: backend-fmt backend-lint backend-test backend-build
 launcher: launcher-fmt launcher-lint launcher-test launcher-build
 
 frontend: frontend-fmt frontend-lint frontend-test frontend-build
+
+radio-client: radio-client-fmt radio-client-lint radio-client-test radio-client-build
 
 backend-build:
 	cargo build -p log73-backend
@@ -81,3 +85,18 @@ frontend-fmt:
 
 frontend-lint:
 	pnpm run lint
+
+radio-client-build:
+	cargo build -p log73-radio-client
+
+radio-client-test:
+	cargo test -p log73-radio-client
+
+radio-client-fmt:
+	cargo fmt -p log73-radio-client
+
+radio-client-lint:
+	cargo clippy -p log73-radio-client --all-targets --all-features -- -D warnings
+
+radio-client-run:
+	cargo run -p log73-radio-client
