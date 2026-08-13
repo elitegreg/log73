@@ -320,6 +320,7 @@ radio-io/src/radio_manager.rs         lazy/refcounted multi-radio manager and CW
 radio-io/src/websocket.rs             radio HTTP/websocket endpoint and command dispatch
 radio-io/src/voice_keyer.rs           local voice-keyer audio loading, caching, and playback
 radio-io/src/wsjtx.rs                 WSJT-X UDP listener and raw event forwarding
+radio-io/src/flrig.rs                 FLRig-compatible XML-RPC listener lifecycle
 launcher/                             Rust iced desktop launcher
 launcher/src/main.rs                  launcher UI and backend process start/stop controls
 radio-client/                         Rust/Iced client-side radio controller

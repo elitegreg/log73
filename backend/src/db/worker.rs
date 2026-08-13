@@ -918,6 +918,8 @@ mod tests {
             wsjtx_bind_address: "127.0.0.1".to_string(),
             wsjtx_port: 2237,
             wsjtx_multicast_group: String::new(),
+            flrig_enabled: false,
+            flrig_port: radio_io::DEFAULT_FLRIG_PORT,
             cw_tuning_increment_hz: crate::db::DEFAULT_CW_TUNING_INCREMENT_HZ,
             ssb_tuning_increment_hz: crate::db::DEFAULT_SSB_TUNING_INCREMENT_HZ,
             rit_clear_on_log: false,
@@ -1330,6 +1332,8 @@ mod tests {
         assert_eq!(radio.wsjtx_bind_address, "127.0.0.1");
         assert_eq!(radio.wsjtx_port, 2237);
         assert_eq!(radio.wsjtx_multicast_group, "");
+        assert!(!radio.flrig_enabled);
+        assert_eq!(radio.flrig_port, radio_io::DEFAULT_FLRIG_PORT);
         assert_eq!(
             radio.cw_tuning_increment_hz,
             crate::db::DEFAULT_CW_TUNING_INCREMENT_HZ
@@ -1370,6 +1374,8 @@ mod tests {
         let mut replacement = tcp_radio();
         replacement.name = "Updated client radio".to_string();
         replacement.wsjtx_enabled = true;
+        replacement.flrig_enabled = true;
+        replacement.flrig_port = 23_456;
         let second = database
             .upsert_client_radio(
                 client_id.to_string(),
@@ -1391,13 +1397,16 @@ mod tests {
         );
         assert_eq!(second.name, "Updated client radio");
         assert!(second.wsjtx_enabled);
+        assert!(second.flrig_enabled);
+        assert_eq!(second.flrig_port, 23_456);
     }
 
     #[tokio::test]
-    async fn client_radios_do_not_reserve_wsjtx_ports_or_load_into_backend_runtime() {
+    async fn client_radios_do_not_reserve_local_service_ports_or_load_into_backend_runtime() {
         let database = test_database();
         let mut backend_radio = tcp_radio();
         backend_radio.wsjtx_enabled = true;
+        backend_radio.flrig_enabled = true;
         let backend = database
             .create_radio(backend_radio)
             .await
@@ -1405,6 +1414,7 @@ mod tests {
 
         let mut client_radio = tcp_radio();
         client_radio.wsjtx_enabled = true;
+        client_radio.flrig_enabled = true;
         let client = database
             .upsert_client_radio(
                 "7bea2122-503a-48ef-9eb5-8da4f5802b81".to_string(),
@@ -1444,6 +1454,29 @@ mod tests {
             .create_radio(disabled)
             .await
             .expect("disabled radio does not reserve its WSJT-X port");
+    }
+
+    #[tokio::test]
+    async fn enabled_flrig_ports_are_unique_but_disabled_ports_are_not_reserved() {
+        let database = test_database();
+        let mut first = tcp_radio();
+        first.flrig_enabled = true;
+        database
+            .create_radio(first)
+            .await
+            .expect("first enabled FLRig port is accepted");
+
+        let mut duplicate = tcp_radio();
+        duplicate.name = "Duplicate".to_string();
+        duplicate.flrig_enabled = true;
+        assert!(database.create_radio(duplicate).await.is_err());
+
+        let mut disabled = tcp_radio();
+        disabled.name = "Disabled".to_string();
+        database
+            .create_radio(disabled)
+            .await
+            .expect("disabled radio does not reserve its FLRig port");
     }
 
     #[tokio::test]

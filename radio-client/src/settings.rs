@@ -246,6 +246,8 @@ mod tests {
         settings.radio.name = "Client radio".to_string();
         settings.radio.radio_kind = "dummy".to_string();
         settings.radio.transport_kind = "none".to_string();
+        settings.radio.flrig_enabled = true;
+        settings.radio.flrig_port = 23_456;
 
         save_atomic(&path, &settings).unwrap();
         assert_eq!(load_or_create(&path).unwrap(), settings);

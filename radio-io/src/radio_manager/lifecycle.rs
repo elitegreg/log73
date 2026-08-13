@@ -287,6 +287,9 @@ impl RadioHandle {
 mod tests {
     use super::*;
     use crate::{cw::DEFAULT_CW_MESSAGES, voice_messages::DEFAULT_VOICE_MESSAGES};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio::time::{Duration, Instant, sleep};
 
     fn test_radio() -> RadioConfig {
         RadioConfig::new(
@@ -306,6 +309,8 @@ mod tests {
                 wsjtx_bind_address: "127.0.0.1".to_string(),
                 wsjtx_port: 2237,
                 wsjtx_multicast_group: String::new(),
+                flrig_enabled: false,
+                flrig_port: crate::DEFAULT_FLRIG_PORT,
                 cw_tuning_increment_hz: 20,
                 ssb_tuning_increment_hz: 100,
                 rit_clear_on_log: false,
@@ -340,5 +345,79 @@ mod tests {
         assert!(manager.is_active(radio.id).await);
         manager.release(radio.id).await;
         assert!(!manager.is_active(radio.id).await);
+    }
+
+    #[tokio::test]
+    async fn flrig_listener_follows_managed_cat_lifecycle() {
+        let port = available_tcp_port();
+        let mut radio = test_radio();
+        radio.flrig_enabled = true;
+        radio.flrig_port = port;
+        let manager = RadioManager::new(VoiceKeyer::new(), BandCatalog::new(Vec::new()));
+
+        manager
+            .acquire(radio.clone())
+            .await
+            .expect("acquires radio");
+        wait_for_listener(port).await;
+
+        manager.release(radio.id).await;
+        assert!(TcpStream::connect(local_address(port)).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn flrig_bind_conflict_keeps_cat_online_and_retries() {
+        let conflict = TcpListener::bind(local_address(0))
+            .await
+            .expect("bind conflicting listener");
+        let port = conflict.local_addr().expect("conflict address").port();
+        let mut radio = test_radio();
+        radio.flrig_enabled = true;
+        radio.flrig_port = port;
+        let manager = RadioManager::new(VoiceKeyer::new(), BandCatalog::new(Vec::new()));
+
+        let handle = manager
+            .acquire(radio.clone())
+            .await
+            .expect("acquires radio");
+        wait_for_online(&handle).await;
+        drop(conflict);
+        wait_for_listener(port).await;
+
+        manager.release(radio.id).await;
+    }
+
+    fn available_tcp_port() -> u16 {
+        std::net::TcpListener::bind(local_address(0))
+            .expect("bind temporary listener")
+            .local_addr()
+            .expect("temporary listener address")
+            .port()
+    }
+
+    fn local_address(port: u16) -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)
+    }
+
+    async fn wait_for_listener(port: u16) {
+        let deadline = Instant::now() + Duration::from_secs(4);
+        loop {
+            if TcpStream::connect(local_address(port)).await.is_ok() {
+                return;
+            }
+            assert!(Instant::now() < deadline, "FLRig listener did not start");
+            sleep(Duration::from_millis(25)).await;
+        }
+    }
+
+    async fn wait_for_online(handle: &RadioHandle) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if handle.current_status().await.online {
+                return;
+            }
+            assert!(Instant::now() < deadline, "CAT radio did not become online");
+            sleep(Duration::from_millis(25)).await;
+        }
     }
 }

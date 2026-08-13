@@ -19,6 +19,7 @@ pub struct ConfigureScreen {
     tcp_port: String,
     serial_baud_rate: String,
     wsjtx_port: String,
+    flrig_port: String,
     cw_increment: String,
     ssb_increment: String,
     cw_serial_baud_rate: String,
@@ -45,6 +46,8 @@ pub enum Message {
     WsjtxBindSelected(String),
     WsjtxPortChanged(String),
     WsjtxMulticastChanged(String),
+    FlrigEnabledChanged(bool),
+    FlrigPortChanged(String),
     CwIncrementChanged(String),
     SsbIncrementChanged(String),
     RitClearChanged(bool),
@@ -99,6 +102,7 @@ impl ConfigureScreen {
             tcp_port: settings.radio.tcp_port.to_string(),
             serial_baud_rate: settings.radio.serial_baud_rate.to_string(),
             wsjtx_port: settings.radio.wsjtx_port.to_string(),
+            flrig_port: settings.radio.flrig_port.to_string(),
             cw_increment: settings.radio.cw_tuning_increment_hz.to_string(),
             ssb_increment: settings.radio.ssb_tuning_increment_hz.to_string(),
             cw_serial_baud_rate: settings.radio.cw_serial_baud_rate.to_string(),
@@ -133,6 +137,8 @@ impl ConfigureScreen {
             Message::WsjtxBindSelected(value) => self.draft.radio.wsjtx_bind_address = value,
             Message::WsjtxPortChanged(value) => self.wsjtx_port = value,
             Message::WsjtxMulticastChanged(value) => self.draft.radio.wsjtx_multicast_group = value,
+            Message::FlrigEnabledChanged(value) => self.draft.radio.flrig_enabled = value,
+            Message::FlrigPortChanged(value) => self.flrig_port = value,
             Message::CwIncrementChanged(value) => self.cw_increment = value,
             Message::SsbIncrementChanged(value) => self.ssb_increment = value,
             Message::RitClearChanged(value) => self.draft.radio.rit_clear_on_log = value,
@@ -248,6 +254,7 @@ impl ConfigureScreen {
         self.tcp_port = self.draft.radio.tcp_port.to_string();
         self.serial_baud_rate = self.draft.radio.serial_baud_rate.to_string();
         self.wsjtx_port = self.draft.radio.wsjtx_port.to_string();
+        self.flrig_port = self.draft.radio.flrig_port.to_string();
         self.cw_increment = self.draft.radio.cw_tuning_increment_hz.to_string();
         self.ssb_increment = self.draft.radio.ssb_tuning_increment_hz.to_string();
         self.cw_serial_baud_rate = self.draft.radio.cw_serial_baud_rate.to_string();
@@ -258,6 +265,7 @@ impl ConfigureScreen {
         settings.radio.tcp_port = parse_u16(&self.tcp_port);
         settings.radio.serial_baud_rate = parse_u32(&self.serial_baud_rate);
         settings.radio.wsjtx_port = parse_u16(&self.wsjtx_port);
+        settings.radio.flrig_port = parse_u16(&self.flrig_port);
         settings.radio.cw_tuning_increment_hz = parse_u32(&self.cw_increment);
         settings.radio.ssb_tuning_increment_hz = parse_u32(&self.ssb_increment);
         settings.radio.cw_serial_baud_rate = parse_u32(&self.cw_serial_baud_rate);
@@ -437,6 +445,10 @@ impl ConfigureScreen {
         content = content.push(section(
             "WSJT-X",
             wsjtx_fields(&self.draft.radio, &self.wsjtx_port),
+        ));
+        content = content.push(section(
+            "FLRig emulation",
+            flrig_fields(&self.draft.radio, &self.flrig_port),
         ));
         content = content.push(section(
             "Tuning",
@@ -848,6 +860,21 @@ fn wsjtx_fields<'a>(radio: &'a RadioSettings, port: &'a str) -> Element<'a, Mess
                 )
                 .on_input(Message::WsjtxMulticastChanged),
             ));
+    }
+    body.into()
+}
+
+fn flrig_fields<'a>(radio: &'a RadioSettings, port: &'a str) -> Element<'a, Message> {
+    let mut body = column![
+        checkbox("Enable FLRig emulation", radio.flrig_enabled)
+            .on_toggle(Message::FlrigEnabledChanged)
+    ]
+    .spacing(8);
+    if radio.flrig_enabled {
+        body = body.push(field(
+            "TCP port",
+            numeric_input(port, Message::FlrigPortChanged),
+        ));
     }
     body.into()
 }

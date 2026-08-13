@@ -3,6 +3,7 @@ use super::cw_task::{CwTaskCommand, run_cw_task};
 use super::keyers::{CwSerialDevice, open_serial_keyer};
 use crate::bands::BandCatalog;
 use crate::config::RadioConfig;
+use crate::flrig::FlrigServer;
 use crate::radio::{RadioCommand, RadioState, RadioStatus};
 use crate::voice_keyer::VoiceKeyer;
 use backon::{BackoffBuilder, ExponentialBuilder};
@@ -114,6 +115,9 @@ pub(super) async fn run_managed_radio(
             radio,
             shared_cw_serial_keyer,
         } = connected;
+        let mut flrig_server = config
+            .flrig_enabled
+            .then(|| FlrigServer::start(config.id, radio.clone(), config.flrig_port));
         let mut radio_updates = radio.subscribe_updates();
         publish_cat_snapshot(
             config.id,
@@ -152,6 +156,7 @@ pub(super) async fn run_managed_radio(
             tokio::select! {
                 _ = &mut shutdown => {
                     shutdown_cw_task(cw_tx, cw_task).await;
+                    shutdown_flrig_server(&mut flrig_server).await;
                     radio.shutdown();
                     return;
                 }
@@ -185,6 +190,7 @@ pub(super) async fn run_managed_radio(
                                 warn!(radio_id = config.id, "CAT radio entered an error state");
                                 reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
                                 shutdown_cw_task(cw_tx, cw_task).await;
+                                shutdown_flrig_server(&mut flrig_server).await;
                                 radio.shutdown();
                                 break;
                             }
@@ -206,6 +212,7 @@ pub(super) async fn run_managed_radio(
                             set_radio_status(&current_status, &status_updates, false).await;
                             reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
                             shutdown_cw_task(cw_tx, cw_task).await;
+                            shutdown_flrig_server(&mut flrig_server).await;
                             radio.shutdown();
                             break;
                         }
@@ -214,6 +221,7 @@ pub(super) async fn run_managed_radio(
                 command = commands.recv() => {
                     let Some(command) = command else {
                         shutdown_cw_task(cw_tx, cw_task).await;
+                        shutdown_flrig_server(&mut flrig_server).await;
                         radio.shutdown();
                         return;
                     };
@@ -273,6 +281,7 @@ pub(super) async fn run_managed_radio(
                                     reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
                                     error!(radio_id = config.id, %error, "failed to apply radio command");
                                     shutdown_cw_task(cw_tx, cw_task).await;
+                                    shutdown_flrig_server(&mut flrig_server).await;
                                     radio.shutdown();
                                     break;
                                 }
@@ -302,6 +311,12 @@ pub(super) async fn run_managed_radio(
 async fn shutdown_cw_task(cw_tx: mpsc::Sender<CwTaskCommand>, cw_task: JoinHandle<()>) {
     let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
     let _ = cw_task.await;
+}
+
+async fn shutdown_flrig_server(server: &mut Option<FlrigServer>) {
+    if let Some(server) = server.take() {
+        server.shutdown().await;
+    }
 }
 
 async fn set_radio_status(
@@ -518,6 +533,8 @@ pub(super) fn debug_radio_config(config: &RadioConfig, message: &'static str) {
         cw_serial_port = %config.cw_serial_port,
         cw_serial_baud_rate = config.cw_serial_baud_rate,
         cw_serial_line = %config.cw_serial_line,
+        flrig_enabled = config.flrig_enabled,
+        flrig_port = config.flrig_port,
         shared_cw_serial_port = uses_shared_cw_serial_port(config),
         "{message}"
     );
@@ -554,6 +571,8 @@ mod tests {
                 wsjtx_bind_address: "127.0.0.1".to_string(),
                 wsjtx_port: 2237,
                 wsjtx_multicast_group: String::new(),
+                flrig_enabled: false,
+                flrig_port: crate::DEFAULT_FLRIG_PORT,
                 cw_tuning_increment_hz: 20,
                 ssb_tuning_increment_hz: 100,
                 rit_clear_on_log: false,

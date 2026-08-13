@@ -40,6 +40,8 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
             WSJTX_BIND_ADDRESS TEXT NOT NULL DEFAULT '127.0.0.1' CHECK (WSJTX_BIND_ADDRESS IN ('127.0.0.1', '0.0.0.0')),
             WSJTX_PORT INTEGER NOT NULL DEFAULT 2237 CHECK (WSJTX_PORT >= 1024 AND WSJTX_PORT <= 65535),
             WSJTX_MULTICAST_GROUP TEXT NOT NULL DEFAULT '',
+            FLRIG_ENABLED INTEGER NOT NULL DEFAULT 0 CHECK (FLRIG_ENABLED IN (0, 1)),
+            FLRIG_PORT INTEGER NOT NULL DEFAULT 12345 CHECK (FLRIG_PORT >= 1024 AND FLRIG_PORT <= 65535),
             CW_TUNING_INCREMENT_HZ INTEGER NOT NULL DEFAULT 20 CHECK (CW_TUNING_INCREMENT_HZ > 0),
             SSB_TUNING_INCREMENT_HZ INTEGER NOT NULL DEFAULT 100 CHECK (SSB_TUNING_INCREMENT_HZ > 0),
             RIT_CLEAR_ON_LOG INTEGER NOT NULL DEFAULT 0 CHECK (RIT_CLEAR_ON_LOG IN (0, 1)),
@@ -105,6 +107,8 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
         CREATE INDEX IF NOT EXISTS idx_qsos_log_id ON qsos(LOG_ID);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_radios_enabled_wsjtx_port
             ON radios(WSJTX_PORT) WHERE WSJTX_ENABLED = 1 AND CONTROL_LOCATION = 'backend';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_radios_enabled_flrig_port
+            ON radios(FLRIG_PORT) WHERE FLRIG_ENABLED = 1 AND CONTROL_LOCATION = 'backend';
         CREATE UNIQUE INDEX IF NOT EXISTS idx_radios_client_instance_id
             ON radios(CLIENT_INSTANCE_ID) WHERE CONTROL_LOCATION = 'client';
 

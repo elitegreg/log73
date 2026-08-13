@@ -557,6 +557,8 @@ mod tests {
                 wsjtx_bind_address: "127.0.0.1".to_string(),
                 wsjtx_port: 2237,
                 wsjtx_multicast_group: String::new(),
+                flrig_enabled: false,
+                flrig_port: crate::DEFAULT_FLRIG_PORT,
                 cw_tuning_increment_hz: 20,
                 ssb_tuning_increment_hz: 100,
                 rit_clear_on_log: false,

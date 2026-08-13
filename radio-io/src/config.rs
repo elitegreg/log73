@@ -10,6 +10,7 @@ pub const DEFAULT_CW_TUNING_INCREMENT_HZ: u32 = 20;
 pub const DEFAULT_SSB_TUNING_INCREMENT_HZ: u32 = 100;
 pub const DEFAULT_WSJTX_BIND_ADDRESS: &str = "127.0.0.1";
 pub const DEFAULT_WSJTX_PORT: u16 = 2237;
+pub const DEFAULT_FLRIG_PORT: u16 = 12_345;
 pub const DEFAULT_CW_SERIAL_BAUD_RATE: u32 = 9_600;
 pub const DEFAULT_CW_SERIAL_LINE: &str = "dtr";
 
@@ -44,6 +45,8 @@ pub struct RadioSettings {
     pub wsjtx_bind_address: String,
     pub wsjtx_port: u16,
     pub wsjtx_multicast_group: String,
+    pub flrig_enabled: bool,
+    pub flrig_port: u16,
     pub cw_tuning_increment_hz: u32,
     pub ssb_tuning_increment_hz: u32,
     pub rit_clear_on_log: bool,
@@ -75,6 +78,8 @@ impl Default for RadioSettings {
             wsjtx_bind_address: DEFAULT_WSJTX_BIND_ADDRESS.to_string(),
             wsjtx_port: DEFAULT_WSJTX_PORT,
             wsjtx_multicast_group: String::new(),
+            flrig_enabled: false,
+            flrig_port: DEFAULT_FLRIG_PORT,
             cw_tuning_increment_hz: DEFAULT_CW_TUNING_INCREMENT_HZ,
             ssb_tuning_increment_hz: DEFAULT_SSB_TUNING_INCREMENT_HZ,
             rit_clear_on_log: false,
@@ -267,6 +272,9 @@ pub fn validate_radio_settings(settings: &RadioSettings) -> Result<(), String> {
     if settings.wsjtx_port < 1024 {
         return Err("WSJT-X port must be between 1024 and 65535".to_string());
     }
+    if settings.flrig_port < 1024 {
+        return Err("FLRig port must be between 1024 and 65535".to_string());
+    }
     let multicast_group = settings.wsjtx_multicast_group.trim();
     if !multicast_group.is_empty() {
         let group = multicast_group
@@ -394,6 +402,8 @@ mod tests {
         )
         .expect("settings deserialize");
         assert_eq!(settings.wsjtx_bind_address, DEFAULT_WSJTX_BIND_ADDRESS);
+        assert!(!settings.flrig_enabled);
+        assert_eq!(settings.flrig_port, DEFAULT_FLRIG_PORT);
         assert_eq!(settings.cw_messages, cw::DEFAULT_CW_MESSAGES);
     }
 
@@ -403,6 +413,8 @@ mod tests {
             serde_json::to_value(ConfiguredRadio::new(7, tcp_radio())).expect("config serializes");
         assert_eq!(value["id"], 7);
         assert_eq!(value["tcp_host"], "127.0.0.1");
+        assert_eq!(value["flrig_enabled"], false);
+        assert_eq!(value["flrig_port"], DEFAULT_FLRIG_PORT);
         assert!(value.get("settings").is_none());
     }
 
@@ -435,6 +447,9 @@ mod tests {
         serial.serial_port = "/dev/ttyUSB0".to_string();
         assert!(validate_radio_settings(&serial).is_ok());
         serial.wsjtx_port = 1023;
+        assert!(validate_radio_settings(&serial).is_err());
+        serial.wsjtx_port = DEFAULT_WSJTX_PORT;
+        serial.flrig_port = 1023;
         assert!(validate_radio_settings(&serial).is_err());
     }
 }

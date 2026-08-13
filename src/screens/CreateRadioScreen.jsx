@@ -13,6 +13,8 @@ import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
 import { DEFAULT_WSJTX_PORT, nextAvailableWsjtxPort } from '../domain/wsjtx';
 
+const DEFAULT_FLRIG_PORT = 12345;
+
 const DEFAULT_RADIO_KIND = 'dummy';
 const DEFAULT_TRANSPORT_KIND = 'none';
 const DEFAULT_REAL_RADIO_TRANSPORT_KIND = 'tcp';
@@ -151,6 +153,8 @@ function CreateRadioScreen() {
   const [wsjtxBindAddress, setWsjtxBindAddress] = useState('127.0.0.1');
   const [wsjtxPort, setWsjtxPort] = useState(DEFAULT_WSJTX_PORT);
   const [wsjtxMulticastGroup, setWsjtxMulticastGroup] = useState('');
+  const [flrigEnabled, setFlrigEnabled] = useState(false);
+  const [flrigPort, setFlrigPort] = useState(DEFAULT_FLRIG_PORT);
   const [cwTuningIncrementHz, setCwTuningIncrementHz] = useState(
     DEFAULT_CW_TUNING_INCREMENT_HZ,
   );
@@ -380,6 +384,8 @@ function CreateRadioScreen() {
       setWsjtxBindAddress(radio.wsjtx_bind_address ?? '127.0.0.1');
       setWsjtxPort(radio.wsjtx_port ?? DEFAULT_WSJTX_PORT);
       setWsjtxMulticastGroup(radio.wsjtx_multicast_group ?? '');
+      setFlrigEnabled(Boolean(radio.flrig_enabled));
+      setFlrigPort(radio.flrig_port ?? DEFAULT_FLRIG_PORT);
       setCwTuningIncrementHz(
         radio.cw_tuning_increment_hz ?? DEFAULT_CW_TUNING_INCREMENT_HZ,
       );
@@ -548,6 +554,8 @@ function CreateRadioScreen() {
           wsjtx_bind_address: wsjtxBindAddress,
           wsjtx_port: Number(wsjtxPort),
           wsjtx_multicast_group: wsjtxMulticastGroup.trim(),
+          flrig_enabled: Boolean(flrigEnabled),
+          flrig_port: Number(flrigPort),
           cw_tuning_increment_hz: Number(cwTuningIncrementHz),
           ssb_tuning_increment_hz: Number(ssbTuningIncrementHz),
           rit_clear_on_log: Boolean(ritClearOnLog),
@@ -762,6 +770,27 @@ function CreateRadioScreen() {
             />
           </label>
         </>
+      ) : null}
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={flrigEnabled}
+          onChange={(event) => setFlrigEnabled(event.target.checked)}
+        />
+        Enable FLRig emulation
+      </label>
+      {flrigEnabled ? (
+        <label>
+          FLRig Port
+          <input
+            type="number"
+            min="1024"
+            max="65535"
+            value={flrigPort}
+            onChange={(event) => setFlrigPort(event.target.value)}
+            required
+          />
+        </label>
       ) : null}
       <label>
         Tuning Increment (CW) in Hz

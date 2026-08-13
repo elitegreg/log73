@@ -2102,6 +2102,9 @@ async fn create_radio(
     if let Err(error) = validate_unique_wsjtx_port(&app_state, None, &payload).await {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
+    if let Err(error) = validate_unique_flrig_port(&app_state, None, &payload).await {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
     if let Err(error) = app_state
         .voice_keyer
         .validate_radio_voice_messages(&payload.voice_messages)
@@ -2147,6 +2150,9 @@ async fn update_radio(
     debug!(id, payload = %debug_payload_log(&payload), "update radio PUT body");
     radio_io::validate_radio_settings(&payload).map_err(ApiError::bad_request)?;
     validate_unique_wsjtx_port(&app_state, Some(id), &payload)
+        .await
+        .map_err(ApiError::bad_request)?;
+    validate_unique_flrig_port(&app_state, Some(id), &payload)
         .await
         .map_err(ApiError::bad_request)?;
     app_state
@@ -2200,6 +2206,33 @@ async fn validate_unique_wsjtx_port(
         return Err(format!(
             "WSJT-X port {} is already used by another enabled radio",
             payload.wsjtx_port
+        ));
+    }
+    Ok(())
+}
+
+async fn validate_unique_flrig_port(
+    app_state: &AppState,
+    radio_id: Option<i64>,
+    payload: &RadioPayload,
+) -> Result<(), String> {
+    if !payload.flrig_enabled {
+        return Ok(());
+    }
+    let radios = app_state
+        .db
+        .radios()
+        .await
+        .map_err(|error| error.to_string())?;
+    if radios.iter().any(|radio| {
+        radio.control_location == db::RadioControlLocation::Backend
+            && radio.flrig_enabled
+            && radio.flrig_port == payload.flrig_port
+            && Some(radio.id) != radio_id
+    }) {
+        return Err(format!(
+            "FLRig port {} is already used by another enabled radio",
+            payload.flrig_port
         ));
     }
     Ok(())

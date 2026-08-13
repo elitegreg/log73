@@ -12,7 +12,7 @@ cw-serial-keyer = { git = "https://github.com/elitegreg/cw-serial-keyer-rs.git" 
 futures-util = "0.3"
 ham-radio-digital-interfacing = { git = "https://github.com/elitegreg/ham-radio-digital-interfacing-rs.git" }
 log73-paths = { path = "../paths" }
-radio-cat-rs = { git = "https://github.com/elitegreg/radio-cat-rs.git", branch = "main" }
+radio-cat-rs = { git = "https://github.com/elitegreg/radio-cat-rs.git", branch = "main", features = ["xml-rpc"] }
 rodio = { git = "https://github.com/RustAudio/rodio", default-features = false, features = ["playback", "wav", "pipewire", "pulseaudio"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

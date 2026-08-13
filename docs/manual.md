@@ -262,6 +262,8 @@ For a sent serial exchange, the backend supplies the initial next value and the 
 - DATA and RTTY radio-mode mappings
 - Optional **WSJT-X in DATA** listener settings: localhost/open bind, UDP port,
   and IPv4 multicast group
+- Optional **FLRig emulation** with a localhost TCP port. The XML-RPC endpoint
+  is available at `http://127.0.0.1:<port>/RPC2` whenever CAT is connected.
 - CW keyer type: `none`, `winkeyer`, `cat`, `serial`
 - CW messages set (editable and validated)
 
@@ -276,6 +278,8 @@ changing its configuration.
 - Non-dummy radios require TCP or serial transport
 - Tuning increments must be `1..9999` Hz
 - Enabled WSJT-X ports must be unique across radios and in `1024..65535`.
+- Enabled FLRig ports must be unique across backend-controlled radios and in
+  `1024..65535`; the default is `12345`.
 - WSJT-X multicast groups, when set, must be IPv4 multicast addresses.
 
 Transport-specific:

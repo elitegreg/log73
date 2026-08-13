@@ -231,6 +231,9 @@ pub fn validate_radio(payload: &RadioPayload) -> Result<(), String> {
     if payload.wsjtx_port < 1024 {
         return Err("WSJT-X port must be between 1024 and 65535".to_string());
     }
+    if payload.flrig_port < 1024 {
+        return Err("FLRig port must be between 1024 and 65535".to_string());
+    }
     let multicast_group = payload.wsjtx_multicast_group.trim();
     if !multicast_group.is_empty() {
         let group = multicast_group
@@ -1282,6 +1285,8 @@ mod tests {
             wsjtx_bind_address: "127.0.0.1".to_string(),
             wsjtx_port: 2237,
             wsjtx_multicast_group: String::new(),
+            flrig_enabled: false,
+            flrig_port: radio_io::DEFAULT_FLRIG_PORT,
             cw_tuning_increment_hz: db::DEFAULT_CW_TUNING_INCREMENT_HZ,
             ssb_tuning_increment_hz: db::DEFAULT_SSB_TUNING_INCREMENT_HZ,
             rit_clear_on_log: false,

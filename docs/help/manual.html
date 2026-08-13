@@ -401,6 +401,10 @@ Creating/editing radios (with validation details)</h2>
 <li>DATA and RTTY radio-mode mappings</li>
 <li>Optional <strong>WSJT-X in DATA</strong> listener settings:
 localhost/open bind, UDP port, and IPv4 multicast group</li>
+<li>Optional <strong>FLRig emulation</strong> with a localhost TCP port.
+The XML-RPC endpoint is available at
+<code>http://127.0.0.1:&lt;port&gt;/RPC2</code> whenever CAT is
+connected.</li>
 <li>CW keyer type: <code>none</code>, <code>winkeyer</code>,
 <code>cat</code>, <code>serial</code></li>
 <li>CW messages set (editable and validated)</li>
@@ -417,6 +421,8 @@ logger using the radio before changing its configuration.</p>
 <li>Tuning increments must be <code>1..9999</code> Hz</li>
 <li>Enabled WSJT-X ports must be unique across radios and in
 <code>1024..65535</code>.</li>
+<li>Enabled FLRig ports must be unique across backend-controlled radios
+and in <code>1024..65535</code>; the default is <code>12345</code>.</li>
 <li>WSJT-X multicast groups, when set, must be IPv4 multicast
 addresses.</li>
 </ul>
