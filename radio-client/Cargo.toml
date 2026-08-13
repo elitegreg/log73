@@ -1,0 +1,25 @@
+[package]
+name = "log73-radio-client"
+version = "0.2.0"
+edition = "2024"
+repository = "https://github.com/elitegreg/log73"
+authors = ["Greg Mitchell <greg@ng4m.dev>"]
+
+[[bin]]
+name = "log73-radio-client"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.6.1", features = ["derive"] }
+iced = { version = "0.13", default-features = false, features = ["tiny-skia", "tokio", "image", "fira-sans"] }
+log73-paths = { path = "../paths" }
+radio-io = { path = "../radio-io" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }
