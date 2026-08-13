@@ -124,35 +124,39 @@ fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioConfig> {
     let wsjtx_port: i64 = row.get("WSJTX_PORT")?;
     let voice_input_device_id: Option<String> = row.get("VOICE_INPUT_DEVICE_ID")?;
     let voice_output_device_id: Option<String> = row.get("VOICE_OUTPUT_DEVICE_ID")?;
-    Ok(RadioConfig {
-        id: row.get("ID")?,
-        name: row.get("NAME")?,
-        radio_kind: row.get("RADIO_KIND")?,
-        transport_kind: row.get("TRANSPORT_KIND")?,
-        tcp_host: row.get("TCP_HOST")?,
-        tcp_port: tcp_port as u16,
-        serial_port: row.get("SERIAL_PORT")?,
-        serial_baud_rate: serial_baud_rate as u32,
-        options: row.get("OPTIONS")?,
-        data_mode: row.get("DATA_MODE")?,
-        rtty_mode: row.get("RTTY_MODE")?,
-        wsjtx_enabled: row.get("WSJTX_ENABLED")?,
-        wsjtx_bind_address: row.get("WSJTX_BIND_ADDRESS")?,
-        wsjtx_port: wsjtx_port as u16,
-        wsjtx_multicast_group: row.get("WSJTX_MULTICAST_GROUP")?,
-        cw_tuning_increment_hz: cw_tuning_increment_hz as u32,
-        ssb_tuning_increment_hz: ssb_tuning_increment_hz as u32,
-        rit_clear_on_log: row.get("RIT_CLEAR_ON_LOG")?,
-        voice_input_device_id: normalized_optional_device_id(voice_input_device_id.as_deref()),
-        voice_output_device_id: normalized_optional_device_id(voice_output_device_id.as_deref()),
-        cw_keyer_type: row.get("CW_KEYER_TYPE")?,
-        winkeyer_serial_port: row.get("WINKEYER_SERIAL_PORT")?,
-        cw_serial_port: row.get("CW_SERIAL_PORT")?,
-        cw_serial_baud_rate: cw_serial_baud_rate as u32,
-        cw_serial_line: row.get("CW_SERIAL_LINE")?,
-        cw_messages: row.get("CW_MESSAGES")?,
-        voice_messages: row.get("VOICE_MESSAGES")?,
-    })
+    Ok(RadioConfig::new(
+        row.get("ID")?,
+        radio_io::RadioSettings {
+            name: row.get("NAME")?,
+            radio_kind: row.get("RADIO_KIND")?,
+            transport_kind: row.get("TRANSPORT_KIND")?,
+            tcp_host: row.get("TCP_HOST")?,
+            tcp_port: tcp_port as u16,
+            serial_port: row.get("SERIAL_PORT")?,
+            serial_baud_rate: serial_baud_rate as u32,
+            options: row.get("OPTIONS")?,
+            data_mode: row.get("DATA_MODE")?,
+            rtty_mode: row.get("RTTY_MODE")?,
+            wsjtx_enabled: row.get("WSJTX_ENABLED")?,
+            wsjtx_bind_address: row.get("WSJTX_BIND_ADDRESS")?,
+            wsjtx_port: wsjtx_port as u16,
+            wsjtx_multicast_group: row.get("WSJTX_MULTICAST_GROUP")?,
+            cw_tuning_increment_hz: cw_tuning_increment_hz as u32,
+            ssb_tuning_increment_hz: ssb_tuning_increment_hz as u32,
+            rit_clear_on_log: row.get("RIT_CLEAR_ON_LOG")?,
+            voice_input_device_id: normalized_optional_device_id(voice_input_device_id.as_deref()),
+            voice_output_device_id: normalized_optional_device_id(
+                voice_output_device_id.as_deref(),
+            ),
+            cw_keyer_type: row.get("CW_KEYER_TYPE")?,
+            winkeyer_serial_port: row.get("WINKEYER_SERIAL_PORT")?,
+            cw_serial_port: row.get("CW_SERIAL_PORT")?,
+            cw_serial_baud_rate: cw_serial_baud_rate as u32,
+            cw_serial_line: row.get("CW_SERIAL_LINE")?,
+            cw_messages: row.get("CW_MESSAGES")?,
+            voice_messages: row.get("VOICE_MESSAGES")?,
+        },
+    ))
 }
 
 #[cfg(test)]

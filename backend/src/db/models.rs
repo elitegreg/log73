@@ -1,6 +1,4 @@
-use crate::cw::DEFAULT_CW_MESSAGES;
-use crate::voice_messages::DEFAULT_VOICE_MESSAGES;
-pub use radio_io::RadioConfig;
+pub use radio_io::{ConfiguredRadio as RadioConfig, RadioSettings as RadioPayload};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -86,84 +84,4 @@ pub struct UpdateConfig {
     pub dxcluster_commands: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct RadioPayload {
-    pub name: String,
-    pub radio_kind: String,
-    pub transport_kind: String,
-    pub tcp_host: String,
-    pub tcp_port: u16,
-    pub serial_port: String,
-    pub serial_baud_rate: u32,
-    #[serde(default)]
-    pub options: String,
-    #[serde(default)]
-    pub data_mode: String,
-    #[serde(default)]
-    pub rtty_mode: String,
-    #[serde(default)]
-    pub wsjtx_enabled: bool,
-    #[serde(default = "default_wsjtx_bind_address")]
-    pub wsjtx_bind_address: String,
-    #[serde(default = "default_wsjtx_port")]
-    pub wsjtx_port: u16,
-    #[serde(default)]
-    pub wsjtx_multicast_group: String,
-    #[serde(default = "default_cw_tuning_increment_hz")]
-    pub cw_tuning_increment_hz: u32,
-    #[serde(default = "default_ssb_tuning_increment_hz")]
-    pub ssb_tuning_increment_hz: u32,
-    #[serde(default)]
-    pub rit_clear_on_log: bool,
-    #[serde(default)]
-    pub voice_input_device_id: Option<String>,
-    #[serde(default)]
-    pub voice_output_device_id: Option<String>,
-    pub cw_keyer_type: String,
-    pub winkeyer_serial_port: String,
-    #[serde(default)]
-    pub cw_serial_port: String,
-    #[serde(default = "default_cw_serial_baud_rate")]
-    pub cw_serial_baud_rate: u32,
-    #[serde(default = "default_cw_serial_line")]
-    pub cw_serial_line: String,
-    #[serde(default = "default_cw_messages")]
-    pub cw_messages: String,
-    #[serde(default = "default_voice_messages")]
-    pub voice_messages: String,
-}
-
-pub const DEFAULT_CW_TUNING_INCREMENT_HZ: u32 = 20;
-pub const DEFAULT_SSB_TUNING_INCREMENT_HZ: u32 = 100;
-
-fn default_cw_tuning_increment_hz() -> u32 {
-    DEFAULT_CW_TUNING_INCREMENT_HZ
-}
-
-fn default_ssb_tuning_increment_hz() -> u32 {
-    DEFAULT_SSB_TUNING_INCREMENT_HZ
-}
-
-fn default_wsjtx_bind_address() -> String {
-    "127.0.0.1".to_string()
-}
-
-const fn default_wsjtx_port() -> u16 {
-    2237
-}
-
-fn default_cw_serial_baud_rate() -> u32 {
-    9_600
-}
-
-fn default_cw_serial_line() -> String {
-    "dtr".to_string()
-}
-
-fn default_cw_messages() -> String {
-    DEFAULT_CW_MESSAGES.to_string()
-}
-
-fn default_voice_messages() -> String {
-    DEFAULT_VOICE_MESSAGES.to_string()
-}
+pub use radio_io::{DEFAULT_CW_TUNING_INCREMENT_HZ, DEFAULT_SSB_TUNING_INCREMENT_HZ};

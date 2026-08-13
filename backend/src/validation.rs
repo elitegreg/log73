@@ -22,9 +22,13 @@ use std::{
 const MAX_LOG_NAME_LEN: usize = 100;
 const MAX_CONTEST_ID_LEN: usize = 100;
 const MAX_CALLSIGN_LEN: usize = 12;
+#[allow(dead_code)]
 const MAX_RADIO_NAME_LEN: usize = 100;
+#[allow(dead_code)]
 const MAX_RADIO_HOST_LEN: usize = 255;
+#[allow(dead_code)]
 const MAX_SERIAL_PORT_LEN: usize = 255;
+#[allow(dead_code)]
 const MAX_SOUND_DEVICE_ID_LEN: usize = 1024;
 const MAX_LOGIN_USER_LEN: usize = 64;
 const MAX_LOGIN_PASSWORD_LEN: usize = 256;
@@ -41,11 +45,16 @@ const MAX_CONTACT_OBJECT_FIELDS: usize = 100;
 const MAX_CONTACT_JSON_DEPTH: usize = 4;
 const MIN_QSO_EPOCH: i64 = 0;
 const MAX_QSO_EPOCH: i64 = 4_102_444_800; // 2100-01-01T00:00:00Z
+#[allow(dead_code)]
 const MAX_RADIO_FREQUENCY_HZ: u64 = 500_000_000;
+#[allow(dead_code)]
 const MAX_RADIO_TUNING_INCREMENT_HZ: u32 = 9_999;
 const MAX_CW_REQUEST_ID_LEN: usize = 64;
+#[allow(dead_code)]
 const MAX_CW_MESSAGES_LEN: usize = 16_384;
+#[allow(dead_code)]
 const MAX_VOICE_MESSAGES_LEN: usize = 16_384;
+#[allow(dead_code)]
 const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat", "serial"];
 
 static COMPILED_REGEX_CACHE: OnceLock<Mutex<HashMap<String, Result<Regex, String>>>> =
@@ -89,6 +98,7 @@ pub fn validate_cabrillo_export_params(
     validate_configured_params(cabrillo_export_fields(rules), export_params)
 }
 
+#[allow(dead_code)]
 pub fn validate_radio(payload: &RadioPayload) -> Result<(), String> {
     validate_required_text("radio name", &payload.name, MAX_RADIO_NAME_LEN)?;
 
@@ -237,6 +247,7 @@ pub fn validate_radio(payload: &RadioPayload) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn validate_cw_messages(value: &str) -> Result<(), String> {
     if value.trim().is_empty() {
         return Err("CW messages are required".to_string());
@@ -256,6 +267,7 @@ pub fn validate_cw_messages(value: &str) -> Result<(), String> {
     cw::validate(value).map(|_| ())
 }
 
+#[allow(dead_code)]
 pub fn validate_voice_messages(value: &str) -> Result<(), String> {
     if value.trim().is_empty() {
         return Err("Voice messages are required".to_string());
@@ -1112,6 +1124,7 @@ fn validate_host(label: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn validate_serial_port(label: &str, value: &str) -> Result<(), String> {
     if value.chars().any(char::is_control) {
         return Err(format!("{label} cannot contain control characters"));
@@ -1119,6 +1132,7 @@ fn validate_serial_port(label: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn validate_tuning_increment_hz(label: &str, value: u32) -> Result<(), String> {
     if value == 0 || value > MAX_RADIO_TUNING_INCREMENT_HZ {
         return Err(format!(

@@ -1188,7 +1188,7 @@ async fn required_radio_name_for_id(
         .radio(radio_id)
         .await
         .map_err(|error| ApiError::internal(error.to_string()))?
-        .map(|radio| radio.name)
+        .map(|radio| radio.name.clone())
         .ok_or_else(|| ApiError::not_found(format!("radio {radio_id} not found")))
 }
 
@@ -1981,7 +1981,7 @@ async fn default_cw_messages() -> Json<String> {
 }
 
 async fn validate_cw_messages(Json(payload): Json<CwMessagesPayload>) -> Json<serde_json::Value> {
-    match validation::validate_cw_messages(&payload.cw_messages) {
+    match radio_io::validate_cw_messages(&payload.cw_messages) {
         Ok(()) => Json(serde_json::json!({
             "ok": true,
             "labels": cw::labels(&payload.cw_messages)
@@ -2014,11 +2014,11 @@ async fn create_radio(
     State(app_state): State<AppState>,
     Json(mut payload): Json<RadioPayload>,
 ) -> Json<serde_json::Value> {
-    if let Err(error) = resolve_radio_mode_mappings(&mut payload) {
+    if let Err(error) = radio_io::normalize_radio_settings(&mut payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     debug!(payload = %debug_payload_log(&payload), "create radio POST body");
-    if let Err(error) = validation::validate_radio(&payload) {
+    if let Err(error) = radio_io::validate_radio_settings(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     if let Err(error) = validate_unique_wsjtx_port(&app_state, None, &payload).await {
@@ -2051,11 +2051,11 @@ async fn update_radio(
     Path(id): Path<i64>,
     Json(mut payload): Json<RadioPayload>,
 ) -> Json<serde_json::Value> {
-    if let Err(error) = resolve_radio_mode_mappings(&mut payload) {
+    if let Err(error) = radio_io::normalize_radio_settings(&mut payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     debug!(id, payload = %debug_payload_log(&payload), "update radio PUT body");
-    if let Err(error) = validation::validate_radio(&payload) {
+    if let Err(error) = radio_io::validate_radio_settings(&payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     if let Err(error) = validate_unique_wsjtx_port(&app_state, Some(id), &payload).await {
@@ -2091,14 +2091,6 @@ async fn update_radio(
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
-}
-
-fn resolve_radio_mode_mappings(payload: &mut RadioPayload) -> Result<(), String> {
-    let (data_mode, rtty_mode) =
-        modes::resolved_mode_mappings(&payload.radio_kind, &payload.data_mode, &payload.rtty_mode)?;
-    payload.data_mode = data_mode;
-    payload.rtty_mode = rtty_mode;
-    Ok(())
 }
 
 async fn validate_unique_wsjtx_port(
