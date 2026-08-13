@@ -73,6 +73,7 @@ function MainWindow({
   backendSocketStatus,
   radioSocketStatus,
   catStatus,
+  radioControlLocation,
   messageLabels,
   messageSentEvent,
   wsjtxTarget,
@@ -1041,6 +1042,7 @@ function MainWindow({
         backendSocketStatus={backendSocketStatus}
         radioSocketStatus={radioSocketStatus}
         catStatus={catStatus}
+        radioControlLocation={radioControlLocation}
         manualEntryDisabled={wsjtxDataLocked}
       />
       <EntryFields

@@ -26,6 +26,7 @@ function RadioControls({
   backendSocketStatus,
   radioSocketStatus,
   catStatus,
+  radioControlLocation,
   manualEntryDisabled = false,
 }) {
   const modeSelectable = isSelectableMode(radioMode);
@@ -122,6 +123,9 @@ function RadioControls({
         />
       </label>
       <div className="backend-status-group">
+        <div className="backend-socket-status" title="Radio control location">
+          {radioControlLocation === 'client' ? 'CLIENT-SIDE' : 'SERVER-SIDE'}
+        </div>
         <div
           className="backend-socket-status"
           title={`Radio I/O ${radioSocketStatus}`}

@@ -102,6 +102,7 @@ function LoggerScreen() {
     numericLogId,
     loggerId,
     radioWebsocketUrl: radio?.radio_ws_url,
+    isClientRadio: radio?.control_location === 'client',
     notifyOperationalError,
     onWsjtXLoggedAdif: (message) =>
       wsjtxLoggedAdifHandlerRef.current?.(message),
@@ -367,6 +368,7 @@ function LoggerScreen() {
               backendSocketStatus={backendSocketStatus}
               radioSocketStatus={radioSocketStatus}
               catStatus={catStatus}
+              radioControlLocation={radio?.control_location}
               messageLabels={messageLabels}
               messageSentEvent={messageSentEvent}
               wsjtxTarget={wsjtxTarget}

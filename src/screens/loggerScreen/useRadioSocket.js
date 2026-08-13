@@ -20,6 +20,7 @@ export function useRadioSocket({
   numericLogId,
   loggerId,
   radioWebsocketUrl,
+  isClientRadio,
   notifyOperationalError,
   onWsjtXLoggedAdif,
 }) {
@@ -339,6 +340,14 @@ export function useRadioSocket({
       });
 
       socket.addEventListener('error', () => {
+        if (isClientRadio && radioSocketRef.current === socket) {
+          notifyOperationalError(
+            'clientRadioSocketConnect',
+            'Radio Client is not running on this computer or this is another operator’s client-side radio.',
+            null,
+            { logId: numericLogId, radioId: numericRadioId },
+          );
+        }
         if (radioSocketRef.current === socket) socket.close();
       });
     }
@@ -385,6 +394,7 @@ export function useRadioSocket({
     loggerId,
     numericLogId,
     numericRadioId,
+    isClientRadio,
     notifyOperationalError,
     radioWebsocketUrl,
   ]);
