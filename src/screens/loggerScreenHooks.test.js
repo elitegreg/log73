@@ -20,7 +20,11 @@ import {
   mergeResetCommittedPage,
   nextContactToCommit,
 } from './loggerScreen/contactsOutboxState.js';
-import { radioSocketUrl } from './loggerScreen/radioSocketController.js';
+import {
+  radioSocketUrl,
+  wsjtxReceiptMessage,
+  wsjtxTargetUpdate,
+} from './loggerScreen/radioSocketController.js';
 import {
   currentSerialForBand,
   mergeSerialStates,
@@ -203,6 +207,41 @@ test('radio socket URL preserves radio identity and adds logger identity only', 
     ),
     'ws://127.0.0.1:49152/radiows?logger_id=registered&log_id=9',
   );
+});
+
+test('WSJT-X target reconnect logic preserves explicit target intent', () => {
+  assert.deepEqual(
+    wsjtxTargetUpdate(
+      { type: 'wsjtx_target', logger_id: 'logger-1', log_id: 7 },
+      { loggerId: 'logger-1', logId: 7, targetIntent: true },
+    ),
+    { isTarget: true, reclaimTarget: false },
+  );
+  assert.deepEqual(
+    wsjtxTargetUpdate(
+      { type: 'wsjtx_target', logger_id: '', log_id: null },
+      { loggerId: 'logger-1', logId: 7, targetIntent: true },
+    ),
+    { isTarget: false, reclaimTarget: true },
+  );
+  assert.deepEqual(
+    wsjtxTargetUpdate(
+      { type: 'wsjtx_target', logger_id: 'another', log_id: 7 },
+      { loggerId: 'logger-1', logId: 7, targetIntent: true },
+    ),
+    { isTarget: false, reclaimTarget: false },
+  );
+});
+
+test('WSJT-X receipt acknowledges only an accepted event for this log', () => {
+  const event = { type: 'wsjtx_logged_adif', event_id: 'event-1', log_id: 7 };
+  assert.deepEqual(wsjtxReceiptMessage(event, 7, true), {
+    type: 'wsjtx_event_received',
+    event_id: 'event-1',
+  });
+  assert.equal(wsjtxReceiptMessage(event, 7, false), null);
+  assert.equal(wsjtxReceiptMessage({ ...event, log_id: 8 }, 7, true), null);
+  assert.equal(wsjtxReceiptMessage({ ...event, event_id: '' }, 7, true), null);
 });
 
 test('band map sequence helpers apply live updates and detect gaps', () => {

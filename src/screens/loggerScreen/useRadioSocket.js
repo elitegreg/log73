@@ -7,7 +7,11 @@ import {
   BACKEND_WS_PING_TIMEOUT_MS,
   DEFAULT_RADIO_STATE,
 } from '../loggerScreenHelpers.js';
-import { radioSocketUrl } from './radioSocketController.js';
+import {
+  radioSocketUrl,
+  wsjtxReceiptMessage,
+  wsjtxTargetUpdate,
+} from './radioSocketController.js';
 
 const RADIO_WS_CONNECT_TIMEOUT_MS = 5000;
 
@@ -262,13 +266,15 @@ export function useRadioSocket({
               sequence: Date.now(),
             });
           } else if (message.type === 'wsjtx_target') {
-            const isThisLogger =
-              message.logger_id === loggerId &&
-              Number(message.log_id) === numericLogId;
-            setWsjtXTargetState(isThisLogger);
+            const targetUpdate = wsjtxTargetUpdate(message, {
+              loggerId,
+              logId: numericLogId,
+              targetIntent: wsjtxTargetIntentRef.current,
+            });
+            setWsjtXTargetState(targetUpdate.isTarget);
             if (message.logger_id) {
-              wsjtxTargetIntentRef.current = isThisLogger;
-            } else if (wsjtxTargetIntentRef.current) {
+              wsjtxTargetIntentRef.current = targetUpdate.isTarget;
+            } else if (targetUpdate.reclaimTarget) {
               socket.send(
                 JSON.stringify({ type: 'set_wsjtx_target', enabled: true }),
               );
@@ -287,14 +293,12 @@ export function useRadioSocket({
               );
             } else {
               const accepted = onWsjtXLoggedAdifRef.current?.(message);
-              if (accepted !== false) {
-                socket.send(
-                  JSON.stringify({
-                    type: 'wsjtx_event_received',
-                    event_id: message.event_id,
-                  }),
-                );
-              }
+              const receipt = wsjtxReceiptMessage(
+                message,
+                numericLogId,
+                accepted,
+              );
+              if (receipt) socket.send(JSON.stringify(receipt));
             }
           } else if (message.type === 'wsjtx_error') {
             notifyOperationalError(
