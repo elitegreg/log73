@@ -5,6 +5,12 @@ edition = "2024"
 repository = "https://github.com/elitegreg/log73"
 authors = ["Greg Mitchell <greg@ng4m.dev>"]
 
+[package.metadata.wix]
+upgrade-guid = "7A2E8C2D-1F5A-4B6E-9C43-8F9D0E4A7B21"
+path-guid = "D6F4A3B1-9E72-4C85-B0AD-2C6E1F8A9347"
+license = false
+eula = false
+
 [[bin]]
 name = "log73-radio-client"
 path = "src/main.rs"

@@ -3,7 +3,7 @@ VERSION ?= $(shell awk -F '"' '/^version =/ { print $$2; exit }' backend/Cargo.t
 DIST ?= $(shell command -v dist 2>/dev/null || printf '%s' "$$HOME/.cargo/bin/dist")
 NFPM ?= $(shell command -v nfpm 2>/dev/null || { command -v go >/dev/null 2>&1 && printf '%s' "$$(go env GOPATH)/bin/nfpm"; } || printf '%s' nfpm)
 
-.PHONY: all release deb help \
+.PHONY: all release deb package-smoke help \
 	backend launcher frontend \
 	radio-client \
 	backend-build backend-release backend-test backend-fmt backend-lint \
@@ -25,6 +25,19 @@ deb:
 	pnpm run build:production
 	"$(DIST)" build --artifacts=local --target="$(DEB_TARGET)" --allow-dirty
 	NFPM="$(NFPM)" scripts/build_native_linux_packages.sh "$(DEB_TARGET)" "$(VERSION)"
+
+package-smoke:
+	@tmp_dir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$tmp_dir"' EXIT; \
+	install -d "$$tmp_dir/opt/log73/bin" "$$tmp_dir/usr/share/applications" "$$tmp_dir/usr/share/icons/hicolor/512x512/apps"; \
+	install -m 0755 target/debug/log73-backend "$$tmp_dir/opt/log73/bin/log73-backend"; \
+	install -m 0755 target/debug/log73-launcher "$$tmp_dir/opt/log73/bin/log73-launcher"; \
+	install -m 0755 target/debug/log73-radio-client "$$tmp_dir/opt/log73/bin/log73-radio-client"; \
+	install -m 0644 static/log73-icon-512.png "$$tmp_dir/usr/share/icons/hicolor/512x512/apps/log73.png"; \
+	install -m 0644 static/log73-icon-512.png "$$tmp_dir/usr/share/icons/hicolor/512x512/apps/log73-radio-client.png"; \
+	printf '%s\n' '[Desktop Entry]' 'Name=Log73' 'Exec=/opt/log73/bin/log73-launcher' > "$$tmp_dir/usr/share/applications/log73.desktop"; \
+	printf '%s\n' '[Desktop Entry]' 'Name=Log73 Radio Client' 'Exec=/opt/log73/bin/log73-radio-client' > "$$tmp_dir/usr/share/applications/log73-radio-client.desktop"; \
+	scripts/check_native_package_contents.sh "$$tmp_dir"
 
 help:
 	mkdir -p docs/help
