@@ -16,7 +16,6 @@ mod static_assets;
 mod stats;
 mod supercheckpartial;
 mod validation;
-mod wsjtx;
 
 use axum::{
     Json, Router,
@@ -65,13 +64,11 @@ use tower_http::trace::TraceLayer;
 use tracing::{Span, debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use uuid::Uuid;
-use wsjtx::{WsjtXManager, WsjtXTargetState};
 
 #[derive(Clone)]
 struct AppState {
     radio_io: RadioWebSocketState,
     client_radios: ClientRadioRegistry,
-    wsjtx_manager: WsjtXManager,
     log_events: broadcast::Sender<ServerMessage>,
     db: Database,
     auth_config: std::sync::Arc<RwLock<AuthConfig>>,
@@ -489,19 +486,9 @@ async fn main() {
     log_cache.register_processor(std::sync::Arc::new(bandmap.clone()));
     log_cache.register_processor(std::sync::Arc::new(supercheckpartial.clone()));
 
-    let wsjtx_manager = WsjtXManager::new(
-        db.clone(),
-        contest_rules.clone(),
-        band_catalog.clone(),
-        log_cache.clone(),
-        incremental_scoring.clone(),
-        log_events.clone(),
-    );
-
     let app_state = AppState {
         radio_io: radio_io.clone(),
         client_radios: ClientRadioRegistry::default(),
-        wsjtx_manager,
         log_events,
         db,
         auth_config,
@@ -690,23 +677,19 @@ async fn ws_handler(
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
     let session_id = params.get("session_id").cloned().unwrap_or_default();
-    let logger_id = params.get("logger_id").cloned().unwrap_or_default();
     let radio_id = params
         .get("radio_id")
         .and_then(|value| value.parse::<i64>().ok());
     let log_id = params
         .get("log_id")
         .and_then(|value| value.parse::<i64>().ok());
-    ws.on_upgrade(move |socket| {
-        handle_socket(socket, app_state, session_id, logger_id, radio_id, log_id)
-    })
+    ws.on_upgrade(move |socket| handle_socket(socket, app_state, session_id, radio_id, log_id))
 }
 
 async fn handle_socket(
     socket: WebSocket,
     app_state: AppState,
     session_id: String,
-    logger_id: String,
     radio_id: Option<i64>,
     log_id: Option<i64>,
 ) {
@@ -718,61 +701,10 @@ async fn handle_socket(
         warn!(session_id, radio_id, "backend websocket missing log_id");
         return;
     };
-    if logger_id.is_empty() {
-        warn!(
-            session_id,
-            radio_id, log_id, "backend websocket missing logger_id"
-        );
-        return;
-    }
-
-    let acquired = match app_state.radio_io.acquire(radio_id).await {
-        Ok(acquired) => acquired,
-        Err(error) => {
-            warn!(session_id, radio_id, log_id, %error, "backend websocket could not acquire radio");
-            return;
-        }
-    };
-    let config = acquired.config;
-    let radio_handle = acquired.handle;
     let mut log_events = app_state.log_events.subscribe();
-    let mut wsjtx_target_updates = app_state.wsjtx_manager.subscribe_targets();
-    let wsjtx_target = match app_state
-        .wsjtx_manager
-        .acquire(
-            radio_id,
-            &logger_id,
-            log_id,
-            config,
-            radio_handle.current_state().await,
-            radio_handle.subscribe(),
-        )
-        .await
-    {
-        Ok(target) => target,
-        Err(error) => {
-            warn!(session_id, logger_id, radio_id, log_id, %error, "unable to register logger for WSJT-X");
-            app_state.radio_io.release(radio_id).await;
-            return;
-        }
-    };
 
     info!(session_id, radio_id, "backend websocket connected");
     let (mut sender, mut receiver) = socket.split();
-
-    if sender
-        .send(Message::Text(
-            serde_json::to_string(&wsjtx_target_message(&wsjtx_target))
-                .expect("WSJT-X target should serialize")
-                .into(),
-        ))
-        .await
-        .is_err()
-    {
-        app_state.wsjtx_manager.release(radio_id, &logger_id).await;
-        app_state.radio_io.release(radio_id).await;
-        return;
-    }
 
     if let Some(totals) = app_state.incremental_scoring.totals(log_id) {
         let score_update = score_update_message(log_id, &totals);
@@ -785,8 +717,6 @@ async fn handle_socket(
             .await
             .is_err()
         {
-            app_state.wsjtx_manager.release(radio_id, &logger_id).await;
-            app_state.radio_io.release(radio_id).await;
             return;
         }
     }
@@ -799,13 +729,8 @@ async fn handle_socket(
     let outbound = tokio::spawn(async move {
         loop {
             let message = tokio::select! {
-                target = wsjtx_target_updates.recv() => match target {
-                    Ok(target) if target.radio_id == radio_id => serde_json::to_string(&wsjtx_target_message(&target)).expect("WSJT-X target should serialize"),
-                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                },
                 event = log_events.recv() => match event {
-                    Ok(event) => match websocket_log_event_for_client(event, outbound_session_id.as_str(), outbound_log_id, radio_id) {
+                    Ok(event) => match websocket_log_event_for_client(event, outbound_session_id.as_str(), outbound_log_id) {
                         Some(event) => serde_json::to_string(&event).expect("log event should serialize"),
                         None => continue,
                     },
@@ -911,23 +836,6 @@ async fn handle_socket(
                     warn!(session_id, radio_id, frequency_hz, call = %normalized_call, %error, "failed to send DX Cluster spot");
                 }
             }
-            Ok(ClientMessage::SetWsjtXTarget { enabled }) => {
-                debug!(
-                    session_id,
-                    logger_id,
-                    radio_id,
-                    log_id,
-                    enabled,
-                    "websocket set_wsjtx_target command received"
-                );
-                if let Err(error) = app_state
-                    .wsjtx_manager
-                    .set_target(radio_id, &logger_id, enabled)
-                    .await
-                {
-                    warn!(session_id, logger_id, radio_id, log_id, enabled, %error, "unable to update WSJT-X target");
-                }
-            }
             Err(error) => warn!(session_id, radio_id, %error, "invalid websocket message"),
         }
     }
@@ -936,17 +844,7 @@ async fn handle_socket(
         subscription.abort();
     }
     outbound.abort();
-    app_state.wsjtx_manager.release(radio_id, &logger_id).await;
-    app_state.radio_io.release(radio_id).await;
     info!(session_id, radio_id, "backend websocket disconnected");
-}
-
-fn wsjtx_target_message(state: &WsjtXTargetState) -> ServerMessage {
-    ServerMessage::WsjtXTarget {
-        radio_id: state.radio_id,
-        logger_id: state.logger_id.clone(),
-        log_id: state.log_id,
-    }
 }
 
 fn spawn_bandmap_websocket_subscription(
@@ -2760,7 +2658,6 @@ fn websocket_log_event_for_client(
     event: ServerMessage,
     outbound_session_id: &str,
     outbound_log_id: Option<i64>,
-    outbound_radio_id: i64,
 ) -> Option<ServerMessage> {
     let outbound_log_id = outbound_log_id?;
     match event {
@@ -2793,17 +2690,6 @@ fn websocket_log_event_for_client(
         }),
         ServerMessage::SupercheckpartialUpdate { callsigns } => {
             Some(ServerMessage::SupercheckpartialUpdate { callsigns })
-        }
-        ServerMessage::WsjtXError {
-            radio_id,
-            log_id,
-            message,
-        } if radio_id == outbound_radio_id && log_id == outbound_log_id => {
-            Some(ServerMessage::WsjtXError {
-                radio_id,
-                log_id,
-                message,
-            })
         }
         _ => None,
     }
@@ -3136,10 +3022,8 @@ mod tests {
             contact: committed_contact(1, "origin-session"),
         };
 
-        assert!(
-            websocket_log_event_for_client(event.clone(), "other-session", Some(1), 1).is_some()
-        );
-        assert!(websocket_log_event_for_client(event, "other-session", Some(2), 1).is_none());
+        assert!(websocket_log_event_for_client(event.clone(), "other-session", Some(1)).is_some());
+        assert!(websocket_log_event_for_client(event, "other-session", Some(2)).is_none());
     }
 
     #[test]
@@ -3148,14 +3032,14 @@ mod tests {
             contact: committed_contact(1, "origin-session"),
         };
 
-        assert!(websocket_log_event_for_client(event, "origin-session", Some(1), 1).is_none());
+        assert!(websocket_log_event_for_client(event, "origin-session", Some(1)).is_none());
     }
 
     #[test]
     fn websocket_contact_deleted_and_score_updates_are_log_scoped() {
         let deleted = ServerMessage::ContactDeleted { id: 55, log_id: 7 };
-        assert!(websocket_log_event_for_client(deleted.clone(), "session", Some(7), 1).is_some());
-        assert!(websocket_log_event_for_client(deleted, "session", Some(8), 1).is_none());
+        assert!(websocket_log_event_for_client(deleted.clone(), "session", Some(7)).is_some());
+        assert!(websocket_log_event_for_client(deleted, "session", Some(8)).is_none());
 
         let score = ServerMessage::ScoreUpdate {
             log_id: 7,
@@ -3164,8 +3048,8 @@ mod tests {
             bonus_points: 5,
             total_score: 35,
         };
-        assert!(websocket_log_event_for_client(score.clone(), "session", Some(7), 1).is_some());
-        assert!(websocket_log_event_for_client(score, "session", Some(8), 1).is_none());
+        assert!(websocket_log_event_for_client(score.clone(), "session", Some(7)).is_some());
+        assert!(websocket_log_event_for_client(score, "session", Some(8)).is_none());
     }
 
     #[test]
@@ -3174,22 +3058,9 @@ mod tests {
             callsigns: vec!["K1ABC".to_string()],
         };
 
-        assert!(websocket_log_event_for_client(update.clone(), "session-a", Some(7), 1).is_some());
-        assert!(websocket_log_event_for_client(update.clone(), "session-a", Some(8), 1).is_some());
-        assert!(websocket_log_event_for_client(update, "session-a", None, 1).is_none());
-    }
-
-    #[test]
-    fn websocket_wsjtx_errors_are_scoped_to_radio_and_log() {
-        let event = ServerMessage::WsjtXError {
-            radio_id: 2,
-            log_id: 7,
-            message: "bind failed".to_string(),
-        };
-
-        assert!(websocket_log_event_for_client(event.clone(), "session", Some(7), 2).is_some());
-        assert!(websocket_log_event_for_client(event.clone(), "session", Some(8), 2).is_none());
-        assert!(websocket_log_event_for_client(event, "session", Some(7), 3).is_none());
+        assert!(websocket_log_event_for_client(update.clone(), "session-a", Some(7)).is_some());
+        assert!(websocket_log_event_for_client(update.clone(), "session-a", Some(8)).is_some());
+        assert!(websocket_log_event_for_client(update, "session-a", None).is_none());
     }
 
     #[test]

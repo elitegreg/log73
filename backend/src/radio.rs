@@ -26,16 +26,6 @@ pub enum ServerMessage {
         bonus_points: i64,
         total_score: i64,
     },
-    WsjtXError {
-        radio_id: i64,
-        log_id: i64,
-        message: String,
-    },
-    WsjtXTarget {
-        radio_id: i64,
-        logger_id: Option<String>,
-        log_id: Option<i64>,
-    },
     #[serde(rename = "dxcluster_spot")]
     DxClusterSpot {
         spot: Box<DxClusterSpot>,
@@ -73,9 +63,6 @@ pub enum ClientMessage {
         frequency_hz: u64,
         call: String,
         comment: String,
-    },
-    SetWsjtXTarget {
-        enabled: bool,
     },
     #[serde(rename = "set_dxcluster_enabled")]
     SetDxClusterEnabled {
@@ -235,41 +222,6 @@ mod tests {
     }
 
     #[test]
-    fn serializes_wsjtx_errors_and_target_state() {
-        let wsjtx = serde_json::to_value(ServerMessage::WsjtXError {
-            radio_id: 2,
-            log_id: 7,
-            message: "bind failed".to_string(),
-        })
-        .expect("WSJT-X error should serialize");
-        assert_eq!(
-            wsjtx,
-            serde_json::json!({
-                "type": "wsjt_x_error",
-                "radio_id": 2,
-                "log_id": 7,
-                "message": "bind failed"
-            })
-        );
-
-        let target = serde_json::to_value(ServerMessage::WsjtXTarget {
-            radio_id: 2,
-            logger_id: Some("logger-1".to_string()),
-            log_id: Some(7),
-        })
-        .expect("WSJT-X target should serialize");
-        assert_eq!(
-            target,
-            serde_json::json!({
-                "type": "wsjt_x_target",
-                "radio_id": 2,
-                "logger_id": "logger-1",
-                "log_id": 7
-            })
-        );
-    }
-
-    #[test]
     fn deserializes_ping_client_message() {
         let message: ClientMessage = serde_json::from_value(serde_json::json!({
             "type": "ping",
@@ -280,20 +232,6 @@ mod tests {
         match message {
             ClientMessage::Ping { request_id } => assert_eq!(request_id, "ping-123"),
             other => panic!("unexpected client message: {other:?}"),
-        }
-    }
-
-    #[test]
-    fn deserializes_wsjtx_target_client_message() {
-        let message: ClientMessage = serde_json::from_value(serde_json::json!({
-            "type": "set_wsjt_x_target",
-            "enabled": true
-        }))
-        .expect("WSJT-X target message should deserialize");
-
-        match message {
-            ClientMessage::SetWsjtXTarget { enabled } => assert!(enabled),
-            other => panic!("unexpected message: {other:?}"),
         }
     }
 

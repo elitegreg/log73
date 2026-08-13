@@ -675,9 +675,9 @@ Regenerate `docs/help/*.html` through the existing `make help` flow when impleme
 - Client rows cannot be web-edited or deleted while online.
 - Backend radio CRUD behavior remains unchanged.
 - Duplicate WSJT-X ports are rejected for two backend radios but allowed across client radios.
-- WSJT-X event ingestion validates, enriches, scores, broadcasts, and returns a committed contact.
-- Retrying the same event ID returns one QSO and one scoring effect.
-- Malformed/oversized ADIF and event IDs fail safely.
+- The backend radio WebSocket host delivers WSJT-X events only to the selected logger; normal QSO submission then validates, enriches, scores, and broadcasts the contact.
+- The existing contact outbox handles the accepted lost-success-response duplication tradeoff.
+- The backend logger WebSocket does not ingest or route WSJT-X events.
 - Existing backend WebSocket no longer depends on acquiring a radio.
 
 ### Frontend tests
