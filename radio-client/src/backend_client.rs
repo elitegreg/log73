@@ -356,6 +356,12 @@ fn classify(status: StatusCode) -> Result<(), RequestFailure> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        Router,
+        http::StatusCode,
+        routing::{post, put},
+    };
+    use tokio::sync::oneshot;
 
     #[test]
     fn endpoint_uses_api_path_without_embedded_credentials() {
@@ -390,5 +396,63 @@ mod tests {
             next_retry_delay(Duration::from_secs(30)),
             Duration::from_secs(30)
         );
+    }
+
+    #[test]
+    fn local_http_fixture_round_trips_registration_heartbeat_and_offline() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let app = Router::new()
+                .route(
+                    "/api/radio-clients/{client_id}",
+                    put(|| async {
+                        axum::Json(serde_json::json!({
+                            "radio_id": 17,
+                            "lease_id": Uuid::new_v4().to_string(),
+                            "heartbeat_interval_seconds": 15,
+                            "lease_timeout_seconds": 45
+                        }))
+                    }),
+                )
+                .route(
+                    "/api/radio-clients/{client_id}/heartbeat",
+                    post(|| async { StatusCode::OK }),
+                )
+                .route(
+                    "/api/radio-clients/{client_id}/offline",
+                    post(|| async { StatusCode::OK }),
+                );
+            let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
+                Ok(listener) => listener,
+                Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => return,
+                Err(error) => panic!("local HTTP fixture binds: {error}"),
+            };
+            let address = listener.local_addr().unwrap();
+            let (shutdown, shutdown_rx) = oneshot::channel();
+            let server = tokio::spawn(async move {
+                axum::serve(listener, app)
+                    .with_graceful_shutdown(async move {
+                        let _ = shutdown_rx.await;
+                    })
+                    .await
+                    .unwrap();
+            });
+
+            let mut settings = RadioClientSettings::default();
+            settings.backend.base_url = format!("http://{address}");
+            let client = Client::new();
+            let lease = register(&client, &settings, "ws://127.0.0.1:49152/radiows")
+                .await
+                .unwrap();
+            assert_eq!(lease.radio_id, 17);
+            heartbeat(&client, &settings, &lease).await.unwrap();
+            offline(&client, &settings, &lease).await.unwrap();
+
+            let _ = shutdown.send(());
+            server.await.unwrap();
+        });
     }
 }

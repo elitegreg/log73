@@ -3,7 +3,7 @@ VERSION ?= $(shell awk -F '"' '/^version =/ { print $$2; exit }' backend/Cargo.t
 DIST ?= $(shell command -v dist 2>/dev/null || printf '%s' "$$HOME/.cargo/bin/dist")
 NFPM ?= $(shell command -v nfpm 2>/dev/null || { command -v go >/dev/null 2>&1 && printf '%s' "$$(go env GOPATH)/bin/nfpm"; } || printf '%s' nfpm)
 
-.PHONY: all release deb package-smoke help \
+.PHONY: all release deb package-smoke verify-radio-client help \
 	backend launcher frontend \
 	radio-client \
 	backend-build backend-release backend-test backend-fmt backend-lint \
@@ -38,6 +38,9 @@ package-smoke:
 	printf '%s\n' '[Desktop Entry]' 'Name=Log73' 'Exec=/opt/log73/bin/log73-launcher' > "$$tmp_dir/usr/share/applications/log73.desktop"; \
 	printf '%s\n' '[Desktop Entry]' 'Name=Log73 Radio Client' 'Exec=/opt/log73/bin/log73-radio-client' > "$$tmp_dir/usr/share/applications/log73-radio-client.desktop"; \
 	scripts/check_native_package_contents.sh "$$tmp_dir"
+
+verify-radio-client:
+	scripts/verify_radio_client.sh
 
 help:
 	mkdir -p docs/help
