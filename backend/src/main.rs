@@ -3,6 +3,7 @@ mod auth;
 mod bandmap;
 mod bands;
 mod cabrillo;
+mod client_radios;
 mod contest_rules;
 mod db;
 mod dxcc;
@@ -27,10 +28,11 @@ use axum::{
     http::{HeaderMap, HeaderValue, Request, StatusCode, header},
     middleware,
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use bandmap::{BandMapEvent, BandMapManager, CqSpotInput, InUseSpotInput, LocalSpotInput};
 use clap::Parser;
+use client_radios::{ClientRadioRegistry, HEARTBEAT_INTERVAL, LEASE_TIMEOUT};
 use contest_rules::{
     ContestRules, ContestRulesStore, ExchangeDirection, ExchangeField, FieldInputKind, SerialScope,
 };
@@ -62,11 +64,13 @@ use tokio::sync::{RwLock, broadcast, mpsc};
 use tower_http::trace::TraceLayer;
 use tracing::{Span, debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
+use uuid::Uuid;
 use wsjtx::{WsjtXManager, WsjtXTargetState};
 
 #[derive(Clone)]
 struct AppState {
     radio_io: RadioWebSocketState,
+    client_radios: ClientRadioRegistry,
     wsjtx_manager: WsjtXManager,
     log_events: broadcast::Sender<ServerMessage>,
     db: Database,
@@ -246,6 +250,7 @@ struct ErrorBody {
     code: Option<&'static str>,
 }
 
+#[derive(Debug)]
 struct ApiError {
     status: StatusCode,
     body: ErrorBody,
@@ -272,6 +277,10 @@ impl ApiError {
 
     fn internal(error: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, error)
+    }
+
+    fn conflict(error: impl Into<String>) -> Self {
+        Self::new(StatusCode::CONFLICT, error)
     }
 }
 
@@ -491,6 +500,7 @@ async fn main() {
 
     let app_state = AppState {
         radio_io: radio_io.clone(),
+        client_radios: ClientRadioRegistry::default(),
         wsjtx_manager,
         log_events,
         db,
@@ -510,6 +520,7 @@ async fn main() {
         voice_keyer,
     };
     spawn_dxcluster_bandmap_bridge(app_state.dxcluster.clone(), app_state.bandmap.clone());
+    spawn_client_radio_expiration_task(app_state.client_radios.clone());
 
     let request_trace_layer = TraceLayer::new_for_http()
         .make_span_with(|request: &Request<axum::body::Body>| {
@@ -580,6 +591,18 @@ async fn main() {
         .route("/radio-kinds", get(radio_kinds))
         .route("/serial-ports", get(serial_ports))
         .route("/radios", get(radios).post(create_radio))
+        .route(
+            "/radio-clients/{client_instance_id}",
+            put(register_client_radio),
+        )
+        .route(
+            "/radio-clients/{client_instance_id}/heartbeat",
+            post(client_radio_heartbeat),
+        )
+        .route(
+            "/radio-clients/{client_instance_id}/offline",
+            post(client_radio_offline),
+        )
         .route("/radios/cw-messages/default", get(default_cw_messages))
         .route("/radios/cw-messages/validate", post(validate_cw_messages))
         .route(
@@ -647,6 +670,18 @@ async fn shutdown_signal() {
             .expect("failed to listen for shutdown signal");
         info!("received shutdown signal; starting graceful shutdown");
     }
+}
+
+fn spawn_client_radio_expiration_task(registry: ClientRadioRegistry) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            for radio_id in registry.expire().await {
+                info!(radio_id, "client radio lease expired; radio is offline");
+            }
+        }
+    });
 }
 
 async fn ws_handler(
@@ -1838,21 +1873,148 @@ async fn output_audio_devices(
         .map_err(ApiError::internal)
 }
 
+#[derive(Debug, serde::Deserialize)]
+struct RegisterClientRadioRequest {
+    radio_ws_url: String,
+    config: RadioPayload,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ClientRadioLeaseRequest {
+    radio_id: i64,
+    lease_id: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ClientRadioRegistration {
+    radio_id: i64,
+    lease_id: String,
+    heartbeat_interval_seconds: u64,
+    lease_timeout_seconds: u64,
+}
+
+async fn register_client_radio(
+    State(app_state): State<AppState>,
+    Path(client_instance_id): Path<String>,
+    Json(mut payload): Json<RegisterClientRadioRequest>,
+) -> ApiResult<ClientRadioRegistration> {
+    let client_instance_id = validate_client_instance_id(&client_instance_id)?;
+    validate_client_radio_ws_url(&payload.radio_ws_url)?;
+    radio_io::normalize_radio_settings(&mut payload.config).map_err(ApiError::bad_request)?;
+    radio_io::validate_radio_settings(&payload.config).map_err(ApiError::bad_request)?;
+
+    let record = app_state
+        .db
+        .upsert_client_radio(
+            client_instance_id.clone(),
+            payload.radio_ws_url.trim().to_string(),
+            payload.config,
+        )
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let lease_id = app_state
+        .client_radios
+        .register(record.id, client_instance_id)
+        .await;
+    info!(radio_id = record.id, "client radio registered");
+    Ok(Json(ClientRadioRegistration {
+        radio_id: record.id,
+        lease_id,
+        heartbeat_interval_seconds: HEARTBEAT_INTERVAL.as_secs(),
+        lease_timeout_seconds: LEASE_TIMEOUT.as_secs(),
+    }))
+}
+
+async fn client_radio_heartbeat(
+    State(app_state): State<AppState>,
+    Path(client_instance_id): Path<String>,
+    Json(payload): Json<ClientRadioLeaseRequest>,
+) -> ApiResult<serde_json::Value> {
+    let client_instance_id = validate_client_instance_id(&client_instance_id)?;
+    validate_client_radio_lease_request(&payload)?;
+    app_state
+        .client_radios
+        .heartbeat(payload.radio_id, &client_instance_id, &payload.lease_id)
+        .await
+        .map_err(|_| ApiError::conflict("client radio lease is stale or has been replaced"))?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn client_radio_offline(
+    State(app_state): State<AppState>,
+    Path(client_instance_id): Path<String>,
+    Json(payload): Json<ClientRadioLeaseRequest>,
+) -> ApiResult<serde_json::Value> {
+    let client_instance_id = validate_client_instance_id(&client_instance_id)?;
+    validate_client_radio_lease_request(&payload)?;
+    app_state
+        .client_radios
+        .offline(payload.radio_id, &client_instance_id, &payload.lease_id)
+        .await
+        .map_err(|_| ApiError::conflict("client radio lease is stale or has been replaced"))?;
+    info!(radio_id = payload.radio_id, "client radio marked offline");
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+fn validate_client_instance_id(value: &str) -> Result<String, ApiError> {
+    Uuid::parse_str(value)
+        .map(|id| id.to_string())
+        .map_err(|_| ApiError::bad_request("client instance ID must be a UUID"))
+}
+
+fn validate_client_radio_lease_request(payload: &ClientRadioLeaseRequest) -> Result<(), ApiError> {
+    if payload.radio_id <= 0 {
+        return Err(ApiError::bad_request("radio ID must be positive"));
+    }
+    Uuid::parse_str(&payload.lease_id)
+        .map(|_| ())
+        .map_err(|_| ApiError::bad_request("lease ID must be a UUID"))
+}
+
+fn validate_client_radio_ws_url(value: &str) -> Result<(), ApiError> {
+    let url = url::Url::parse(value.trim())
+        .map_err(|_| ApiError::bad_request("radio WebSocket URL must be a valid URL"))?;
+    if url.scheme() != "ws"
+        || url.host_str() != Some("127.0.0.1")
+        || url.port().is_none()
+        || url.path() != "/radiows"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(ApiError::bad_request(
+            "radio WebSocket URL must be ws://127.0.0.1:<port>/radiows",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, serde::Serialize)]
 struct RadioView {
     #[serde(flatten)]
     config: db::RadioConfig,
-    radio_ws_url: String,
+    control_location: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_online: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    radio_ws_url: Option<String>,
 }
 
-impl From<db::RadioRecord> for RadioView {
-    fn from(record: db::RadioRecord) -> Self {
+impl RadioView {
+    fn from_record(record: db::RadioRecord, client_online: Option<bool>) -> Self {
         let radio_id = record.id;
-        let radio_ws_url = record
-            .radio_ws_url
-            .unwrap_or_else(|| radio_websocket_url(radio_id));
+        let is_client = record.control_location == db::RadioControlLocation::Client;
+        let radio_ws_url = if is_client {
+            client_online
+                .and_then(|online| online.then_some(record.radio_ws_url))
+                .flatten()
+        } else {
+            Some(radio_websocket_url(radio_id))
+        };
         Self {
             config: record.config,
+            control_location: if is_client { "client" } else { "backend" },
+            client_online: is_client.then_some(client_online.unwrap_or(false)),
             radio_ws_url,
         }
     }
@@ -1865,10 +2027,17 @@ fn radio_websocket_url(radio_id: i64) -> String {
 async fn radios(State(app_state): State<AppState>) -> ApiResult<Vec<RadioView>> {
     match app_state.db.radios().await {
         Ok(mut radios) => {
+            let mut views = Vec::with_capacity(radios.len());
             for radio in &mut radios {
                 app_state.voice_keyer.sanitize_radio_config(radio);
+                let client_online = if radio.control_location == db::RadioControlLocation::Client {
+                    Some(app_state.client_radios.is_online(radio.id).await)
+                } else {
+                    None
+                };
+                views.push(RadioView::from_record(radio.clone(), client_online));
             }
-            Ok(Json(radios.into_iter().map(RadioView::from).collect()))
+            Ok(Json(views))
         }
         Err(error) => {
             error!(%error, "failed to load radios");
@@ -1940,7 +2109,12 @@ async fn radio(State(app_state): State<AppState>, Path(id): Path<i64>) -> ApiRes
     match app_state.db.radio(id).await {
         Ok(Some(mut radio)) => {
             app_state.voice_keyer.sanitize_radio_config(&mut radio);
-            Ok(Json(RadioView::from(radio)))
+            let client_online = if radio.control_location == db::RadioControlLocation::Client {
+                Some(app_state.client_radios.is_online(radio.id).await)
+            } else {
+                None
+            };
+            Ok(Json(RadioView::from_record(radio, client_online)))
         }
         Ok(None) => Err(ApiError::not_found("not found")),
         Err(error) => Err(ApiError::internal(error.to_string())),
@@ -2048,7 +2222,7 @@ async fn create_radio(
             app_state
                 .voice_keyer
                 .sanitize_radio_config(&mut record.config);
-            Json(serde_json::json!({ "ok": true, "radio": RadioView::from(record) }))
+            Json(serde_json::json!({ "ok": true, "radio": RadioView::from_record(record, None) }))
         }
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -2096,7 +2270,7 @@ async fn update_radio(
             app_state
                 .voice_keyer
                 .sanitize_radio_config(&mut record.config);
-            Json(serde_json::json!({ "ok": true, "radio": RadioView::from(record) }))
+            Json(serde_json::json!({ "ok": true, "radio": RadioView::from_record(record, None) }))
         }
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
@@ -3064,6 +3238,46 @@ mod tests {
     #[test]
     fn radio_view_uses_radio_specific_websocket_uri() {
         assert_eq!(radio_websocket_url(3), "/radiows?radio_id=3");
+    }
+
+    #[test]
+    fn client_radio_registration_requires_a_loopback_websocket_url() {
+        assert!(validate_client_radio_ws_url("ws://127.0.0.1:49152/radiows").is_ok());
+        assert!(validate_client_radio_ws_url("ws://127.0.0.1:49152/radiows?logger_id=one").is_ok());
+
+        for value in [
+            "wss://127.0.0.1:49152/radiows",
+            "ws://localhost:49152/radiows",
+            "ws://127.0.0.1/radiows",
+            "ws://127.0.0.1:49152/other",
+            "ws://user:password@127.0.0.1:49152/radiows",
+        ] {
+            let error = validate_client_radio_ws_url(value).expect_err("URL should be rejected");
+            assert_eq!(error.status, StatusCode::BAD_REQUEST, "{value}");
+        }
+    }
+
+    #[test]
+    fn client_radio_identifiers_must_be_uuids() {
+        assert_eq!(
+            validate_client_instance_id("B55168F4-5D76-4EED-A17F-67B42167AC42").unwrap(),
+            "b55168f4-5d76-4eed-a17f-67b42167ac42"
+        );
+        assert_eq!(
+            validate_client_instance_id("not-a-uuid")
+                .unwrap_err()
+                .status,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            validate_client_radio_lease_request(&ClientRadioLeaseRequest {
+                radio_id: 0,
+                lease_id: Uuid::new_v4().to_string(),
+            })
+            .unwrap_err()
+            .status,
+            StatusCode::BAD_REQUEST
+        );
     }
 
     #[test]
