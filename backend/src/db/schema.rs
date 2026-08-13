@@ -51,7 +51,18 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
             CW_SERIAL_BAUD_RATE INTEGER NOT NULL DEFAULT 9600 CHECK (CW_SERIAL_BAUD_RATE > 0),
             CW_SERIAL_LINE TEXT NOT NULL DEFAULT 'dtr',
             CW_MESSAGES TEXT NOT NULL,
-            VOICE_MESSAGES TEXT NOT NULL
+            VOICE_MESSAGES TEXT NOT NULL,
+            CONTROL_LOCATION TEXT NOT NULL DEFAULT 'backend' CHECK (CONTROL_LOCATION IN ('backend', 'client')),
+            CLIENT_INSTANCE_ID TEXT,
+            RADIO_WS_URL TEXT,
+            CHECK (
+                (CONTROL_LOCATION = 'backend' AND CLIENT_INSTANCE_ID IS NULL AND RADIO_WS_URL IS NULL)
+                OR (
+                    CONTROL_LOCATION = 'client'
+                    AND CLIENT_INSTANCE_ID IS NOT NULL AND length(trim(CLIENT_INSTANCE_ID)) > 0
+                    AND RADIO_WS_URL IS NOT NULL AND length(trim(RADIO_WS_URL)) > 0
+                )
+            )
         ) STRICT;
 
         CREATE TABLE IF NOT EXISTS qsos (
@@ -93,7 +104,9 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
 
         CREATE INDEX IF NOT EXISTS idx_qsos_log_id ON qsos(LOG_ID);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_radios_enabled_wsjtx_port
-            ON radios(WSJTX_PORT) WHERE WSJTX_ENABLED = 1;
+            ON radios(WSJTX_PORT) WHERE WSJTX_ENABLED = 1 AND CONTROL_LOCATION = 'backend';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_radios_client_instance_id
+            ON radios(CLIENT_INSTANCE_ID) WHERE CONTROL_LOCATION = 'client';
 
         CREATE TABLE IF NOT EXISTS log_serial_state (
             LOG_ID INTEGER NOT NULL REFERENCES logs(ID) ON DELETE CASCADE,

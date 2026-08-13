@@ -23,7 +23,7 @@ pub use contact::{
 #[allow(unused_imports)]
 pub use models::{
     AuthConfig, ConfigView, DEFAULT_CW_TUNING_INCREMENT_HZ, DEFAULT_SSB_TUNING_INCREMENT_HZ,
-    DxClusterConfig, Log, LoginPasswordUpdate, NewLog, RadioConfig, RadioPayload, SerialAllocation,
-    UpdateConfig, UpdateLog,
+    DxClusterConfig, Log, LoginPasswordUpdate, NewLog, RadioConfig, RadioControlLocation,
+    RadioPayload, RadioRecord, SerialAllocation, UpdateConfig, UpdateLog,
 };
 pub use worker::Database;

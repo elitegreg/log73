@@ -1,6 +1,45 @@
 pub use radio_io::{ConfiguredRadio as RadioConfig, RadioSettings as RadioPayload};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::ops::{Deref, DerefMut};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RadioControlLocation {
+    Backend,
+    Client,
+}
+
+impl RadioControlLocation {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "backend" => Ok(Self::Backend),
+            "client" => Ok(Self::Client),
+            _ => Err(format!("unknown radio control location: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RadioRecord {
+    pub config: RadioConfig,
+    pub control_location: RadioControlLocation,
+    pub client_instance_id: Option<String>,
+    pub radio_ws_url: Option<String>,
+}
+
+impl Deref for RadioRecord {
+    type Target = RadioConfig;
+
+    fn deref(&self) -> &Self::Target {
+        &self.config
+    }
+}
+
+impl DerefMut for RadioRecord {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.config
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Log {

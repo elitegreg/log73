@@ -458,7 +458,7 @@ async fn main() {
     let bandmap = BandMapManager::new(band_catalog.clone(), initial_bandmap_max_age);
     let radio_manager = RadioManager::new(voice_keyer.clone(), band_catalog.clone());
     let radio_configs = db
-        .radios()
+        .backend_radio_configs()
         .await
         .unwrap_or_else(|error| panic!("failed to load radio I/O configuration: {error}"));
     let radio_io = RadioWebSocketState::new(radio_manager, RadioIoConfig::new(radio_configs));
@@ -1842,11 +1842,14 @@ struct RadioView {
     radio_ws_url: String,
 }
 
-impl From<db::RadioConfig> for RadioView {
-    fn from(config: db::RadioConfig) -> Self {
-        let radio_ws_url = radio_websocket_url(config.id);
+impl From<db::RadioRecord> for RadioView {
+    fn from(record: db::RadioRecord) -> Self {
+        let radio_id = record.id;
+        let radio_ws_url = record
+            .radio_ws_url
+            .unwrap_or_else(|| radio_websocket_url(radio_id));
         Self {
-            config,
+            config: record.config,
             radio_ws_url,
         }
     }
@@ -2031,16 +2034,18 @@ async fn create_radio(
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     match app_state.db.create_radio(payload).await {
-        Ok(mut radio) => {
-            if let Err(error) = app_state.voice_keyer.sync_radio_messages(&radio) {
-                warn!(radio_id = radio.id, %error, "failed to sync voice keyer registrations after radio create");
+        Ok(mut record) => {
+            if let Err(error) = app_state.voice_keyer.sync_radio_messages(&record.config) {
+                warn!(radio_id = record.id, %error, "failed to sync voice keyer registrations after radio create");
             }
-            if let Err(error) = app_state.radio_io.add_radio(radio.clone()) {
-                error!(radio_id = radio.id, %error, "failed to add created radio to radio I/O configuration");
+            if let Err(error) = app_state.radio_io.add_radio(record.config.clone()) {
+                error!(radio_id = record.id, %error, "failed to add created radio to radio I/O configuration");
                 return Json(serde_json::json!({ "ok": false, "error": error }));
             }
-            app_state.voice_keyer.sanitize_radio_config(&mut radio);
-            Json(serde_json::json!({ "ok": true, "radio": RadioView::from(radio) }))
+            app_state
+                .voice_keyer
+                .sanitize_radio_config(&mut record.config);
+            Json(serde_json::json!({ "ok": true, "radio": RadioView::from(record) }))
         }
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -2077,16 +2082,18 @@ async fn update_radio(
         }
     };
     match app_state.db.update_radio(id, payload).await {
-        Ok(Some(mut radio)) => {
-            if let Err(error) = app_state.voice_keyer.sync_radio_messages(&radio) {
-                warn!(radio_id = radio.id, %error, "failed to sync voice keyer registrations after radio update");
+        Ok(Some(mut record)) => {
+            if let Err(error) = app_state.voice_keyer.sync_radio_messages(&record.config) {
+                warn!(radio_id = record.id, %error, "failed to sync voice keyer registrations after radio update");
             }
-            if let Err(error) = mutation.commit_update(radio.clone()) {
+            if let Err(error) = mutation.commit_update(record.config.clone()) {
                 error!(id, %error, "failed to commit updated radio I/O configuration");
                 return Json(serde_json::json!({ "ok": false, "error": error }));
             }
-            app_state.voice_keyer.sanitize_radio_config(&mut radio);
-            Json(serde_json::json!({ "ok": true, "radio": RadioView::from(radio) }))
+            app_state
+                .voice_keyer
+                .sanitize_radio_config(&mut record.config);
+            Json(serde_json::json!({ "ok": true, "radio": RadioView::from(record) }))
         }
         Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
@@ -2107,7 +2114,10 @@ async fn validate_unique_wsjtx_port(
         .await
         .map_err(|error| error.to_string())?;
     if radios.iter().any(|radio| {
-        radio.wsjtx_enabled && radio.wsjtx_port == payload.wsjtx_port && Some(radio.id) != radio_id
+        radio.control_location == db::RadioControlLocation::Backend
+            && radio.wsjtx_enabled
+            && radio.wsjtx_port == payload.wsjtx_port
+            && Some(radio.id) != radio_id
     }) {
         return Err(format!(
             "WSJT-X port {} is already used by another enabled radio",
