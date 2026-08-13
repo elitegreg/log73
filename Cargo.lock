@@ -2662,13 +2662,16 @@ dependencies = [
 name = "log73-radio-client"
 version = "0.2.0"
 dependencies = [
+ "axum",
  "clap",
+ "csv",
  "iced",
  "log73-paths",
  "radio-io",
  "reqwest",
  "serde",
  "serde_json",
+ "tokio",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",

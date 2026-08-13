@@ -1,14 +1,17 @@
 mod configure;
+mod lifecycle;
 mod settings;
 
 use clap::Parser;
 use iced::widget::image::Handle as ImageHandle;
-use iced::widget::{Image, button, column, container, text};
-use iced::{Element, Length, Task, Theme, application, window};
+use iced::widget::{Image, button, column, container, row, scrollable, text};
+use iced::{Element, Length, Subscription, Task, Theme, application, window};
 use settings::{RadioClientSettings, load_or_create, settings_file_path};
 use std::{
+    collections::VecDeque,
     fs::{self, OpenOptions},
     path::{Path, PathBuf},
+    time::{SystemTime, UNIX_EPOCH},
 };
 use tracing::info;
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
@@ -18,7 +21,7 @@ const RADIO_CLIENT_ICON_PNG: &[u8] = include_bytes!(concat!(
     "/../static/log73-icon-512.png"
 ));
 const WINDOW_WIDTH: f32 = 640.0;
-const WINDOW_HEIGHT: f32 = 400.0;
+const EVENT_LOG_CAPACITY: usize = 1_000;
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Log73 client-side radio controller")]
@@ -126,10 +129,12 @@ fn main() -> iced::Result {
             text_color: iced::Color::BLACK,
         })
         .window(window::Settings {
-            size: iced::Size::new(WINDOW_WIDTH, WINDOW_HEIGHT),
+            size: iced::Size::new(WINDOW_WIDTH, 680.0),
             icon: radio_client_window_icon(),
             ..window::Settings::default()
         })
+        .subscription(subscription)
+        .exit_on_close_request(false)
         .run_with(move || (RadioClient::new(settings, paths), Task::none()))
 }
 
@@ -173,28 +178,132 @@ struct RadioClient {
     paths: AppPaths,
     icon: ImageHandle,
     configure: Option<configure::ConfigureScreen>,
+    lifecycle: LifecycleState,
+    host: Option<lifecycle::RunningHost>,
+    events: VecDeque<EventEntry>,
+    pending_close_window: Option<window::Id>,
 }
 
 impl RadioClient {
     fn new(settings: RadioClientSettings, paths: AppPaths) -> Self {
+        let lifecycle = LifecycleState::initial(&settings);
         Self {
             settings,
             paths,
             icon: ImageHandle::from_bytes(RADIO_CLIENT_ICON_PNG),
             configure: None,
+            lifecycle,
+            host: None,
+            events: VecDeque::from([EventEntry::new("Radio Client is ready.")]),
+            pending_close_window: None,
         }
     }
 }
 
-#[derive(Debug, Clone)]
 enum Message {
     ConfigurePressed,
     Configure(configure::Message),
+    StartPressed,
+    StopPressed,
+    StartFinished(std::sync::Arc<std::sync::Mutex<Option<Result<lifecycle::StartResult, String>>>>),
+    StopFinished(Vec<String>),
+    WindowCloseRequested(window::Id),
+}
+
+impl Clone for Message {
+    fn clone(&self) -> Self {
+        match self {
+            Self::ConfigurePressed => Self::ConfigurePressed,
+            Self::Configure(message) => Self::Configure(message.clone()),
+            Self::StartPressed => Self::StartPressed,
+            Self::StopPressed => Self::StopPressed,
+            Self::StartFinished(result) => Self::StartFinished(result.clone()),
+            Self::StopFinished(events) => Self::StopFinished(events.clone()),
+            Self::WindowCloseRequested(window_id) => Self::WindowCloseRequested(*window_id),
+        }
+    }
+}
+
+impl std::fmt::Debug for Message {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ConfigurePressed => formatter.write_str("ConfigurePressed"),
+            Self::Configure(message) => formatter.debug_tuple("Configure").field(message).finish(),
+            Self::StartPressed => formatter.write_str("StartPressed"),
+            Self::StopPressed => formatter.write_str("StopPressed"),
+            Self::StartFinished(_) => formatter.write_str("StartFinished"),
+            Self::StopFinished(events) => {
+                formatter.debug_tuple("StopFinished").field(events).finish()
+            }
+            Self::WindowCloseRequested(window_id) => formatter
+                .debug_tuple("WindowCloseRequested")
+                .field(window_id)
+                .finish(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LifecycleState {
+    NotConfigured,
+    Stopped,
+    Starting,
+    RunningLocal,
+    Stopping,
+    Error,
+}
+
+impl LifecycleState {
+    fn initial(settings: &RadioClientSettings) -> Self {
+        if settings.is_radio_configured() {
+            Self::Stopped
+        } else {
+            Self::NotConfigured
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::NotConfigured => "Not configured",
+            Self::Stopped => "Stopped",
+            Self::Starting => "Starting…",
+            Self::RunningLocal => "Running locally",
+            Self::Stopping => "Stopping…",
+            Self::Error => "Error",
+        }
+    }
+}
+
+struct EventEntry {
+    timestamp: u64,
+    message: String,
+}
+
+impl EventEntry {
+    fn new(message: impl Into<String>) -> Self {
+        Self {
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            message: message.into(),
+        }
+    }
+}
+
+fn subscription(_state: &RadioClient) -> Subscription<Message> {
+    window::close_requests().map(Message::WindowCloseRequested)
 }
 
 fn update(state: &mut RadioClient, message: Message) -> Task<Message> {
     match message {
         Message::ConfigurePressed => {
+            if state.lifecycle == LifecycleState::RunningLocal
+                || state.lifecycle == LifecycleState::Starting
+                || state.lifecycle == LifecycleState::Stopping
+            {
+                return Task::none();
+            }
             state.configure = Some(configure::ConfigureScreen::new(
                 &state.settings,
                 state.paths.voicekeyer_dir.clone(),
@@ -211,6 +320,8 @@ fn update(state: &mut RadioClient, message: Message) -> Task<Message> {
                 configure::Outcome::Saved(settings) => {
                     state.settings = *settings;
                     state.configure = None;
+                    state.lifecycle = LifecycleState::initial(&state.settings);
+                    state.push_event("Saved Radio Client settings.");
                     Task::none()
                 }
                 configure::Outcome::Cancelled => {
@@ -218,6 +329,94 @@ fn update(state: &mut RadioClient, message: Message) -> Task<Message> {
                     Task::none()
                 }
             }
+        }
+        Message::StartPressed => {
+            if !matches!(
+                state.lifecycle,
+                LifecycleState::Stopped | LifecycleState::Error
+            ) {
+                return Task::none();
+            }
+            state.lifecycle = LifecycleState::Starting;
+            state.push_event("Starting local radio host…");
+            Task::perform(lifecycle::start(state.paths.clone()), |result| {
+                Message::StartFinished(std::sync::Arc::new(std::sync::Mutex::new(Some(result))))
+            })
+        }
+        Message::StopPressed => {
+            if state.lifecycle == LifecycleState::Starting {
+                state.lifecycle = LifecycleState::Stopping;
+                state.push_event("Startup will stop as soon as the local host is ready.");
+                return Task::none();
+            }
+            let Some(host) = state.host.take() else {
+                return Task::none();
+            };
+            state.lifecycle = LifecycleState::Stopping;
+            state.push_event("Stopping local radio host…");
+            Task::perform(lifecycle::stop(host), Message::StopFinished)
+        }
+        Message::StartFinished(result) => match result
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+        {
+            None => Task::none(),
+            Some(result) => match result {
+                Ok(result) => {
+                    for event in result.events {
+                        state.push_event(event);
+                    }
+                    state.host = Some(result.host);
+                    if state.lifecycle == LifecycleState::Stopping
+                        || state.pending_close_window.is_some()
+                    {
+                        update(state, Message::StopPressed)
+                    } else {
+                        state.lifecycle = LifecycleState::RunningLocal;
+                        state.push_event("Local radio host is running.");
+                        Task::none()
+                    }
+                }
+                Err(error) => {
+                    state.lifecycle = LifecycleState::Error;
+                    state.push_event(format!("Unable to start local radio host: {error}"));
+                    close_if_requested(state)
+                }
+            },
+        },
+        Message::StopFinished(events) => {
+            for event in events {
+                state.push_event(event);
+            }
+            state.host = None;
+            state.lifecycle = LifecycleState::Stopped;
+            state.push_event("Local radio host stopped.");
+            close_if_requested(state)
+        }
+        Message::WindowCloseRequested(window_id) => {
+            state.pending_close_window = Some(window_id);
+            if state.host.is_some() || state.lifecycle == LifecycleState::Starting {
+                update(state, Message::StopPressed)
+            } else {
+                close_if_requested(state)
+            }
+        }
+    }
+}
+
+fn close_if_requested(state: &mut RadioClient) -> Task<Message> {
+    state
+        .pending_close_window
+        .take()
+        .map_or_else(Task::none, window::close)
+}
+
+impl RadioClient {
+    fn push_event(&mut self, message: impl Into<String>) {
+        self.events.push_back(EventEntry::new(message));
+        if self.events.len() > EVENT_LOG_CAPACITY {
+            self.events.pop_front();
         }
     }
 }
@@ -228,22 +427,55 @@ fn view(state: &RadioClient) -> Element<'_, Message> {
             .view(&state.paths.voicekeyer_dir)
             .map(Message::Configure);
     }
-    let status = if state.settings.is_radio_configured() {
-        "Configured — stopped"
-    } else {
-        "Not configured"
-    };
+    let configured = state.settings.is_radio_configured();
+    let can_start = configured
+        && matches!(
+            state.lifecycle,
+            LifecycleState::Stopped | LifecycleState::Error
+        );
+    let can_stop = matches!(
+        state.lifecycle,
+        LifecycleState::Starting | LifecycleState::RunningLocal
+    );
+    let can_configure = !matches!(
+        state.lifecycle,
+        LifecycleState::Starting | LifecycleState::RunningLocal | LifecycleState::Stopping
+    );
+    let mut details = Vec::new();
+    if let Some(host) = &state.host {
+        details.push(format!("Local WebSocket: {}", host.websocket_url));
+    }
+    if state.lifecycle == LifecycleState::RunningLocal {
+        details.push("Backend registration begins in C4.".to_string());
+    }
+    let event_lines = state
+        .events
+        .iter()
+        .map(|event| {
+            text(format!("[{}] {}", event.timestamp, event.message))
+                .size(13)
+                .into()
+        })
+        .collect::<Vec<_>>();
     let content = column![
         Image::new(state.icon.clone()).width(96).height(96),
         text("Log73 Radio Client").size(32),
-        text(status).size(22),
-        button("Configure").on_press(Message::ConfigurePressed),
+        text(state.lifecycle.label()).size(22),
+        row![
+            button("Configure").on_press_maybe(can_configure.then_some(Message::ConfigurePressed)),
+            button("Start").on_press_maybe(can_start.then_some(Message::StartPressed)),
+            button("Stop").on_press_maybe(can_stop.then_some(Message::StopPressed)),
+        ]
+        .spacing(12),
+        column(details.into_iter().map(|detail| text(detail).into())).spacing(4),
         text(format!("Settings: {}", state.paths.settings_file.display())).size(14),
         text(format!(
             "Voice files: {}",
             state.paths.voicekeyer_dir.display()
         ))
         .size(14),
+        text("Event log").size(18),
+        scrollable(column(event_lines).spacing(3)).height(Length::Fill),
     ]
     .spacing(14)
     .align_x(iced::Alignment::Center);
@@ -252,7 +484,6 @@ fn view(state: &RadioClient) -> Element<'_, Message> {
         .width(Length::Fill)
         .height(Length::Fill)
         .center_x(Length::Fill)
-        .center_y(Length::Fill)
         .padding(24)
         .into()
 }
@@ -298,5 +529,37 @@ mod tests {
             AppPaths::resolve(&cli).log_file,
             PathBuf::from("custom/data/log73-radio-client.log")
         );
+    }
+
+    #[test]
+    fn lifecycle_starts_stopped_only_for_valid_settings() {
+        let mut settings = RadioClientSettings::default();
+        assert_eq!(
+            LifecycleState::initial(&settings),
+            LifecycleState::NotConfigured
+        );
+        settings.radio.name = "Dummy".to_string();
+        settings.radio.radio_kind = "dummy".to_string();
+        settings.radio.transport_kind = "none".to_string();
+        assert_eq!(LifecycleState::initial(&settings), LifecycleState::Stopped);
+    }
+
+    #[test]
+    fn event_log_discards_entries_beyond_its_capacity() {
+        let settings = RadioClientSettings::default();
+        let paths = AppPaths {
+            config_dir: PathBuf::new(),
+            data_dir: PathBuf::new(),
+            app_dir: PathBuf::new(),
+            settings_file: PathBuf::from("settings.json"),
+            voicekeyer_dir: PathBuf::from("voicekeyer"),
+            log_file: PathBuf::from("radio-client.log"),
+        };
+        let mut client = RadioClient::new(settings, paths);
+        for index in 0..=EVENT_LOG_CAPACITY {
+            client.push_event(format!("event {index}"));
+        }
+        assert_eq!(client.events.len(), EVENT_LOG_CAPACITY);
+        assert_eq!(client.events.front().unwrap().message, "event 1");
     }
 }

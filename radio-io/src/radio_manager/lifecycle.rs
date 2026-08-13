@@ -241,6 +241,21 @@ impl RadioManager {
             Some(ManagedRadioSlot::Active(_))
         )
     }
+
+    /// Stops every managed radio, including connections still held by WebSocket
+    /// sessions. Hosts use this during process-level shutdown.
+    pub async fn shutdown_all(&self) {
+        let radio_ids = self.radios.lock().await.keys().copied().collect::<Vec<_>>();
+        for radio_id in radio_ids {
+            loop {
+                let active = self.is_active(radio_id).await;
+                if !active {
+                    break;
+                }
+                self.release(radio_id).await;
+            }
+        }
+    }
 }
 
 impl RadioHandle {

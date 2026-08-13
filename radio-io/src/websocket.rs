@@ -41,6 +41,7 @@ pub struct RadioWebSocketState {
     radio_manager: RadioManager,
     wsjtx_manager: WsjtXManager,
     registry: Arc<Mutex<RadioRegistry>>,
+    shutdown_sessions: broadcast::Sender<()>,
 }
 
 impl RadioWebSocketState {
@@ -59,10 +60,12 @@ impl RadioWebSocketState {
                 )
             })
             .collect();
+        let (shutdown_sessions, _) = broadcast::channel(1);
         Self {
             radio_manager,
             wsjtx_manager: WsjtXManager::new(),
             registry: Arc::new(Mutex::new(RadioRegistry { radios })),
+            shutdown_sessions,
         }
     }
 
@@ -129,6 +132,10 @@ impl RadioWebSocketState {
         self.finish_use(radio_id);
     }
 
+    fn close_sessions(&self) {
+        let _ = self.shutdown_sessions.send(());
+    }
+
     fn contains_radio(&self, radio_id: i64) -> bool {
         lock_registry(&self.registry).radios.contains_key(&radio_id)
     }
@@ -154,6 +161,13 @@ impl SingleRadioWebSocketState {
             state: RadioWebSocketState::new(radio_manager, RadioIoConfig::new(vec![config])),
             radio_id,
         }
+    }
+
+    /// Deterministically stops all shared radio resources for this local host.
+    pub async fn shutdown(&self) {
+        self.state.close_sessions();
+        self.state.wsjtx_manager.shutdown_all().await;
+        self.state.radio_manager.shutdown_all().await;
     }
 }
 
@@ -450,7 +464,15 @@ async fn handle_radio_socket(
         }
     });
 
-    while let Some(Ok(message)) = receiver.next().await {
+    let mut shutdown = state.shutdown_sessions.subscribe();
+    loop {
+        let message = tokio::select! {
+            _ = shutdown.recv() => break,
+            message = receiver.next() => message,
+        };
+        let Some(Ok(message)) = message else {
+            break;
+        };
         let Message::Text(text) = message else {
             continue;
         };

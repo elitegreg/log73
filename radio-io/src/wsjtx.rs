@@ -193,6 +193,25 @@ impl WsjtXManager {
         }
     }
 
+    /// Stops all WSJT-X controllers regardless of their registered loggers.
+    /// This is used when a radio host itself is shutting down.
+    pub async fn shutdown_all(&self) {
+        let listeners = {
+            let mut listeners = self.inner.listeners.lock().await;
+            std::mem::take(&mut *listeners)
+        };
+        for (radio_id, listener) in listeners {
+            let (completed, result) = oneshot::channel();
+            let _ = listener
+                .commands
+                .send(ControllerCommand::Shutdown(completed))
+                .await;
+            let _ = result.await;
+            let _ = listener.task.await;
+            let _ = self.inner.target_events.send(no_target_state(radio_id));
+        }
+    }
+
     pub async fn set_target(
         &self,
         radio_id: i64,
