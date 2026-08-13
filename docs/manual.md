@@ -1,6 +1,8 @@
 # Log73 Operator Manual
 
-This manual is for contest operators running the production `log73-backend` executable.
+This manual is for contest operators running the production `log73-backend`
+executable and, when radio hardware is on an operator computer, the
+`log73-radio-client` desktop application.
 
 It is written as an operations guide (not a developer guide): start the backend, connect in a browser, configure station/log/radio settings, and operate the logger during a contest.
 
@@ -15,7 +17,8 @@ In practical terms:
 - You run one backend process (`log73-backend`) at the station/site.
 - Operators connect to it from one or more browsers.
 - The backend stores logs and QSOs in SQLite.
-- The backend manages CAT radio control and CW keying.
+- The backend manages server-side CAT radio control and CW keying.
+- A Radio Client can own client-side CAT, CW, voice audio, and WSJT-X hardware.
 
 Core operating capabilities include:
 
@@ -110,7 +113,80 @@ Treat it as a shared trusted-station gate, not individual role-based auth.
 
 ---
 
-## 5) Configure Log73 screen
+## 5) Client-side radios and the Log73 Radio Client
+
+Choose a server-side radio when the hardware is attached to the backend
+computer. Choose a client-side radio when the operator computer owns the
+radio, serial ports, audio devices, or WSJT-X process. Client-side radios
+register automatically; they are not created or edited in the browser.
+
+### Installing and starting the client
+
+Release packages provide a **Log73 Radio Client** desktop entry and install
+the executable beside the normal Log73 binaries. From a source checkout:
+
+```bash
+make radio-client-build
+./target/debug/log73-radio-client
+```
+
+The client binds only to `ws://127.0.0.1:<ephemeral-port>/radiows`. It never
+binds the local control listener to `0.0.0.0`. The returned loopback URL is
+registered with the backend and is later used by the browser. `127.0.0.1`
+always means the browser/Radio Client computer.
+
+Configure the backend URL and optional Basic Auth username/password in the
+client's Configure screen. The client keeps its local host alive while the
+backend is unavailable and retries registration. The status/event log uses
+these meanings:
+
+- **Registering**: registration is being attempted.
+- **Registered**: the backend has an active radio lease.
+- **Backend unavailable**: registration or heartbeat failed and will retry.
+- **Credentials rejected**: HTTP 401/403; retry is intentionally slow.
+- **Lease replaced**: another process registered the same client identity;
+  the client will register again.
+- **CAT offline**: the local host is running but the configured radio
+  transport is not connected.
+- **Client offline**: the backend lease expired or the Radio Client is stopped.
+
+Client settings default to `log73-radio-client.json` in the platform config
+directory. Voice files live under `voicekeyer/` in the client data directory;
+safe relative `.wav` files are loaded into memory at Start. Stop before
+changing voice files or voice-message configuration, then Start to reload.
+
+### Open Log selection
+
+The radio list explicitly labels `[SERVER-SIDE]`, `[CLIENT-SIDE · ONLINE]`,
+and `[CLIENT-SIDE · OFFLINE]`. The selected-radio help text explains which
+computer owns the hardware. Open is disabled for an offline client radio;
+start the Radio Client on that computer first. Client-radio Edit is labelled
+**Configure in Radio Client**. An offline client snapshot may be deleted
+after confirmation and will reappear when the client registers again.
+
+If a browser selects a client radio registered by another operator computer,
+the local loopback WebSocket cannot connect. Return to Open Log and select the
+correct client radio or run the Radio Client on the current computer.
+
+### Client-side WSJT-X
+
+Enable WSJT-X in the radio configuration, open the logger in DATA mode, and
+enable its **WSJT-X** target checkbox. The UDP listener runs only when all
+three conditions hold: WSJT-X is enabled, the radio is in DATA mode, and this
+logger is the active target. A later logger does not steal the target unless
+the operator explicitly claims it.
+
+WSJT-X sends UDP to the configured client bind address and port. The Radio
+Client's radio-io host forwards the complete Logged ADIF record over the radio
+WebSocket to the targeted browser. The browser preserves all ADIF fields,
+combines `QSO_DATE` and `TIME_ON` into `QSO_DATE_TIME_ON`, adds only missing
+operator/transmitter context, and submits the result through the ordinary
+pending contact outbox/API. There is no WSJT-X-specific HTTP endpoint.
+
+The first release intentionally has no HTTPS/mixed-content support, TLS
+certificate management, or Origin checks for this local radio connection.
+
+## 6) Configure Log73 screen
 
 Configure Log73 includes:
 
@@ -133,7 +209,7 @@ Configure Log73 includes:
 
 ---
 
-## 6) Quick tutorial flow (first-time operation)
+## 7) Quick tutorial flow (first-time operation)
 
 1. Open **Configure Log73** and set shared station options.
 2. Create a log.
@@ -144,7 +220,7 @@ Configure Log73 includes:
 
 ---
 
-## 7) Creating/editing logs (with validation details)
+## 8) Creating/editing logs (with validation details)
 
 ### Create log flow
 
@@ -175,7 +251,7 @@ For a sent serial exchange, the backend supplies the initial next value and the 
 
 ---
 
-## 8) Creating/editing radios (with validation details)
+## 9) Creating/editing radios (with validation details)
 
 ### Radio fields
 
@@ -236,9 +312,9 @@ host firewall. An optional IPv4 multicast group may be used instead.
 Multiple logger windows, including different logs, may share one radio. When
 WSJT-X is enabled and the radio is in DATA mode, **WSJT-X Target** replaces the
 ESM checkbox. Exactly one logger per radio may be the target; selecting it in a
-different logger moves the target. The first logger opened for a radio is
-selected automatically, while closing or unchecking the selected logger leaves
-the radio without a target.
+different logger moves the target. Logger connections begin untargeted. The
+operator explicitly enables the WSJT-X checkbox to claim the target; closing
+or unchecking the selected logger leaves the radio without a target.
 
 The UDP listener runs only while a target is selected and the radio remains in
 DATA mode. Incoming Logged ADIF contacts are saved to the selected logger's
@@ -250,7 +326,7 @@ notifications and recorded in the backend log.
 
 ---
 
-## 9) Opening and using the logger
+## 10) Opening and using the logger
 
 Logger layout includes:
 
@@ -276,7 +352,7 @@ Operational basics:
 
 ---
 
-## 10) Offline mode (what works / what doesn’t)
+## 11) Offline mode (what works / what doesn’t)
 
 There are two practical offline scenarios.
 
@@ -319,7 +395,7 @@ Practical caution:
 
 ---
 
-## 11) Hotkeys and special input behaviors (complete)
+## 12) Hotkeys and special input behaviors (complete)
 
 ### Global logger shortcuts
 
@@ -372,7 +448,7 @@ When cursor is in callsign field:
 
 ---
 
-## 12) ESM behavior summary/matrix
+## 13) ESM behavior summary/matrix
 
 When ESM is enabled, Enter chooses message/log actions from state.
 
@@ -401,7 +477,7 @@ When ESM is enabled, Enter chooses message/log actions from state.
 
 ---
 
-## 13) Log window selection/editing controls
+## 14) Log window selection/editing controls
 
 Selection behavior:
 
@@ -427,7 +503,7 @@ Other table behavior:
 
 ---
 
-## 14) Supported contests (names)
+## 15) Supported contests (names)
 
 Current runtime contest names:
 
@@ -440,7 +516,7 @@ Current runtime contest names:
 
 ---
 
-## 15) Supported CW keyers
+## 16) Supported CW keyers
 
 - None
 - Winkeyer
@@ -449,7 +525,7 @@ Current runtime contest names:
 
 ---
 
-## 16) Supported radios
+## 17) Supported radios
 
 The backend exposes the current `radio-cat-rs` driver descriptors at `/api/radio-kinds`. Each option includes a stable driver `id`, display name, and description.
 
@@ -475,7 +551,7 @@ The create-radio screen defaults to the in-memory `dummy` driver with `none` tra
 
 ---
 
-## 17) Core feature checklist
+## 18) Core feature checklist
 
 - Browser UI served by backend executable
 - Shared Basic Auth gate (optional)
@@ -493,7 +569,7 @@ The create-radio screen defaults to the in-memory `dummy` driver with `none` tra
 
 ---
 
-## 18) Known limitations
+## 19) Known limitations
 
 - Basic Auth is a shared station gate, not per-user authorization.
 - `Mark`, `Store`, and `Spot It` controls are present but depend on band-map / DX-cluster context; in many configurations they are limited or appear inactive.
@@ -503,7 +579,7 @@ The create-radio screen defaults to the in-memory `dummy` driver with `none` tra
 
 ---
 
-## 19) Practical operating tips
+## 20) Practical operating tips
 
 - Before contest start:
   - confirm CAT connectivity and mode/frequency updates

@@ -41,6 +41,7 @@ Log73 is under active development. Contest definitions are loaded from YAML rule
 - Realtime radio state updates over websocket.
 - SQLite-backed QSO storage.
 - Offline/pending contact cache in browser local storage.
+- Optional client-side radio control through the separate Log73 Radio Client desktop app.
 
 ## Authentication
 
@@ -161,6 +162,68 @@ Run the launcher:
 cargo run -p launcher
 ```
 
+## Client-side radios
+
+Use a server-side radio when the radio hardware and CAT connection are on the
+same computer as `log73-backend`. Use a client-side radio when the operator's
+radio, serial ports, audio devices, or WSJT-X instance are on another computer.
+
+Build and launch the Radio Client from a source checkout:
+
+```bash
+make radio-client-build
+./target/debug/log73-radio-client
+```
+
+Release packages install it as `/opt/log73/bin/log73-radio-client` and provide
+a separate **Log73 Radio Client** desktop entry. The client binds its local
+WebSocket only to `127.0.0.1` on an ephemeral port, then registers that URL
+with the configured backend. `127.0.0.1` therefore means the computer running
+the browser and Radio Client, not necessarily the backend computer.
+
+The client configuration is stored in `log73-radio-client.json` in the
+platform config directory. Its data directory contains `voicekeyer/` and the
+client log. On Linux the defaults are:
+
+```text
+~/.config/log73/log73-radio-client.json
+~/.local/share/log73/voicekeyer/
+~/.local/share/log73/log73-radio-client.log
+```
+
+Configure the backend URL and optional HTTP Basic Auth credentials in the
+client's **Configure** screen. The client keeps its local radio host running
+while the backend is unavailable and retries registration. The main screen
+reports registering, registered, backend unavailable, credentials rejected,
+and lease replaced states. A stopped client makes its radio offline in the
+Open Log screen; an offline client-side radio cannot be opened until the
+client is started again.
+
+Client-side radios are labelled **CLIENT-SIDE** in radio selection and logger
+context. Configure them in the Radio Client; the browser's Edit action is
+read-only for these rows. Server-side radios remain configured in the browser.
+
+Voice files are safe relative `.wav` files under `voicekeyer/`. They are
+validated and loaded into memory at Start. Stop, change the files or voice
+messages, and Start again to reload the deterministic cache. The first
+release uses local output devices and does not provide HTTPS, TLS, or mixed-
+content support for the local radio connection.
+
+### Client-side WSJT-X
+
+Enable WSJT-X on the radio configuration and use a logger opened in DATA mode.
+The **WSJT-X** checkbox in that logger claims the radio's single WSJT-X target;
+the UDP listener runs only while the checkbox is enabled, the radio reports
+DATA mode, and that logger is targeted. Configure WSJT-X to send UDP to the
+client computer's configured bind address and port. Logged ADIF is delivered
+over the radio WebSocket to the targeted browser, converted into the normal
+pending contact outbox, and submitted through the ordinary contacts API.
+
+If the browser is on a different computer from the Radio Client, the local
+loopback connection will fail. The logger reports that the Radio Client may
+not be running on this computer or that the selected client radio belongs to
+another operator.
+
 ## Release packages
 
 Release packaging is configured with `cargo-dist` in `dist-workspace.toml`.
@@ -252,7 +315,6 @@ src/styles/*.css                      base styles and theme overrides
 
 backend/                              Rust backend
 backend/src/main.rs                   Axum routes, websocket handling, API handlers
-backend/src/wsjtx.rs                  WSJT-X contact import, validation, cache, and scoring adapter
 radio-io/                             Radio I/O library crate
 radio-io/src/radio_manager.rs         lazy/refcounted multi-radio manager and CW task
 radio-io/src/websocket.rs             radio HTTP/websocket endpoint and command dispatch
@@ -260,6 +322,9 @@ radio-io/src/voice_keyer.rs           local voice-keyer audio loading, caching, 
 radio-io/src/wsjtx.rs                 WSJT-X UDP listener and raw event forwarding
 launcher/                             Rust iced desktop launcher
 launcher/src/main.rs                  launcher UI and backend process start/stop controls
+radio-client/                         Rust/Iced client-side radio controller
+radio-client/src/main.rs              local host, lifecycle, and registration UI
+radio-client/src/backend_client.rs    backend registration, heartbeat, and lease handling
 backend/src/auth.rs                   HTTP Basic Auth middleware
 backend/src/db.rs                     SQLite schema and data mapping
 backend/src/radio.rs                  CRUD/backend websocket messages
