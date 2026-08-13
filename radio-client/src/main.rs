@@ -1,8 +1,9 @@
+mod configure;
 mod settings;
 
 use clap::Parser;
 use iced::widget::image::Handle as ImageHandle;
-use iced::widget::{Image, column, container, text};
+use iced::widget::{Image, button, column, container, text};
 use iced::{Element, Length, Task, Theme, application, window};
 use settings::{RadioClientSettings, load_or_create, settings_file_path};
 use std::{
@@ -167,11 +168,11 @@ fn radio_client_window_icon() -> Option<window::Icon> {
     }
 }
 
-#[derive(Debug)]
 struct RadioClient {
     settings: RadioClientSettings,
     paths: AppPaths,
     icon: ImageHandle,
+    configure: Option<configure::ConfigureScreen>,
 }
 
 impl RadioClient {
@@ -180,18 +181,53 @@ impl RadioClient {
             settings,
             paths,
             icon: ImageHandle::from_bytes(RADIO_CLIENT_ICON_PNG),
+            configure: None,
         }
     }
 }
 
 #[derive(Debug, Clone)]
-enum Message {}
+enum Message {
+    ConfigurePressed,
+    Configure(configure::Message),
+}
 
-fn update(_state: &mut RadioClient, message: Message) -> Task<Message> {
-    match message {}
+fn update(state: &mut RadioClient, message: Message) -> Task<Message> {
+    match message {
+        Message::ConfigurePressed => {
+            state.configure = Some(configure::ConfigureScreen::new(
+                &state.settings,
+                state.paths.voicekeyer_dir.clone(),
+            ));
+            Task::none()
+        }
+        Message::Configure(message) => {
+            let Some(configure) = state.configure.as_mut() else {
+                return Task::none();
+            };
+            let (outcome, task) = configure.update(message, &state.paths.settings_file);
+            match outcome {
+                configure::Outcome::None => task.map(Message::Configure),
+                configure::Outcome::Saved(settings) => {
+                    state.settings = *settings;
+                    state.configure = None;
+                    Task::none()
+                }
+                configure::Outcome::Cancelled => {
+                    state.configure = None;
+                    Task::none()
+                }
+            }
+        }
+    }
 }
 
 fn view(state: &RadioClient) -> Element<'_, Message> {
+    if let Some(configure) = &state.configure {
+        return configure
+            .view(&state.paths.voicekeyer_dir)
+            .map(Message::Configure);
+    }
     let status = if state.settings.is_radio_configured() {
         "Configured — stopped"
     } else {
@@ -201,7 +237,7 @@ fn view(state: &RadioClient) -> Element<'_, Message> {
         Image::new(state.icon.clone()).width(96).height(96),
         text("Log73 Radio Client").size(32),
         text(status).size(22),
-        text("Radio configuration controls will be available in the next implementation step."),
+        button("Configure").on_press(Message::ConfigurePressed),
         text(format!("Settings: {}", state.paths.settings_file.display())).size(14),
         text(format!(
             "Voice files: {}",

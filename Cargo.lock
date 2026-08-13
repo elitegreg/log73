@@ -2666,6 +2666,7 @@ dependencies = [
  "iced",
  "log73-paths",
  "radio-io",
+ "reqwest",
  "serde",
  "serde_json",
  "tracing",
