@@ -57,11 +57,14 @@ struct RunningListener {
 pub enum WsjtXEvent {
     LoggedAdif {
         radio_id: i64,
+        logger_id: String,
         log_id: i64,
+        event_id: String,
         text: String,
     },
     Error {
         radio_id: i64,
+        logger_id: String,
         log_id: i64,
         message: String,
     },
@@ -110,11 +113,7 @@ impl WsjtXManager {
         }
 
         let (commands, command_rx) = mpsc::channel(8);
-        let target = WsjtXTarget {
-            logger_id: logger_id.to_string(),
-            log_id,
-        };
-        let (target_updates, target_rx) = watch::channel(Some(target.clone()));
+        let (target_updates, target_rx) = watch::channel(None);
         let events = self.inner.events.clone();
         let task = tokio::spawn(run_controller(
             radio_id,
@@ -136,15 +135,13 @@ impl WsjtXManager {
             radio_id,
             ManagedListener {
                 registrations,
-                target: Some(target.clone()),
+                target: None,
                 target_updates,
                 commands,
                 task,
             },
         );
-        let state = target_state(radio_id, Some(&target));
-        let _ = self.inner.target_events.send(state.clone());
-        Ok(state)
+        Ok(no_target_state(radio_id))
     }
 
     pub async fn release(&self, radio_id: i64, logger_id: &str) {
@@ -408,14 +405,16 @@ async fn run_listener(
                                 debug!(radio_id, log_id = target.log_id, wsjtx_instance_id = %datagram.id, adif = %text, "received WSJT-X Logged ADIF contact");
                                 let _ = events.send(WsjtXEvent::LoggedAdif {
                                     radio_id,
+                                    logger_id: target.logger_id,
                                     log_id: target.log_id,
+                                    event_id: new_wsjtx_event_id(),
                                     text: text.to_string(),
                                 });
                             }
                             None => emit_error(
                                 &events,
                                 radio_id,
-                                target.log_id,
+                                &target,
                                 "WSJT-X sent an empty Logged ADIF message".to_string(),
                             ),
                         }
@@ -455,6 +454,10 @@ async fn run_listener(
     }
 }
 
+fn new_wsjtx_event_id() -> String {
+    uuid::Uuid::new_v4().to_string()
+}
+
 fn emit_target_error(
     events: &broadcast::Sender<WsjtXEvent>,
     radio_id: i64,
@@ -462,17 +465,23 @@ fn emit_target_error(
     message: String,
 ) {
     if let Some(target) = target_updates.borrow().as_ref() {
-        emit_error(events, radio_id, target.log_id, message);
+        emit_error(events, radio_id, target, message);
     } else {
         error!(radio_id, %message, "WSJT-X error without an active target");
     }
 }
 
-fn emit_error(events: &broadcast::Sender<WsjtXEvent>, radio_id: i64, log_id: i64, message: String) {
-    error!(radio_id, log_id, %message, "WSJT-X error");
+fn emit_error(
+    events: &broadcast::Sender<WsjtXEvent>,
+    radio_id: i64,
+    target: &WsjtXTarget,
+    message: String,
+) {
+    error!(radio_id, log_id = target.log_id, %message, "WSJT-X error");
     let _ = events.send(WsjtXEvent::Error {
         radio_id,
-        log_id,
+        logger_id: target.logger_id.clone(),
+        log_id: target.log_id,
         message,
     });
 }
@@ -577,7 +586,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn first_logger_is_target_and_later_logger_does_not_steal_it() {
+    async fn logger_registration_starts_untargeted_until_explicitly_enabled() {
         let manager = test_manager();
         let (_, updates) = broadcast::channel(4);
         let initial_state = Some(RadioState {
@@ -597,14 +606,20 @@ mod tests {
             )
             .await
             .expect("first logger registers");
-        assert_eq!(first.logger_id.as_deref(), Some("logger-a"));
-        assert_eq!(first.log_id, Some(10));
+        assert_eq!(first, no_target_state(1));
 
         let second = manager
             .acquire(1, "logger-b", 11, test_config(), initial_state, updates)
             .await
             .expect("second logger registers");
         assert_eq!(second, first);
+
+        let targeted = manager
+            .set_target(1, "logger-a", true)
+            .await
+            .expect("checkbox enables target");
+        assert_eq!(targeted.logger_id.as_deref(), Some("logger-a"));
+        assert_eq!(targeted.log_id, Some(10));
 
         manager.release(1, "logger-b").await;
         manager.release(1, "logger-a").await;
@@ -668,6 +683,11 @@ mod tests {
             .await
             .expect("logger registers");
 
+        manager
+            .set_target(1, "logger-a", true)
+            .await
+            .expect("target enables");
+
         let cleared = manager
             .set_target(1, "logger-a", false)
             .await
@@ -675,5 +695,12 @@ mod tests {
         assert_eq!(cleared, no_target_state(1));
 
         manager.release(1, "logger-a").await;
+    }
+
+    #[test]
+    fn generated_logged_adif_event_ids_are_uuid_v4() {
+        let event_id = new_wsjtx_event_id();
+        let parsed = uuid::Uuid::parse_str(&event_id).expect("event id is a UUID");
+        assert_eq!(parsed.get_version(), Some(uuid::Version::Random));
     }
 }

@@ -41,6 +41,14 @@ pub enum RadioClientMessage {
     SetWpm {
         wpm: u8,
     },
+    #[serde(rename = "set_wsjtx_target", alias = "set_wsjt_x_target")]
+    SetWsjtXTarget {
+        enabled: bool,
+    },
+    #[serde(rename = "wsjtx_event_received", alias = "wsjt_x_event_received")]
+    WsjtXEventReceived {
+        event_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -48,8 +56,28 @@ pub enum RadioClientMessage {
 pub enum RadioServerMessage {
     RadioStatus(RadioStatus),
     RadioState(RadioState),
-    Pong { request_id: String },
-    MessageSent { request_id: String },
+    Pong {
+        request_id: String,
+    },
+    MessageSent {
+        request_id: String,
+    },
+    #[serde(rename = "wsjtx_target", alias = "wsjt_x_target")]
+    WsjtXTarget {
+        logger_id: Option<String>,
+        log_id: Option<i64>,
+    },
+    #[serde(rename = "wsjtx_logged_adif", alias = "wsjt_x_logged_adif")]
+    WsjtXLoggedAdif {
+        event_id: String,
+        log_id: i64,
+        text: String,
+    },
+    #[serde(rename = "wsjtx_error", alias = "wsjt_x_error")]
+    WsjtXError {
+        log_id: i64,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -228,6 +256,73 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn wsjtx_radio_protocol_uses_stable_wire_names() {
+        let target_command: RadioClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "set_wsjtx_target",
+            "enabled": true
+        }))
+        .expect("target command deserializes");
+        assert!(matches!(
+            target_command,
+            RadioClientMessage::SetWsjtXTarget { enabled: true }
+        ));
+
+        let receipt: RadioClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "wsjtx_event_received",
+            "event_id": "8bf420c0-46f2-44aa-bfac-71a2ed41ef1a"
+        }))
+        .expect("receipt deserializes");
+        assert!(matches!(
+            receipt,
+            RadioClientMessage::WsjtXEventReceived { .. }
+        ));
+
+        let target = serde_json::to_value(RadioServerMessage::WsjtXTarget {
+            logger_id: Some("logger-1".to_string()),
+            log_id: Some(42),
+        })
+        .expect("target serializes");
+        assert_eq!(
+            target,
+            serde_json::json!({
+                "type": "wsjtx_target",
+                "logger_id": "logger-1",
+                "log_id": 42
+            })
+        );
+
+        let logged = serde_json::to_value(RadioServerMessage::WsjtXLoggedAdif {
+            event_id: "event-1".to_string(),
+            log_id: 42,
+            text: "<CALL:5>K1ABC<EOR>".to_string(),
+        })
+        .expect("logged ADIF serializes");
+        assert_eq!(
+            logged,
+            serde_json::json!({
+                "type": "wsjtx_logged_adif",
+                "event_id": "event-1",
+                "log_id": 42,
+                "text": "<CALL:5>K1ABC<EOR>"
+            })
+        );
+
+        let error = serde_json::to_value(RadioServerMessage::WsjtXError {
+            log_id: 42,
+            message: "bind failed".to_string(),
+        })
+        .expect("error serializes");
+        assert_eq!(
+            error,
+            serde_json::json!({
+                "type": "wsjtx_error",
+                "log_id": 42,
+                "message": "bind failed"
+            })
+        );
     }
 
     #[test]

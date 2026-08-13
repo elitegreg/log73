@@ -1,6 +1,6 @@
 use crate::{
     RadioClientMessage, RadioCommand, RadioConfig, RadioIoConfig, RadioManager, RadioServerMessage,
-    is_valid_message_mode, modes,
+    WsjtXEvent, WsjtXManager, WsjtXTargetState, is_valid_message_mode, modes,
 };
 use axum::{
     Extension,
@@ -20,13 +20,14 @@ use std::{
     sync::{Arc, Mutex, MutexGuard},
 };
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 const MAX_RADIO_FREQUENCY_HZ: u64 = 500_000_000;
 const MAX_RIT_OFFSET_HZ: i32 = 9_999;
 const MIN_CW_WPM: u8 = 5;
 const MAX_CW_WPM: u8 = 60;
 const MAX_REQUEST_ID_LEN: usize = 64;
+const MAX_LOGGER_ID_LEN: usize = 128;
 const MAX_CW_TEXT_LEN: usize = 256;
 const MAX_MESSAGE_FIELDS: usize = 100;
 const MAX_FIELD_NAME_LEN: usize = 64;
@@ -38,6 +39,7 @@ const MAX_FIELD_JSON_DEPTH: usize = 4;
 #[derive(Clone)]
 pub struct RadioWebSocketState {
     radio_manager: RadioManager,
+    wsjtx_manager: WsjtXManager,
     registry: Arc<Mutex<RadioRegistry>>,
 }
 
@@ -59,6 +61,7 @@ impl RadioWebSocketState {
             .collect();
         Self {
             radio_manager,
+            wsjtx_manager: WsjtXManager::new(),
             registry: Arc::new(Mutex::new(RadioRegistry { radios })),
         }
     }
@@ -134,6 +137,22 @@ impl RadioWebSocketState {
         let mut registry = lock_registry(&self.registry);
         if let Some(radio) = registry.radios.get_mut(&radio_id) {
             radio.users = radio.users.saturating_sub(1);
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct SingleRadioWebSocketState {
+    state: RadioWebSocketState,
+    radio_id: i64,
+}
+
+impl SingleRadioWebSocketState {
+    pub fn new(radio_manager: RadioManager, config: RadioConfig) -> Self {
+        let radio_id = config.id;
+        Self {
+            state: RadioWebSocketState::new(radio_manager, RadioIoConfig::new(vec![config])),
+            radio_id,
         }
     }
 }
@@ -253,7 +272,15 @@ fn lock_registry(registry: &Mutex<RadioRegistry>) -> MutexGuard<'_, RadioRegistr
 
 #[derive(Debug, Deserialize)]
 pub struct RadioWsQuery {
-    radio_id: i64,
+    radio_id: Option<i64>,
+    logger_id: Option<String>,
+    log_id: Option<i64>,
+}
+
+#[derive(Clone)]
+struct LoggerIdentity {
+    logger_id: String,
+    log_id: i64,
 }
 
 pub async fn radio_ws_handler(
@@ -261,19 +288,65 @@ pub async fn radio_ws_handler(
     Query(query): Query<RadioWsQuery>,
     ws: WebSocketUpgrade,
 ) -> Response {
-    if !state.contains_radio(query.radio_id) {
-        return (
-            StatusCode::NOT_FOUND,
-            format!("radio {} not found", query.radio_id),
-        )
-            .into_response();
+    let Some(radio_id) = query.radio_id else {
+        return (StatusCode::BAD_REQUEST, "radio_id is required").into_response();
+    };
+    let identity = match logger_identity(&query) {
+        Ok(identity) => identity,
+        Err(error) => return (StatusCode::BAD_REQUEST, error).into_response(),
+    };
+    if !state.contains_radio(radio_id) {
+        return (StatusCode::NOT_FOUND, format!("radio {radio_id} not found")).into_response();
     }
 
-    ws.on_upgrade(move |socket| handle_radio_socket(socket, state, query.radio_id))
+    ws.on_upgrade(move |socket| handle_radio_socket(socket, state, radio_id, identity))
         .into_response()
 }
 
-async fn handle_radio_socket(socket: WebSocket, state: RadioWebSocketState, radio_id: i64) {
+pub async fn single_radio_ws_handler(
+    Extension(single): Extension<SingleRadioWebSocketState>,
+    Query(query): Query<RadioWsQuery>,
+    ws: WebSocketUpgrade,
+) -> Response {
+    if query
+        .radio_id
+        .is_some_and(|radio_id| radio_id != single.radio_id)
+    {
+        return (StatusCode::NOT_FOUND, "radio not found").into_response();
+    }
+    let identity = match logger_identity(&query) {
+        Ok(identity) => identity,
+        Err(error) => return (StatusCode::BAD_REQUEST, error).into_response(),
+    };
+    ws.on_upgrade(move |socket| {
+        handle_radio_socket(socket, single.state, single.radio_id, identity)
+    })
+    .into_response()
+}
+
+fn logger_identity(query: &RadioWsQuery) -> Result<Option<LoggerIdentity>, String> {
+    match (&query.logger_id, query.log_id) {
+        (None, None) => Ok(None),
+        (Some(logger_id), Some(log_id)) => {
+            validate_required_text("Logger id", logger_id, MAX_LOGGER_ID_LEN)?;
+            if log_id <= 0 {
+                return Err("log_id must be positive".to_string());
+            }
+            Ok(Some(LoggerIdentity {
+                logger_id: logger_id.trim().to_string(),
+                log_id,
+            }))
+        }
+        _ => Err("logger_id and log_id must be provided together".to_string()),
+    }
+}
+
+async fn handle_radio_socket(
+    socket: WebSocket,
+    state: RadioWebSocketState,
+    radio_id: i64,
+    identity: Option<LoggerIdentity>,
+) {
     let acquired = match state.acquire(radio_id).await {
         Ok(acquired) => acquired,
         Err(error) => {
@@ -281,7 +354,38 @@ async fn handle_radio_socket(socket: WebSocket, state: RadioWebSocketState, radi
             return;
         }
     };
+    let config = acquired.config;
     let radio_handle = acquired.handle;
+    let initial_state = radio_handle.current_state().await;
+    let mut wsjtx_subscriptions = identity.as_ref().map(|_| {
+        (
+            state.wsjtx_manager.subscribe_targets(),
+            state.wsjtx_manager.subscribe_events(),
+        )
+    });
+    let initial_wsjtx_target = if let Some(identity) = &identity {
+        match state
+            .wsjtx_manager
+            .acquire(
+                radio_id,
+                &identity.logger_id,
+                identity.log_id,
+                config,
+                initial_state.clone(),
+                radio_handle.subscribe(),
+            )
+            .await
+        {
+            Ok(target) => Some(target),
+            Err(error) => {
+                warn!(radio_id, logger_id = %identity.logger_id, %error, "radio websocket could not register WSJT-X logger");
+                state.release(radio_id).await;
+                return;
+            }
+        }
+    } else {
+        None
+    };
 
     info!(radio_id, "radio websocket connected");
     let (mut sender, mut receiver) = socket.split();
@@ -290,20 +394,38 @@ async fn handle_radio_socket(socket: WebSocket, state: RadioWebSocketState, radi
         .await
         .is_err()
     {
-        state.release(radio_id).await;
+        release_socket_registration(&state, radio_id, identity.as_ref()).await;
         return;
     }
-    if let Some(current) = radio_handle.current_state().await {
+    if let Some(current) = initial_state {
         let current = RadioServerMessage::RadioState(current);
         if send_radio_ws_message(&mut sender, &current).await.is_err() {
-            state.release(radio_id).await;
+            release_socket_registration(&state, radio_id, identity.as_ref()).await;
             return;
         }
+    }
+    if let Some(target) = &initial_wsjtx_target
+        && send_radio_ws_message(&mut sender, &wsjtx_target_message(target))
+            .await
+            .is_err()
+    {
+        release_socket_registration(&state, radio_id, identity.as_ref()).await;
+        return;
     }
 
     let mut status_updates = radio_handle.subscribe_status();
     let mut state_updates = radio_handle.subscribe();
     let (direct_tx, mut direct_rx) = mpsc::channel::<RadioServerMessage>(32);
+    let wsjtx_bridge = identity.as_ref().and_then(|identity| {
+        wsjtx_subscriptions.take().map(|subscriptions| {
+            spawn_wsjtx_socket_bridge(
+                subscriptions,
+                radio_id,
+                identity.logger_id.clone(),
+                direct_tx.clone(),
+            )
+        })
+    });
     let outbound = tokio::spawn(async move {
         loop {
             let message = tokio::select! {
@@ -435,13 +557,126 @@ async fn handle_radio_socket(socket: WebSocket, state: RadioWebSocketState, radi
                 }
                 let _ = radio_handle.send_command(RadioCommand::SetWpm(wpm)).await;
             }
+            Ok(RadioClientMessage::SetWsjtXTarget { enabled }) => {
+                let Some(identity) = &identity else {
+                    warn!(
+                        radio_id,
+                        "unidentified radio websocket cannot set WSJT-X target"
+                    );
+                    continue;
+                };
+                if let Err(error) = state
+                    .wsjtx_manager
+                    .set_target(radio_id, &identity.logger_id, enabled)
+                    .await
+                {
+                    warn!(radio_id, logger_id = %identity.logger_id, enabled, %error, "unable to update WSJT-X target");
+                }
+            }
+            Ok(RadioClientMessage::WsjtXEventReceived { event_id }) => {
+                if let Err(error) = validate_wsjtx_event_id(&event_id) {
+                    warn!(radio_id, %error, "invalid WSJT-X receipt acknowledgment");
+                    continue;
+                }
+                if let Some(identity) = &identity {
+                    debug!(radio_id, logger_id = %identity.logger_id, event_id, "browser acknowledged WSJT-X event receipt");
+                }
+            }
             Err(error) => warn!(radio_id, %error, "invalid radio websocket message"),
         }
     }
 
     outbound.abort();
-    state.release(radio_id).await;
+    if let Some(bridge) = wsjtx_bridge {
+        bridge.abort();
+    }
+    release_socket_registration(&state, radio_id, identity.as_ref()).await;
     info!(radio_id, "radio websocket disconnected");
+}
+
+async fn release_socket_registration(
+    state: &RadioWebSocketState,
+    radio_id: i64,
+    identity: Option<&LoggerIdentity>,
+) {
+    if let Some(identity) = identity {
+        state
+            .wsjtx_manager
+            .release(radio_id, &identity.logger_id)
+            .await;
+    }
+    state.release(radio_id).await;
+}
+
+fn wsjtx_target_message(target: &WsjtXTargetState) -> RadioServerMessage {
+    RadioServerMessage::WsjtXTarget {
+        logger_id: target.logger_id.clone(),
+        log_id: target.log_id,
+    }
+}
+
+fn spawn_wsjtx_socket_bridge(
+    (mut targets, mut events): (
+        broadcast::Receiver<WsjtXTargetState>,
+        broadcast::Receiver<WsjtXEvent>,
+    ),
+    radio_id: i64,
+    logger_id: String,
+    direct_tx: mpsc::Sender<RadioServerMessage>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            let message = tokio::select! {
+                target = targets.recv() => match target {
+                    Ok(target) if target.radio_id == radio_id => wsjtx_target_message(&target),
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+                event = events.recv() => match event {
+                    Ok(event) => match wsjtx_event_message(event, radio_id, &logger_id) {
+                        Some(message) => message,
+                        None => continue,
+                    },
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+            };
+            if direct_tx.send(message).await.is_err() {
+                break;
+            }
+        }
+    })
+}
+
+fn wsjtx_event_message(
+    event: WsjtXEvent,
+    radio_id: i64,
+    logger_id: &str,
+) -> Option<RadioServerMessage> {
+    match event {
+        WsjtXEvent::LoggedAdif {
+            radio_id: event_radio_id,
+            logger_id: target_logger_id,
+            log_id,
+            event_id,
+            text,
+        } if event_radio_id == radio_id && target_logger_id == logger_id => {
+            Some(RadioServerMessage::WsjtXLoggedAdif {
+                event_id,
+                log_id,
+                text,
+            })
+        }
+        WsjtXEvent::Error {
+            radio_id: event_radio_id,
+            logger_id: target_logger_id,
+            log_id,
+            message,
+        } if event_radio_id == radio_id && target_logger_id == logger_id => {
+            Some(RadioServerMessage::WsjtXError { log_id, message })
+        }
+        _ => None,
+    }
 }
 
 async fn send_radio_ws_message(
@@ -547,6 +782,13 @@ fn validate_cw_wpm(wpm: u8) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+fn validate_wsjtx_event_id(event_id: &str) -> Result<(), String> {
+    validate_required_text("WSJT-X event id", event_id, MAX_REQUEST_ID_LEN)?;
+    uuid::Uuid::parse_str(event_id.trim())
+        .map(|_| ())
+        .map_err(|_| "WSJT-X event id must be a UUID".to_string())
 }
 
 fn validate_required_text(label: &str, value: &str, max_length: usize) -> Result<(), String> {
@@ -673,6 +915,8 @@ mod tests {
         assert!(validate_rit_adjustment_hz(0).is_err());
         assert!(validate_cw_wpm(25).is_ok());
         assert!(validate_cw_wpm(4).is_err());
+        assert!(validate_wsjtx_event_id("8bf420c0-46f2-44aa-bfac-71a2ed41ef1a").is_ok());
+        assert!(validate_wsjtx_event_id("event-1").is_err());
     }
 
     #[test]
@@ -684,6 +928,95 @@ mod tests {
         );
         assert!(validate_cw_text_request("request-1", "CQ TEST").is_ok());
         assert!(validate_cw_text_request("request-1", "").is_err());
+    }
+
+    #[test]
+    fn validates_optional_logger_identity_as_an_atomic_pair() {
+        let control_only = RadioWsQuery {
+            radio_id: Some(1),
+            logger_id: None,
+            log_id: None,
+        };
+        assert!(logger_identity(&control_only).unwrap().is_none());
+
+        let identified = RadioWsQuery {
+            radio_id: Some(1),
+            logger_id: Some(" logger-1 ".to_string()),
+            log_id: Some(42),
+        };
+        let identity = logger_identity(&identified)
+            .expect("identity validates")
+            .expect("identity exists");
+        assert_eq!(identity.logger_id, "logger-1");
+        assert_eq!(identity.log_id, 42);
+
+        let partial = RadioWsQuery {
+            radio_id: Some(1),
+            logger_id: Some("logger-1".to_string()),
+            log_id: None,
+        };
+        assert!(logger_identity(&partial).is_err());
+    }
+
+    #[test]
+    fn single_radio_state_owns_exactly_its_configured_runtime_radio() {
+        let radio = test_radio(7, "Client radio");
+        let single = SingleRadioWebSocketState::new(
+            RadioManager::new(VoiceKeyer::new(), BandCatalog::new(Vec::new())),
+            radio,
+        );
+        assert_eq!(single.radio_id, 7);
+        assert!(single.state.contains_radio(7));
+        assert!(!single.state.contains_radio(8));
+    }
+
+    #[test]
+    fn wsjtx_events_route_only_to_the_selected_radio_and_logger() {
+        let event = WsjtXEvent::LoggedAdif {
+            radio_id: 1,
+            logger_id: "logger-1".to_string(),
+            log_id: 42,
+            event_id: "event-1".to_string(),
+            text: "<EOR>".to_string(),
+        };
+        assert!(matches!(
+            wsjtx_event_message(event.clone(), 1, "logger-1"),
+            Some(RadioServerMessage::WsjtXLoggedAdif { .. })
+        ));
+        assert!(wsjtx_event_message(event.clone(), 1, "logger-2").is_none());
+        assert!(wsjtx_event_message(event, 2, "logger-1").is_none());
+    }
+
+    #[tokio::test]
+    async fn wsjtx_candidate_is_untargeted_until_checkbox_enable() {
+        let state = test_state(vec![test_radio(1, "Initial")]);
+        let acquired = state.acquire(1).await.expect("radio acquires");
+        let initial = state
+            .wsjtx_manager
+            .acquire(
+                1,
+                "logger-1",
+                42,
+                acquired.config.clone(),
+                acquired.handle.current_state().await,
+                acquired.handle.subscribe(),
+            )
+            .await
+            .expect("candidate registers");
+        assert_eq!(initial.logger_id, None);
+        assert_eq!(initial.log_id, None);
+
+        let enabled = state
+            .wsjtx_manager
+            .set_target(1, "logger-1", true)
+            .await
+            .expect("checkbox enables target");
+        assert_eq!(enabled.logger_id.as_deref(), Some("logger-1"));
+        assert_eq!(enabled.log_id, Some(42));
+
+        state.wsjtx_manager.release(1, "logger-1").await;
+        drop(acquired);
+        state.release(1).await;
     }
 
     #[tokio::test]

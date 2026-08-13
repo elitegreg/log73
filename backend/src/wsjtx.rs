@@ -89,6 +89,7 @@ async fn run_ingestor(mut source: broadcast::Receiver<WsjtXEvent>, ingestor: Wsj
                 radio_id,
                 log_id,
                 text,
+                ..
             }) => {
                 if let Err(message) = ingestor.ingest(radio_id, log_id, &text).await {
                     ingestor.emit_error(radio_id, log_id, message);
@@ -98,6 +99,7 @@ async fn run_ingestor(mut source: broadcast::Receiver<WsjtXEvent>, ingestor: Wsj
                 radio_id,
                 log_id,
                 message,
+                ..
             }) => ingestor.emit_error(radio_id, log_id, message),
             Err(broadcast::error::RecvError::Lagged(skipped)) => {
                 warn!(skipped, "WSJT-X backend event bridge lagged");

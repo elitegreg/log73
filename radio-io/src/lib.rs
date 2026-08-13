@@ -29,6 +29,6 @@ pub use radio_cat_rs::{Mode, list_serial_ports, supported_drivers};
 pub use radio_manager::{RadioHandle, RadioManager};
 pub use websocket::{
     AcquiredRadio, RadioAcquireError, RadioMutationError, RadioMutationPermit, RadioWebSocketState,
-    radio_ws_handler,
+    SingleRadioWebSocketState, radio_ws_handler, single_radio_ws_handler,
 };
 pub use wsjtx::{WsjtXEvent, WsjtXManager, WsjtXTargetState};
