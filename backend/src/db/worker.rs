@@ -1504,4 +1504,34 @@ mod tests {
             Some("alsa:out-2")
         );
     }
+
+    #[tokio::test]
+    async fn update_radio_rejects_client_owned_records() {
+        let database = test_database();
+        let client = database
+            .upsert_client_radio(
+                "1e2d3c4b-5a69-4870-91b2-c3d4e5f60718".to_string(),
+                "ws://127.0.0.1:49152/radiows".to_string(),
+                tcp_radio(),
+            )
+            .await
+            .expect("client radio is registered");
+
+        let mut update = tcp_radio();
+        update.name = "Attempted backend edit".to_string();
+        assert!(
+            database
+                .update_radio(client.id, update)
+                .await
+                .expect("client radio update query runs")
+                .is_none()
+        );
+
+        let persisted = database
+            .radio(client.id)
+            .await
+            .expect("client radio loads")
+            .expect("client radio remains");
+        assert_eq!(persisted.name, client.name);
+    }
 }

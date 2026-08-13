@@ -30,8 +30,12 @@ function formatRadioSummary(radio, radioKindsById) {
       : radio.transport_kind === 'serial'
         ? `serial ${radio.serial_port || '(unset)'} @ ${radio.serial_baud_rate}`
         : `tcp ${radio.tcp_host}:${radio.tcp_port}`;
+  const ownership =
+    radio.control_location === 'client'
+      ? ` - client-side (${radio.client_online ? 'online' : 'offline'})`
+      : '';
 
-  return `${radio.name} - ${radioKindLabel(radio, radioKindsById)} - ${connection}`;
+  return `${radio.name} - ${radioKindLabel(radio, radioKindsById)} - ${connection}${ownership}`;
 }
 
 function OpenLogScreen() {
@@ -42,6 +46,9 @@ function OpenLogScreen() {
   const [radioKindsById, setRadioKindsById] = useState(() => new Map());
   const [selectedLogId, setSelectedLogId] = useState('');
   const [selectedRadioId, setSelectedRadioId] = useState('');
+  const selectedRadio = radios.find(
+    (radio) => String(radio.id) === selectedRadioId,
+  );
 
   const notifyOperationalError = useCallback(
     (source, fallback, error, details = {}) => {
@@ -132,6 +139,15 @@ function OpenLogScreen() {
 
   async function deleteRadio() {
     if (!selectedRadioId) return;
+    if (
+      selectedRadio?.control_location === 'client' &&
+      selectedRadio.client_online === false &&
+      !window.confirm(
+        'Delete this offline client-side radio snapshot? Starting its configured Log73 Radio Client again will register it again.',
+      )
+    ) {
+      return;
+    }
     try {
       await apiJson(`/radios/${selectedRadioId}`, {
         method: 'DELETE',

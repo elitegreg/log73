@@ -2232,32 +2232,33 @@ async fn update_radio(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
     Json(mut payload): Json<RadioPayload>,
-) -> Json<serde_json::Value> {
-    if let Err(error) = radio_io::normalize_radio_settings(&mut payload) {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
+) -> ApiResult<serde_json::Value> {
+    let record = app_state
+        .db
+        .radio(id)
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .ok_or_else(|| ApiError::not_found("not found"))?;
+    if record.control_location == db::RadioControlLocation::Client {
+        return Err(ApiError::conflict(
+            "Configure this radio in Log73 Radio Client.",
+        ));
     }
+
+    radio_io::normalize_radio_settings(&mut payload).map_err(ApiError::bad_request)?;
     debug!(id, payload = %debug_payload_log(&payload), "update radio PUT body");
-    if let Err(error) = radio_io::validate_radio_settings(&payload) {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
-    }
-    if let Err(error) = validate_unique_wsjtx_port(&app_state, Some(id), &payload).await {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
-    }
-    if let Err(error) = app_state
+    radio_io::validate_radio_settings(&payload).map_err(ApiError::bad_request)?;
+    validate_unique_wsjtx_port(&app_state, Some(id), &payload)
+        .await
+        .map_err(ApiError::bad_request)?;
+    app_state
         .voice_keyer
         .validate_radio_voice_messages(&payload.voice_messages)
-    {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
-    }
-    let mutation = match app_state.radio_io.begin_mutation(id) {
-        Ok(mutation) => mutation,
-        Err(error) => {
-            return Json(serde_json::json!({
-                "ok": false,
-                "error": radio_mutation_error("update", error),
-            }));
-        }
-    };
+        .map_err(ApiError::bad_request)?;
+    let mutation = app_state
+        .radio_io
+        .begin_mutation(id)
+        .map_err(|error| radio_mutation_api_error("update", error))?;
     match app_state.db.update_radio(id, payload).await {
         Ok(Some(mut record)) => {
             if let Err(error) = app_state.voice_keyer.sync_radio_messages(&record.config) {
@@ -2265,15 +2266,17 @@ async fn update_radio(
             }
             if let Err(error) = mutation.commit_update(record.config.clone()) {
                 error!(id, %error, "failed to commit updated radio I/O configuration");
-                return Json(serde_json::json!({ "ok": false, "error": error }));
+                return Err(ApiError::internal(error.to_string()));
             }
             app_state
                 .voice_keyer
                 .sanitize_radio_config(&mut record.config);
-            Json(serde_json::json!({ "ok": true, "radio": RadioView::from_record(record, None) }))
+            Ok(Json(
+                serde_json::json!({ "ok": true, "radio": RadioView::from_record(record, None) }),
+            ))
         }
-        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Ok(None) => Err(ApiError::not_found("not found")),
+        Err(error) => Err(ApiError::internal(error.to_string())),
     }
 }
 
@@ -2307,16 +2310,35 @@ async fn validate_unique_wsjtx_port(
 async fn delete_radio(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-) -> Json<serde_json::Value> {
-    let mutation = match app_state.radio_io.begin_mutation(id) {
-        Ok(mutation) => mutation,
-        Err(error) => {
-            return Json(serde_json::json!({
-                "ok": false,
-                "error": radio_mutation_error("delete", error),
-            }));
+) -> ApiResult<serde_json::Value> {
+    let record = app_state
+        .db
+        .radio(id)
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .ok_or_else(|| ApiError::not_found("not found"))?;
+
+    if record.control_location == db::RadioControlLocation::Client {
+        if app_state.client_radios.is_online(id).await {
+            return Err(ApiError::conflict(
+                "This client-side radio is online. Stop Log73 Radio Client before deleting it.",
+            ));
         }
-    };
+        let deleted = app_state
+            .db
+            .delete_radio(id)
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+        if !deleted {
+            return Err(ApiError::not_found("not found"));
+        }
+        return Ok(Json(serde_json::json!({ "ok": true, "deleted": true })));
+    }
+
+    let mutation = app_state
+        .radio_io
+        .begin_mutation(id)
+        .map_err(|error| radio_mutation_api_error("delete", error))?;
 
     match app_state.db.delete_radio(id).await {
         Ok(deleted) => {
@@ -2325,21 +2347,23 @@ async fn delete_radio(
             }
             if deleted && let Err(error) = mutation.commit_delete() {
                 error!(id, %error, "failed to commit deleted radio I/O configuration");
-                return Json(serde_json::json!({ "ok": false, "error": error }));
+                return Err(ApiError::internal(error.to_string()));
             }
-            Json(serde_json::json!({ "ok": true, "deleted": deleted }))
+            Ok(Json(serde_json::json!({ "ok": true, "deleted": deleted })))
         }
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Err(error) => Err(ApiError::internal(error.to_string())),
     }
 }
 
-fn radio_mutation_error(action: &str, error: RadioMutationError) -> String {
+fn radio_mutation_api_error(action: &str, error: RadioMutationError) -> ApiError {
     match error {
-        RadioMutationError::NotFound { .. } => "not found".to_string(),
-        RadioMutationError::InUse { .. } => format!("cannot {action} an active radio"),
-        RadioMutationError::MutationInProgress { .. } => {
-            format!("cannot {action} a radio while another change is in progress")
+        RadioMutationError::NotFound { .. } => ApiError::not_found("not found"),
+        RadioMutationError::InUse { .. } => {
+            ApiError::conflict(format!("cannot {action} an active radio"))
         }
+        RadioMutationError::MutationInProgress { .. } => ApiError::conflict(format!(
+            "cannot {action} a radio while another change is in progress"
+        )),
     }
 }
 
