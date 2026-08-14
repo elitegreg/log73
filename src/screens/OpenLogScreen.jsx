@@ -271,7 +271,7 @@ function OpenLogScreen() {
               </option>
             ))}
           </select>
-          <div className="selection-buttons">
+          <div className="selection-buttons log-selection-buttons">
             <Link className="cmd-btn" to="/ui/create_log">
               Create
             </Link>

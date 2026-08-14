@@ -730,6 +730,11 @@
   padding: 8px 0;
 }
 
+.log-selection-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
+}
+
 .selection-actions {
   justify-content: flex-end;
   padding: 10px 12px;

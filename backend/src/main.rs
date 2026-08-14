@@ -1927,7 +1927,9 @@ async fn radios(State(app_state): State<AppState>) -> ApiResult<Vec<RadioView>> 
         Ok(mut radios) => {
             let mut views = Vec::with_capacity(radios.len());
             for radio in &mut radios {
-                app_state.voice_keyer.sanitize_radio_config(radio);
+                if radio.control_location == db::RadioControlLocation::Backend {
+                    app_state.voice_keyer.sanitize_radio_config(radio);
+                }
                 let client_online = if radio.control_location == db::RadioControlLocation::Client {
                     Some(app_state.client_radios.is_online(radio.id).await)
                 } else {
@@ -2006,7 +2008,9 @@ async fn serial_ports() -> ApiResult<Vec<SerialPortOption>> {
 async fn radio(State(app_state): State<AppState>, Path(id): Path<i64>) -> ApiResult<RadioView> {
     match app_state.db.radio(id).await {
         Ok(Some(mut radio)) => {
-            app_state.voice_keyer.sanitize_radio_config(&mut radio);
+            if radio.control_location == db::RadioControlLocation::Backend {
+                app_state.voice_keyer.sanitize_radio_config(&mut radio);
+            }
             let client_online = if radio.control_location == db::RadioControlLocation::Client {
                 Some(app_state.client_radios.is_online(radio.id).await)
             } else {
