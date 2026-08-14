@@ -8,7 +8,7 @@ import {
   isOfflineClientRadio,
   preferredRadioSelection,
   radioOwnershipLabel,
-  radioSelectionDetail,
+  visibleRadioOptions,
 } from './openLogRadio.js';
 
 function normalizeRadioKinds(value) {
@@ -37,7 +37,8 @@ function formatRadioSummary(radio, radioKindsById) {
       : radio.transport_kind === 'serial'
         ? `serial ${radio.serial_port || '(unset)'} @ ${radio.serial_baud_rate}`
         : `tcp ${radio.tcp_host}:${radio.tcp_port}`;
-  return `${radioOwnershipLabel(radio)} ${radio.name} - ${radioKindLabel(radio, radioKindsById)} - ${connection}`;
+  const ownership = radioOwnershipLabel(radio);
+  return `${ownership ? `${ownership} ` : ''}${radio.name} - ${radioKindLabel(radio, radioKindsById)} - ${connection}`;
 }
 
 function OpenLogScreen() {
@@ -51,6 +52,7 @@ function OpenLogScreen() {
   const selectedRadio = radios.find(
     (radio) => String(radio.id) === selectedRadioId,
   );
+  const visibleRadios = visibleRadioOptions(radios);
 
   const notifyOperationalError = useCallback(
     (source, fallback, error, details = {}) => {
@@ -195,13 +197,6 @@ function OpenLogScreen() {
       });
       return;
     }
-    if (isOfflineClientRadio(selectedRadio)) {
-      notifyError(
-        'Start Log73 Radio Client on that computer before opening this radio.',
-        { dedupeKey: 'OpenLogScreen.openLogger.clientOffline' },
-      );
-      return;
-    }
     navigate(`/ui/logger/${selectedLogId}/${selectedRadioId}`);
   }
 
@@ -325,25 +320,20 @@ function OpenLogScreen() {
         </section>
         <section>
           <h2>Radios</h2>
-          <p className="selection-help">
-            Create server-side radios here. Client-side radios register
-            automatically from Log73 Radio Client.
-          </p>
-          <select
-            className="selection-list"
-            size={10}
-            value={selectedRadioId}
-            onChange={(event) => setSelectedRadioId(event.target.value)}
-          >
-            {radios.map((radio) => (
-              <option key={radio.id} value={radio.id}>
-                {formatRadioSummary(radio, radioKindsById)}
-              </option>
-            ))}
-          </select>
-          <p className="selection-help">
-            {radioSelectionDetail(selectedRadio)}
-          </p>
+          <div className="radio-selection-list-wrap">
+            <select
+              className="selection-list radio-selection-list"
+              size={10}
+              value={selectedRadioId}
+              onChange={(event) => setSelectedRadioId(event.target.value)}
+            >
+              {visibleRadios.map((radio) => (
+                <option key={radio.id} value={radio.id}>
+                  {formatRadioSummary(radio, radioKindsById)}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="selection-buttons">
             <Link className="cmd-btn" to="/ui/create_radio">
               Create
@@ -393,16 +383,7 @@ function OpenLogScreen() {
         <button
           className="cmd-btn primary"
           onClick={openLogger}
-          disabled={
-            !selectedLogId ||
-            !selectedRadioId ||
-            isOfflineClientRadio(selectedRadio)
-          }
-          title={
-            isOfflineClientRadio(selectedRadio)
-              ? 'Start Log73 Radio Client on that computer before opening this radio.'
-              : undefined
-          }
+          disabled={!selectedLogId || !selectedRadioId}
         >
           Open
         </button>

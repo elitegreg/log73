@@ -2,7 +2,7 @@ use iced::widget::image::Handle as ImageHandle;
 use iced::widget::{
     Image, button, column, container, opaque, pick_list, row, scrollable, stack, text, text_input,
 };
-use iced::{Element, Font, Length, Subscription, Task, Theme, application, font, window};
+use iced::{Element, Length, Subscription, Task, Theme, application, window};
 use serde::{Deserialize, Serialize};
 use shared_child::SharedChild;
 use std::fmt;
@@ -21,7 +21,7 @@ const LAUNCHER_ICON_PNG: &[u8] = include_bytes!(concat!(
     "/../static/log73-icon-512.png"
 ));
 const LAUNCHER_MAIN_ICON_SIZE: f32 = 256.0;
-const LAUNCHER_TITLE_TEXT_SIZE: f32 = 40.0;
+const LAUNCHER_TITLE_TEXT_SIZE: f32 = 32.0;
 const LAUNCHER_WINDOW_WIDTH: f32 = 720.0;
 const LAUNCHER_WINDOW_HEIGHT: f32 = 420.0;
 
@@ -37,7 +37,7 @@ const LINUX_EDGE_COMMANDS: &[&str] = &[
 ];
 
 fn main() -> iced::Result {
-    application("log73 Launcher", update, view)
+    application("Log73 Launcher", update, view)
         .theme(|_| Theme::Light)
         .style(|_, _| iced::application::Appearance {
             background_color: iced::Color::WHITE,
@@ -1195,12 +1195,7 @@ fn view_main(state: &Launcher) -> Element<'_, Message> {
         .height(Length::Fixed(LAUNCHER_MAIN_ICON_SIZE));
 
     let controls = column![
-        text("log73 Launcher")
-            .size(LAUNCHER_TITLE_TEXT_SIZE)
-            .font(Font {
-                weight: font::Weight::Bold,
-                ..Font::DEFAULT
-            }),
+        text("Log73 Launcher").size(LAUNCHER_TITLE_TEXT_SIZE),
         row![updates_button, settings_button].spacing(12),
         row![
             start_button,

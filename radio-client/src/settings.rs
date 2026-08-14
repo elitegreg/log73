@@ -15,6 +15,7 @@ pub const SETTINGS_FILE_NAME: &str = "log73-radio-client.json";
 pub struct RadioClientSettings {
     pub schema_version: u32,
     pub client_instance_id: Uuid,
+    pub debug_logging_enabled: bool,
     pub backend: BackendSettings,
     pub radio: RadioSettings,
 }
@@ -24,6 +25,7 @@ impl Default for RadioClientSettings {
         Self {
             schema_version: SETTINGS_SCHEMA_VERSION,
             client_instance_id: Uuid::new_v4(),
+            debug_logging_enabled: false,
             backend: BackendSettings::default(),
             radio: RadioSettings::default(),
         }
@@ -248,6 +250,7 @@ mod tests {
         settings.radio.transport_kind = "none".to_string();
         settings.radio.flrig_enabled = true;
         settings.radio.flrig_port = 23_456;
+        settings.debug_logging_enabled = true;
 
         save_atomic(&path, &settings).unwrap();
         assert_eq!(load_or_create(&path).unwrap(), settings);

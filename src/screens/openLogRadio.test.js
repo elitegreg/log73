@@ -3,30 +3,28 @@ import test from 'node:test';
 import {
   preferredRadioSelection,
   radioOwnershipLabel,
-  radioSelectionDetail,
+  visibleRadioOptions,
 } from './openLogRadio.js';
 
-test('client radio labels and details make ownership explicit', () => {
-  assert.equal(
-    radioOwnershipLabel({ control_location: 'backend' }),
-    '[SERVER-SIDE]',
-  );
+test('client radio labels make remote ownership explicit', () => {
+  assert.equal(radioOwnershipLabel({ control_location: 'backend' }), '');
   assert.equal(
     radioOwnershipLabel({ control_location: 'client', client_online: true }),
-    '[CLIENT-SIDE · ONLINE]',
-  );
-  assert.match(
-    radioSelectionDetail({ control_location: 'client', client_online: false }),
-    /Start Log73 Radio Client/,
+    '[Remote Client]',
   );
 });
 
-test('initial radio selection avoids an offline client radio when possible', () => {
+test('offline client radios are hidden and cannot remain selected', () => {
   const radios = [
     { id: 1, control_location: 'client', client_online: false },
     { id: 2, control_location: 'backend' },
+    { id: 3, control_location: 'client', client_online: true },
   ];
+  assert.deepEqual(
+    visibleRadioOptions(radios).map((radio) => radio.id),
+    [2, 3],
+  );
   assert.equal(preferredRadioSelection('', radios), '2');
-  assert.equal(preferredRadioSelection('1', radios), '1');
-  assert.equal(preferredRadioSelection('', radios.slice(0, 1)), '1');
+  assert.equal(preferredRadioSelection('1', radios), '2');
+  assert.equal(preferredRadioSelection('', radios.slice(0, 1)), '');
 });

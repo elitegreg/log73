@@ -696,7 +696,7 @@
 
 .selection-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
   padding: 12px;
 }
@@ -709,6 +709,18 @@
 .selection-list {
   width: 100%;
   font-size: 12px;
+}
+
+.radio-selection-list-wrap {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.radio-selection-list {
+  display: block;
+  min-width: 100%;
+  width: max-content;
 }
 
 .selection-buttons,
