@@ -46,6 +46,7 @@ import { useEntryFields } from './hooks/useEntryFields';
 import { useEsm } from './hooks/useEsm';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useMessageSending } from './hooks/useMessageSending';
+import { wsjtxDataModeLocked } from '../domain/wsjtx';
 
 function dxccAdifNumber(dxccInfo) {
   const dxccNumber = Number(dxccInfo?.adif);
@@ -70,9 +71,12 @@ function MainWindow({
   cabrilloTransmitterId,
   radioState,
   backendSocketStatus,
+  radioSocketStatus,
   catStatus,
   messageLabels,
   messageSentEvent,
+  wsjtxTarget,
+  onSetWsjtXTarget,
   sessionId,
   logId,
   bandMapEnabled,
@@ -105,6 +109,7 @@ function MainWindow({
   onExit,
 }) {
   const radioMode = radioState?.mode ?? 'CW';
+  const wsjtxDataLocked = wsjtxDataModeLocked(radio, radioMode, wsjtxTarget);
   const radioFrequencyHz =
     radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
   const {
@@ -131,9 +136,10 @@ function MainWindow({
     radioMode,
     log,
     serialAllocation,
-    bandMapSelection,
+    bandMapSelection: wsjtxDataLocked ? null : bandMapSelection,
     radioFrequencyHz,
     contacts,
+    locked: wsjtxDataLocked,
   });
   const {
     esmEnabled,
@@ -192,10 +198,10 @@ function MainWindow({
   }, [cwWpm]);
 
   useEffect(() => {
-    if (backendSocketStatus === 'connected') {
+    if (radioSocketStatus === 'connected') {
       setCwWpmRef.current?.(cwWpm);
     }
-  }, [backendSocketStatus, cwWpm]);
+  }, [radioSocketStatus, cwWpm]);
 
   useEffect(() => {
     onDebouncedCallsignChange?.(debouncedCallSign.trim().toUpperCase());
@@ -340,7 +346,7 @@ function MainWindow({
     onStoreCqFrequency,
     onMarkFrequency,
     onStoreBandMapSpot,
-    onActivateBandMapSpot,
+    onActivateBandMapSpot: wsjtxDataLocked ? undefined : onActivateBandMapSpot,
     onSetRadioFrequency,
     onSetRadioMode,
     onClearRit,
@@ -389,6 +395,37 @@ function MainWindow({
     onStopKeying,
   });
 
+  const previousWsjtXDataLockedRef = useRef(false);
+  useEffect(() => {
+    const wasLocked = previousWsjtXDataLockedRef.current;
+    previousWsjtXDataLockedRef.current = wsjtxDataLocked;
+    if (!wsjtxDataLocked || wasLocked) return;
+    stopMessageSending();
+    setEsmEnabled(false);
+    setRepeatRunF1(false);
+    setCallSign('');
+    setExchangeValues({});
+    pendingPreviousContactAutofillRef.current = '';
+    callsignFrequencyBaselineRef.current = null;
+    pendingBandMapTuneFrequencyRef.current = null;
+    setEsmRunCallsignAttempt('');
+    setEsmExchangeSentCallsign('');
+    closeCwTextDialog();
+  }, [
+    closeCwTextDialog,
+    setEsmEnabled,
+    setEsmExchangeSentCallsign,
+    setEsmRunCallsignAttempt,
+    setExchangeValues,
+    setRepeatRunF1,
+    setCallSign,
+    stopMessageSending,
+    wsjtxDataLocked,
+    callsignFrequencyBaselineRef,
+    pendingBandMapTuneFrequencyRef,
+    pendingPreviousContactAutofillRef,
+  ]);
+
   useKeyboardShortcuts({
     radioMode,
     bandMapSpotStore,
@@ -406,9 +443,11 @@ function MainWindow({
     setCwWpm,
     sendMessageKey,
     stopMessageSending,
+    manualEntryDisabled: wsjtxDataLocked,
   });
 
   function handleCallsignChange(event) {
+    if (wsjtxDataLocked) return;
     handleEntryCallsignChange(event, {
       stopRepeat,
       updateEsmStateAfterCallsignEdit: (normalizedCallsign) => {
@@ -469,6 +508,7 @@ function MainWindow({
 
   function canLogContact(force = false, values = exchangeValues) {
     return (
+      !wsjtxDataLocked &&
       !serialBlockMessage &&
       allRequiredFieldsFilled(values) &&
       (force || (callsignValidation().ok && !firstInvalidExchangeField(values)))
@@ -476,6 +516,7 @@ function MainWindow({
   }
 
   function clearEntryFields({ clearRit = true } = {}) {
+    if (wsjtxDataLocked) return;
     if (clearRit) clearRitIfEnabled();
     setCallSign('');
     callsignFrequencyBaselineRef.current = null;
@@ -507,6 +548,7 @@ function MainWindow({
   ]);
 
   function logContact(force = false, values = exchangeValues) {
+    if (wsjtxDataLocked) return false;
     if (!canLogContact(force, values)) {
       if (!force && !callsignValidation().ok) {
         callSignRef.current?.focus();
@@ -838,6 +880,10 @@ function MainWindow({
   }
 
   function handleExchangeKeyDown(event, index) {
+    if (wsjtxDataLocked) {
+      event.preventDefault();
+      return;
+    }
     const currentField = settings.exchange[index];
     const currentFieldName = currentField?.id;
 
@@ -983,6 +1029,9 @@ function MainWindow({
         onSetRadioMode={onSetRadioMode}
         esmEnabled={esmEnabled}
         onSetEsmEnabled={setEsmEnabled}
+        wsjtxEnabled={Boolean(radio?.wsjtx_enabled)}
+        wsjtxTarget={wsjtxTarget}
+        onSetWsjtXTarget={onSetWsjtXTarget}
         cwWpm={cwWpm}
         cwWpmMin={CW_WPM_MIN}
         cwWpmMax={CW_WPM_MAX}
@@ -990,7 +1039,9 @@ function MainWindow({
         bandMapEnabled={bandMapEnabled}
         onSetBandMapEnabled={onSetBandMapEnabled}
         backendSocketStatus={backendSocketStatus}
+        radioSocketStatus={radioSocketStatus}
         catStatus={catStatus}
+        manualEntryDisabled={wsjtxDataLocked}
       />
       <EntryFields
         settings={settings}
@@ -1010,6 +1061,7 @@ function MainWindow({
         exchangeInputRefs={exchangeInputRefs}
         updateExchangeField={updateExchangeField}
         handleExchangeKeyDown={handleExchangeKeyDown}
+        locked={wsjtxDataLocked}
       />
       {serialAllocation?.message ? (
         <div className="serial-allocation-status" aria-live="polite">
@@ -1070,6 +1122,7 @@ function MainWindow({
         repeatRunF1={repeatRunF1}
         setRepeatRunF1={setRepeatRunF1}
         esmNextKeys={esmHighlightedKeys}
+        disabled={wsjtxDataLocked}
       />
       <CommandButtons
         stopMessageSending={stopMessageSending}
@@ -1085,6 +1138,7 @@ function MainWindow({
         highlightLogIt={highlightLogIt}
         disableLogIt={Boolean(serialBlockMessage)}
         logItTitle={serialBlockMessage || undefined}
+        manualEntryDisabled={wsjtxDataLocked}
       />
       <StatusBar
         stationCallsign={stationCallsign}

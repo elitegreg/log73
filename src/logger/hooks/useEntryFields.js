@@ -19,6 +19,7 @@ export function useEntryFields({
   bandMapSelection,
   radioFrequencyHz,
   contacts,
+  locked = false,
 }) {
   const [callSign, setCallSign] = useState('');
   const [debouncedCallSign, setDebouncedCallSign] = useState('');
@@ -34,12 +35,17 @@ export function useEntryFields({
   const bandMapSelectionSequenceRef = useRef(null);
 
   useEffect(() => {
+    if (locked) {
+      setExchangeValues({});
+      return;
+    }
     setExchangeValues(
       exchangeDefaults(settings, radioMode, log?.contest_params ?? {}),
     );
-  }, [settings, radioMode, log]);
+  }, [settings, radioMode, log, locked]);
 
   useEffect(() => {
+    if (locked) return;
     if (!serialAllocation?.required || !serialAllocation.fieldAdif) return;
     const serialField = (settings?.exchange ?? []).find(
       (field) =>
@@ -54,7 +60,7 @@ export function useEntryFields({
           ? ''
           : String(serialAllocation.current),
     }));
-  }, [settings, serialAllocation]);
+  }, [settings, serialAllocation, locked]);
 
   useEffect(() => {
     const selection = callsignSelectionRef.current;
@@ -110,6 +116,7 @@ export function useEntryFields({
   }, [callSign, contacts, exchangeValues, log, radioMode, settings]);
 
   useEffect(() => {
+    if (locked) return;
     if (!bandMapSelection?.spot) return;
     if (bandMapSelectionSequenceRef.current === bandMapSelection.sequence)
       return;
@@ -139,9 +146,10 @@ export function useEntryFields({
       callsignFrequencyBaselineRef.current;
     callSignEditedAtRef.current = new Date();
     window.requestAnimationFrame(() => callSignRef.current?.focus());
-  }, [bandMapSelection, exchangeValues, radioMode, settings]);
+  }, [bandMapSelection, exchangeValues, radioMode, settings, locked]);
 
   function updateExchangeField(field, value) {
+    if (locked) return;
     setExchangeValues((current) => ({
       ...current,
       [field.id]: sanitizeExchangeValue(field, value, radioMode),

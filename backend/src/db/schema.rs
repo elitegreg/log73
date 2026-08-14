@@ -36,6 +36,12 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
             OPTIONS TEXT NOT NULL DEFAULT '',
             DATA_MODE TEXT NOT NULL,
             RTTY_MODE TEXT NOT NULL,
+            WSJTX_ENABLED INTEGER NOT NULL DEFAULT 0 CHECK (WSJTX_ENABLED IN (0, 1)),
+            WSJTX_BIND_ADDRESS TEXT NOT NULL DEFAULT '127.0.0.1' CHECK (WSJTX_BIND_ADDRESS IN ('127.0.0.1', '0.0.0.0')),
+            WSJTX_PORT INTEGER NOT NULL DEFAULT 2237 CHECK (WSJTX_PORT >= 1024 AND WSJTX_PORT <= 65535),
+            WSJTX_MULTICAST_GROUP TEXT NOT NULL DEFAULT '',
+            FLRIG_ENABLED INTEGER NOT NULL DEFAULT 0 CHECK (FLRIG_ENABLED IN (0, 1)),
+            FLRIG_PORT INTEGER NOT NULL DEFAULT 12345 CHECK (FLRIG_PORT >= 1024 AND FLRIG_PORT <= 65535),
             CW_TUNING_INCREMENT_HZ INTEGER NOT NULL DEFAULT 20 CHECK (CW_TUNING_INCREMENT_HZ > 0),
             SSB_TUNING_INCREMENT_HZ INTEGER NOT NULL DEFAULT 100 CHECK (SSB_TUNING_INCREMENT_HZ > 0),
             RIT_CLEAR_ON_LOG INTEGER NOT NULL DEFAULT 0 CHECK (RIT_CLEAR_ON_LOG IN (0, 1)),
@@ -47,7 +53,18 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
             CW_SERIAL_BAUD_RATE INTEGER NOT NULL DEFAULT 9600 CHECK (CW_SERIAL_BAUD_RATE > 0),
             CW_SERIAL_LINE TEXT NOT NULL DEFAULT 'dtr',
             CW_MESSAGES TEXT NOT NULL,
-            VOICE_MESSAGES TEXT NOT NULL
+            VOICE_MESSAGES TEXT NOT NULL,
+            CONTROL_LOCATION TEXT NOT NULL DEFAULT 'backend' CHECK (CONTROL_LOCATION IN ('backend', 'client')),
+            CLIENT_INSTANCE_ID TEXT,
+            RADIO_WS_URL TEXT,
+            CHECK (
+                (CONTROL_LOCATION = 'backend' AND CLIENT_INSTANCE_ID IS NULL AND RADIO_WS_URL IS NULL)
+                OR (
+                    CONTROL_LOCATION = 'client'
+                    AND CLIENT_INSTANCE_ID IS NOT NULL AND length(trim(CLIENT_INSTANCE_ID)) > 0
+                    AND RADIO_WS_URL IS NOT NULL AND length(trim(RADIO_WS_URL)) > 0
+                )
+            )
         ) STRICT;
 
         CREATE TABLE IF NOT EXISTS qsos (
@@ -88,6 +105,12 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
         ) STRICT;
 
         CREATE INDEX IF NOT EXISTS idx_qsos_log_id ON qsos(LOG_ID);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_radios_enabled_wsjtx_port
+            ON radios(WSJTX_PORT) WHERE WSJTX_ENABLED = 1 AND CONTROL_LOCATION = 'backend';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_radios_enabled_flrig_port
+            ON radios(FLRIG_PORT) WHERE FLRIG_ENABLED = 1 AND CONTROL_LOCATION = 'backend';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_radios_client_instance_id
+            ON radios(CLIENT_INSTANCE_ID) WHERE CONTROL_LOCATION = 'client';
 
         CREATE TABLE IF NOT EXISTS log_serial_state (
             LOG_ID INTEGER NOT NULL REFERENCES logs(ID) ON DELETE CASCADE,

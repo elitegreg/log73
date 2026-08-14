@@ -5,6 +5,7 @@ import {
   getSessionId,
   loadUnusedSerial,
   mergeContact,
+  normalizeContact,
   saveLocalContacts,
   saveUnusedSerial,
   serialAllocationStorageKey,
@@ -12,6 +13,16 @@ import {
   sortContacts,
   sortContactsByCallsignThenTime,
 } from './loggerScreenHelpers.js';
+
+test('normalizeContact preserves WSJT-X ADIF field values', () => {
+  const normalized = normalizeContact({
+    meta: { status: 'Pending', source: 'wsjtx' },
+    adif: { FREQ: '14.074', COMMENT: '  exact value  ' },
+  });
+
+  assert.equal(normalized.adif.FREQ, '14.074');
+  assert.equal(normalized.adif.COMMENT, '  exact value  ');
+});
 
 test('sortContacts keeps normal log ordering newest first', () => {
   const contacts = [
@@ -50,7 +61,9 @@ test('sortContactsByCallsignThenTime normalizes callsign case', () => {
   ];
 
   assert.deepEqual(
-    sortContactsByCallsignThenTime(contacts).map((contact) => contact.adif.CALL),
+    sortContactsByCallsignThenTime(contacts).map(
+      (contact) => contact.adif.CALL,
+    ),
     ['K1AAA', 'k1bbb', 'K1BBB'],
   );
 });
@@ -193,7 +206,9 @@ test('getSessionId stores newly created id in sessionStorage only', () => {
   };
 
   assert.equal(getSessionId(), 'new-session-id');
-  assert.deepEqual(sessionStorageWrites, [[SESSION_STORAGE_KEY, 'new-session-id']]);
+  assert.deepEqual(sessionStorageWrites, [
+    [SESSION_STORAGE_KEY, 'new-session-id'],
+  ]);
   assert.equal(localStorageWrites, 0);
   globalThis.window.crypto = originalCrypto;
 });

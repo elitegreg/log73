@@ -1,0 +1,37 @@
+name: Radio Client
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  radio-client:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config libasound-dev libpipewire-0.3-dev
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+
+      - name: Check Radio Client formatting
+        run: cargo fmt -p log73-radio-client -- --check
+
+      - name: Lint Radio Client
+        run: cargo clippy -p log73-radio-client --all-targets --all-features -- -D warnings
+
+      - name: Test Radio Client
+        run: cargo test -p log73-radio-client
+
+      - name: Build Radio Client
+        run: cargo build -p log73-radio-client

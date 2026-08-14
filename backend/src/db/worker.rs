@@ -7,10 +7,13 @@ use super::logs::{
     db_create_log, db_delete_log, db_log_qso_count, db_logs, db_update_log, select_log,
 };
 use super::models::{
-    AuthConfig, ConfigView, DxClusterConfig, Log, NewLog, RadioConfig, RadioPayload,
+    AuthConfig, ConfigView, DxClusterConfig, Log, NewLog, RadioPayload, RadioRecord,
     SerialAllocation, UpdateConfig, UpdateLog,
 };
-use super::radios::{db_create_radio, db_delete_radio, db_radios, db_update_radio, select_radio};
+use super::radios::{
+    db_backend_radio_configs, db_create_radio, db_delete_radio, db_radios, db_update_radio,
+    db_upsert_client_radio, select_radio,
+};
 use super::schema::initialize_schema;
 use super::serials::db_allocate_serial;
 use rusqlite::Connection;
@@ -46,11 +49,14 @@ enum DbCommand {
         response: oneshot::Sender<rusqlite::Result<usize>>,
     },
     Radios {
-        response: oneshot::Sender<rusqlite::Result<Vec<RadioConfig>>>,
+        response: oneshot::Sender<rusqlite::Result<Vec<RadioRecord>>>,
     },
     Radio {
         id: i64,
-        response: oneshot::Sender<rusqlite::Result<Option<RadioConfig>>>,
+        response: oneshot::Sender<rusqlite::Result<Option<RadioRecord>>>,
+    },
+    BackendRadioConfigs {
+        response: oneshot::Sender<rusqlite::Result<Vec<radio_io::RadioConfig>>>,
     },
     AuthConfig {
         response: oneshot::Sender<rusqlite::Result<AuthConfig>>,
@@ -67,16 +73,23 @@ enum DbCommand {
     },
     CreateRadio {
         radio: RadioPayload,
-        response: oneshot::Sender<rusqlite::Result<RadioConfig>>,
+        response: oneshot::Sender<rusqlite::Result<RadioRecord>>,
     },
     UpdateRadio {
         id: i64,
         radio: RadioPayload,
-        response: oneshot::Sender<rusqlite::Result<Option<RadioConfig>>>,
+        response: oneshot::Sender<rusqlite::Result<Option<RadioRecord>>>,
     },
     DeleteRadio {
         id: i64,
         response: oneshot::Sender<rusqlite::Result<bool>>,
+    },
+    #[allow(dead_code)]
+    UpsertClientRadio {
+        client_instance_id: String,
+        radio_ws_url: String,
+        radio: RadioPayload,
+        response: oneshot::Sender<rusqlite::Result<RadioRecord>>,
     },
     Contacts {
         log_id: i64,
@@ -193,12 +206,17 @@ impl Database {
             .await
     }
 
-    pub async fn radios(&self) -> rusqlite::Result<Vec<RadioConfig>> {
+    pub async fn radios(&self) -> rusqlite::Result<Vec<RadioRecord>> {
         self.call(|response| DbCommand::Radios { response }).await
     }
 
-    pub async fn radio(&self, id: i64) -> rusqlite::Result<Option<RadioConfig>> {
+    pub async fn radio(&self, id: i64) -> rusqlite::Result<Option<RadioRecord>> {
         self.call(|response| DbCommand::Radio { id, response })
+            .await
+    }
+
+    pub async fn backend_radio_configs(&self) -> rusqlite::Result<Vec<radio_io::RadioConfig>> {
+        self.call(|response| DbCommand::BackendRadioConfigs { response })
             .await
     }
 
@@ -240,7 +258,7 @@ impl Database {
             .await
     }
 
-    pub async fn create_radio(&self, radio: RadioPayload) -> rusqlite::Result<RadioConfig> {
+    pub async fn create_radio(&self, radio: RadioPayload) -> rusqlite::Result<RadioRecord> {
         self.call(|response| DbCommand::CreateRadio { radio, response })
             .await
     }
@@ -249,7 +267,7 @@ impl Database {
         &self,
         id: i64,
         radio: RadioPayload,
-    ) -> rusqlite::Result<Option<RadioConfig>> {
+    ) -> rusqlite::Result<Option<RadioRecord>> {
         self.call(|response| DbCommand::UpdateRadio {
             id,
             radio,
@@ -261,6 +279,23 @@ impl Database {
     pub async fn delete_radio(&self, id: i64) -> rusqlite::Result<bool> {
         self.call(|response| DbCommand::DeleteRadio { id, response })
             .await
+    }
+
+    /// B2 registration endpoint boundary; exercised by persistence tests until the route lands.
+    #[allow(dead_code)]
+    pub async fn upsert_client_radio(
+        &self,
+        client_instance_id: String,
+        radio_ws_url: String,
+        radio: RadioPayload,
+    ) -> rusqlite::Result<RadioRecord> {
+        self.call(|response| DbCommand::UpsertClientRadio {
+            client_instance_id,
+            radio_ws_url,
+            radio,
+            response,
+        })
+        .await
     }
 
     pub async fn contacts(&self, log_id: i64) -> rusqlite::Result<Vec<Contact>> {
@@ -341,6 +376,9 @@ fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbComm
             DbCommand::Radio { id, response } => {
                 let _ = response.send(select_radio(&connection, id));
             }
+            DbCommand::BackendRadioConfigs { response } => {
+                let _ = response.send(db_backend_radio_configs(&connection));
+            }
             DbCommand::AuthConfig { response } => {
                 let _ = response.send(db_auth_config(&connection));
             }
@@ -365,6 +403,19 @@ fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbComm
             }
             DbCommand::DeleteRadio { id, response } => {
                 let _ = response.send(db_delete_radio(&connection, id));
+            }
+            DbCommand::UpsertClientRadio {
+                client_instance_id,
+                radio_ws_url,
+                radio,
+                response,
+            } => {
+                let _ = response.send(db_upsert_client_radio(
+                    &connection,
+                    &client_instance_id,
+                    &radio_ws_url,
+                    radio,
+                ));
             }
             DbCommand::Contacts { log_id, response } => {
                 let _ = response.send(db_contacts(&connection, log_id));
@@ -863,6 +914,12 @@ mod tests {
             options: String::new(),
             data_mode: "DATA-USB".to_string(),
             rtty_mode: "RTTY".to_string(),
+            wsjtx_enabled: false,
+            wsjtx_bind_address: "127.0.0.1".to_string(),
+            wsjtx_port: 2237,
+            wsjtx_multicast_group: String::new(),
+            flrig_enabled: false,
+            flrig_port: radio_io::DEFAULT_FLRIG_PORT,
             cw_tuning_increment_hz: crate::db::DEFAULT_CW_TUNING_INCREMENT_HZ,
             ssb_tuning_increment_hz: crate::db::DEFAULT_SSB_TUNING_INCREMENT_HZ,
             rit_clear_on_log: false,
@@ -1271,6 +1328,12 @@ mod tests {
         assert_eq!(radio.options, "");
         assert_eq!(radio.data_mode, "DATA-USB");
         assert_eq!(radio.rtty_mode, "RTTY");
+        assert!(!radio.wsjtx_enabled);
+        assert_eq!(radio.wsjtx_bind_address, "127.0.0.1");
+        assert_eq!(radio.wsjtx_port, 2237);
+        assert_eq!(radio.wsjtx_multicast_group, "");
+        assert!(!radio.flrig_enabled);
+        assert_eq!(radio.flrig_port, radio_io::DEFAULT_FLRIG_PORT);
         assert_eq!(
             radio.cw_tuning_increment_hz,
             crate::db::DEFAULT_CW_TUNING_INCREMENT_HZ
@@ -1287,6 +1350,133 @@ mod tests {
         assert_eq!(radio.cw_serial_baud_rate, 9_600);
         assert_eq!(radio.cw_serial_line, "dtr");
         assert_eq!(radio.voice_messages, DEFAULT_VOICE_MESSAGES);
+        assert_eq!(
+            radio.control_location,
+            crate::db::RadioControlLocation::Backend
+        );
+        assert_eq!(radio.client_instance_id, None);
+        assert_eq!(radio.radio_ws_url, None);
+    }
+
+    #[tokio::test]
+    async fn client_radio_registration_upsert_reuses_id_and_replaces_snapshot() {
+        let database = test_database();
+        let client_id = "b55168f4-5d76-4eed-a17f-67b42167ac42";
+        let first = database
+            .upsert_client_radio(
+                client_id.to_string(),
+                "ws://127.0.0.1:49152/radiows".to_string(),
+                tcp_radio(),
+            )
+            .await
+            .expect("client radio is registered");
+
+        let mut replacement = tcp_radio();
+        replacement.name = "Updated client radio".to_string();
+        replacement.wsjtx_enabled = true;
+        replacement.flrig_enabled = true;
+        replacement.flrig_port = 23_456;
+        let second = database
+            .upsert_client_radio(
+                client_id.to_string(),
+                "ws://127.0.0.1:49153/radiows".to_string(),
+                replacement,
+            )
+            .await
+            .expect("client radio is re-registered");
+
+        assert_eq!(first.id, second.id);
+        assert_eq!(
+            second.control_location,
+            crate::db::RadioControlLocation::Client
+        );
+        assert_eq!(second.client_instance_id.as_deref(), Some(client_id));
+        assert_eq!(
+            second.radio_ws_url.as_deref(),
+            Some("ws://127.0.0.1:49153/radiows")
+        );
+        assert_eq!(second.name, "Updated client radio");
+        assert!(second.wsjtx_enabled);
+        assert!(second.flrig_enabled);
+        assert_eq!(second.flrig_port, 23_456);
+    }
+
+    #[tokio::test]
+    async fn client_radios_do_not_reserve_local_service_ports_or_load_into_backend_runtime() {
+        let database = test_database();
+        let mut backend_radio = tcp_radio();
+        backend_radio.wsjtx_enabled = true;
+        backend_radio.flrig_enabled = true;
+        let backend = database
+            .create_radio(backend_radio)
+            .await
+            .expect("backend radio is created");
+
+        let mut client_radio = tcp_radio();
+        client_radio.wsjtx_enabled = true;
+        client_radio.flrig_enabled = true;
+        let client = database
+            .upsert_client_radio(
+                "7bea2122-503a-48ef-9eb5-8da4f5802b81".to_string(),
+                "ws://127.0.0.1:49152/radiows".to_string(),
+                client_radio,
+            )
+            .await
+            .expect("client radio may share the backend port");
+
+        let runtime_configs = database
+            .backend_radio_configs()
+            .await
+            .expect("backend runtime configs load");
+        assert_eq!(runtime_configs.len(), 1);
+        assert_eq!(runtime_configs[0].id, backend.id);
+        assert_ne!(runtime_configs[0].id, client.id);
+    }
+
+    #[tokio::test]
+    async fn enabled_wsjtx_ports_are_unique_but_disabled_ports_are_not_reserved() {
+        let database = test_database();
+        let mut first = tcp_radio();
+        first.wsjtx_enabled = true;
+        database
+            .create_radio(first)
+            .await
+            .expect("first enabled WSJT-X port is accepted");
+
+        let mut duplicate = tcp_radio();
+        duplicate.name = "Duplicate".to_string();
+        duplicate.wsjtx_enabled = true;
+        assert!(database.create_radio(duplicate).await.is_err());
+
+        let mut disabled = tcp_radio();
+        disabled.name = "Disabled".to_string();
+        database
+            .create_radio(disabled)
+            .await
+            .expect("disabled radio does not reserve its WSJT-X port");
+    }
+
+    #[tokio::test]
+    async fn enabled_flrig_ports_are_unique_but_disabled_ports_are_not_reserved() {
+        let database = test_database();
+        let mut first = tcp_radio();
+        first.flrig_enabled = true;
+        database
+            .create_radio(first)
+            .await
+            .expect("first enabled FLRig port is accepted");
+
+        let mut duplicate = tcp_radio();
+        duplicate.name = "Duplicate".to_string();
+        duplicate.flrig_enabled = true;
+        assert!(database.create_radio(duplicate).await.is_err());
+
+        let mut disabled = tcp_radio();
+        disabled.name = "Disabled".to_string();
+        database
+            .create_radio(disabled)
+            .await
+            .expect("disabled radio does not reserve its FLRig port");
     }
 
     #[tokio::test]
@@ -1346,5 +1536,35 @@ mod tests {
             updated.voice_output_device_id.as_deref(),
             Some("alsa:out-2")
         );
+    }
+
+    #[tokio::test]
+    async fn update_radio_rejects_client_owned_records() {
+        let database = test_database();
+        let client = database
+            .upsert_client_radio(
+                "1e2d3c4b-5a69-4870-91b2-c3d4e5f60718".to_string(),
+                "ws://127.0.0.1:49152/radiows".to_string(),
+                tcp_radio(),
+            )
+            .await
+            .expect("client radio is registered");
+
+        let mut update = tcp_radio();
+        update.name = "Attempted backend edit".to_string();
+        assert!(
+            database
+                .update_radio(client.id, update)
+                .await
+                .expect("client radio update query runs")
+                .is_none()
+        );
+
+        let persisted = database
+            .radio(client.id)
+            .await
+            .expect("client radio loads")
+            .expect("client radio remains");
+        assert_eq!(persisted.name, client.name);
     }
 }

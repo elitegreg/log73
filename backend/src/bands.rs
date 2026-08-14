@@ -1,60 +1,7 @@
-use radio_cat_rs::Frequency;
-use serde::{Deserialize, Serialize};
+pub use radio_io::{Band, BandCatalog, band_for_frequency};
+use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::Path;
-use std::sync::{Arc, RwLock};
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Band {
-    pub iaru_region: i64,
-    pub name: String,
-    pub lower_hz: i64,
-    pub upper_hz: i64,
-    pub default_ssb_mode: String,
-    pub sort_order: i64,
-    pub cabrillo: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct BandCatalog {
-    inner: Arc<RwLock<Arc<Vec<Band>>>>,
-}
-
-impl BandCatalog {
-    pub fn new(bands: Vec<Band>) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(Arc::new(bands))),
-        }
-    }
-
-    pub fn snapshot(&self) -> Arc<Vec<Band>> {
-        self.inner
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
-    }
-
-    pub fn replace(&self, bands: Vec<Band>) {
-        *self
-            .inner
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::new(bands);
-    }
-}
-
-impl Default for BandCatalog {
-    fn default() -> Self {
-        Self::new(Vec::new())
-    }
-}
-
-impl From<Arc<Vec<Band>>> for BandCatalog {
-    fn from(bands: Arc<Vec<Band>>) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(bands)),
-        }
-    }
-}
 
 #[derive(Debug, Deserialize)]
 struct BandCsvRow {
@@ -231,13 +178,6 @@ fn validate_non_overlapping(path: &Path, bands: &[Band]) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-pub fn band_for_frequency(bands: &[Band], frequency: Frequency) -> Option<&Band> {
-    let frequency_hz = i64::try_from(frequency.hz()).ok()?;
-    bands
-        .iter()
-        .find(|band| frequency_hz >= band.lower_hz && frequency_hz <= band.upper_hz)
 }
 
 pub fn band_by_name<'a>(bands: &'a [Band], name: &str) -> Option<&'a Band> {
@@ -526,10 +466,10 @@ mod tests {
     fn band_lookups_are_case_insensitive_and_include_boundaries() {
         let bands = vec![band("20M", 14_000_000, 14_350_000)];
         assert_eq!(band_by_name(&bands, " 20m ").unwrap().name, "20M");
-        assert!(band_for_frequency(&bands, Frequency::from_hz(14_000_000)).is_some());
-        assert!(band_for_frequency(&bands, Frequency::from_hz(14_350_000)).is_some());
-        assert!(band_for_frequency(&bands, Frequency::from_hz(13_999_999)).is_none());
-        assert!(band_for_frequency(&bands, Frequency::from_hz(14_350_001)).is_none());
+        assert!(band_for_frequency(&bands, 14_000_000).is_some());
+        assert!(band_for_frequency(&bands, 14_350_000).is_some());
+        assert!(band_for_frequency(&bands, 13_999_999).is_none());
+        assert!(band_for_frequency(&bands, 14_350_001).is_none());
     }
 
     #[test]

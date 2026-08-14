@@ -11,6 +11,7 @@ import {
   bandForFrequency,
 } from '../logger/mainWindowHelpers';
 import { cabrilloTransmitterPrompt } from '../domain/cabrilloTransmitter';
+import { wsjtxContactFromMessage } from '../domain/wsjtx';
 import TransmitterIdPrompt from '../logger/TransmitterIdPrompt';
 import {
   contactAdif,
@@ -26,8 +27,10 @@ import { useContactsOutbox } from './loggerScreen/useContactsOutbox';
 import { useLoggerContext } from './loggerScreen/useLoggerContext';
 import { useLoggerImage } from './loggerScreen/useLoggerImage';
 import { useOperationalErrorReporter } from './loggerScreen/useOperationalErrorReporter';
+import { useRadioSocket } from './loggerScreen/useRadioSocket';
 import { useSerialAllocator } from './loggerScreen/useSerialAllocator';
-import { getSessionId } from './loggerScreenHelpers';
+import { appendPendingContact } from './loggerScreen/contactsOutboxState';
+import { createSessionId, getSessionId } from './loggerScreenHelpers';
 
 function LoggerScreen() {
   const { logId, radioId } = useParams();
@@ -35,6 +38,7 @@ function LoggerScreen() {
   const numericLogId = Number(logId);
   const numericRadioId = Number(radioId);
   const [sessionId] = useState(getSessionId);
+  const [loggerId] = useState(createSessionId);
   const [transmitterSelection, setTransmitterSelection] = useState(null);
   const [bandMapEnabled, setBandMapEnabled] = useState(() => {
     return localStorage.getItem(BAND_MAP_ENABLED_STORAGE_KEY) === '1';
@@ -64,18 +68,17 @@ function LoggerScreen() {
   const remoteContactHandlerRef = useRef(null);
   const remoteContactDeletedHandlerRef = useRef(null);
   const refreshContactsHandlerRef = useRef(null);
+  const wsjtxLoggedAdifHandlerRef = useRef(null);
 
   const {
-    radioState,
     backendSocketStatus,
-    catStatus,
-    messageSentEvent,
     scoreSummary,
     isSocketDebugPanelEnabled,
     socketDebugEntries,
-    sendRadioMessage,
+    sendBackendMessage,
   } = useBackendSocket({
     sessionId,
+    loggerId,
     numericLogId,
     numericRadioId,
     notifyOperationalError,
@@ -84,6 +87,25 @@ function LoggerScreen() {
     onRemoteContactRef: remoteContactHandlerRef,
     onRemoteContactDeletedRef: remoteContactDeletedHandlerRef,
     onRefreshContactsRef: refreshContactsHandlerRef,
+  });
+
+  const {
+    radioState,
+    radioSocketStatus,
+    catStatus,
+    messageSentEvent,
+    sendRadioMessage,
+    wsjtxTarget,
+    setWsjtXTarget,
+  } = useRadioSocket({
+    numericRadioId,
+    numericLogId,
+    loggerId,
+    radioWebsocketUrl: radio?.radio_ws_url,
+    isClientRadio: radio?.control_location === 'client',
+    notifyOperationalError,
+    onWsjtXLoggedAdif: (message) =>
+      wsjtxLoggedAdifHandlerRef.current?.(message),
   });
 
   const {
@@ -102,6 +124,7 @@ function LoggerScreen() {
     logId: numericLogId,
     radioId: numericRadioId,
     radioFrequencyHz: radioState?.frequency_hz,
+    sendBackendMessage,
     sendRadioMessage,
     notifyOperationalError,
     onBeforeActivateSpot: () => bandMapActivateClearRef.current?.(),
@@ -159,6 +182,21 @@ function LoggerScreen() {
       : null;
   const isTransmitterSelectionPending =
     transmitterPromptKey !== null && cabrilloTransmitterId === null;
+
+  wsjtxLoggedAdifHandlerRef.current = (message) => {
+    const contact = wsjtxContactFromMessage({
+      eventId: message.event_id,
+      text: message.text,
+      logId: numericLogId,
+      sessionId,
+      operatorCallsign,
+      cabrilloTransmitterId,
+    });
+    setAllContacts((currentContacts) =>
+      appendPendingContact(currentContacts, contact),
+    );
+    return true;
+  };
 
   const handleBackendSocketMessage = useCallback(
     (message) => {
@@ -328,9 +366,12 @@ function LoggerScreen() {
               cabrilloTransmitterId={cabrilloTransmitterId}
               radioState={radioState}
               backendSocketStatus={backendSocketStatus}
+              radioSocketStatus={radioSocketStatus}
               catStatus={catStatus}
               messageLabels={messageLabels}
               messageSentEvent={messageSentEvent}
+              wsjtxTarget={wsjtxTarget}
+              onSetWsjtXTarget={setWsjtXTarget}
               sessionId={sessionId}
               logId={numericLogId}
               bandMapEnabled={bandMapEnabled}
@@ -368,7 +409,10 @@ function LoggerScreen() {
                 sendRadioMessage({ type: 'send_cw_text', ...payload })
               }
               onSendDxClusterSpot={(payload) =>
-                sendRadioMessage({ type: 'send_dxcluster_spot', ...payload })
+                sendBackendMessage({
+                  type: 'send_dxcluster_spot',
+                  ...payload,
+                })
               }
               onStopKeying={() => sendRadioMessage({ type: 'stop_keying' })}
               onSetCwWpm={(wpm) => sendRadioMessage({ type: 'set_wpm', wpm })}

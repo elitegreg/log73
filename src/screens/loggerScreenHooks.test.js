@@ -14,10 +14,17 @@ import {
   visibleBandMapSpotStoreForCurrentBand,
 } from './loggerScreen/useBandMap.js';
 import {
+  appendPendingContact,
+  contactCommitPayload,
   mergeCommittedPage,
   mergeResetCommittedPage,
   nextContactToCommit,
 } from './loggerScreen/contactsOutboxState.js';
+import {
+  radioSocketUrl,
+  wsjtxReceiptMessage,
+  wsjtxTargetUpdate,
+} from './loggerScreen/radioSocketController.js';
 import {
   currentSerialForBand,
   mergeSerialStates,
@@ -148,6 +155,93 @@ test('contacts outbox state picks next non-committing pending or updating contac
 
   const next = nextContactToCommit(contacts, new Set(['skip']));
   assert.equal(next.meta.clientId, 'take');
+});
+
+test('contacts outbox appends a WSJT-X contact once by client ID', () => {
+  const contact = {
+    meta: { clientId: 'event-1', status: 'Pending' },
+    adif: { CALL: 'W1AW', QSO_DATE_TIME_ON: 100 },
+  };
+  const once = appendPendingContact([], contact);
+  const twice = appendPendingContact(once, { ...contact });
+
+  assert.equal(once.length, 1);
+  assert.equal(twice, once);
+});
+
+test('contact commit payload copies every pending ADIF field unchanged', () => {
+  const adif = {
+    FREQ: '14.074',
+    QSO_DATE_OFF: '20240801',
+    TIME_OFF: '123500',
+    COMMENT: '  exact value  ',
+    APP_WSJTX_FOO: 'future-value',
+    _PRIVATE: 'private-value',
+  };
+  const payload = contactCommitPayload(
+    { meta: { clientId: 'event-1', source: 'wsjtx' }, adif },
+    7,
+  );
+
+  assert.deepEqual(payload.adif, adif);
+  assert.notEqual(payload.adif, adif);
+});
+
+test('radio socket URL preserves radio identity and adds logger identity only', () => {
+  assert.equal(
+    radioSocketUrl('/radiows?radio_id=4', {
+      loggerId: 'logger-1',
+      logId: 7,
+      baseUrl: 'https://logger.example/ui/logger/7/4',
+    }),
+    'wss://logger.example/radiows?radio_id=4&logger_id=logger-1&log_id=7',
+  );
+  assert.equal(
+    radioSocketUrl(
+      'ws://127.0.0.1:49152/radiows?logger_id=registered&log_id=9',
+      {
+        loggerId: 'logger-1',
+        logId: 7,
+        baseUrl: 'https://logger.example/ui/logger/7/4',
+      },
+    ),
+    'ws://127.0.0.1:49152/radiows?logger_id=registered&log_id=9',
+  );
+});
+
+test('WSJT-X target reconnect logic preserves explicit target intent', () => {
+  assert.deepEqual(
+    wsjtxTargetUpdate(
+      { type: 'wsjtx_target', logger_id: 'logger-1', log_id: 7 },
+      { loggerId: 'logger-1', logId: 7, targetIntent: true },
+    ),
+    { isTarget: true, reclaimTarget: false },
+  );
+  assert.deepEqual(
+    wsjtxTargetUpdate(
+      { type: 'wsjtx_target', logger_id: '', log_id: null },
+      { loggerId: 'logger-1', logId: 7, targetIntent: true },
+    ),
+    { isTarget: false, reclaimTarget: true },
+  );
+  assert.deepEqual(
+    wsjtxTargetUpdate(
+      { type: 'wsjtx_target', logger_id: 'another', log_id: 7 },
+      { loggerId: 'logger-1', logId: 7, targetIntent: true },
+    ),
+    { isTarget: false, reclaimTarget: false },
+  );
+});
+
+test('WSJT-X receipt acknowledges only an accepted event for this log', () => {
+  const event = { type: 'wsjtx_logged_adif', event_id: 'event-1', log_id: 7 };
+  assert.deepEqual(wsjtxReceiptMessage(event, 7, true), {
+    type: 'wsjtx_event_received',
+    event_id: 'event-1',
+  });
+  assert.equal(wsjtxReceiptMessage(event, 7, false), null);
+  assert.equal(wsjtxReceiptMessage({ ...event, log_id: 8 }, 7, true), null);
+  assert.equal(wsjtxReceiptMessage({ ...event, event_id: '' }, 7, true), null);
 });
 
 test('band map sequence helpers apply live updates and detect gaps', () => {

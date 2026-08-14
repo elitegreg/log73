@@ -4,7 +4,7 @@ mod winkeyer;
 
 use super::cw_task::CwKeyer;
 use crate::cat_keyer::CatKeyer;
-use crate::db::RadioConfig;
+use crate::config::RadioConfig;
 use radio_cat_rs::Radio;
 
 use serial::SerialLineKeyer;

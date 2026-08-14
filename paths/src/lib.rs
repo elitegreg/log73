@@ -30,6 +30,10 @@ pub fn log_file_path(data_dir: impl AsRef<Path>) -> PathBuf {
     data_dir.as_ref().join("log73-backend.log")
 }
 
+pub fn radio_client_log_file_path(data_dir: impl AsRef<Path>) -> PathBuf {
+    data_dir.as_ref().join("log73-radio-client.log")
+}
+
 pub fn app_root() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -176,6 +180,10 @@ mod tests {
         assert_eq!(
             database_path(data_dir),
             Path::new("log73-data").join("log73.db")
+        );
+        assert_eq!(
+            radio_client_log_file_path(data_dir),
+            Path::new("log73-data").join("log73-radio-client.log")
         );
         assert_eq!(
             installed_data_dir(Path::new("app-root")),

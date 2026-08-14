@@ -1,4 +1,4 @@
-use crate::db::RadioConfig;
+use crate::config::RadioConfig;
 use crate::voice_keyer::{VoiceKeyer, VoicePlaybackThread};
 use radio_cat_rs::Radio;
 use tracing::{debug, warn};

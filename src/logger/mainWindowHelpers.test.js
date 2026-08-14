@@ -5,6 +5,7 @@ import {
   bandByName,
   bandNamesEqual,
   bandForFrequency,
+  catIndicatorState,
   callsignClearThresholdHz,
   loggerFrequencyChangeAction,
   callsignHasQuery,
@@ -29,6 +30,12 @@ import {
   steppedFrequencyHz,
   typedModeFromCallsignInput,
 } from './mainWindowHelpers.js';
+
+test('CAT indicator combines the radio websocket and CAT connection states', () => {
+  assert.equal(catIndicatorState('connected', 'online'), 'connected');
+  assert.equal(catIndicatorState('connected', 'offline'), 'degraded');
+  assert.equal(catIndicatorState('disconnected', 'online'), 'disconnected');
+});
 
 test('exchangeDefaults uses the allocated sent serial and leaves received serial blank', () => {
   const settings = {

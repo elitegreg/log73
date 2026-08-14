@@ -1,5 +1,5 @@
 [workspace]
-members = ["backend", "launcher", "paths"]
+members = ["backend", "launcher", "paths", "radio-client", "radio-io"]
 resolver = "2"
 
 # The profile that 'dist' will build with

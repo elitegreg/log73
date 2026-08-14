@@ -121,6 +121,9 @@ body.theme-classic-terminal .log-context-menu button:disabled {
 body.theme-classic-terminal .backend-socket-light.connected {
   background-color: #33ff66;
 }
+body.theme-classic-terminal .backend-socket-light.degraded {
+  background-color: #ffff00;
+}
 body.theme-classic-terminal .backend-socket-light.disconnected {
   background-color: #ff4040;
 }

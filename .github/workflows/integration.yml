@@ -20,3 +20,6 @@ jobs:
 
   frontend-build:
     uses: ./.github/workflows/frontend-build.yml
+
+  radio-client:
+    uses: ./.github/workflows/radio-client.yml

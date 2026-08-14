@@ -71,3 +71,23 @@ export function nextContactToCommit(allContacts, committingIds) {
     return false;
   });
 }
+
+export function appendPendingContact(currentContacts, contact) {
+  const clientId = metaValue(contact, 'clientId');
+  if (
+    clientId &&
+    currentContacts.some(
+      (current) => metaValue(current, 'clientId') === clientId,
+    )
+  ) {
+    return currentContacts;
+  }
+  return sortContacts([...currentContacts, contact]);
+}
+
+export function contactCommitPayload(contact, logId) {
+  return {
+    meta: { ...contactMeta(contact), logId },
+    adif: { ...contactAdif(contact) },
+  };
+}

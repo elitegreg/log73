@@ -3,26 +3,19 @@ mod auth;
 mod bandmap;
 mod bands;
 mod cabrillo;
-mod cat_keyer;
+mod client_radios;
 mod contest_rules;
-mod cw;
 mod db;
 mod dxcc;
 mod dxcluster;
 mod log_cache;
-mod message_mode;
-mod messages;
-mod modes;
 mod qso_time;
 mod radio;
-mod radio_manager;
 mod scoring;
 mod static_assets;
 mod stats;
 mod supercheckpartial;
 mod validation;
-mod voice_keyer;
-mod voice_messages;
 
 use axum::{
     Json, Router,
@@ -34,23 +27,27 @@ use axum::{
     http::{HeaderMap, HeaderValue, Request, StatusCode, header},
     middleware,
     response::{IntoResponse, Response},
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use bandmap::{BandMapEvent, BandMapManager, CqSpotInput, InUseSpotInput, LocalSpotInput};
 use clap::Parser;
+use client_radios::{ClientRadioRegistry, HEARTBEAT_INTERVAL, LEASE_TIMEOUT};
 use contest_rules::{
     ContestRules, ContestRulesStore, ExchangeDirection, ExchangeField, FieldInputKind, SerialScope,
 };
 use db::{
     AuthConfig, Contact, Database, NewLog, RadioPayload, UpdateLog, contact_adif_value, contact_id,
-    contact_log_id, contact_meta_value, set_contact_meta,
+    contact_log_id, contact_meta_value, normalize_contact_adif, set_contact_meta,
 };
 use dxcluster::{DxClusterEvent, DxClusterManager, format_dxcluster_frequency_khz};
 use futures_util::{SinkExt, StreamExt};
 use log_cache::LogCache;
-use radio::{ClientMessage, RadioCommand, ServerMessage};
-use radio_cat_rs::{list_serial_ports, supported_drivers};
-use radio_manager::RadioManager;
+use radio::{ClientMessage, ServerMessage};
+use radio_io::voice_keyer::VoiceKeyer;
+use radio_io::{
+    RadioIoConfig, RadioManager, RadioMutationError, RadioWebSocketState, cw, list_serial_ports,
+    modes, supported_drivers, voice_keyer, voice_messages,
+};
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use stats::StatsTracker;
 use std::{
@@ -62,15 +59,16 @@ use std::{
     time::Duration,
 };
 use supercheckpartial::SuperCheckPartial;
-use tokio::sync::{RwLock, broadcast, mpsc, oneshot};
+use tokio::sync::{RwLock, broadcast, mpsc};
 use tower_http::trace::TraceLayer;
 use tracing::{Span, debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
-use voice_keyer::VoiceKeyer;
+use uuid::Uuid;
 
 #[derive(Clone)]
 struct AppState {
-    radio_manager: RadioManager,
+    radio_io: RadioWebSocketState,
+    client_radios: ClientRadioRegistry,
     log_events: broadcast::Sender<ServerMessage>,
     db: Database,
     auth_config: std::sync::Arc<RwLock<AuthConfig>>,
@@ -249,6 +247,7 @@ struct ErrorBody {
     code: Option<&'static str>,
 }
 
+#[derive(Debug)]
 struct ApiError {
     status: StatusCode,
     body: ErrorBody,
@@ -275,6 +274,10 @@ impl ApiError {
 
     fn internal(error: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, error)
+    }
+
+    fn conflict(error: impl Into<String>) -> Self {
+        Self::new(StatusCode::CONFLICT, error)
     }
 }
 
@@ -434,6 +437,9 @@ async fn main() {
     let dxcluster = DxClusterManager::new();
     let voicekeyer_dir = paths.data_dir.join("voicekeyer");
     let voice_keyer = VoiceKeyer::with_voicekeyer_dir(voicekeyer_dir);
+    if let Err(error) = voice_keyer.load_voice_assets() {
+        warn!(%error, "failed to load voice asset cache at startup");
+    }
     let initial_bandmap_max_age = match db.dxcluster_config().await {
         Ok(config) => {
             let max_age = Duration::from_secs(u64::from(config.max_age_min) * 60);
@@ -459,7 +465,12 @@ async fn main() {
         "loaded amateur radio band catalog"
     );
     let bandmap = BandMapManager::new(band_catalog.clone(), initial_bandmap_max_age);
-    let radio_manager = RadioManager::new(db.clone(), voice_keyer.clone(), band_catalog.clone());
+    let radio_manager = RadioManager::new(voice_keyer.clone(), band_catalog.clone());
+    let radio_configs = db
+        .backend_radio_configs()
+        .await
+        .unwrap_or_else(|error| panic!("failed to load radio I/O configuration: {error}"));
+    let radio_io = RadioWebSocketState::new(radio_manager, RadioIoConfig::new(radio_configs));
     let scoring_modules = ScoringModules::new();
     let incremental_scoring = IncrementalScoreTracker::new();
     let stats = StatsTracker::new();
@@ -476,7 +487,8 @@ async fn main() {
     log_cache.register_processor(std::sync::Arc::new(supercheckpartial.clone()));
 
     let app_state = AppState {
-        radio_manager,
+        radio_io: radio_io.clone(),
+        client_radios: ClientRadioRegistry::default(),
         log_events,
         db,
         auth_config,
@@ -495,6 +507,7 @@ async fn main() {
         voice_keyer,
     };
     spawn_dxcluster_bandmap_bridge(app_state.dxcluster.clone(), app_state.bandmap.clone());
+    spawn_client_radio_expiration_task(app_state.client_radios.clone());
 
     let request_trace_layer = TraceLayer::new_for_http()
         .make_span_with(|request: &Request<axum::body::Body>| {
@@ -565,6 +578,18 @@ async fn main() {
         .route("/radio-kinds", get(radio_kinds))
         .route("/serial-ports", get(serial_ports))
         .route("/radios", get(radios).post(create_radio))
+        .route(
+            "/radio-clients/{client_instance_id}",
+            put(register_client_radio),
+        )
+        .route(
+            "/radio-clients/{client_instance_id}/heartbeat",
+            post(client_radio_heartbeat),
+        )
+        .route(
+            "/radio-clients/{client_instance_id}/offline",
+            post(client_radio_offline),
+        )
         .route("/radios/cw-messages/default", get(default_cw_messages))
         .route("/radios/cw-messages/validate", post(validate_cw_messages))
         .route(
@@ -585,8 +610,10 @@ async fn main() {
     let app = Router::new()
         .nest("/api", api)
         .route("/ws", get(ws_handler))
+        .route("/radiows", get(radio_io::radio_ws_handler))
         .fallback(static_assets::static_handler)
         .with_state(app_state.clone())
+        .layer(axum::Extension(radio_io))
         .layer(middleware::from_fn_with_state(app_state, auth::basic_auth))
         .layer(request_trace_layer);
 
@@ -632,6 +659,18 @@ async fn shutdown_signal() {
     }
 }
 
+fn spawn_client_radio_expiration_task(registry: ClientRadioRegistry) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            for radio_id in registry.expire().await {
+                info!(radio_id, "client radio lease expired; radio is offline");
+            }
+        }
+    });
+}
+
 async fn ws_handler(
     State(app_state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
@@ -658,49 +697,16 @@ async fn handle_socket(
         warn!(session_id, "backend websocket missing radio_id");
         return;
     };
-
-    let Ok(radio_handle) = app_state.radio_manager.acquire(radio_id).await else {
-        warn!(
-            session_id,
-            radio_id, "backend websocket requested unavailable radio"
-        );
+    let Some(log_id) = log_id else {
+        warn!(session_id, radio_id, "backend websocket missing log_id");
         return;
     };
+    let mut log_events = app_state.log_events.subscribe();
 
     info!(session_id, radio_id, "backend websocket connected");
     let (mut sender, mut receiver) = socket.split();
 
-    let current_status = radio_handle.current_status_message().await;
-    if sender
-        .send(Message::Text(
-            serde_json::to_string(&current_status)
-                .expect("radio status should serialize")
-                .into(),
-        ))
-        .await
-        .is_err()
-    {
-        app_state.radio_manager.release(radio_id).await;
-        return;
-    }
-
-    if let Some(current) = radio_handle.current_message().await
-        && sender
-            .send(Message::Text(
-                serde_json::to_string(&current)
-                    .expect("radio state should serialize")
-                    .into(),
-            ))
-            .await
-            .is_err()
-    {
-        app_state.radio_manager.release(radio_id).await;
-        return;
-    }
-
-    if let Some(log_id) = log_id
-        && let Some(totals) = app_state.incremental_scoring.totals(log_id)
-    {
+    if let Some(totals) = app_state.incremental_scoring.totals(log_id) {
         let score_update = score_update_message(log_id, &totals);
         if sender
             .send(Message::Text(
@@ -711,32 +717,18 @@ async fn handle_socket(
             .await
             .is_err()
         {
-            app_state.radio_manager.release(radio_id).await;
             return;
         }
     }
 
-    let mut radio_status_updates = radio_handle.subscribe_status();
-    let mut radio_updates = radio_handle.subscribe();
-    let mut log_events = app_state.log_events.subscribe();
     let (direct_tx, mut direct_rx) = mpsc::channel::<ServerMessage>(32);
     let mut bandmap_enabled = false;
     let mut bandmap_subscription: Option<tokio::task::JoinHandle<()>> = None;
     let outbound_session_id = session_id.clone();
-    let outbound_log_id = log_id;
+    let outbound_log_id = Some(log_id);
     let outbound = tokio::spawn(async move {
         loop {
             let message = tokio::select! {
-                status = radio_status_updates.recv() => match status {
-                    Ok(status) => serde_json::to_string(&ServerMessage::RadioStatus(status)).expect("radio status should serialize"),
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                },
-                update = radio_updates.recv() => match update {
-                    Ok(update) => serde_json::to_string(&ServerMessage::RadioState(update)).expect("radio state should serialize"),
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => break,
-                },
                 event = log_events.recv() => match event {
                     Ok(event) => match websocket_log_event_for_client(event, outbound_session_id.as_str(), outbound_log_id) {
                         Some(event) => serde_json::to_string(&event).expect("log event should serialize"),
@@ -801,7 +793,7 @@ async fn handle_socket(
                         direct_tx.clone(),
                         session_id.clone(),
                         radio_id,
-                        log_id,
+                        Some(log_id),
                     ));
                     if direct_tx
                         .send(ServerMessage::BandMapSubscriptionReady)
@@ -815,214 +807,6 @@ async fn handle_socket(
                         );
                         break;
                     }
-                }
-            }
-            Ok(ClientMessage::SetFrequency { frequency_hz }) => {
-                debug!(
-                    session_id,
-                    radio_id, frequency_hz, "websocket set_frequency command received"
-                );
-                if let Err(error) = validation::validate_radio_frequency_hz(frequency_hz) {
-                    warn!(session_id, radio_id, frequency_hz, %error, "invalid websocket set_frequency command");
-                    continue;
-                }
-                let _ = radio_handle
-                    .send_command(RadioCommand::SetFrequency(frequency_hz))
-                    .await;
-            }
-            Ok(ClientMessage::SetMode { mode }) => {
-                debug!(
-                    session_id,
-                    radio_id, mode, "websocket set_mode command received"
-                );
-                if let Err(error) = validation::validate_radio_mode(&mode) {
-                    warn!(session_id, radio_id, mode, %error, "invalid websocket set_mode command");
-                    continue;
-                }
-                let _ = radio_handle.send_command(RadioCommand::SetMode(mode)).await;
-            }
-            Ok(ClientMessage::RitClear) => {
-                debug!(session_id, radio_id, "websocket rit_clear command received");
-                let _ = radio_handle.send_command(RadioCommand::RitClear).await;
-            }
-            Ok(ClientMessage::RitIncrement { hz }) => {
-                debug!(
-                    session_id,
-                    radio_id, hz, "websocket rit_increment command received"
-                );
-                if let Err(error) = validation::validate_rit_adjustment_hz(hz) {
-                    warn!(session_id, radio_id, hz, %error, "invalid websocket rit_increment command");
-                    continue;
-                }
-                let _ = radio_handle
-                    .send_command(RadioCommand::RitIncrement(hz))
-                    .await;
-            }
-            Ok(ClientMessage::RitDecrement { hz }) => {
-                debug!(
-                    session_id,
-                    radio_id, hz, "websocket rit_decrement command received"
-                );
-                if let Err(error) = validation::validate_rit_adjustment_hz(hz) {
-                    warn!(session_id, radio_id, hz, %error, "invalid websocket rit_decrement command");
-                    continue;
-                }
-                let _ = radio_handle
-                    .send_command(RadioCommand::RitDecrement(hz))
-                    .await;
-            }
-            Ok(ClientMessage::SendMessage {
-                request_id,
-                mode,
-                keys,
-                fields,
-            }) => {
-                debug!(
-                    session_id,
-                    radio_id,
-                    request_id,
-                    mode,
-                    ?keys,
-                    "websocket send_message command received"
-                );
-                if let Err(error) =
-                    validation::validate_message_request(&request_id, &mode, &keys, &fields)
-                {
-                    warn!(session_id, radio_id, request_id, mode, ?keys, %error, "invalid websocket send_message command");
-                    continue;
-                }
-                let (completed_tx, completed_rx) = oneshot::channel();
-                let command_result = radio_handle
-                    .send_command(RadioCommand::SendMessage {
-                        mode,
-                        keys,
-                        fields,
-                        completed: completed_tx,
-                    })
-                    .await;
-                if command_result.is_ok() {
-                    let direct_tx = direct_tx.clone();
-                    let completion_session_id = session_id.clone();
-                    tokio::spawn(async move {
-                        debug!(
-                            session_id = %completion_session_id,
-                            request_id,
-                            "waiting for message send completion"
-                        );
-                        match completed_rx.await {
-                            Ok(Ok(())) => {
-                                debug!(
-                                    session_id = %completion_session_id,
-                                    request_id,
-                                    "message send complete; sending message_sent websocket message"
-                                );
-                                if direct_tx
-                                    .send(ServerMessage::MessageSent { request_id })
-                                    .await
-                                    .is_err()
-                                {
-                                    debug!(
-                                        session_id = %completion_session_id,
-                                        "unable to send message_sent websocket message; session closed"
-                                    );
-                                }
-                            }
-                            Ok(Err(error)) => {
-                                debug!(
-                                    session_id = %completion_session_id,
-                                    request_id,
-                                    %error,
-                                    "message send did not complete; not sending message_sent websocket message"
-                                );
-                            }
-                            Err(error) => {
-                                debug!(
-                                    session_id = %completion_session_id,
-                                    request_id,
-                                    %error,
-                                    "message completion channel closed; not sending message_sent websocket message"
-                                );
-                            }
-                        }
-                    });
-                } else {
-                    debug!(
-                        session_id,
-                        radio_id, request_id, "failed to queue message command"
-                    );
-                }
-            }
-            Ok(ClientMessage::SendCwText {
-                request_id,
-                text,
-                wait_for_completion,
-            }) => {
-                debug!(
-                    session_id,
-                    radio_id, request_id, "websocket send_cw_text command received"
-                );
-                if let Err(error) = validation::validate_cw_text_request(&request_id, &text) {
-                    warn!(session_id, radio_id, request_id, %error, "invalid websocket send_cw_text command");
-                    continue;
-                }
-                let (completed_tx, completed_rx) = oneshot::channel();
-                let command_result = radio_handle
-                    .send_command(RadioCommand::SendCwText {
-                        text,
-                        wait_for_completion,
-                        completed: completed_tx,
-                    })
-                    .await;
-                if command_result.is_ok() {
-                    let direct_tx = direct_tx.clone();
-                    let completion_session_id = session_id.clone();
-                    tokio::spawn(async move {
-                        debug!(
-                            session_id = %completion_session_id,
-                            request_id,
-                            "waiting for cw text send completion"
-                        );
-                        match completed_rx.await {
-                            Ok(Ok(())) => {
-                                debug!(
-                                    session_id = %completion_session_id,
-                                    request_id,
-                                    "cw text send complete; sending message_sent websocket message"
-                                );
-                                if direct_tx
-                                    .send(ServerMessage::MessageSent { request_id })
-                                    .await
-                                    .is_err()
-                                {
-                                    debug!(
-                                        session_id = %completion_session_id,
-                                        "unable to send message_sent websocket message; session closed"
-                                    );
-                                }
-                            }
-                            Ok(Err(error)) => {
-                                debug!(
-                                    session_id = %completion_session_id,
-                                    request_id,
-                                    %error,
-                                    "cw text send did not complete; not sending message_sent websocket message"
-                                );
-                            }
-                            Err(error) => {
-                                debug!(
-                                    session_id = %completion_session_id,
-                                    request_id,
-                                    %error,
-                                    "cw text completion channel closed; not sending message_sent websocket message"
-                                );
-                            }
-                        }
-                    });
-                } else {
-                    debug!(
-                        session_id,
-                        radio_id, request_id, "failed to queue cw text command"
-                    );
                 }
             }
             Ok(ClientMessage::SendDxClusterSpot {
@@ -1052,24 +836,6 @@ async fn handle_socket(
                     warn!(session_id, radio_id, frequency_hz, call = %normalized_call, %error, "failed to send DX Cluster spot");
                 }
             }
-            Ok(ClientMessage::StopKeying) => {
-                debug!(
-                    session_id,
-                    radio_id, "websocket stop_keying command received"
-                );
-                let _ = radio_handle.send_command(RadioCommand::StopKeying).await;
-            }
-            Ok(ClientMessage::SetWpm { wpm }) => {
-                debug!(
-                    session_id,
-                    radio_id, wpm, "websocket set_wpm command received"
-                );
-                if let Err(error) = validation::validate_cw_wpm(wpm) {
-                    warn!(session_id, radio_id, wpm, %error, "invalid websocket set_wpm command");
-                    continue;
-                }
-                let _ = radio_handle.send_command(RadioCommand::SetWpm(wpm)).await;
-            }
             Err(error) => warn!(session_id, radio_id, %error, "invalid websocket message"),
         }
     }
@@ -1078,7 +844,6 @@ async fn handle_socket(
         subscription.abort();
     }
     outbound.abort();
-    app_state.radio_manager.release(radio_id).await;
     info!(session_id, radio_id, "backend websocket disconnected");
 }
 
@@ -1359,7 +1124,7 @@ async fn required_radio_name_for_id(
         .radio(radio_id)
         .await
         .map_err(|error| ApiError::internal(error.to_string()))?
-        .map(|radio| radio.name)
+        .map(|radio| radio.name.clone())
         .ok_or_else(|| ApiError::not_found(format!("radio {radio_id} not found")))
 }
 
@@ -2006,13 +1771,173 @@ async fn output_audio_devices(
         .map_err(ApiError::internal)
 }
 
-async fn radios(State(app_state): State<AppState>) -> ApiResult<Vec<db::RadioConfig>> {
+#[derive(Debug, serde::Deserialize)]
+struct RegisterClientRadioRequest {
+    radio_ws_url: String,
+    config: RadioPayload,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ClientRadioLeaseRequest {
+    radio_id: i64,
+    lease_id: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct ClientRadioRegistration {
+    radio_id: i64,
+    lease_id: String,
+    heartbeat_interval_seconds: u64,
+    lease_timeout_seconds: u64,
+}
+
+async fn register_client_radio(
+    State(app_state): State<AppState>,
+    Path(client_instance_id): Path<String>,
+    Json(mut payload): Json<RegisterClientRadioRequest>,
+) -> ApiResult<ClientRadioRegistration> {
+    let client_instance_id = validate_client_instance_id(&client_instance_id)?;
+    validate_client_radio_ws_url(&payload.radio_ws_url)?;
+    radio_io::normalize_radio_settings(&mut payload.config).map_err(ApiError::bad_request)?;
+    radio_io::validate_radio_settings(&payload.config).map_err(ApiError::bad_request)?;
+
+    let record = app_state
+        .db
+        .upsert_client_radio(
+            client_instance_id.clone(),
+            payload.radio_ws_url.trim().to_string(),
+            payload.config,
+        )
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let lease_id = app_state
+        .client_radios
+        .register(record.id, client_instance_id)
+        .await;
+    info!(radio_id = record.id, "client radio registered");
+    Ok(Json(ClientRadioRegistration {
+        radio_id: record.id,
+        lease_id,
+        heartbeat_interval_seconds: HEARTBEAT_INTERVAL.as_secs(),
+        lease_timeout_seconds: LEASE_TIMEOUT.as_secs(),
+    }))
+}
+
+async fn client_radio_heartbeat(
+    State(app_state): State<AppState>,
+    Path(client_instance_id): Path<String>,
+    Json(payload): Json<ClientRadioLeaseRequest>,
+) -> ApiResult<serde_json::Value> {
+    let client_instance_id = validate_client_instance_id(&client_instance_id)?;
+    validate_client_radio_lease_request(&payload)?;
+    app_state
+        .client_radios
+        .heartbeat(payload.radio_id, &client_instance_id, &payload.lease_id)
+        .await
+        .map_err(|_| ApiError::conflict("client radio lease is stale or has been replaced"))?;
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+async fn client_radio_offline(
+    State(app_state): State<AppState>,
+    Path(client_instance_id): Path<String>,
+    Json(payload): Json<ClientRadioLeaseRequest>,
+) -> ApiResult<serde_json::Value> {
+    let client_instance_id = validate_client_instance_id(&client_instance_id)?;
+    validate_client_radio_lease_request(&payload)?;
+    app_state
+        .client_radios
+        .offline(payload.radio_id, &client_instance_id, &payload.lease_id)
+        .await
+        .map_err(|_| ApiError::conflict("client radio lease is stale or has been replaced"))?;
+    info!(radio_id = payload.radio_id, "client radio marked offline");
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+fn validate_client_instance_id(value: &str) -> Result<String, ApiError> {
+    Uuid::parse_str(value)
+        .map(|id| id.to_string())
+        .map_err(|_| ApiError::bad_request("client instance ID must be a UUID"))
+}
+
+fn validate_client_radio_lease_request(payload: &ClientRadioLeaseRequest) -> Result<(), ApiError> {
+    if payload.radio_id <= 0 {
+        return Err(ApiError::bad_request("radio ID must be positive"));
+    }
+    Uuid::parse_str(&payload.lease_id)
+        .map(|_| ())
+        .map_err(|_| ApiError::bad_request("lease ID must be a UUID"))
+}
+
+fn validate_client_radio_ws_url(value: &str) -> Result<(), ApiError> {
+    let url = url::Url::parse(value.trim())
+        .map_err(|_| ApiError::bad_request("radio WebSocket URL must be a valid URL"))?;
+    if url.scheme() != "ws"
+        || url.host_str() != Some("127.0.0.1")
+        || url.port().is_none()
+        || url.path() != "/radiows"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(ApiError::bad_request(
+            "radio WebSocket URL must be ws://127.0.0.1:<port>/radiows",
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Debug, serde::Serialize)]
+struct RadioView {
+    #[serde(flatten)]
+    config: db::RadioConfig,
+    control_location: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_online: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    radio_ws_url: Option<String>,
+}
+
+impl RadioView {
+    fn from_record(record: db::RadioRecord, client_online: Option<bool>) -> Self {
+        let radio_id = record.id;
+        let is_client = record.control_location == db::RadioControlLocation::Client;
+        let radio_ws_url = if is_client {
+            client_online
+                .and_then(|online| online.then_some(record.radio_ws_url))
+                .flatten()
+        } else {
+            Some(radio_websocket_url(radio_id))
+        };
+        Self {
+            config: record.config,
+            control_location: if is_client { "client" } else { "backend" },
+            client_online: is_client.then_some(client_online.unwrap_or(false)),
+            radio_ws_url,
+        }
+    }
+}
+
+fn radio_websocket_url(radio_id: i64) -> String {
+    format!("/radiows?radio_id={radio_id}")
+}
+
+async fn radios(State(app_state): State<AppState>) -> ApiResult<Vec<RadioView>> {
     match app_state.db.radios().await {
         Ok(mut radios) => {
+            let mut views = Vec::with_capacity(radios.len());
             for radio in &mut radios {
-                app_state.voice_keyer.sanitize_radio_config(radio);
+                if radio.control_location == db::RadioControlLocation::Backend {
+                    app_state.voice_keyer.sanitize_radio_config(radio);
+                }
+                let client_online = if radio.control_location == db::RadioControlLocation::Client {
+                    Some(app_state.client_radios.is_online(radio.id).await)
+                } else {
+                    None
+                };
+                views.push(RadioView::from_record(radio.clone(), client_online));
             }
-            Ok(Json(radios))
+            Ok(Json(views))
         }
         Err(error) => {
             error!(%error, "failed to load radios");
@@ -2080,14 +2005,18 @@ async fn serial_ports() -> ApiResult<Vec<SerialPortOption>> {
         .map_err(|error| ApiError::internal(error.to_string()))
 }
 
-async fn radio(
-    State(app_state): State<AppState>,
-    Path(id): Path<i64>,
-) -> ApiResult<db::RadioConfig> {
+async fn radio(State(app_state): State<AppState>, Path(id): Path<i64>) -> ApiResult<RadioView> {
     match app_state.db.radio(id).await {
         Ok(Some(mut radio)) => {
-            app_state.voice_keyer.sanitize_radio_config(&mut radio);
-            Ok(Json(radio))
+            if radio.control_location == db::RadioControlLocation::Backend {
+                app_state.voice_keyer.sanitize_radio_config(&mut radio);
+            }
+            let client_online = if radio.control_location == db::RadioControlLocation::Client {
+                Some(app_state.client_radios.is_online(radio.id).await)
+            } else {
+                None
+            };
+            Ok(Json(RadioView::from_record(radio, client_online)))
         }
         Ok(None) => Err(ApiError::not_found("not found")),
         Err(error) => Err(ApiError::internal(error.to_string())),
@@ -2134,7 +2063,7 @@ async fn default_cw_messages() -> Json<String> {
 }
 
 async fn validate_cw_messages(Json(payload): Json<CwMessagesPayload>) -> Json<serde_json::Value> {
-    match validation::validate_cw_messages(&payload.cw_messages) {
+    match radio_io::validate_cw_messages(&payload.cw_messages) {
         Ok(()) => Json(serde_json::json!({
             "ok": true,
             "labels": cw::labels(&payload.cw_messages)
@@ -2167,11 +2096,17 @@ async fn create_radio(
     State(app_state): State<AppState>,
     Json(mut payload): Json<RadioPayload>,
 ) -> Json<serde_json::Value> {
-    if let Err(error) = resolve_radio_mode_mappings(&mut payload) {
+    if let Err(error) = radio_io::normalize_radio_settings(&mut payload) {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     debug!(payload = %debug_payload_log(&payload), "create radio POST body");
-    if let Err(error) = validation::validate_radio(&payload) {
+    if let Err(error) = radio_io::validate_radio_settings(&payload) {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
+    if let Err(error) = validate_unique_wsjtx_port(&app_state, None, &payload).await {
+        return Json(serde_json::json!({ "ok": false, "error": error }));
+    }
+    if let Err(error) = validate_unique_flrig_port(&app_state, None, &payload).await {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     if let Err(error) = app_state
@@ -2181,12 +2116,18 @@ async fn create_radio(
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     match app_state.db.create_radio(payload).await {
-        Ok(mut radio) => {
-            if let Err(error) = app_state.voice_keyer.sync_radio_messages(&radio) {
-                warn!(radio_id = radio.id, %error, "failed to sync voice keyer registrations after radio create");
+        Ok(mut record) => {
+            if let Err(error) = app_state.voice_keyer.sync_radio_messages(&record.config) {
+                warn!(radio_id = record.id, %error, "failed to sync voice keyer registrations after radio create");
             }
-            app_state.voice_keyer.sanitize_radio_config(&mut radio);
-            Json(serde_json::json!({ "ok": true, "radio": radio }))
+            if let Err(error) = app_state.radio_io.add_radio(record.config.clone()) {
+                error!(radio_id = record.id, %error, "failed to add created radio to radio I/O configuration");
+                return Json(serde_json::json!({ "ok": false, "error": error }));
+            }
+            app_state
+                .voice_keyer
+                .sanitize_radio_config(&mut record.config);
+            Json(serde_json::json!({ "ok": true, "radio": RadioView::from_record(record, None) }))
         }
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     }
@@ -2196,73 +2137,168 @@ async fn update_radio(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
     Json(mut payload): Json<RadioPayload>,
-) -> Json<serde_json::Value> {
-    if let Err(error) = resolve_radio_mode_mappings(&mut payload) {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
+) -> ApiResult<serde_json::Value> {
+    let record = app_state
+        .db
+        .radio(id)
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .ok_or_else(|| ApiError::not_found("not found"))?;
+    if record.control_location == db::RadioControlLocation::Client {
+        return Err(ApiError::conflict(
+            "Configure this radio in Log73 Radio Client.",
+        ));
     }
+
+    radio_io::normalize_radio_settings(&mut payload).map_err(ApiError::bad_request)?;
     debug!(id, payload = %debug_payload_log(&payload), "update radio PUT body");
-    if let Err(error) = validation::validate_radio(&payload) {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
-    }
-    if let Err(error) = app_state
+    radio_io::validate_radio_settings(&payload).map_err(ApiError::bad_request)?;
+    validate_unique_wsjtx_port(&app_state, Some(id), &payload)
+        .await
+        .map_err(ApiError::bad_request)?;
+    validate_unique_flrig_port(&app_state, Some(id), &payload)
+        .await
+        .map_err(ApiError::bad_request)?;
+    app_state
         .voice_keyer
         .validate_radio_voice_messages(&payload.voice_messages)
-    {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
-    }
+        .map_err(ApiError::bad_request)?;
+    let mutation = app_state
+        .radio_io
+        .begin_mutation(id)
+        .map_err(|error| radio_mutation_api_error("update", error))?;
     match app_state.db.update_radio(id, payload).await {
-        Ok(Some(mut radio)) => {
-            if let Err(error) = app_state.voice_keyer.sync_radio_messages(&radio) {
-                warn!(radio_id = radio.id, %error, "failed to sync voice keyer registrations after radio update");
+        Ok(Some(mut record)) => {
+            if let Err(error) = app_state.voice_keyer.sync_radio_messages(&record.config) {
+                warn!(radio_id = record.id, %error, "failed to sync voice keyer registrations after radio update");
             }
-            app_state.voice_keyer.sanitize_radio_config(&mut radio);
-            let active = app_state.radio_manager.is_active(id).await;
-            debug!(
-                id,
-                active, "radio updated; checking whether reload is needed"
-            );
-            if active {
-                if let Err(error) = app_state
-                    .radio_manager
-                    .reload_config(id, radio.clone())
-                    .await
-                {
-                    warn!(id, %error, "failed to reload active radio after update");
-                    return Json(serde_json::json!({ "ok": false, "error": error }));
-                }
-                debug!(id, "active radio reload requested after update");
+            if let Err(error) = mutation.commit_update(record.config.clone()) {
+                error!(id, %error, "failed to commit updated radio I/O configuration");
+                return Err(ApiError::internal(error.to_string()));
             }
-            Json(serde_json::json!({ "ok": true, "radio": radio }))
+            app_state
+                .voice_keyer
+                .sanitize_radio_config(&mut record.config);
+            Ok(Json(
+                serde_json::json!({ "ok": true, "radio": RadioView::from_record(record, None) }),
+            ))
         }
-        Ok(None) => Json(serde_json::json!({ "ok": false, "error": "not found" })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Ok(None) => Err(ApiError::not_found("not found")),
+        Err(error) => Err(ApiError::internal(error.to_string())),
     }
 }
 
-fn resolve_radio_mode_mappings(payload: &mut RadioPayload) -> Result<(), String> {
-    let (data_mode, rtty_mode) =
-        modes::resolved_mode_mappings(&payload.radio_kind, &payload.data_mode, &payload.rtty_mode)?;
-    payload.data_mode = data_mode;
-    payload.rtty_mode = rtty_mode;
+async fn validate_unique_wsjtx_port(
+    app_state: &AppState,
+    radio_id: Option<i64>,
+    payload: &RadioPayload,
+) -> Result<(), String> {
+    if !payload.wsjtx_enabled {
+        return Ok(());
+    }
+    let radios = app_state
+        .db
+        .radios()
+        .await
+        .map_err(|error| error.to_string())?;
+    if radios.iter().any(|radio| {
+        radio.control_location == db::RadioControlLocation::Backend
+            && radio.wsjtx_enabled
+            && radio.wsjtx_port == payload.wsjtx_port
+            && Some(radio.id) != radio_id
+    }) {
+        return Err(format!(
+            "WSJT-X port {} is already used by another enabled radio",
+            payload.wsjtx_port
+        ));
+    }
+    Ok(())
+}
+
+async fn validate_unique_flrig_port(
+    app_state: &AppState,
+    radio_id: Option<i64>,
+    payload: &RadioPayload,
+) -> Result<(), String> {
+    if !payload.flrig_enabled {
+        return Ok(());
+    }
+    let radios = app_state
+        .db
+        .radios()
+        .await
+        .map_err(|error| error.to_string())?;
+    if radios.iter().any(|radio| {
+        radio.control_location == db::RadioControlLocation::Backend
+            && radio.flrig_enabled
+            && radio.flrig_port == payload.flrig_port
+            && Some(radio.id) != radio_id
+    }) {
+        return Err(format!(
+            "FLRig port {} is already used by another enabled radio",
+            payload.flrig_port
+        ));
+    }
     Ok(())
 }
 
 async fn delete_radio(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-) -> Json<serde_json::Value> {
-    if app_state.radio_manager.is_active(id).await {
-        return Json(serde_json::json!({ "ok": false, "error": "cannot delete an active radio" }));
+) -> ApiResult<serde_json::Value> {
+    let record = app_state
+        .db
+        .radio(id)
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .ok_or_else(|| ApiError::not_found("not found"))?;
+
+    if record.control_location == db::RadioControlLocation::Client {
+        if app_state.client_radios.is_online(id).await {
+            return Err(ApiError::conflict(
+                "This client-side radio is online. Stop Log73 Radio Client before deleting it.",
+            ));
+        }
+        let deleted = app_state
+            .db
+            .delete_radio(id)
+            .await
+            .map_err(|error| ApiError::internal(error.to_string()))?;
+        if !deleted {
+            return Err(ApiError::not_found("not found"));
+        }
+        return Ok(Json(serde_json::json!({ "ok": true, "deleted": true })));
     }
+
+    let mutation = app_state
+        .radio_io
+        .begin_mutation(id)
+        .map_err(|error| radio_mutation_api_error("delete", error))?;
 
     match app_state.db.delete_radio(id).await {
         Ok(deleted) => {
             if deleted && let Err(error) = app_state.voice_keyer.clear_radio_messages(id) {
                 warn!(id, %error, "failed to clear voice keyer registrations after radio delete");
             }
-            Json(serde_json::json!({ "ok": true, "deleted": deleted }))
+            if deleted && let Err(error) = mutation.commit_delete() {
+                error!(id, %error, "failed to commit deleted radio I/O configuration");
+                return Err(ApiError::internal(error.to_string()));
+            }
+            Ok(Json(serde_json::json!({ "ok": true, "deleted": deleted })))
         }
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Err(error) => Err(ApiError::internal(error.to_string())),
+    }
+}
+
+fn radio_mutation_api_error(action: &str, error: RadioMutationError) -> ApiError {
+    match error {
+        RadioMutationError::NotFound { .. } => ApiError::not_found("not found"),
+        RadioMutationError::InUse { .. } => {
+            ApiError::conflict(format!("cannot {action} an active radio"))
+        }
+        RadioMutationError::MutationInProgress { .. } => ApiError::conflict(format!(
+            "cannot {action} a radio while another change is in progress"
+        )),
     }
 }
 
@@ -2775,13 +2811,23 @@ fn contacts_from_payload(payload: serde_json::Value) -> Result<Vec<Contact>, Str
         serde_json::Value::Array(values) => values
             .into_iter()
             .map(|value| match value {
-                serde_json::Value::Object(contact) => Ok(contact),
+                serde_json::Value::Object(contact) => Ok(normalize_contact_adif_fields(contact)),
                 _ => Err("contact list must contain objects".to_string()),
             })
             .collect(),
-        serde_json::Value::Object(contact) => Ok(vec![contact]),
+        serde_json::Value::Object(contact) => Ok(vec![normalize_contact_adif_fields(contact)]),
         _ => Err("contacts payload must be an object or list of objects".to_string()),
     }
+}
+
+fn normalize_contact_adif_fields(mut contact: Contact) -> Contact {
+    if let Some(serde_json::Value::Object(adif)) = contact.remove("adif") {
+        contact.insert(
+            "adif".to_string(),
+            serde_json::Value::Object(normalize_contact_adif(adif)),
+        );
+    }
+    contact
 }
 
 #[cfg(test)]
@@ -2804,6 +2850,25 @@ mod tests {
                 ("QSO_DATE_TIME_ON".to_string(), json!(1_700_000_000_i64)),
             ]),
         )
+    }
+
+    #[test]
+    fn contacts_from_payload_normalizes_adif_field_names() {
+        let contacts = contacts_from_payload(json!({
+            "meta": {},
+            "adif": { "call": "K1ABC", "BaNd": "20m" }
+        }))
+        .expect("contact payload should parse");
+
+        assert_eq!(contacts.len(), 1);
+        assert_eq!(
+            contact_adif_value(&contacts[0], "CALL"),
+            Some(&json!("K1ABC"))
+        );
+        assert_eq!(
+            contact_adif_value(&contacts[0], "BAND"),
+            Some(&json!("20m"))
+        );
     }
 
     #[test]
@@ -3099,6 +3164,51 @@ mod tests {
         assert_eq!(
             response.headers().get(header::ETAG),
             Some(&HeaderValue::from_str(&etag).expect("etag header should parse"))
+        );
+    }
+
+    #[test]
+    fn radio_view_uses_radio_specific_websocket_uri() {
+        assert_eq!(radio_websocket_url(3), "/radiows?radio_id=3");
+    }
+
+    #[test]
+    fn client_radio_registration_requires_a_loopback_websocket_url() {
+        assert!(validate_client_radio_ws_url("ws://127.0.0.1:49152/radiows").is_ok());
+        assert!(validate_client_radio_ws_url("ws://127.0.0.1:49152/radiows?logger_id=one").is_ok());
+
+        for value in [
+            "wss://127.0.0.1:49152/radiows",
+            "ws://localhost:49152/radiows",
+            "ws://127.0.0.1/radiows",
+            "ws://127.0.0.1:49152/other",
+            "ws://user:password@127.0.0.1:49152/radiows",
+        ] {
+            let error = validate_client_radio_ws_url(value).expect_err("URL should be rejected");
+            assert_eq!(error.status, StatusCode::BAD_REQUEST, "{value}");
+        }
+    }
+
+    #[test]
+    fn client_radio_identifiers_must_be_uuids() {
+        assert_eq!(
+            validate_client_instance_id("B55168F4-5D76-4EED-A17F-67B42167AC42").unwrap(),
+            "b55168f4-5d76-4eed-a17f-67b42167ac42"
+        );
+        assert_eq!(
+            validate_client_instance_id("not-a-uuid")
+                .unwrap_err()
+                .status,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            validate_client_radio_lease_request(&ClientRadioLeaseRequest {
+                radio_id: 0,
+                lease_id: Uuid::new_v4().to_string(),
+            })
+            .unwrap_err()
+            .status,
+            StatusCode::BAD_REQUEST
         );
     }
 

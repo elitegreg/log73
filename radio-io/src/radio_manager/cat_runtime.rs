@@ -2,7 +2,8 @@ use super::commands::{apply_command, fail_unavailable_radio_command, logger_stat
 use super::cw_task::{CwTaskCommand, run_cw_task};
 use super::keyers::{CwSerialDevice, open_serial_keyer};
 use crate::bands::BandCatalog;
-use crate::db::RadioConfig;
+use crate::config::RadioConfig;
+use crate::flrig::FlrigServer;
 use crate::radio::{RadioCommand, RadioState, RadioStatus};
 use crate::voice_keyer::VoiceKeyer;
 use backon::{BackoffBuilder, ExponentialBuilder};
@@ -27,7 +28,7 @@ pub(super) struct ManagedRadioRuntime {
 }
 
 pub(super) async fn run_managed_radio(
-    mut config: RadioConfig,
+    config: RadioConfig,
     runtime: ManagedRadioRuntime,
     mut commands: mpsc::Receiver<RadioCommand>,
     mut shutdown: oneshot::Receiver<()>,
@@ -50,13 +51,6 @@ pub(super) async fn run_managed_radio(
                     _ = &mut shutdown => return,
                     command = commands.recv() => {
                         match command {
-                            Some(RadioCommand::ReloadConfig(new_config)) => {
-                                info!(radio_id = new_config.id, "reloading radio config while waiting to reconnect CAT");
-                                config = *new_config;
-                                reconnect_backoff = cat_reconnect_backoff().build();
-                                reconnect_deadline = None;
-                                break;
-                            }
                             Some(command) => {
                                 warn!(radio_id = config.id, ?command, "dropping radio command while waiting to reconnect CAT");
                                 fail_unavailable_radio_command(command, "radio disconnected");
@@ -82,11 +76,6 @@ pub(super) async fn run_managed_radio(
             _ = &mut shutdown => return,
             command = commands.recv() => {
                 match command {
-                    Some(RadioCommand::ReloadConfig(new_config)) => {
-                        info!(radio_id = new_config.id, "reloading radio config before CAT connect");
-                        config = *new_config;
-                        continue;
-                    }
                     Some(command) => {
                         warn!(radio_id = config.id, ?command, "dropping radio command while CAT is disconnected");
                         fail_unavailable_radio_command(command, "radio disconnected");
@@ -126,6 +115,9 @@ pub(super) async fn run_managed_radio(
             radio,
             shared_cw_serial_keyer,
         } = connected;
+        let mut flrig_server = config
+            .flrig_enabled
+            .then(|| FlrigServer::start(config.id, radio.clone(), config.flrig_port));
         let mut radio_updates = radio.subscribe_updates();
         publish_cat_snapshot(
             config.id,
@@ -164,6 +156,7 @@ pub(super) async fn run_managed_radio(
             tokio::select! {
                 _ = &mut shutdown => {
                     shutdown_cw_task(cw_tx, cw_task).await;
+                    shutdown_flrig_server(&mut flrig_server).await;
                     radio.shutdown();
                     return;
                 }
@@ -197,6 +190,7 @@ pub(super) async fn run_managed_radio(
                                 warn!(radio_id = config.id, "CAT radio entered an error state");
                                 reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
                                 shutdown_cw_task(cw_tx, cw_task).await;
+                                shutdown_flrig_server(&mut flrig_server).await;
                                 radio.shutdown();
                                 break;
                             }
@@ -218,6 +212,7 @@ pub(super) async fn run_managed_radio(
                             set_radio_status(&current_status, &status_updates, false).await;
                             reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
                             shutdown_cw_task(cw_tx, cw_task).await;
+                            shutdown_flrig_server(&mut flrig_server).await;
                             radio.shutdown();
                             break;
                         }
@@ -226,6 +221,7 @@ pub(super) async fn run_managed_radio(
                 command = commands.recv() => {
                     let Some(command) = command else {
                         shutdown_cw_task(cw_tx, cw_task).await;
+                        shutdown_flrig_server(&mut flrig_server).await;
                         radio.shutdown();
                         return;
                     };
@@ -252,14 +248,6 @@ pub(super) async fn run_managed_radio(
                         RadioCommand::SetWpm(wpm) => {
                             debug!(radio_id = config.id, wpm, "forwarding cw set_wpm command");
                             let _ = cw_tx.send(CwTaskCommand::SetWpm(wpm)).await;
-                        }
-                        RadioCommand::ReloadConfig(new_config) => {
-                            debug_radio_config(&new_config, "reloading active radio config");
-                            set_radio_status(&current_status, &status_updates, false).await;
-                            shutdown_cw_task(cw_tx, cw_task).await;
-                            radio.shutdown();
-                            config = *new_config;
-                            break;
                         }
                         command => {
                             let is_rit_command = matches!(
@@ -293,6 +281,7 @@ pub(super) async fn run_managed_radio(
                                     reconnect_deadline = Some(next_cat_reconnect_deadline(&mut reconnect_backoff));
                                     error!(radio_id = config.id, %error, "failed to apply radio command");
                                     shutdown_cw_task(cw_tx, cw_task).await;
+                                    shutdown_flrig_server(&mut flrig_server).await;
                                     radio.shutdown();
                                     break;
                                 }
@@ -322,6 +311,12 @@ pub(super) async fn run_managed_radio(
 async fn shutdown_cw_task(cw_tx: mpsc::Sender<CwTaskCommand>, cw_task: JoinHandle<()>) {
     let _ = cw_tx.send(CwTaskCommand::Shutdown).await;
     let _ = cw_task.await;
+}
+
+async fn shutdown_flrig_server(server: &mut Option<FlrigServer>) {
+    if let Some(server) = server.take() {
+        server.shutdown().await;
+    }
 }
 
 async fn set_radio_status(
@@ -538,6 +533,8 @@ pub(super) fn debug_radio_config(config: &RadioConfig, message: &'static str) {
         cw_serial_port = %config.cw_serial_port,
         cw_serial_baud_rate = config.cw_serial_baud_rate,
         cw_serial_line = %config.cw_serial_line,
+        flrig_enabled = config.flrig_enabled,
+        flrig_port = config.flrig_port,
         shared_cw_serial_port = uses_shared_cw_serial_port(config),
         "{message}"
     );
@@ -554,34 +551,42 @@ fn command_error_requires_reconnect(error: &RadioError) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::RadioConfig;
+    use crate::config::RadioConfig;
 
     fn test_config() -> RadioConfig {
-        RadioConfig {
-            id: 1,
-            name: "Test".to_string(),
-            radio_kind: "dummy".to_string(),
-            transport_kind: "none".to_string(),
-            tcp_host: "127.0.0.1".to_string(),
-            tcp_port: 5002,
-            serial_port: String::new(),
-            serial_baud_rate: 115_200,
-            options: String::new(),
-            data_mode: "DATA-USB".to_string(),
-            rtty_mode: "RTTY".to_string(),
-            cw_tuning_increment_hz: 20,
-            ssb_tuning_increment_hz: 100,
-            rit_clear_on_log: false,
-            voice_input_device_id: None,
-            voice_output_device_id: None,
-            cw_keyer_type: "none".to_string(),
-            winkeyer_serial_port: String::new(),
-            cw_serial_port: String::new(),
-            cw_serial_baud_rate: 9_600,
-            cw_serial_line: "dtr".to_string(),
-            cw_messages: String::new(),
-            voice_messages: crate::voice_messages::DEFAULT_VOICE_MESSAGES.to_string(),
-        }
+        RadioConfig::new(
+            1,
+            crate::RadioSettings {
+                name: "Test".to_string(),
+                radio_kind: "dummy".to_string(),
+                transport_kind: "none".to_string(),
+                tcp_host: "127.0.0.1".to_string(),
+                tcp_port: 5002,
+                serial_port: String::new(),
+                serial_baud_rate: 115_200,
+                options: String::new(),
+                data_mode: "DATA-USB".to_string(),
+                rtty_mode: "RTTY".to_string(),
+                wsjtx_enabled: false,
+                wsjtx_bind_address: "127.0.0.1".to_string(),
+                wsjtx_port: 2237,
+                wsjtx_multicast_group: String::new(),
+                flrig_enabled: false,
+                flrig_port: crate::DEFAULT_FLRIG_PORT,
+                cw_tuning_increment_hz: 20,
+                ssb_tuning_increment_hz: 100,
+                rit_clear_on_log: false,
+                voice_input_device_id: None,
+                voice_output_device_id: None,
+                cw_keyer_type: "none".to_string(),
+                winkeyer_serial_port: String::new(),
+                cw_serial_port: String::new(),
+                cw_serial_baud_rate: 9_600,
+                cw_serial_line: "dtr".to_string(),
+                cw_messages: String::new(),
+                voice_messages: crate::voice_messages::DEFAULT_VOICE_MESSAGES.to_string(),
+            },
+        )
     }
 
     #[test]

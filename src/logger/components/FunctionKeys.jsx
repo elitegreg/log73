@@ -10,6 +10,7 @@ function FunctionKeys({
   repeatRunF1,
   setRepeatRunF1,
   esmNextKeys = [],
+  disabled = false,
 }) {
   const esmNextKeySet = new Set(esmNextKeys);
 
@@ -23,6 +24,7 @@ function FunctionKeys({
             type="button"
             title={`Keyboard shortcut: ${button.key}`}
             onClick={() => sendMessageKey(button.key)}
+            disabled={disabled}
           >
             {button.key} {messageButtonLabel(button.label, stationCallsign)}
             {messageModeKey === 'run' && button.key === 'F1' && (
@@ -35,6 +37,7 @@ function FunctionKeys({
                   type="checkbox"
                   checked={repeatRunF1}
                   onChange={(event) => setRepeatRunF1(event.target.checked)}
+                  disabled={disabled}
                 />
                 Rpt
               </label>
@@ -50,6 +53,7 @@ function FunctionKeys({
             type="button"
             title={`Keyboard shortcut: ${button.key}`}
             onClick={() => sendMessageKey(button.key)}
+            disabled={disabled}
           >
             {button.key} {messageButtonLabel(button.label, stationCallsign)}
           </button>

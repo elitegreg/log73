@@ -35,8 +35,9 @@ fi
 binary_dir="target/${target}/dist"
 backend_bin="${binary_dir}/log73-backend"
 launcher_bin="${binary_dir}/log73-launcher"
+radio_client_bin="${binary_dir}/log73-radio-client"
 
-if [[ ! -x "$backend_bin" || ! -x "$launcher_bin" ]]; then
+if [[ ! -x "$backend_bin" || ! -x "$launcher_bin" || ! -x "$radio_client_bin" ]]; then
   echo "expected dist binaries were not found under ${binary_dir}" >&2
   echo "run: dist build --artifacts=local --target=${target}" >&2
   exit 1
@@ -56,12 +57,13 @@ mkdir -p \
 
 install -m 0755 "$backend_bin" "${package_root}/opt/log73/bin/log73-backend"
 install -m 0755 "$launcher_bin" "${package_root}/opt/log73/bin/log73-launcher"
+install -m 0755 "$radio_client_bin" "${package_root}/opt/log73/bin/log73-radio-client"
 install -m 0644 data/MASTER.SCP "${package_root}/opt/log73/data/MASTER.SCP"
 install -m 0644 data/cty.csv "${package_root}/opt/log73/data/cty.csv"
 install -m 0644 data/bands_1.csv "${package_root}/opt/log73/data/bands_1.csv"
 install -m 0644 data/bands_2.csv "${package_root}/opt/log73/data/bands_2.csv"
 install -m 0644 data/bands_3.csv "${package_root}/opt/log73/data/bands_3.csv"
-cp -R data/contest-rules "${package_root}/opt/log73/data/contest-rules"
+cp -R data/* "${package_root}/opt/log73/data/"
 find "${package_root}/opt/log73/data/contest-rules" -type f -exec chmod 0644 {} +
 install -m 0644 static/log73-icon-512.png \
   "${package_root}/usr/share/icons/hicolor/512x512/apps/log73.png"
@@ -76,6 +78,20 @@ Icon=log73
 Terminal=false
 Categories=Utility;HamRadio;
 DESKTOP
+
+cat > "${package_root}/usr/share/applications/log73-radio-client.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Log73 Radio Client
+Comment=Client-side Log73 radio controller
+Exec=/opt/log73/bin/log73-radio-client
+Icon=log73-radio-client
+Terminal=false
+Categories=Utility;HamRadio;
+DESKTOP
+
+install -m 0644 static/log73-icon-512.png \
+  "${package_root}/usr/share/icons/hicolor/512x512/apps/log73-radio-client.png"
 
 write_config() {
   local config_path="$1"
@@ -104,12 +120,20 @@ contents:
     dst: /opt/log73/bin/log73-launcher
     file_info:
       mode: 0755
+  - src: ${package_root}/opt/log73/bin/log73-radio-client
+    dst: /opt/log73/bin/log73-radio-client
+    file_info:
+      mode: 0755
   - src: ${package_root}/opt/log73/data/
     dst: /opt/log73/data
   - src: ${package_root}/usr/share/applications/log73.desktop
     dst: /usr/share/applications/log73.desktop
+  - src: ${package_root}/usr/share/applications/log73-radio-client.desktop
+    dst: /usr/share/applications/log73-radio-client.desktop
   - src: ${package_root}/usr/share/icons/hicolor/512x512/apps/log73.png
     dst: /usr/share/icons/hicolor/512x512/apps/log73.png
+  - src: ${package_root}/usr/share/icons/hicolor/512x512/apps/log73-radio-client.png
+    dst: /usr/share/icons/hicolor/512x512/apps/log73-radio-client.png
 depends:
   - ${udev_dep}
   - ${chromium_dep}

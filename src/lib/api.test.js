@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { apiJson } from './api.js';
+import { apiJson, websocketUrl } from './api.js';
 
 test('apiJson unwraps legacy ok payloads', async () => {
   globalThis.fetch = async () => ({
@@ -48,4 +48,26 @@ test('apiJson returns null for 204 responses', async () => {
   const result = await apiJson('/client-errors', { method: 'POST' });
 
   assert.equal(result, null);
+});
+
+test('websocketUrl resolves a relative radio endpoint', () => {
+  assert.equal(
+    websocketUrl(
+      '/radiows?radio_id=3',
+      {},
+      'https://logger.example/ui/logger/1/3',
+    ),
+    'wss://logger.example/radiows?radio_id=3',
+  );
+});
+
+test('websocketUrl accepts a full HTTP radio endpoint and adds parameters', () => {
+  assert.equal(
+    websocketUrl(
+      'http://localhost:7300/radiows',
+      { radio_id: 3 },
+      'https://logger.example/ui/logger/1/3',
+    ),
+    'ws://localhost:7300/radiows?radio_id=3',
+  );
 });

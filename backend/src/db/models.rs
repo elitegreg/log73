@@ -1,7 +1,45 @@
-use crate::cw::DEFAULT_CW_MESSAGES;
-use crate::voice_messages::DEFAULT_VOICE_MESSAGES;
+pub use radio_io::{ConfiguredRadio as RadioConfig, RadioSettings as RadioPayload};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::ops::{Deref, DerefMut};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RadioControlLocation {
+    Backend,
+    Client,
+}
+
+impl RadioControlLocation {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "backend" => Ok(Self::Backend),
+            "client" => Ok(Self::Client),
+            _ => Err(format!("unknown radio control location: {value}")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RadioRecord {
+    pub config: RadioConfig,
+    pub control_location: RadioControlLocation,
+    pub client_instance_id: Option<String>,
+    pub radio_ws_url: Option<String>,
+}
+
+impl Deref for RadioRecord {
+    type Target = RadioConfig;
+
+    fn deref(&self) -> &Self::Target {
+        &self.config
+    }
+}
+
+impl DerefMut for RadioRecord {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.config
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Log {
@@ -27,33 +65,6 @@ pub struct UpdateLog {
     pub station_callsign: String,
     #[serde(default)]
     pub contest_params: Value,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct RadioConfig {
-    pub id: i64,
-    pub name: String,
-    pub radio_kind: String,
-    pub transport_kind: String,
-    pub tcp_host: String,
-    pub tcp_port: u16,
-    pub serial_port: String,
-    pub serial_baud_rate: u32,
-    pub options: String,
-    pub data_mode: String,
-    pub rtty_mode: String,
-    pub cw_tuning_increment_hz: u32,
-    pub ssb_tuning_increment_hz: u32,
-    pub rit_clear_on_log: bool,
-    pub voice_input_device_id: Option<String>,
-    pub voice_output_device_id: Option<String>,
-    pub cw_keyer_type: String,
-    pub winkeyer_serial_port: String,
-    pub cw_serial_port: String,
-    pub cw_serial_baud_rate: u32,
-    pub cw_serial_line: String,
-    pub cw_messages: String,
-    pub voice_messages: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -112,68 +123,4 @@ pub struct UpdateConfig {
     pub dxcluster_commands: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-pub struct RadioPayload {
-    pub name: String,
-    pub radio_kind: String,
-    pub transport_kind: String,
-    pub tcp_host: String,
-    pub tcp_port: u16,
-    pub serial_port: String,
-    pub serial_baud_rate: u32,
-    #[serde(default)]
-    pub options: String,
-    #[serde(default)]
-    pub data_mode: String,
-    #[serde(default)]
-    pub rtty_mode: String,
-    #[serde(default = "default_cw_tuning_increment_hz")]
-    pub cw_tuning_increment_hz: u32,
-    #[serde(default = "default_ssb_tuning_increment_hz")]
-    pub ssb_tuning_increment_hz: u32,
-    #[serde(default)]
-    pub rit_clear_on_log: bool,
-    #[serde(default)]
-    pub voice_input_device_id: Option<String>,
-    #[serde(default)]
-    pub voice_output_device_id: Option<String>,
-    pub cw_keyer_type: String,
-    pub winkeyer_serial_port: String,
-    #[serde(default)]
-    pub cw_serial_port: String,
-    #[serde(default = "default_cw_serial_baud_rate")]
-    pub cw_serial_baud_rate: u32,
-    #[serde(default = "default_cw_serial_line")]
-    pub cw_serial_line: String,
-    #[serde(default = "default_cw_messages")]
-    pub cw_messages: String,
-    #[serde(default = "default_voice_messages")]
-    pub voice_messages: String,
-}
-
-pub const DEFAULT_CW_TUNING_INCREMENT_HZ: u32 = 20;
-pub const DEFAULT_SSB_TUNING_INCREMENT_HZ: u32 = 100;
-
-fn default_cw_tuning_increment_hz() -> u32 {
-    DEFAULT_CW_TUNING_INCREMENT_HZ
-}
-
-fn default_ssb_tuning_increment_hz() -> u32 {
-    DEFAULT_SSB_TUNING_INCREMENT_HZ
-}
-
-fn default_cw_serial_baud_rate() -> u32 {
-    9_600
-}
-
-fn default_cw_serial_line() -> String {
-    "dtr".to_string()
-}
-
-fn default_cw_messages() -> String {
-    DEFAULT_CW_MESSAGES.to_string()
-}
-
-fn default_voice_messages() -> String {
-    DEFAULT_VOICE_MESSAGES.to_string()
-}
+pub use radio_io::{DEFAULT_CW_TUNING_INCREMENT_HZ, DEFAULT_SSB_TUNING_INCREMENT_HZ};

@@ -267,7 +267,11 @@ fn import_record(
     }
 
     for field in &rules.exchange {
-        let Some(mapping) = mappings.get(&field.adif) else {
+        let Some(mapping) = mappings
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(&field.adif))
+            .map(|(_, mapping)| mapping)
+        else {
             return Err(ImportError {
                 line,
                 error: format!("{} mapping is required", field.label),
@@ -695,6 +699,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_records_normalizes_lowercase_field_names() {
+        let records = parse_records("<call:4>W1AW<eor>").expect("ADIF should parse");
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].fields.get("CALL").map(String::as_str),
+            Some("W1AW")
+        );
+    }
+
+    #[test]
     fn parse_records_ignores_typed_header_tags() {
         let records = parse_records("Log73\n<ADIF_VER:5:S>3.1.0<EOH>\n<CALL:4:S>W1AW<EOR>\n")
             .expect("ADIF should parse");
@@ -793,6 +808,38 @@ mod tests {
         assert_eq!(
             contact_adif_value(contact, "APP_LOG73_MY_DXCC_PFX"),
             Some(&json!("K"))
+        );
+    }
+
+    #[test]
+    fn import_contacts_accepts_case_insensitive_mapping_names() {
+        let mut log = test_log();
+        log.contest_params = json!({ "County": "ABBE" });
+        let mappings = BTreeMap::from([
+            ("stx_string".to_string(), ImportMapping::FixedConfig),
+            (
+                "srx_string".to_string(),
+                ImportMapping::AdifField {
+                    field: "n1mm_section".to_string(),
+                },
+            ),
+        ]);
+
+        let imported = import_contacts(
+            &log,
+            &test_rules(),
+            "<eoh><qso_date:8>20231114<time_on:6>221523<station_callsign:6>N0CALL<call:4>W1AW<band:3>20m<freq:5>14.25<mode:2>CW<n1mm_section:2>NC<eor>",
+            &mappings,
+        )
+        .expect("lowercase ADIF fields should import");
+
+        assert_eq!(
+            contact_adif_value(&imported[0].contact, "STX_STRING"),
+            Some(&json!("ABBE"))
+        );
+        assert_eq!(
+            contact_adif_value(&imported[0].contact, "SRX_STRING"),
+            Some(&json!("NC"))
         );
     }
 

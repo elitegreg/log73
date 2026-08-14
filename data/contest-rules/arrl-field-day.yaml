@@ -6,6 +6,7 @@ contests:
       - SSB
       - FM
       - CW
+      - DATA
     value_sets:
       DX:
         use: dx
@@ -58,7 +59,7 @@ contests:
       - id: class-received
         label: Class
         type: String:3
-        adif: SRX_STRING
+        adif: CLASS
         direction: received
         regex: ^\d+[A-F]$
       - id: section-received

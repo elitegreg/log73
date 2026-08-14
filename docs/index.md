@@ -8,3 +8,4 @@ Log73 is a browser-based contest logger with a Rust backend, designed for practi
 
 - [Full Manual](./manual.md)
 - [Keyboard Shortcuts](./keyboard-shortcuts.md)
+- [Radio Client setup and operation](./manual.md#client-side-radios)

@@ -17,26 +17,25 @@ argon2 = "0.5"
 backon = "1.6.0"
 base64 = "0.22.1"
 clap = { version = "4.6.1", features = ["derive"] }
-cw-serial-keyer = { git = "https://github.com/elitegreg/cw-serial-keyer-rs.git" }
 csv = "1"
 dxcllistener = { git = "https://github.com/elitegreg/dxcllistener.git" }
 dxclparser = "1.0.1"
 futures-util = "0.3"
 log73-paths = { path = "../paths" }
+radio-io = { path = "../radio-io" }
 mime_guess = "2.0.5"
 regex = "1"
 rand_core = { version = "0.6", features = ["getrandom"] }
 radif = "0.4.0"
-radio-cat-rs = { git = "https://github.com/elitegreg/radio-cat-rs.git", branch = "main" }
-rodio = { git = "https://github.com/RustAudio/rodio", default-features = false, features = ["playback", "wav", "pipewire", "pulseaudio"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 rust-embed = "8.11.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
-tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync", "time", "test-util"] }
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
-winkeyer = { package = "winkeyer-rs", git = "https://github.com/elitegreg/winkeyer-rs.git" }
+url = "2"
+uuid = { version = "1", features = ["v4"] }

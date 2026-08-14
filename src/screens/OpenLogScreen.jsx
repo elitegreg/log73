@@ -3,6 +3,13 @@ import { Link, useNavigate } from 'react-router-dom';
 import { apiDownload, apiJson } from '../lib/api';
 import { errorMessage, reportClientErrorLater } from '../lib/errorReporting';
 import { useNotifications } from '../lib/notificationsContext';
+import {
+  isClientRadio,
+  isOfflineClientRadio,
+  preferredRadioSelection,
+  radioOwnershipLabel,
+  visibleRadioOptions,
+} from './openLogRadio.js';
 
 function normalizeRadioKinds(value) {
   return (Array.isArray(value) ? value : [])
@@ -30,8 +37,8 @@ function formatRadioSummary(radio, radioKindsById) {
       : radio.transport_kind === 'serial'
         ? `serial ${radio.serial_port || '(unset)'} @ ${radio.serial_baud_rate}`
         : `tcp ${radio.tcp_host}:${radio.tcp_port}`;
-
-  return `${radio.name} - ${radioKindLabel(radio, radioKindsById)} - ${connection}`;
+  const ownership = radioOwnershipLabel(radio);
+  return `${ownership ? `${ownership} ` : ''}${radio.name} - ${radioKindLabel(radio, radioKindsById)} - ${connection}`;
 }
 
 function OpenLogScreen() {
@@ -42,6 +49,10 @@ function OpenLogScreen() {
   const [radioKindsById, setRadioKindsById] = useState(() => new Map());
   const [selectedLogId, setSelectedLogId] = useState('');
   const [selectedRadioId, setSelectedRadioId] = useState('');
+  const selectedRadio = radios.find(
+    (radio) => String(radio.id) === selectedRadioId,
+  );
+  const visibleRadios = visibleRadioOptions(radios);
 
   const notifyOperationalError = useCallback(
     (source, fallback, error, details = {}) => {
@@ -57,7 +68,7 @@ function OpenLogScreen() {
     [notifyError],
   );
 
-  async function load() {
+  const load = useCallback(async () => {
     const [nextLogs, nextRadios, nextRadioKinds] = await Promise.all([
       apiJson('/logs'),
       apiJson('/radios'),
@@ -71,8 +82,10 @@ function OpenLogScreen() {
       ),
     );
     setSelectedLogId((current) => current || String(nextLogs[0]?.id ?? ''));
-    setSelectedRadioId((current) => current || String(nextRadios[0]?.id ?? ''));
-  }
+    setSelectedRadioId((current) =>
+      preferredRadioSelection(current, nextRadios),
+    );
+  }, []);
 
   useEffect(() => {
     load().catch((error) =>
@@ -82,7 +95,20 @@ function OpenLogScreen() {
         error,
       ),
     );
-  }, [notifyOperationalError]);
+  }, [load, notifyOperationalError]);
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      load().catch((error) =>
+        notifyOperationalError(
+          'OpenLogScreen.refresh',
+          'Unable to refresh radio status.',
+          error,
+        ),
+      );
+    }, 10_000);
+    return () => window.clearInterval(intervalId);
+  }, [load, notifyOperationalError]);
 
   async function deleteLog() {
     if (!selectedLogId) return;
@@ -132,6 +158,14 @@ function OpenLogScreen() {
 
   async function deleteRadio() {
     if (!selectedRadioId) return;
+    if (
+      isOfflineClientRadio(selectedRadio) &&
+      !window.confirm(
+        'Delete this offline client-side radio snapshot? Starting its configured Log73 Radio Client again will register it again.',
+      )
+    ) {
+      return;
+    }
     try {
       await apiJson(`/radios/${selectedRadioId}`, {
         method: 'DELETE',
@@ -237,7 +271,7 @@ function OpenLogScreen() {
               </option>
             ))}
           </select>
-          <div className="selection-buttons">
+          <div className="selection-buttons log-selection-buttons">
             <Link className="cmd-btn" to="/ui/create_log">
               Create
             </Link>
@@ -286,35 +320,59 @@ function OpenLogScreen() {
         </section>
         <section>
           <h2>Radios</h2>
-          <select
-            className="selection-list"
-            size={10}
-            value={selectedRadioId}
-            onChange={(event) => setSelectedRadioId(event.target.value)}
-          >
-            {radios.map((radio) => (
-              <option key={radio.id} value={radio.id}>
-                {formatRadioSummary(radio, radioKindsById)}
-              </option>
-            ))}
-          </select>
+          <div className="radio-selection-list-wrap">
+            <select
+              className="selection-list radio-selection-list"
+              size={10}
+              value={selectedRadioId}
+              onChange={(event) => setSelectedRadioId(event.target.value)}
+            >
+              {visibleRadios.map((radio) => (
+                <option key={radio.id} value={radio.id}>
+                  {formatRadioSummary(radio, radioKindsById)}
+                </option>
+              ))}
+            </select>
+          </div>
           <div className="selection-buttons">
             <Link className="cmd-btn" to="/ui/create_radio">
               Create
             </Link>
             <Link
-              className={`cmd-btn${selectedRadioId ? '' : ' disabled'}`}
-              to={selectedRadioId ? `/ui/edit_radio/${selectedRadioId}` : '#'}
+              className={`cmd-btn${selectedRadioId && !isClientRadio(selectedRadio) ? '' : ' disabled'}`}
+              to={
+                selectedRadioId && !isClientRadio(selectedRadio)
+                  ? `/ui/edit_radio/${selectedRadioId}`
+                  : '#'
+              }
+              title={
+                isClientRadio(selectedRadio)
+                  ? 'Configure in Radio Client'
+                  : undefined
+              }
               onClick={(event) => {
-                if (!selectedRadioId) event.preventDefault();
+                if (!selectedRadioId || isClientRadio(selectedRadio))
+                  event.preventDefault();
               }}
             >
-              Edit
+              {isClientRadio(selectedRadio)
+                ? 'Configure in Radio Client'
+                : 'Edit'}
             </Link>
             <button
               className="cmd-btn"
               onClick={deleteRadio}
-              disabled={!selectedRadioId}
+              disabled={
+                !selectedRadioId ||
+                (isClientRadio(selectedRadio) &&
+                  !isOfflineClientRadio(selectedRadio))
+              }
+              title={
+                isClientRadio(selectedRadio) &&
+                !isOfflineClientRadio(selectedRadio)
+                  ? 'Stop Log73 Radio Client before deleting its snapshot.'
+                  : undefined
+              }
             >
               Delete
             </button>
@@ -322,7 +380,11 @@ function OpenLogScreen() {
         </section>
       </div>
       <div className="selection-actions">
-        <button className="cmd-btn primary" onClick={openLogger}>
+        <button
+          className="cmd-btn primary"
+          onClick={openLogger}
+          disabled={!selectedLogId || !selectedRadioId}
+        >
           Open
         </button>
       </div>

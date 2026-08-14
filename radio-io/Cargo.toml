@@ -1,0 +1,22 @@
+[package]
+name = "radio-io"
+version = "0.2.0"
+edition = "2024"
+repository = "https://github.com/elitegreg/log73"
+authors = ["Greg Mitchell <greg@ng4m.dev>"]
+
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+backon = "1.6.0"
+cw-serial-keyer = { git = "https://github.com/elitegreg/cw-serial-keyer-rs.git" }
+futures-util = "0.3"
+ham-radio-digital-interfacing = { git = "https://github.com/elitegreg/ham-radio-digital-interfacing-rs.git" }
+log73-paths = { path = "../paths" }
+radio-cat-rs = { git = "https://github.com/elitegreg/radio-cat-rs.git", branch = "main", features = ["xml-rpc"] }
+rodio = { git = "https://github.com/RustAudio/rodio", default-features = false, features = ["playback", "wav", "pipewire", "pulseaudio"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1.44"
+uuid = { version = "1", features = ["v4"] }
+winkeyer = { package = "winkeyer-rs", git = "https://github.com/elitegreg/winkeyer-rs.git" }

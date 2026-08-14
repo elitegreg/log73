@@ -4,6 +4,7 @@ import {
   adifFieldOptionLabel,
   adifFieldOptions,
   fixedValueMappingErrors,
+  parseAdifRecords,
   parseFirstAdifRecord,
 } from './adifImport.js';
 
@@ -65,6 +66,22 @@ test('parseFirstAdifRecord accepts zero-length typed fields', () => {
   assert.deepEqual(record.fields, {
     COMMENT: '',
   });
+});
+
+test('parseAdifRecords preserves exact QSO values and excludes header fields', () => {
+  const records = parseAdifRecords(
+    '<PROGRAMID:6>WSJT-X<EOH><COMMENT:9>  note   <UTF8:5>éabc<CALL:4>W1AW<EOR>',
+  );
+
+  assert.deepEqual(records, [
+    { COMMENT: '  note   ', UTF8: 'éabc', CALL: 'W1AW' },
+  ]);
+});
+
+test('parseAdifRecords requires complete well-formed records', () => {
+  assert.throws(() => parseAdifRecords('<CALL:4>W1AW'), /missing EOR/);
+  assert.throws(() => parseAdifRecords('<CALL:5>W1AW'), /truncated/);
+  assert.throws(() => parseAdifRecords('<CALL>W1AW<EOR>'), /invalid ADIF tag/);
 });
 
 test('adifFieldOptions sorts fields and labels examples', () => {

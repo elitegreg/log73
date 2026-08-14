@@ -117,6 +117,9 @@ body.theme-default .log-context-menu button:disabled {
 body.theme-default .backend-socket-light.connected {
   background-color: #00a000;
 }
+body.theme-default .backend-socket-light.degraded {
+  background-color: #d09000;
+}
 body.theme-default .backend-socket-light.disconnected {
   background-color: #d00000;
 }

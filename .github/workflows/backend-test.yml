@@ -38,4 +38,4 @@ jobs:
             . -> target
 
       - name: Run backend tests
-        run: cargo test -p log73-backend
+        run: cargo test -p log73-backend -p radio-io

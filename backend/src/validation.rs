@@ -8,23 +8,27 @@ use crate::db::{
     self, Contact, Database, NewLog, RadioPayload, UpdateLog, contact_adif_value, contact_id,
     contact_log_id, contact_meta_value,
 };
-use crate::message_mode::is_valid_message_mode;
 use crate::modes::mode_is_cw;
 use crate::voice_messages;
-use radio_cat_rs::{Frequency, supported_drivers};
+use radio_io::supported_drivers;
 use regex::Regex;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
+    net::Ipv4Addr,
     sync::{Mutex, OnceLock},
 };
 
 const MAX_LOG_NAME_LEN: usize = 100;
 const MAX_CONTEST_ID_LEN: usize = 100;
 const MAX_CALLSIGN_LEN: usize = 12;
+#[allow(dead_code)]
 const MAX_RADIO_NAME_LEN: usize = 100;
+#[allow(dead_code)]
 const MAX_RADIO_HOST_LEN: usize = 255;
+#[allow(dead_code)]
 const MAX_SERIAL_PORT_LEN: usize = 255;
+#[allow(dead_code)]
 const MAX_SOUND_DEVICE_ID_LEN: usize = 1024;
 const MAX_LOGIN_USER_LEN: usize = 64;
 const MAX_LOGIN_PASSWORD_LEN: usize = 256;
@@ -41,18 +45,17 @@ const MAX_CONTACT_OBJECT_FIELDS: usize = 100;
 const MAX_CONTACT_JSON_DEPTH: usize = 4;
 const MIN_QSO_EPOCH: i64 = 0;
 const MAX_QSO_EPOCH: i64 = 4_102_444_800; // 2100-01-01T00:00:00Z
+#[allow(dead_code)]
 const MAX_RADIO_FREQUENCY_HZ: u64 = 500_000_000;
+#[allow(dead_code)]
 const MAX_RADIO_TUNING_INCREMENT_HZ: u32 = 9_999;
-const MAX_RIT_OFFSET_HZ: i32 = 9_999;
-const MIN_CW_WPM: u8 = 5;
-const MAX_CW_WPM: u8 = 60;
 const MAX_CW_REQUEST_ID_LEN: usize = 64;
-const MAX_CW_TEXT_LEN: usize = 256;
+#[allow(dead_code)]
 const MAX_CW_MESSAGES_LEN: usize = 16_384;
+#[allow(dead_code)]
 const MAX_VOICE_MESSAGES_LEN: usize = 16_384;
-const MAX_WS_FIELDS: usize = 100;
+#[allow(dead_code)]
 const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat", "serial"];
-const LOGGER_MODE_OPTIONS: &[&str] = crate::modes::LOGGER_MODE_OPTIONS;
 
 static COMPILED_REGEX_CACHE: OnceLock<Mutex<HashMap<String, Result<Regex, String>>>> =
     OnceLock::new();
@@ -95,6 +98,7 @@ pub fn validate_cabrillo_export_params(
     validate_configured_params(cabrillo_export_fields(rules), export_params)
 }
 
+#[allow(dead_code)]
 pub fn validate_radio(payload: &RadioPayload) -> Result<(), String> {
     validate_required_text("radio name", &payload.name, MAX_RADIO_NAME_LEN)?;
 
@@ -221,12 +225,32 @@ pub fn validate_radio(payload: &RadioPayload) -> Result<(), String> {
         );
     }
 
+    if !matches!(payload.wsjtx_bind_address.trim(), "127.0.0.1" | "0.0.0.0") {
+        return Err("WSJT-X bind address must be 127.0.0.1 or 0.0.0.0".to_string());
+    }
+    if payload.wsjtx_port < 1024 {
+        return Err("WSJT-X port must be between 1024 and 65535".to_string());
+    }
+    if payload.flrig_port < 1024 {
+        return Err("FLRig port must be between 1024 and 65535".to_string());
+    }
+    let multicast_group = payload.wsjtx_multicast_group.trim();
+    if !multicast_group.is_empty() {
+        let group = multicast_group
+            .parse::<Ipv4Addr>()
+            .map_err(|_| "WSJT-X multicast group must be a valid IPv4 address".to_string())?;
+        if !group.is_multicast() {
+            return Err("WSJT-X multicast group must be an IPv4 multicast address".to_string());
+        }
+    }
+
     validate_cw_messages(&payload.cw_messages)?;
     validate_voice_messages(&payload.voice_messages)?;
 
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn validate_cw_messages(value: &str) -> Result<(), String> {
     if value.trim().is_empty() {
         return Err("CW messages are required".to_string());
@@ -246,6 +270,7 @@ pub fn validate_cw_messages(value: &str) -> Result<(), String> {
     cw::validate(value).map(|_| ())
 }
 
+#[allow(dead_code)]
 pub fn validate_voice_messages(value: &str) -> Result<(), String> {
     if value.trim().is_empty() {
         return Err("Voice messages are required".to_string());
@@ -525,63 +550,6 @@ pub fn validate_radio_frequency_hz(frequency_hz: u64) -> Result<(), String> {
     Ok(())
 }
 
-pub fn validate_radio_mode(mode: &str) -> Result<(), String> {
-    let mode = mode.trim().to_uppercase();
-    if LOGGER_MODE_OPTIONS.contains(&mode.as_str()) {
-        Ok(())
-    } else {
-        Err(format!(
-            "mode must be one of: {}",
-            LOGGER_MODE_OPTIONS.join(", ")
-        ))
-    }
-}
-
-pub fn validate_message_request(
-    request_id: &str,
-    mode: &str,
-    keys: &[String],
-    fields: &serde_json::Map<String, Value>,
-) -> Result<(), String> {
-    validate_required_text("Message request id", request_id, MAX_CW_REQUEST_ID_LEN)?;
-
-    if !is_valid_message_mode(mode) {
-        return Err("Message mode must be run or S&P".to_string());
-    }
-
-    if keys.is_empty() {
-        return Err("Message keys must contain at least one key".to_string());
-    }
-
-    for key in keys {
-        let normalized_key = key.trim().to_uppercase();
-        if !matches!(
-            normalized_key.as_str(),
-            "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12"
-        ) {
-            return Err("Message keys must contain only F1 through F12".to_string());
-        }
-    }
-
-    if fields.len() > MAX_WS_FIELDS {
-        return Err(format!(
-            "Message fields cannot contain more than {MAX_WS_FIELDS} entries"
-        ));
-    }
-    for (key, value) in fields {
-        validate_contact_key(key)?;
-        validate_json_value_size(value, 0).map_err(|error| format!("{key}: {error}"))?;
-    }
-
-    Ok(())
-}
-
-pub fn validate_cw_text_request(request_id: &str, text: &str) -> Result<(), String> {
-    validate_required_text("CW request id", request_id, MAX_CW_REQUEST_ID_LEN)?;
-    validate_required_text("CW text", text, MAX_CW_TEXT_LEN)?;
-    Ok(())
-}
-
 pub fn validate_dxcluster_spot_request(
     frequency_hz: u64,
     call: &str,
@@ -590,24 +558,6 @@ pub fn validate_dxcluster_spot_request(
     validate_radio_frequency_hz(frequency_hz)?;
     validate_callsign("DX spot callsign", call, false)?;
     validate_optional_plain_text("DX spot comment", comment, MAX_DXCLUSTER_SPOT_COMMENT_LEN)?;
-    Ok(())
-}
-
-pub fn validate_cw_wpm(wpm: u8) -> Result<(), String> {
-    if !(MIN_CW_WPM..=MAX_CW_WPM).contains(&wpm) {
-        return Err(format!(
-            "CW WPM must be between {MIN_CW_WPM} and {MAX_CW_WPM}"
-        ));
-    }
-    Ok(())
-}
-
-pub fn validate_rit_adjustment_hz(hz: i32) -> Result<(), String> {
-    if hz <= 0 || hz > MAX_RIT_OFFSET_HZ {
-        return Err(format!(
-            "RIT adjustment must be between 1 and {MAX_RIT_OFFSET_HZ} Hz"
-        ));
-    }
     Ok(())
 }
 
@@ -907,7 +857,7 @@ fn validate_contact_band_and_frequency(
     let frequency_hz = contact_frequency_hz(contact_adif_value(contact, "FREQ"))
         .ok_or_else(|| "frequency is required".to_string())?;
     validate_radio_frequency_hz(frequency_hz)?;
-    let frequency_band = band_for_frequency(bands, Frequency::from_hz(frequency_hz))
+    let frequency_band = band_for_frequency(bands, frequency_hz)
         .ok_or_else(|| "frequency is outside supported amateur bands".to_string())?;
     if !frequency_band.name.eq_ignore_ascii_case(&contact_band.name) {
         return Err("frequency does not match band".to_string());
@@ -1177,6 +1127,7 @@ fn validate_host(label: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn validate_serial_port(label: &str, value: &str) -> Result<(), String> {
     if value.chars().any(char::is_control) {
         return Err(format!("{label} cannot contain control characters"));
@@ -1184,6 +1135,7 @@ fn validate_serial_port(label: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 fn validate_tuning_increment_hz(label: &str, value: u32) -> Result<(), String> {
     if value == 0 || value > MAX_RADIO_TUNING_INCREMENT_HZ {
         return Err(format!(
@@ -1329,6 +1281,12 @@ mod tests {
             options: String::new(),
             data_mode: "DATA-USB".to_string(),
             rtty_mode: "RTTY".to_string(),
+            wsjtx_enabled: false,
+            wsjtx_bind_address: "127.0.0.1".to_string(),
+            wsjtx_port: 2237,
+            wsjtx_multicast_group: String::new(),
+            flrig_enabled: false,
+            flrig_port: radio_io::DEFAULT_FLRIG_PORT,
             cw_tuning_increment_hz: db::DEFAULT_CW_TUNING_INCREMENT_HZ,
             ssb_tuning_increment_hz: db::DEFAULT_SSB_TUNING_INCREMENT_HZ,
             rit_clear_on_log: false,
@@ -1379,6 +1337,23 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn validates_wsjtx_network_settings() {
+        let mut radio = test_radio();
+        radio.wsjtx_enabled = true;
+        radio.wsjtx_multicast_group = "239.255.0.1".to_string();
+        assert!(validate_radio(&radio).is_ok());
+
+        radio.wsjtx_port = 1023;
+        assert!(validate_radio(&radio).is_err());
+        radio.wsjtx_port = 2237;
+        radio.wsjtx_bind_address = "192.0.2.1".to_string();
+        assert!(validate_radio(&radio).is_err());
+        radio.wsjtx_bind_address = "0.0.0.0".to_string();
+        radio.wsjtx_multicast_group = "192.0.2.1".to_string();
+        assert!(validate_radio(&radio).is_err());
     }
 
     #[test]
@@ -1471,25 +1446,6 @@ mod tests {
             .expect_err("mismatched passwords should be rejected");
 
         assert_eq!(error, "passwords do not match");
-    }
-
-    #[test]
-    fn validates_logger_mode_requests() {
-        for mode in LOGGER_MODE_OPTIONS {
-            assert!(validate_radio_mode(mode).is_ok());
-        }
-        assert!(validate_radio_mode("AM").is_ok());
-        assert!(validate_radio_mode("USB").is_err());
-    }
-
-    #[test]
-    fn validates_search_and_pounce_message_mode_aliases() {
-        let fields = Map::new();
-        let keys = vec!["F1".to_string()];
-
-        assert!(validate_message_request("req1", "s&p", &keys, &fields).is_ok());
-        assert!(validate_message_request("req1", "sp", &keys, &fields).is_ok());
-        assert!(validate_message_request("req1", "search_and_pounce", &keys, &fields).is_ok());
     }
 
     #[test]
@@ -1631,14 +1587,6 @@ mod tests {
 
         let error = validate_radio(&radio).expect_err("SSB tuning increment should be rejected");
         assert!(error.contains("SSB tuning increment"));
-    }
-
-    #[test]
-    fn validates_rit_adjustment_hz_range() {
-        assert!(validate_rit_adjustment_hz(1).is_ok());
-        assert!(validate_rit_adjustment_hz(MAX_RIT_OFFSET_HZ).is_ok());
-        assert!(validate_rit_adjustment_hz(0).is_err());
-        assert!(validate_rit_adjustment_hz(MAX_RIT_OFFSET_HZ + 1).is_err());
     }
 
     #[test]

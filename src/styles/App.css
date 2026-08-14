@@ -90,6 +90,10 @@
   background-color: #00a000;
 }
 
+.backend-socket-light.degraded {
+  background-color: #d09000;
+}
+
 .backend-socket-light.disconnected {
   background-color: #d00000;
 }
@@ -692,7 +696,7 @@
 
 .selection-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 16px;
   padding: 12px;
 }
@@ -707,11 +711,28 @@
   font-size: 12px;
 }
 
+.radio-selection-list-wrap {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.radio-selection-list {
+  display: block;
+  min-width: 100%;
+  width: max-content;
+}
+
 .selection-buttons,
 .selection-actions {
   display: flex;
   gap: 8px;
   padding: 8px 0;
+}
+
+.log-selection-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, max-content);
 }
 
 .selection-actions {
