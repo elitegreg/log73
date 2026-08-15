@@ -1,6 +1,7 @@
 mod bands;
 mod cat_keyer;
 mod config;
+pub mod fldigi;
 mod flrig;
 mod message_mode;
 mod messages;
@@ -21,6 +22,10 @@ pub use config::{
     DEFAULT_WSJTX_BIND_ADDRESS, DEFAULT_WSJTX_PORT, RadioConfig, RadioIoConfig, RadioSettings,
     normalize_radio_settings, validate_cw_messages, validate_radio_settings,
     validate_voice_messages,
+};
+pub use fldigi::{
+    DEFAULT_FLDIGI_ENDPOINT, DEFAULT_FLDIGI_POLL_INTERVAL, DEFAULT_FLDIGI_REQUEST_TIMEOUT,
+    FldigiCommand, FldigiConfig, FldigiError, FldigiInterface,
 };
 pub use message_mode::is_valid_message_mode;
 pub use radio::{
