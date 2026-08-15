@@ -26,10 +26,21 @@ import {
   previousContactExchangeAutofill,
   normalizedContactFrequencyHz,
   shouldAdvanceFromCallsignAutofill,
+  spaceDelimitedWordAt,
   tuningIncrementHzForMode,
   steppedFrequencyHz,
   typedModeFromCallsignInput,
 } from './mainWindowHelpers.js';
+
+test('spaceDelimitedWordAt returns only the word under the offset', () => {
+  const text = 'CQ K1ABC 599';
+
+  assert.equal(spaceDelimitedWordAt(text, 0), 'CQ');
+  assert.equal(spaceDelimitedWordAt(text, 4), 'K1ABC');
+  assert.equal(spaceDelimitedWordAt(text, text.length - 1), '599');
+  assert.equal(spaceDelimitedWordAt(text, 2), '');
+  assert.equal(spaceDelimitedWordAt(text, text.length), '');
+});
 
 test('CAT indicator combines the radio websocket and CAT connection states', () => {
   assert.equal(catIndicatorState('connected', 'online'), 'connected');

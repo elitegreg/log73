@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { buildSentExchange, fieldDefault } from '../domain/contactFields';
+import {
+  buildSentExchange,
+  fieldDefault,
+  sanitizeCallsign,
+} from '../domain/contactFields';
 import { cabrilloTransmitterAdif } from '../domain/cabrilloTransmitter';
 import { callsignPrefix, dxccContinent } from '../domain/dxcc';
 import { validateCallsign, validateExchangeField } from '../domain/validation';
@@ -33,6 +37,7 @@ import {
   shouldAdvanceFromCallsignAutofill,
   callsignClearThresholdHz,
   loggerFrequencyChangeAction,
+  spaceDelimitedWordAt,
 } from './mainWindowHelpers';
 import RadioControls from './components/RadioControls';
 import EntryFields from './components/EntryFields';
@@ -688,6 +693,47 @@ function MainWindow({
     });
   }
 
+  function handleDigitalIoTextClick(event) {
+    if (!event.ctrlKey || wsjtxDataLocked) return;
+
+    const word = spaceDelimitedWordAt(
+      digitalIoText,
+      event.currentTarget.selectionStart,
+    );
+    if (!word) return;
+
+    const nextBlankField = entryFields().find(
+      (field) => field.editable && String(field.value).trim() === '',
+    );
+    if (!nextBlankField) return;
+
+    if (nextBlankField.name === 'CALL') {
+      const callsign = sanitizeCallsign(word);
+      if (!callsign) return;
+      stopRepeat();
+      setCallSign(callsign);
+      pendingPreviousContactAutofillRef.current = '';
+      callsignFrequencyBaselineRef.current = radioFrequencyHz;
+      pendingBandMapTuneFrequencyRef.current = null;
+      callSignEditedAtRef.current = new Date();
+      const nextState = esmStateAfterCallsignEdit({
+        callsign,
+        runCallsignAttempt: esmRunCallsignAttempt,
+        exchangeSentCallsign: esmExchangeSentCallsign,
+      });
+      setEsmRunCallsignAttempt(nextState.runCallsignAttempt);
+      setEsmExchangeSentCallsign(nextState.exchangeSentCallsign);
+    } else {
+      const field = (settings?.exchange ?? []).find(
+        (item) => item.id === nextBlankField.name,
+      );
+      if (!field) return;
+      updateExchangeField(field, word);
+    }
+
+    focusNextEditableField(nextBlankField.name);
+  }
+
   function handleFieldTab(event, currentFieldName, values = exchangeValues) {
     if (event.key !== 'Tab') {
       return;
@@ -1107,6 +1153,7 @@ function MainWindow({
             readOnly
             aria-label="Digital I/O received text"
             value={digitalIoText}
+            onClick={handleDigitalIoTextClick}
           />
         </div>
       ) : null}

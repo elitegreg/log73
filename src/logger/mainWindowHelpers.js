@@ -587,3 +587,17 @@ export function esmEnterAction({
     nextExchangeSentCallsign: normalizedCallsign,
   };
 }
+
+export function spaceDelimitedWordAt(text, offset) {
+  const value = String(text ?? '');
+  const index = Number(offset);
+  if (!Number.isInteger(index) || index < 0 || index >= value.length) {
+    return '';
+  }
+  if (value[index] === ' ') return '';
+
+  const start = value.lastIndexOf(' ', index - 1) + 1;
+  const nextSpace = value.indexOf(' ', index);
+  const end = nextSpace === -1 ? value.length : nextSpace;
+  return value.slice(start, end);
+}

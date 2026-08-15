@@ -347,10 +347,10 @@ async fn run_controller(
             }
             command = commands.recv() => match command {
                 Some(ControllerCommand::Send { logger_id, command }) => {
-                    if let Some(running) = &running {
-                        if running.commands.send(command).await.is_err() {
-                            warn!(radio_id, logger_id, "FLDigi command channel closed");
-                        }
+                    if let Some(running) = &running
+                        && running.commands.send(command).await.is_err()
+                    {
+                        warn!(radio_id, logger_id, "FLDigi command channel closed");
                     }
                 }
                 Some(ControllerCommand::Shutdown(completed)) => {
