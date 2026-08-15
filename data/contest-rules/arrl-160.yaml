@@ -3,7 +3,7 @@ contests:
   ARRL-160:
     name: ARRL 160-Meter Contest
     bands:
-      - 160
+      - 160M
     value_sets:
       ARRL Sections:
         use: arrl-sections

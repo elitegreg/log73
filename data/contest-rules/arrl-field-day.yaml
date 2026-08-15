@@ -7,6 +7,7 @@ contests:
       - FM
       - CW
       - DATA
+      - RTTY
     value_sets:
       DX:
         use: dx
@@ -70,23 +71,62 @@ contests:
         in_sets: [ARRL Sections, RAC Sections, DX]
     scoring:
       qso_points:
-        rules: [{id: qso-rule-1, when: {field: MODE, values: [SSB, FM]}, points: 1}, {id: qso-rule-2, points: 2}]
+        rules:
+          [
+            {
+              id: qso-rule-1,
+              when: { field: MODE, values: [SSB, FM] },
+              points: 1,
+            },
+            { id: qso-rule-2, points: 2 },
+          ]
       dupe_key:
         - CALL
         - BAND
         - MODE
       param_multipliers:
-        - {id: param-mult-category-power, param: CATEGORY-POWER, values: {HIGH: 1, LOW: 2, QRP: 5}}
+        - {
+            id: param-mult-category-power,
+            param: CATEGORY-POWER,
+            values: { HIGH: 1, LOW: 2, QRP: 5 },
+          }
     cabrillo:
       fixed_headers:
-        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
-        - {id: fixed-category-mode, name: CATEGORY-MODE, value: ALL}
+        - { id: fixed-category-band, name: CATEGORY-BAND, value: ALL }
+        - { id: fixed-category-mode, name: CATEGORY-MODE, value: ALL }
       export_fields:
-        - {id: export-club, preset: export-club-optional}
-        - {id: export-email, key: EMAIL, label: Email, type: String:75, regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$', preserve_case: true}
-        - {id: export-location, key: LOCATION, label: Location, type: String:32, help_text: 'State, province, or DX'}
-        - {id: export-name, key: NAME, label: Name, type: String:75, preserve_case: true}
-        - {id: export-address, key: ADDRESS, label: Address, type: String:45, widget: textarea, max_lines: 6, preserve_case: true}
-        - {id: export-soapbox, preset: export-soapbox-optional}
+        - { id: export-club, preset: export-club-optional }
+        - {
+            id: export-email,
+            key: EMAIL,
+            label: Email,
+            type: String:75,
+            regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$',
+            preserve_case: true,
+          }
+        - {
+            id: export-location,
+            key: LOCATION,
+            label: Location,
+            type: String:32,
+            help_text: 'State, province, or DX',
+          }
+        - {
+            id: export-name,
+            key: NAME,
+            label: Name,
+            type: String:75,
+            preserve_case: true,
+          }
+        - {
+            id: export-address,
+            key: ADDRESS,
+            label: Address,
+            type: String:45,
+            widget: textarea,
+            max_lines: 6,
+            preserve_case: true,
+          }
+        - { id: export-soapbox, preset: export-soapbox-optional }
     profiles:
-      - hf-vhf-bands
+      - all-contest-bands

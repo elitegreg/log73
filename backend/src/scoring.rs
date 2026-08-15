@@ -92,7 +92,7 @@ impl ContestScoringModule {
         if self.rules.scoring.dupe_key.is_empty() {
             return None;
         }
-        Some(scoring_key(
+        Some(dupe_scoring_key(
             contact,
             &self.rules,
             &self.rules.scoring.dupe_key,
@@ -354,6 +354,30 @@ fn scoring_key(contact: &Contact, rules: &ContestRules, fields: &[String]) -> St
         .map(|field| field_value(contact, rules, field).unwrap_or_default())
         .collect::<Vec<_>>()
         .join("|")
+}
+
+fn dupe_scoring_key(contact: &Contact, rules: &ContestRules, fields: &[String]) -> String {
+    fields
+        .iter()
+        .map(|field| {
+            if field.eq_ignore_ascii_case("MODE") {
+                dupe_mode_class(contact, rules).unwrap_or_default()
+            } else {
+                field_value(contact, rules, field).unwrap_or_default()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn dupe_mode_class(contact: &Contact, rules: &ContestRules) -> Option<String> {
+    let mode = field_value(contact, rules, "MODE")?;
+    Some(match mode.as_str() {
+        "CW" | "CW-R" => "CW".to_string(),
+        "SSB" => "SSB".to_string(),
+        "FM" => "FM".to_string(),
+        _ => "DATA".to_string(),
+    })
 }
 
 fn score_qso_points(
@@ -1802,6 +1826,72 @@ mod tests {
         assert_eq!(contact_meta_value(&contacts[1], "dupe"), Some(&json!(true)));
         assert_eq!(
             contact_meta_value(&contacts[2], "dupe"),
+            Some(&json!(false))
+        );
+    }
+
+    #[test]
+    fn mode_dupe_key_groups_digital_modes_and_keeps_ssb_cw_and_fm_distinct() {
+        let rules = test_rules(
+            fixed_points(1),
+            vec!["CALL", "BAND", "MODE"],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = vec![
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("10m")),
+                ("MODE", json!("RTTY")),
+            ]),
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("10m")),
+                ("MODE", json!("FT8")),
+            ]),
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("10m")),
+                ("MODE", json!("PSK")),
+            ]),
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("10m")),
+                ("MODE", json!("SSB")),
+            ]),
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("10m")),
+                ("MODE", json!("CW")),
+            ]),
+            contact(vec![
+                ("CALL", json!("K1ABC")),
+                ("BAND", json!("10m")),
+                ("MODE", json!("FM")),
+            ]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 4);
+        assert_eq!(
+            contact_meta_value(&contacts[0], "dupe"),
+            Some(&json!(false))
+        );
+        assert_eq!(contact_meta_value(&contacts[1], "dupe"), Some(&json!(true)));
+        assert_eq!(contact_meta_value(&contacts[2], "dupe"), Some(&json!(true)));
+        assert_eq!(
+            contact_meta_value(&contacts[3], "dupe"),
+            Some(&json!(false))
+        );
+        assert_eq!(
+            contact_meta_value(&contacts[4], "dupe"),
+            Some(&json!(false))
+        );
+        assert_eq!(
+            contact_meta_value(&contacts[5], "dupe"),
             Some(&json!(false))
         );
     }

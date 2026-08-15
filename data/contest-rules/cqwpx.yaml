@@ -54,7 +54,7 @@ contests:
     scoring:
       qso_points:
         category_band_param: CATEGORY-BAND
-        geography: {country_field: APP_LOG73_DXCC_PFX, station_country_field: APP_LOG73_MY_DXCC_PFX, continent_field: CONT, station_continent_field: MY_CONT, same_country: 1, different_country_north_america: {default: 2, by_band: {160m: 4, 80m: 4, 40m: 4}}, different_country_same_continent: {default: 1, by_band: {160m: 2, 80m: 2, 40m: 2}}, different_continent: {default: 3, by_band: {160m: 6, 80m: 6, 40m: 6}}, unresolved: 0}
+        geography: {country_field: APP_LOG73_DXCC_PFX, station_country_field: APP_LOG73_MY_DXCC_PFX, continent_field: CONT, station_continent_field: MY_CONT, same_country: 1, different_country_north_america: {default: 2, by_band: {160M: 4, 80M: 4, 40M: 4}}, different_country_same_continent: {default: 1, by_band: {160M: 2, 80M: 2, 40M: 2}}, different_continent: {default: 3, by_band: {160M: 6, 80M: 6, 40M: 6}}, unresolved: 0}
       dupe_key:
         - CALL
         - BAND
@@ -91,4 +91,33 @@ contests:
     cabrillo:
       fixed_headers:
         - {value: SSB, id: fixed-category-mode}
+    extends: CQ-WPX-CW
+  CQ-WPX-RTTY:
+    name: CQ World Wide WPX RTTY Contest
+    bands:
+      - 80M
+      - 40M
+      - 20M
+      - 15M
+      - 10M
+    modes:
+      - RTTY
+    setup_fields:
+      - id: header-category-band
+        valid_values: [ALL, 80M, 40M, 20M, 15M, 10M]
+    scoring:
+      qso_points:
+        geography:
+          same_country: {default: 1, by_band: {80M: 2, 40M: 2}}
+          different_country_north_america: {default: 2, by_band: {80M: 4, 40M: 4}}
+          different_country_same_continent: {default: 2, by_band: {80M: 4, 40M: 4}}
+          different_continent: {default: 3, by_band: {80M: 6, 40M: 6}}
+    cabrillo:
+      fixed_headers:
+        - {value: RTTY, id: fixed-category-mode}
+    metadata:
+      source: https://cqwpxrtty.com/rules.htm
+      notes: >-
+        RTTY uses 80 through 10 meters. Same-country QSOs are worth two points on 80 and 40
+        meters; all different-country QSOs on the same continent are worth two or four points.
     extends: CQ-WPX-CW

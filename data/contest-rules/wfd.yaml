@@ -6,6 +6,8 @@ contests:
       - CW
       - SSB
       - FM
+      - DATA
+      - RTTY
     value_sets:
       ARRL Sections:
         use: arrl-sections
@@ -34,7 +36,42 @@ contests:
         label: Objective Multiplier
         type: String:2
         default: '0'
-        valid_values: ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32']
+        valid_values:
+          [
+            '0',
+            '1',
+            '2',
+            '3',
+            '4',
+            '5',
+            '6',
+            '7',
+            '8',
+            '9',
+            '10',
+            '11',
+            '12',
+            '13',
+            '14',
+            '15',
+            '16',
+            '17',
+            '18',
+            '19',
+            '20',
+            '21',
+            '22',
+            '23',
+            '24',
+            '25',
+            '26',
+            '27',
+            '28',
+            '29',
+            '30',
+            '31',
+            '32',
+          ]
         widget: select
         help_text: Sum of completed WFD objective multipliers. Score is QSO points × (this value + 1).
     exchange:
@@ -68,19 +105,73 @@ contests:
         in_sets: [ARRL Sections, RAC Sections, Other Locations]
     scoring:
       qso_points:
-        rules: [{id: qso-rule-1, when: {field: MODE, values: [SSB, FM, AM]}, points: 1}, {id: qso-rule-2, points: 2}]
+        rules:
+          [
+            {
+              id: qso-rule-1,
+              when: { field: MODE, values: [SSB, FM, AM] },
+              points: 1,
+            },
+            { id: qso-rule-2, points: 2 },
+          ]
       dupe_key:
         - CALL
         - BAND
         - MODE_CLASS
       param_multipliers:
-        - {id: param-mult-objective-multiplier, param: Objective Multiplier, values: {'0': 1, '1': 2, '2': 3, '3': 4, '4': 5, '5': 6, '6': 7, '7': 8, '8': 9, '9': 10, '10': 11, '11': 12, '12': 13, '13': 14, '14': 15, '15': 16, '16': 17, '17': 18, '18': 19, '19': 20, '20': 21, '21': 22, '22': 23, '23': 24, '24': 25, '25': 26, '26': 27, '27': 28, '28': 29, '29': 30, '30': 31, '31': 32, '32': 33}}
+        - {
+            id: param-mult-objective-multiplier,
+            param: Objective Multiplier,
+            values:
+              {
+                '0': 1,
+                '1': 2,
+                '2': 3,
+                '3': 4,
+                '4': 5,
+                '5': 6,
+                '6': 7,
+                '7': 8,
+                '8': 9,
+                '9': 10,
+                '10': 11,
+                '11': 12,
+                '12': 13,
+                '13': 14,
+                '14': 15,
+                '15': 16,
+                '16': 17,
+                '17': 18,
+                '18': 19,
+                '19': 20,
+                '20': 21,
+                '21': 22,
+                '22': 23,
+                '23': 24,
+                '24': 25,
+                '25': 26,
+                '26': 27,
+                '27': 28,
+                '28': 29,
+                '29': 30,
+                '30': 31,
+                '31': 32,
+                '32': 33,
+              },
+          }
     cabrillo:
       fixed_headers: []
       export_fields:
-        - {id: export-club, preset: export-club-optional}
-        - {id: export-name, key: NAME, label: Contact Name, type: String:75, required: false, preserve_case: true}
-        - {id: export-email, preset: export-email-optional}
+        - { id: export-club, preset: export-club-optional }
+        - {
+            id: export-name,
+            key: NAME,
+            label: Contact Name,
+            type: String:75,
+            required: false,
+            preserve_case: true,
+          }
+        - { id: export-email, preset: export-email-optional }
     metadata:
       source: https://winterfieldday.org/sop.php
       notes: >-
@@ -88,4 +179,4 @@ contests:
         supported; digital modes and satellite objective contacts are not yet supported. Enter the
         total completed 2026 objective multiplier manually (maximum 32).
     profiles:
-      - hf-vhf-bands
+      - all-contest-bands
