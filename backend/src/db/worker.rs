@@ -914,10 +914,15 @@ mod tests {
             options: String::new(),
             data_mode: "DATA-USB".to_string(),
             rtty_mode: "RTTY".to_string(),
+            digital_program: "none".to_string(),
             wsjtx_enabled: false,
             wsjtx_bind_address: "127.0.0.1".to_string(),
             wsjtx_port: 2237,
             wsjtx_multicast_group: String::new(),
+            fldigi_data_enabled: false,
+            fldigi_rtty_enabled: false,
+            fldigi_host: radio_io::DEFAULT_FLDIGI_HOST.to_string(),
+            fldigi_port: radio_io::DEFAULT_FLDIGI_PORT,
             flrig_enabled: false,
             flrig_port: radio_io::DEFAULT_FLRIG_PORT,
             cw_tuning_increment_hz: crate::db::DEFAULT_CW_TUNING_INCREMENT_HZ,
@@ -1373,6 +1378,7 @@ mod tests {
 
         let mut replacement = tcp_radio();
         replacement.name = "Updated client radio".to_string();
+        replacement.digital_program = "wsjtx".to_string();
         replacement.wsjtx_enabled = true;
         replacement.flrig_enabled = true;
         replacement.flrig_port = 23_456;
@@ -1405,6 +1411,7 @@ mod tests {
     async fn client_radios_do_not_reserve_local_service_ports_or_load_into_backend_runtime() {
         let database = test_database();
         let mut backend_radio = tcp_radio();
+        backend_radio.digital_program = "wsjtx".to_string();
         backend_radio.wsjtx_enabled = true;
         backend_radio.flrig_enabled = true;
         let backend = database
@@ -1413,6 +1420,7 @@ mod tests {
             .expect("backend radio is created");
 
         let mut client_radio = tcp_radio();
+        client_radio.digital_program = "wsjtx".to_string();
         client_radio.wsjtx_enabled = true;
         client_radio.flrig_enabled = true;
         let client = database
@@ -1437,6 +1445,7 @@ mod tests {
     async fn enabled_wsjtx_ports_are_unique_but_disabled_ports_are_not_reserved() {
         let database = test_database();
         let mut first = tcp_radio();
+        first.digital_program = "wsjtx".to_string();
         first.wsjtx_enabled = true;
         database
             .create_radio(first)
@@ -1445,6 +1454,7 @@ mod tests {
 
         let mut duplicate = tcp_radio();
         duplicate.name = "Duplicate".to_string();
+        duplicate.digital_program = "wsjtx".to_string();
         duplicate.wsjtx_enabled = true;
         assert!(database.create_radio(duplicate).await.is_err());
 

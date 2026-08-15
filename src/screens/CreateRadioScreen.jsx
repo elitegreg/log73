@@ -14,6 +14,8 @@ import { useNotifications } from '../lib/notificationsContext';
 import { DEFAULT_WSJTX_PORT, nextAvailableWsjtxPort } from '../domain/wsjtx';
 
 const DEFAULT_FLRIG_PORT = 12345;
+const DEFAULT_FLDIGI_HOST = '127.0.0.1';
+const DEFAULT_FLDIGI_PORT = 7362;
 
 const DEFAULT_RADIO_KIND = 'dummy';
 const DEFAULT_TRANSPORT_KIND = 'none';
@@ -149,10 +151,13 @@ function CreateRadioScreen() {
   const [options, setOptions] = useState('');
   const [dataMode, setDataMode] = useState(DEFAULT_DATA_MODE);
   const [rttyMode, setRttyMode] = useState(DEFAULT_RTTY_MODE);
-  const [wsjtxEnabled, setWsjtxEnabled] = useState(false);
+  const [digitalProgram, setDigitalProgram] = useState('none');
   const [wsjtxBindAddress, setWsjtxBindAddress] = useState('127.0.0.1');
   const [wsjtxPort, setWsjtxPort] = useState(DEFAULT_WSJTX_PORT);
   const [wsjtxMulticastGroup, setWsjtxMulticastGroup] = useState('');
+  const [fldigiRttyEnabled, setFldigiRttyEnabled] = useState(false);
+  const [fldigiHost, setFldigiHost] = useState(DEFAULT_FLDIGI_HOST);
+  const [fldigiPort, setFldigiPort] = useState(DEFAULT_FLDIGI_PORT);
   const [flrigEnabled, setFlrigEnabled] = useState(false);
   const [flrigPort, setFlrigPort] = useState(DEFAULT_FLRIG_PORT);
   const [cwTuningIncrementHz, setCwTuningIncrementHz] = useState(
@@ -380,10 +385,18 @@ function CreateRadioScreen() {
           savedRadioKind?.default_rtty_mode ||
           DEFAULT_RTTY_MODE,
       );
-      setWsjtxEnabled(Boolean(radio.wsjtx_enabled));
+      const nextDigitalProgram = String(radio.digital_program ?? '').trim().toLowerCase();
+      setDigitalProgram(
+        ['none', 'wsjtx', 'fldigi'].includes(nextDigitalProgram)
+          ? nextDigitalProgram
+          : (radio.wsjtx_enabled ? 'wsjtx' : 'none'),
+      );
       setWsjtxBindAddress(radio.wsjtx_bind_address ?? '127.0.0.1');
       setWsjtxPort(radio.wsjtx_port ?? DEFAULT_WSJTX_PORT);
       setWsjtxMulticastGroup(radio.wsjtx_multicast_group ?? '');
+      setFldigiRttyEnabled(Boolean(radio.fldigi_rtty_enabled));
+      setFldigiHost(radio.fldigi_host ?? DEFAULT_FLDIGI_HOST);
+      setFldigiPort(radio.fldigi_port ?? DEFAULT_FLDIGI_PORT);
       setFlrigEnabled(Boolean(radio.flrig_enabled));
       setFlrigPort(radio.flrig_port ?? DEFAULT_FLRIG_PORT);
       setCwTuningIncrementHz(
@@ -550,10 +563,15 @@ function CreateRadioScreen() {
           options: options,
           data_mode: dataMode,
           rtty_mode: rttyMode,
-          wsjtx_enabled: Boolean(wsjtxEnabled),
+          digital_program: digitalProgram,
+          wsjtx_enabled: digitalProgram === 'wsjtx',
           wsjtx_bind_address: wsjtxBindAddress,
           wsjtx_port: Number(wsjtxPort),
           wsjtx_multicast_group: wsjtxMulticastGroup.trim(),
+          fldigi_data_enabled: digitalProgram === 'fldigi',
+          fldigi_rtty_enabled: Boolean(fldigiRttyEnabled),
+          fldigi_host: fldigiHost.trim(),
+          fldigi_port: Number(fldigiPort),
           flrig_enabled: Boolean(flrigEnabled),
           flrig_port: Number(flrigPort),
           cw_tuning_increment_hz: Number(cwTuningIncrementHz),
@@ -729,15 +747,21 @@ function CreateRadioScreen() {
           ))}
         </select>
       </label>
-      <label className="checkbox-label">
-        <input
-          type="checkbox"
-          checked={wsjtxEnabled}
-          onChange={(event) => setWsjtxEnabled(event.target.checked)}
-        />
-        WSJT-X in DATA
+      <label>
+        DATA Digital Program
+        <select
+          value={digitalProgram}
+          onChange={(event) => {
+            const value = event.target.value;
+            setDigitalProgram(value);
+          }}
+        >
+          <option value="none">None</option>
+          <option value="wsjtx">WSJT-X</option>
+          <option value="fldigi">FLDigi</option>
+        </select>
       </label>
-      {wsjtxEnabled ? (
+      {digitalProgram === 'wsjtx' ? (
         <>
           <label>
             WSJT-X Bind
@@ -767,6 +791,37 @@ function CreateRadioScreen() {
               value={wsjtxMulticastGroup}
               onChange={(event) => setWsjtxMulticastGroup(event.target.value)}
               placeholder="Optional IPv4 multicast address"
+            />
+          </label>
+        </>
+      ) : null}
+      <label className="checkbox-label">
+        <input
+          type="checkbox"
+          checked={fldigiRttyEnabled}
+          onChange={(event) => setFldigiRttyEnabled(event.target.checked)}
+        />
+        Enable FLDigi (RTTY)
+      </label>
+      {digitalProgram === 'fldigi' || fldigiRttyEnabled ? (
+        <>
+          <label>
+            FLDigi Host
+            <input
+              value={fldigiHost}
+              onChange={(event) => setFldigiHost(event.target.value)}
+              required
+            />
+          </label>
+          <label>
+            FLDigi Port
+            <input
+              type="number"
+              min="1024"
+              max="65535"
+              value={fldigiPort}
+              onChange={(event) => setFldigiPort(event.target.value)}
+              required
             />
           </label>
         </>

@@ -11,6 +11,8 @@ pub const DEFAULT_SSB_TUNING_INCREMENT_HZ: u32 = 100;
 pub const DEFAULT_WSJTX_BIND_ADDRESS: &str = "127.0.0.1";
 pub const DEFAULT_WSJTX_PORT: u16 = 2237;
 pub const DEFAULT_FLRIG_PORT: u16 = 12_345;
+pub const DEFAULT_FLDIGI_HOST: &str = "127.0.0.1";
+pub const DEFAULT_FLDIGI_PORT: u16 = 7362;
 pub const DEFAULT_CW_SERIAL_BAUD_RATE: u32 = 9_600;
 pub const DEFAULT_CW_SERIAL_LINE: &str = "dtr";
 
@@ -41,10 +43,15 @@ pub struct RadioSettings {
     pub options: String,
     pub data_mode: String,
     pub rtty_mode: String,
+    pub digital_program: String,
     pub wsjtx_enabled: bool,
     pub wsjtx_bind_address: String,
     pub wsjtx_port: u16,
     pub wsjtx_multicast_group: String,
+    pub fldigi_data_enabled: bool,
+    pub fldigi_rtty_enabled: bool,
+    pub fldigi_host: String,
+    pub fldigi_port: u16,
     pub flrig_enabled: bool,
     pub flrig_port: u16,
     pub cw_tuning_increment_hz: u32,
@@ -74,10 +81,15 @@ impl Default for RadioSettings {
             options: String::new(),
             data_mode: String::new(),
             rtty_mode: String::new(),
+            digital_program: "none".to_string(),
             wsjtx_enabled: false,
             wsjtx_bind_address: DEFAULT_WSJTX_BIND_ADDRESS.to_string(),
             wsjtx_port: DEFAULT_WSJTX_PORT,
             wsjtx_multicast_group: String::new(),
+            fldigi_data_enabled: false,
+            fldigi_rtty_enabled: false,
+            fldigi_host: DEFAULT_FLDIGI_HOST.to_string(),
+            fldigi_port: DEFAULT_FLDIGI_PORT,
             flrig_enabled: false,
             flrig_port: DEFAULT_FLRIG_PORT,
             cw_tuning_increment_hz: DEFAULT_CW_TUNING_INCREMENT_HZ,
@@ -147,6 +159,10 @@ pub fn normalize_radio_settings(settings: &mut RadioSettings) -> Result<(), Stri
     )?;
     settings.data_mode = data_mode;
     settings.rtty_mode = rtty_mode;
+    settings.digital_program = normalized_digital_program(&settings.digital_program)?;
+    settings.wsjtx_enabled = settings.digital_program == "wsjtx";
+    settings.fldigi_data_enabled = settings.digital_program == "fldigi";
+    settings.fldigi_host = settings.fldigi_host.trim().to_string();
     settings.voice_input_device_id =
         normalized_optional_device_id(settings.voice_input_device_id.take());
     settings.voice_output_device_id =
@@ -164,6 +180,13 @@ pub fn validate_radio_settings(settings: &RadioSettings) -> Result<(), String> {
         return Err(format!("unsupported radio driver: {radio_kind}"));
     }
     modes::resolved_mode_mappings(radio_kind, &settings.data_mode, &settings.rtty_mode)?;
+    let digital_program = normalized_digital_program(&settings.digital_program)?;
+    if settings.wsjtx_enabled != (digital_program == "wsjtx") {
+        return Err("WSJT-X enabled state must match the DATA digital program".to_string());
+    }
+    if settings.fldigi_data_enabled != (digital_program == "fldigi") {
+        return Err("FLDigi DATA enabled state must match the DATA digital program".to_string());
+    }
 
     let transport_kind = settings.transport_kind.trim().to_ascii_lowercase();
     if !matches!(transport_kind.as_str(), "none" | "tcp" | "serial") {
@@ -275,6 +298,15 @@ pub fn validate_radio_settings(settings: &RadioSettings) -> Result<(), String> {
     if settings.flrig_port < 1024 {
         return Err("FLRig port must be between 1024 and 65535".to_string());
     }
+    if settings.fldigi_data_enabled || settings.fldigi_rtty_enabled {
+        validate_required_text("FLDigi host", &settings.fldigi_host, MAX_RADIO_HOST_LEN)?;
+        validate_host("FLDigi host", &settings.fldigi_host)?;
+        if settings.fldigi_port < 1024 {
+            return Err("FLDigi port must be between 1024 and 65535".to_string());
+        }
+    } else {
+        validate_max_len("FLDigi host", &settings.fldigi_host, MAX_RADIO_HOST_LEN)?;
+    }
     let multicast_group = settings.wsjtx_multicast_group.trim();
     if !multicast_group.is_empty() {
         let group = multicast_group
@@ -286,6 +318,15 @@ pub fn validate_radio_settings(settings: &RadioSettings) -> Result<(), String> {
     }
     validate_cw_messages(&settings.cw_messages)?;
     validate_voice_messages(&settings.voice_messages)
+}
+
+fn normalized_digital_program(value: &str) -> Result<String, String> {
+    let value = value.trim().to_ascii_lowercase();
+    if matches!(value.as_str(), "none" | "wsjtx" | "fldigi") {
+        Ok(value)
+    } else {
+        Err("DATA digital program must be none, wsjtx, or fldigi".to_string())
+    }
 }
 
 pub fn validate_cw_messages(value: &str) -> Result<(), String> {
@@ -451,5 +492,21 @@ mod tests {
         serial.wsjtx_port = DEFAULT_WSJTX_PORT;
         serial.flrig_port = 1023;
         assert!(validate_radio_settings(&serial).is_err());
+    }
+
+    #[test]
+    fn digital_program_selects_exactly_one_data_integration() {
+        let mut settings = tcp_radio();
+        settings.digital_program = " FLDIGI ".to_string();
+        settings.wsjtx_enabled = true;
+        normalize_radio_settings(&mut settings).expect("normalizes digital program");
+
+        assert_eq!(settings.digital_program, "fldigi");
+        assert!(!settings.wsjtx_enabled);
+        assert!(settings.fldigi_data_enabled);
+        assert!(validate_radio_settings(&settings).is_ok());
+
+        settings.wsjtx_enabled = true;
+        assert!(validate_radio_settings(&settings).is_err());
     }
 }

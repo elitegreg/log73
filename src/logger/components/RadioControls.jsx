@@ -22,6 +22,9 @@ function RadioControls({
   wsjtxEnabled,
   wsjtxTarget,
   onSetWsjtXTarget,
+  digitalIoEnabled,
+  digitalIoTarget,
+  onSetDigitalIoTarget,
   cwWpm,
   cwWpmMin,
   cwWpmMax,
@@ -97,6 +100,16 @@ function RadioControls({
             type="checkbox"
             checked={Boolean(wsjtxTarget)}
             onChange={(event) => onSetWsjtXTarget?.(event.target.checked)}
+            disabled={radioSocketStatus !== 'connected'}
+          />
+        </label>
+      ) : digitalIoEnabled ? (
+        <label className="radio-control esm-toggle">
+          Digital I/O:
+          <input
+            type="checkbox"
+            checked={Boolean(digitalIoTarget)}
+            onChange={(event) => onSetDigitalIoTarget?.(event.target.checked)}
             disabled={radioSocketStatus !== 'connected'}
           />
         </label>

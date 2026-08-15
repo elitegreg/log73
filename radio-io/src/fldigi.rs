@@ -1,6 +1,6 @@
 //! Bidirectional text messaging through FLDigi's XML-RPC interface.
 
-use dxr::{FaultResponse, MethodCall, MethodResponse};
+use dxr::{FaultResponse, MethodCall, MethodResponse, Value};
 use reqwest::{Client, Url};
 use std::borrow::Cow;
 use std::{fmt, time::Duration};
@@ -12,7 +12,7 @@ use tokio::{
 use tracing::{debug, warn};
 
 pub const DEFAULT_FLDIGI_ENDPOINT: &str = "http://127.0.0.1:7362/RPC2";
-pub const DEFAULT_FLDIGI_POLL_INTERVAL: Duration = Duration::from_millis(100);
+pub const DEFAULT_FLDIGI_POLL_INTERVAL: Duration = Duration::from_millis(500);
 pub const DEFAULT_FLDIGI_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 
 const CHANNEL_CAPACITY: usize = 32;
@@ -215,11 +215,15 @@ async fn apply_command(
             // FLDigi interprets caret-R as "return to receive" once the queued
             // text has been sent.
             let text = format!("{text}^r");
-            call::<_, ()>(client, request_timeout, "text.add_tx", (text,)).await?;
-            call(client, request_timeout, "main.tx", ()).await
+            let _: Value = call(client, request_timeout, "text.add_tx", (text,)).await?;
+            let _: Value = call(client, request_timeout, "main.tx", Value::Nil).await?;
+            Ok(())
         }
         FldigiCommand::ClearReceiveBuffer => {
-            call(client, request_timeout, "text.clear_rx", ()).await
+            // Some FLDigi versions reply with an empty string instead of the
+            // documented XML-RPC nil. The command has no meaningful result.
+            let _: Value = call(client, request_timeout, "text.clear_rx", Value::Nil).await?;
+            Ok(())
         }
     }
 }
@@ -229,7 +233,7 @@ async fn receive_new_text(
     request_timeout: Duration,
     rx_position: &mut i32,
 ) -> Result<Option<String>, FldigiError> {
-    let length: i32 = call(client, request_timeout, "text.get_rx_length", ()).await?;
+    let length: i32 = call(client, request_timeout, "text.get_rx_length", Value::Nil).await?;
     if length < 0 {
         return Err(FldigiError {
             method: "text.get_rx_length",
@@ -398,6 +402,12 @@ mod tests {
 
         let value = match method.as_str() {
             "text.get_rx_length" => {
+                if params.as_slice() != [Value::Nil] {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        "text.get_rx_length expected nil".to_string(),
+                    ));
+                }
                 let length = state.rx.lock().await.len();
                 Value::Integer(i32::try_from(length).expect("mock RX length fits in i32"))
             }
@@ -417,10 +427,22 @@ mod tests {
                 Value::Base64(rx.get(start..end).unwrap_or_default().to_vec())
             }
             "text.clear_rx" => {
+                if params.as_slice() != [Value::Nil] {
+                    return Err((
+                        StatusCode::BAD_REQUEST,
+                        "text.clear_rx expected nil".to_string(),
+                    ));
+                }
                 state.rx.lock().await.clear();
-                Value::Nil
+                Value::String("cleared".to_string())
             }
-            "text.add_tx" | "main.tx" => Value::Nil,
+            "text.add_tx" => Value::String("queued".to_string()),
+            "main.tx" => {
+                if params.as_slice() != [Value::Nil] {
+                    return Err((StatusCode::BAD_REQUEST, "main.tx expected nil".to_string()));
+                }
+                Value::String("transmitting".to_string())
+            }
             _ => {
                 return Err((
                     StatusCode::NOT_FOUND,

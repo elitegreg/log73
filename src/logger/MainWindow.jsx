@@ -77,6 +77,10 @@ function MainWindow({
   messageSentEvent,
   wsjtxTarget,
   onSetWsjtXTarget,
+  digitalIoTarget,
+  digitalIoText,
+  onSetDigitalIoTarget,
+  onClearDigitalIo,
   sessionId,
   logId,
   bandMapEnabled,
@@ -108,8 +112,18 @@ function MainWindow({
   onSerialContactLogged,
   onExit,
 }) {
+  const digitalIoTextRef = useRef(null);
   const radioMode = radioState?.mode ?? 'CW';
   const wsjtxDataLocked = wsjtxDataModeLocked(radio, radioMode, wsjtxTarget);
+  const digitalIoEnabled =
+    (String(radioMode).toUpperCase() === 'DATA' && radio?.fldigi_data_enabled) ||
+    (String(radioMode).toUpperCase() === 'RTTY' && radio?.fldigi_rtty_enabled);
+  useEffect(() => {
+    const textArea = digitalIoTextRef.current;
+    if (textArea) {
+      textArea.scrollTop = textArea.scrollHeight;
+    }
+  }, [digitalIoText]);
   const radioFrequencyHz =
     radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
   const {
@@ -1032,6 +1046,9 @@ function MainWindow({
         wsjtxEnabled={Boolean(radio?.wsjtx_enabled)}
         wsjtxTarget={wsjtxTarget}
         onSetWsjtXTarget={onSetWsjtXTarget}
+        digitalIoEnabled={digitalIoEnabled}
+        digitalIoTarget={digitalIoTarget}
+        onSetDigitalIoTarget={onSetDigitalIoTarget}
         cwWpm={cwWpm}
         cwWpmMin={CW_WPM_MIN}
         cwWpmMax={CW_WPM_MAX}
@@ -1076,6 +1093,23 @@ function MainWindow({
         aria-label="Completion matches"
         value={completionMatches.join(' ')}
       />
+      {digitalIoEnabled && digitalIoTarget ? (
+        <div className="digital-io-box">
+          <div className="digital-io-header">
+            <span>RX/TX:</span>
+            <button type="button" onClick={onClearDigitalIo}>
+              Clear
+            </button>
+          </div>
+          <textarea
+            ref={digitalIoTextRef}
+            rows="8"
+            readOnly
+            aria-label="Digital I/O received text"
+            value={digitalIoText}
+          />
+        </div>
+      ) : null}
       {modeIsCw(radioMode) && isCwTextDialogOpen ? (
         <div className="cw-text-dialog-overlay" onClick={closeCwTextDialog}>
           <div

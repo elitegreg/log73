@@ -97,6 +97,10 @@ function LoggerScreen() {
     sendRadioMessage,
     wsjtxTarget,
     setWsjtXTarget,
+    digitalIoTarget,
+    digitalIoText,
+    setDigitalIoTarget,
+    clearDigitalIo,
   } = useRadioSocket({
     numericRadioId,
     numericLogId,
@@ -370,8 +374,12 @@ function LoggerScreen() {
               catStatus={catStatus}
               messageLabels={messageLabels}
               messageSentEvent={messageSentEvent}
-              wsjtxTarget={wsjtxTarget}
-              onSetWsjtXTarget={setWsjtXTarget}
+        wsjtxTarget={wsjtxTarget}
+        onSetWsjtXTarget={setWsjtXTarget}
+        digitalIoTarget={digitalIoTarget}
+        digitalIoText={digitalIoText}
+        onSetDigitalIoTarget={setDigitalIoTarget}
+        onClearDigitalIo={clearDigitalIo}
               sessionId={sessionId}
               logId={numericLogId}
               bandMapEnabled={bandMapEnabled}

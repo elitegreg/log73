@@ -36,10 +36,15 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
             OPTIONS TEXT NOT NULL DEFAULT '',
             DATA_MODE TEXT NOT NULL,
             RTTY_MODE TEXT NOT NULL,
+            DIGITAL_PROGRAM TEXT NOT NULL DEFAULT 'none' CHECK (DIGITAL_PROGRAM IN ('none', 'wsjtx', 'fldigi')),
             WSJTX_ENABLED INTEGER NOT NULL DEFAULT 0 CHECK (WSJTX_ENABLED IN (0, 1)),
             WSJTX_BIND_ADDRESS TEXT NOT NULL DEFAULT '127.0.0.1' CHECK (WSJTX_BIND_ADDRESS IN ('127.0.0.1', '0.0.0.0')),
             WSJTX_PORT INTEGER NOT NULL DEFAULT 2237 CHECK (WSJTX_PORT >= 1024 AND WSJTX_PORT <= 65535),
             WSJTX_MULTICAST_GROUP TEXT NOT NULL DEFAULT '',
+            FLDIGI_DATA_ENABLED INTEGER NOT NULL DEFAULT 0 CHECK (FLDIGI_DATA_ENABLED IN (0, 1)),
+            FLDIGI_RTTY_ENABLED INTEGER NOT NULL DEFAULT 0 CHECK (FLDIGI_RTTY_ENABLED IN (0, 1)),
+            FLDIGI_HOST TEXT NOT NULL DEFAULT '127.0.0.1',
+            FLDIGI_PORT INTEGER NOT NULL DEFAULT 7362 CHECK (FLDIGI_PORT >= 1024 AND FLDIGI_PORT <= 65535),
             FLRIG_ENABLED INTEGER NOT NULL DEFAULT 0 CHECK (FLRIG_ENABLED IN (0, 1)),
             FLRIG_PORT INTEGER NOT NULL DEFAULT 12345 CHECK (FLRIG_PORT >= 1024 AND FLRIG_PORT <= 65535),
             CW_TUNING_INCREMENT_HZ INTEGER NOT NULL DEFAULT 20 CHECK (CW_TUNING_INCREMENT_HZ > 0),
@@ -64,6 +69,14 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
                     AND CLIENT_INSTANCE_ID IS NOT NULL AND length(trim(CLIENT_INSTANCE_ID)) > 0
                     AND RADIO_WS_URL IS NOT NULL AND length(trim(RADIO_WS_URL)) > 0
                 )
+            ),
+            CHECK (
+                (DIGITAL_PROGRAM = 'wsjtx' AND WSJTX_ENABLED = 1)
+                OR (DIGITAL_PROGRAM != 'wsjtx' AND WSJTX_ENABLED = 0)
+            ),
+            CHECK (
+                (DIGITAL_PROGRAM = 'fldigi' AND FLDIGI_DATA_ENABLED = 1)
+                OR (DIGITAL_PROGRAM != 'fldigi' AND FLDIGI_DATA_ENABLED = 0)
             )
         ) STRICT;
 

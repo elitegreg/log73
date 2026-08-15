@@ -1,6 +1,7 @@
 use crate::{
-    RadioClientMessage, RadioCommand, RadioConfig, RadioIoConfig, RadioManager, RadioServerMessage,
-    WsjtXEvent, WsjtXManager, WsjtXTargetState, is_valid_message_mode, modes,
+    DigitalIoEvent, DigitalIoManager, DigitalIoTargetState, FldigiCommand, RadioClientMessage,
+    RadioCommand, RadioConfig, RadioIoConfig, RadioManager, RadioServerMessage, WsjtXEvent,
+    WsjtXManager, WsjtXTargetState, is_valid_message_mode, modes,
 };
 use axum::{
     Extension,
@@ -29,6 +30,7 @@ const MAX_CW_WPM: u8 = 60;
 const MAX_REQUEST_ID_LEN: usize = 64;
 const MAX_LOGGER_ID_LEN: usize = 128;
 const MAX_CW_TEXT_LEN: usize = 256;
+const MAX_DIGITAL_IO_TEXT_LEN: usize = 16_384;
 const MAX_MESSAGE_FIELDS: usize = 100;
 const MAX_FIELD_NAME_LEN: usize = 64;
 const MAX_FIELD_STRING_LEN: usize = 1024;
@@ -40,6 +42,7 @@ const MAX_FIELD_JSON_DEPTH: usize = 4;
 pub struct RadioWebSocketState {
     radio_manager: RadioManager,
     wsjtx_manager: WsjtXManager,
+    digital_io_manager: DigitalIoManager,
     registry: Arc<Mutex<RadioRegistry>>,
     shutdown_sessions: broadcast::Sender<()>,
 }
@@ -64,6 +67,7 @@ impl RadioWebSocketState {
         Self {
             radio_manager,
             wsjtx_manager: WsjtXManager::new(),
+            digital_io_manager: DigitalIoManager::new(),
             registry: Arc::new(Mutex::new(RadioRegistry { radios })),
             shutdown_sessions,
         }
@@ -167,6 +171,7 @@ impl SingleRadioWebSocketState {
     pub async fn shutdown(&self) {
         self.state.close_sessions();
         self.state.wsjtx_manager.shutdown_all().await;
+        self.state.digital_io_manager.shutdown_all().await;
         self.state.radio_manager.shutdown_all().await;
     }
 }
@@ -377,6 +382,12 @@ async fn handle_radio_socket(
             state.wsjtx_manager.subscribe_events(),
         )
     });
+    let mut digital_io_subscriptions = identity.as_ref().map(|_| {
+        (
+            state.digital_io_manager.subscribe_targets(),
+            state.digital_io_manager.subscribe_events(),
+        )
+    });
     let initial_wsjtx_target = if let Some(identity) = &identity {
         match state
             .wsjtx_manager
@@ -384,7 +395,7 @@ async fn handle_radio_socket(
                 radio_id,
                 &identity.logger_id,
                 identity.log_id,
-                config,
+                config.clone(),
                 initial_state.clone(),
                 radio_handle.subscribe(),
             )
@@ -393,6 +404,33 @@ async fn handle_radio_socket(
             Ok(target) => Some(target),
             Err(error) => {
                 warn!(radio_id, logger_id = %identity.logger_id, %error, "radio websocket could not register WSJT-X logger");
+                state.release(radio_id).await;
+                return;
+            }
+        }
+    } else {
+        None
+    };
+    let initial_digital_io_target = if let Some(identity) = &identity {
+        match state
+            .digital_io_manager
+            .acquire(
+                radio_id,
+                &identity.logger_id,
+                identity.log_id,
+                config.clone(),
+                initial_state.clone(),
+                radio_handle.subscribe(),
+            )
+            .await
+        {
+            Ok(target) => Some(target),
+            Err(error) => {
+                warn!(radio_id, logger_id = %identity.logger_id, %error, "radio websocket could not register digital I/O logger");
+                state
+                    .wsjtx_manager
+                    .release(radio_id, &identity.logger_id)
+                    .await;
                 state.release(radio_id).await;
                 return;
             }
@@ -426,6 +464,14 @@ async fn handle_radio_socket(
         release_socket_registration(&state, radio_id, identity.as_ref()).await;
         return;
     }
+    if let Some(target) = &initial_digital_io_target
+        && send_radio_ws_message(&mut sender, &digital_io_target_message(target))
+            .await
+            .is_err()
+    {
+        release_socket_registration(&state, radio_id, identity.as_ref()).await;
+        return;
+    }
 
     let mut status_updates = radio_handle.subscribe_status();
     let mut state_updates = radio_handle.subscribe();
@@ -433,6 +479,16 @@ async fn handle_radio_socket(
     let wsjtx_bridge = identity.as_ref().and_then(|identity| {
         wsjtx_subscriptions.take().map(|subscriptions| {
             spawn_wsjtx_socket_bridge(
+                subscriptions,
+                radio_id,
+                identity.logger_id.clone(),
+                direct_tx.clone(),
+            )
+        })
+    });
+    let digital_io_bridge = identity.as_ref().and_then(|identity| {
+        digital_io_subscriptions.take().map(|subscriptions| {
+            spawn_digital_io_socket_bridge(
                 subscriptions,
                 radio_id,
                 identity.logger_id.clone(),
@@ -595,6 +651,62 @@ async fn handle_radio_socket(
                     warn!(radio_id, logger_id = %identity.logger_id, enabled, %error, "unable to update WSJT-X target");
                 }
             }
+            Ok(RadioClientMessage::SetDigitalIoTarget { enabled }) => {
+                let Some(identity) = &identity else {
+                    warn!(
+                        radio_id,
+                        "unidentified radio websocket cannot set digital I/O target"
+                    );
+                    continue;
+                };
+                if let Err(error) = state
+                    .digital_io_manager
+                    .set_target(radio_id, &identity.logger_id, enabled)
+                    .await
+                {
+                    warn!(radio_id, logger_id = %identity.logger_id, enabled, %error, "unable to update digital I/O target");
+                }
+            }
+            Ok(RadioClientMessage::DigitalIoSend { text }) => {
+                let Some(identity) = &identity else {
+                    warn!(
+                        radio_id,
+                        "unidentified radio websocket cannot send digital I/O text"
+                    );
+                    continue;
+                };
+                if let Err(error) = validate_digital_io_text(&text) {
+                    warn!(radio_id, %error, "invalid digital I/O send command");
+                    continue;
+                }
+                if let Err(error) = state
+                    .digital_io_manager
+                    .send(radio_id, &identity.logger_id, FldigiCommand::Transmit(text))
+                    .await
+                {
+                    warn!(radio_id, logger_id = %identity.logger_id, %error, "unable to send digital I/O text");
+                }
+            }
+            Ok(RadioClientMessage::DigitalIoClear) => {
+                let Some(identity) = &identity else {
+                    warn!(
+                        radio_id,
+                        "unidentified radio websocket cannot clear digital I/O text"
+                    );
+                    continue;
+                };
+                if let Err(error) = state
+                    .digital_io_manager
+                    .send(
+                        radio_id,
+                        &identity.logger_id,
+                        FldigiCommand::ClearReceiveBuffer,
+                    )
+                    .await
+                {
+                    warn!(radio_id, logger_id = %identity.logger_id, %error, "unable to clear digital I/O text");
+                }
+            }
             Ok(RadioClientMessage::WsjtXEventReceived { event_id }) => {
                 if let Err(error) = validate_wsjtx_event_id(&event_id) {
                     warn!(radio_id, %error, "invalid WSJT-X receipt acknowledgment");
@@ -612,6 +724,9 @@ async fn handle_radio_socket(
     if let Some(bridge) = wsjtx_bridge {
         bridge.abort();
     }
+    if let Some(bridge) = digital_io_bridge {
+        bridge.abort();
+    }
     release_socket_registration(&state, radio_id, identity.as_ref()).await;
     info!(radio_id, "radio websocket disconnected");
 }
@@ -626,12 +741,23 @@ async fn release_socket_registration(
             .wsjtx_manager
             .release(radio_id, &identity.logger_id)
             .await;
+        state
+            .digital_io_manager
+            .release(radio_id, &identity.logger_id)
+            .await;
     }
     state.release(radio_id).await;
 }
 
 fn wsjtx_target_message(target: &WsjtXTargetState) -> RadioServerMessage {
     RadioServerMessage::WsjtXTarget {
+        logger_id: target.logger_id.clone(),
+        log_id: target.log_id,
+    }
+}
+
+fn digital_io_target_message(target: &DigitalIoTargetState) -> RadioServerMessage {
+    RadioServerMessage::DigitalIoTarget {
         logger_id: target.logger_id.clone(),
         log_id: target.log_id,
     }
@@ -656,6 +782,39 @@ fn spawn_wsjtx_socket_bridge(
                 },
                 event = events.recv() => match event {
                     Ok(event) => match wsjtx_event_message(event, radio_id, &logger_id) {
+                        Some(message) => message,
+                        None => continue,
+                    },
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+            };
+            if direct_tx.send(message).await.is_err() {
+                break;
+            }
+        }
+    })
+}
+
+fn spawn_digital_io_socket_bridge(
+    (mut targets, mut events): (
+        broadcast::Receiver<DigitalIoTargetState>,
+        broadcast::Receiver<DigitalIoEvent>,
+    ),
+    radio_id: i64,
+    logger_id: String,
+    direct_tx: mpsc::Sender<RadioServerMessage>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        loop {
+            let message = tokio::select! {
+                target = targets.recv() => match target {
+                    Ok(target) if target.radio_id == radio_id => digital_io_target_message(&target),
+                    Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                },
+                event = events.recv() => match event {
+                    Ok(event) => match digital_io_event_message(event, radio_id, &logger_id) {
                         Some(message) => message,
                         None => continue,
                     },
@@ -701,6 +860,32 @@ fn wsjtx_event_message(
     }
 }
 
+fn digital_io_event_message(
+    event: DigitalIoEvent,
+    radio_id: i64,
+    logger_id: &str,
+) -> Option<RadioServerMessage> {
+    match event {
+        DigitalIoEvent::Received {
+            radio_id: event_radio_id,
+            logger_id: event_logger_id,
+            log_id,
+            text,
+        } if event_radio_id == radio_id && event_logger_id == logger_id => {
+            Some(RadioServerMessage::DigitalIoReceived { log_id, text })
+        }
+        DigitalIoEvent::Error {
+            radio_id: event_radio_id,
+            logger_id: event_logger_id,
+            log_id,
+            message,
+        } if event_radio_id == radio_id && event_logger_id == logger_id => {
+            Some(RadioServerMessage::DigitalIoError { log_id, message })
+        }
+        _ => None,
+    }
+}
+
 async fn send_radio_ws_message(
     sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
     message: &RadioServerMessage,
@@ -732,6 +917,18 @@ fn validate_radio_frequency_hz(frequency_hz: u64) -> Result<(), String> {
     if frequency_hz == 0 || frequency_hz > MAX_RADIO_FREQUENCY_HZ {
         return Err(format!(
             "frequency must be between 1 and {MAX_RADIO_FREQUENCY_HZ} Hz"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_digital_io_text(text: &str) -> Result<(), String> {
+    if text.is_empty() {
+        return Err("digital I/O text cannot be empty".to_string());
+    }
+    if text.chars().count() > MAX_DIGITAL_IO_TEXT_LEN {
+        return Err(format!(
+            "digital I/O text must be at most {MAX_DIGITAL_IO_TEXT_LEN} characters"
         ));
     }
     Ok(())
@@ -900,10 +1097,15 @@ mod tests {
                 options: String::new(),
                 data_mode: "DATA-USB".to_string(),
                 rtty_mode: "RTTY".to_string(),
+                digital_program: "none".to_string(),
                 wsjtx_enabled: false,
                 wsjtx_bind_address: "127.0.0.1".to_string(),
                 wsjtx_port: 2237,
                 wsjtx_multicast_group: String::new(),
+                fldigi_data_enabled: false,
+                fldigi_rtty_enabled: false,
+                fldigi_host: crate::DEFAULT_FLDIGI_HOST.to_string(),
+                fldigi_port: crate::DEFAULT_FLDIGI_PORT,
                 flrig_enabled: false,
                 flrig_port: crate::DEFAULT_FLRIG_PORT,
                 cw_tuning_increment_hz: 20,
@@ -941,6 +1143,9 @@ mod tests {
         assert!(validate_cw_wpm(4).is_err());
         assert!(validate_wsjtx_event_id("8bf420c0-46f2-44aa-bfac-71a2ed41ef1a").is_ok());
         assert!(validate_wsjtx_event_id("event-1").is_err());
+        assert!(validate_digital_io_text("CQ TEST").is_ok());
+        assert!(validate_digital_io_text("").is_err());
+        assert!(validate_digital_io_text(&"x".repeat(MAX_DIGITAL_IO_TEXT_LEN + 1)).is_err());
     }
 
     #[test]
@@ -1009,6 +1214,22 @@ mod tests {
         ));
         assert!(wsjtx_event_message(event.clone(), 1, "logger-2").is_none());
         assert!(wsjtx_event_message(event, 2, "logger-1").is_none());
+    }
+
+    #[test]
+    fn digital_io_events_route_only_to_the_selected_radio_and_logger() {
+        let event = DigitalIoEvent::Received {
+            radio_id: 1,
+            logger_id: "logger-1".to_string(),
+            log_id: 42,
+            text: "CQ TEST".to_string(),
+        };
+        assert!(matches!(
+            digital_io_event_message(event.clone(), 1, "logger-1"),
+            Some(RadioServerMessage::DigitalIoReceived { .. })
+        ));
+        assert!(digital_io_event_message(event.clone(), 1, "logger-2").is_none());
+        assert!(digital_io_event_message(event, 2, "logger-1").is_none());
     }
 
     #[tokio::test]
