@@ -9,12 +9,10 @@ authors = ["Greg Mitchell <greg@ng4m.dev>"]
 axum = { version = "0.8", features = ["ws"] }
 backon = "1.6.0"
 cw-serial-keyer = { git = "https://github.com/elitegreg/cw-serial-keyer-rs.git" }
-dxr = { version = "0.8.0", features = ["nil"] }
 futures-util = "0.3"
 ham-radio-digital-interfacing = { git = "https://github.com/elitegreg/ham-radio-digital-interfacing-rs.git" }
 log73-paths = { path = "../paths" }
 radio-cat-rs = { git = "https://github.com/elitegreg/radio-cat-rs.git", branch = "main", features = ["xml-rpc"] }
-reqwest = { version = "0.12", default-features = false }
 rodio = { git = "https://github.com/RustAudio/rodio", default-features = false, features = ["playback", "wav", "pipewire", "pulseaudio"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

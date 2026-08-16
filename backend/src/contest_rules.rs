@@ -2000,7 +2000,7 @@ contests:
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir]).expect("bundled rules load");
 
-        assert_eq!(store.summaries().len(), 41);
+        assert_eq!(store.summaries().len(), 45);
         for id in [
             "ARRL-10",
             "ARRL-SS-CW",

@@ -2,7 +2,6 @@ mod bands;
 mod cat_keyer;
 mod config;
 mod digital_io;
-pub mod fldigi;
 mod flrig;
 mod message_mode;
 mod messages;
@@ -25,7 +24,7 @@ pub use config::{
     validate_radio_settings, validate_voice_messages,
 };
 pub use digital_io::{DigitalIoEvent, DigitalIoManager, DigitalIoTargetState};
-pub use fldigi::{
+pub use ham_radio_digital_interfacing::fldigi::{
     DEFAULT_FLDIGI_ENDPOINT, DEFAULT_FLDIGI_POLL_INTERVAL, DEFAULT_FLDIGI_REQUEST_TIMEOUT,
     FldigiCommand, FldigiConfig, FldigiError, FldigiInterface,
 };

@@ -2964,9 +2964,9 @@ mod tests {
         assert_eq!(state.scope, SerialScope::Band);
         assert!(!state.reservation_required);
         assert_eq!(state.next, None);
-        assert_eq!(state.next_by_band.get("20m"), Some(&67));
-        assert_eq!(state.next_by_band.get("15m"), Some(&9));
-        assert_eq!(state.next_by_band.get("40m"), Some(&1));
+        assert_eq!(state.next_by_band.get("20M"), Some(&67));
+        assert_eq!(state.next_by_band.get("15M"), Some(&9));
+        assert_eq!(state.next_by_band.get("40M"), Some(&1));
     }
 
     #[test]
@@ -3036,8 +3036,8 @@ mod tests {
             serial_state_from_contacts(rules, &log_for("TWO", "FIXED"), field, &contacts)
                 .expect("multi-two serial state resolves");
         assert_eq!(multi_two.scope, SerialScope::Band);
-        assert_eq!(multi_two.next_by_band.get("20m"), Some(&13));
-        assert_eq!(multi_two.next_by_band.get("40m"), Some(&8));
+        assert_eq!(multi_two.next_by_band.get("20M"), Some(&13));
+        assert_eq!(multi_two.next_by_band.get("40M"), Some(&8));
         assert!(!multi_two.reservation_required);
 
         let distributed = serial_state_from_contacts(
@@ -3048,8 +3048,8 @@ mod tests {
         )
         .expect("distributed serial state resolves");
         assert_eq!(distributed.scope, SerialScope::Band);
-        assert_eq!(distributed.next_by_band.get("20m"), Some(&13));
-        assert_eq!(distributed.next_by_band.get("40m"), Some(&8));
+        assert_eq!(distributed.next_by_band.get("20M"), Some(&13));
+        assert_eq!(distributed.next_by_band.get("40M"), Some(&8));
         assert!(!distributed.reservation_required);
     }
 
