@@ -3,9 +3,9 @@ contests:
   NA-SPRINT-CW (North America):
     name: North American CW Sprint (North America)
     bands:
-      - 80
-      - 40
-      - 20
+      - 80M
+      - 40M
+      - 20M
     value_sets:
       US Multipliers:
         use: us-states
@@ -15,6 +15,8 @@ contests:
         use: canadian-provinces
       North American Countries:
         use: north-american-countries
+      Saint Pierre and Miquelon:
+        values: [FP]
       DX:
         use: dx
     setup_fields:
@@ -23,7 +25,7 @@ contests:
         label: State, Province, or NA Country
         type: String:5
         required: true
-        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]
+        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries, Saint Pierre and Miquelon]
       - id: header-category-operator
         preset: category-operator
         default: SINGLE-OP
@@ -67,7 +69,7 @@ contests:
         adif: STX_STRING
         direction: sent
         fixed: true
-        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]
+        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries, Saint Pierre and Miquelon]
         source: QTH
       - id: serial-received
         label: Serial
@@ -85,7 +87,7 @@ contests:
         type: String:5
         adif: SRX_STRING
         direction: received
-        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries, DX]
+        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries, Saint Pierre and Miquelon, DX]
     scoring:
       qso_points:
         points: 1
@@ -93,7 +95,7 @@ contests:
         - CALL
         - BAND
       multipliers:
-        - {id: mult-north-american-location, name: North American Location, field: SRX_STRING, key: [SRX_STRING], in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]}
+        - {id: mult-north-american-location, name: North American Location, field: SRX_STRING, key: [SRX_STRING], in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries, Saint Pierre and Miquelon]}
     cabrillo:
       fixed_headers:
         - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
@@ -129,14 +131,40 @@ contests:
         in_sets: null
         valid_values: [DX]
         id: qth-sent
-      - in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]
+      - in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries, Saint Pierre and Miquelon]
         id: qth-received
     scoring:
       qso_points:
         points: null
-        rules: [{id: qso-rule-1, when: {field: SRX_STRING, in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]}, points: 1}, {id: qso-rule-2, points: 0}]
+        rules: [{id: qso-rule-1, when: {field: SRX_STRING, in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries, Saint Pierre and Miquelon]}, points: 1}, {id: qso-rule-2, points: 0}]
     metadata:
       notes: >-
         DX entrants score only North American contacts. QSY procedure, one-call-sign use, sequential
         serial numbers, real-time human operation, and submission deadline remain operator-enforced.
     extends: NA-SPRINT-CW (North America)
+  NA-SPRINT-RTTY (North America):
+    name: North American RTTY Sprint (North America)
+    modes:
+      - RTTY
+    cabrillo:
+      fixed_headers:
+        - {value: RTTY, id: fixed-category-mode}
+    metadata:
+      source: https://ncjweb.com/Sprint-Rules.pdf
+      notes: >-
+        Single-operator RTTY Sprint. North American stations may work all stations; QSOs with
+        non-North American stations score one point but do not add multipliers.
+    extends: NA-SPRINT-CW (North America)
+  NA-SPRINT-RTTY (DX):
+    name: North American RTTY Sprint (DX)
+    modes:
+      - RTTY
+    cabrillo:
+      fixed_headers:
+        - {value: RTTY, id: fixed-category-mode}
+    metadata:
+      source: https://ncjweb.com/Sprint-Rules.pdf
+      notes: >-
+        DX entrants send DX and score only contacts with North American stations. Received DX QTHs
+        are not accepted or scored.
+    extends: NA-SPRINT-CW (DX)

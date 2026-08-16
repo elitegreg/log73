@@ -11,6 +11,7 @@ export const LOGGER_MODE_OPTIONS = [
 const SELECTABLE_MODES = new Set(LOGGER_MODE_OPTIONS);
 const CW_MODES = new Set(['CW', 'CW-R']);
 const PHONE_MODES = new Set(['SSB', 'FM', 'AM']);
+const DIGITAL_MODES = new Set(['DATA', 'RTTY']);
 
 export function normalizeLoggerMode(mode) {
   return String(mode ?? '')
@@ -28,6 +29,10 @@ export function modeIsCw(mode) {
 
 export function modeIsPhone(mode) {
   return PHONE_MODES.has(normalizeLoggerMode(mode));
+}
+
+export function modeIsDigital(mode) {
+  return DIGITAL_MODES.has(normalizeLoggerMode(mode));
 }
 
 export function adifModeForLoggerMode(mode) {

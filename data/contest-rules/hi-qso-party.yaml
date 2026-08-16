@@ -5,6 +5,8 @@ contests:
     modes:
       - CW
       - SSB
+      - DATA
+      - RTTY
     value_sets:
       DX:
         use: dx
@@ -58,10 +60,15 @@ contests:
         type: String:3
         adif: SRX_STRING
         direction: received
-        in_sets: [Hawaii Districts, States, Washington DC, Canadian Provinces, DX]
+        in_sets:
+          [Hawaii Districts, States, Washington DC, Canadian Provinces, DX]
     scoring:
       qso_points:
-        rules: [{id: qso-rule-1, when: {field: MODE, values: [SSB]}, points: 2}, {id: qso-rule-2, points: 3}]
+        rules:
+          [
+            { id: qso-rule-1, when: { field: MODE, values: [SSB] }, points: 2 },
+            { id: qso-rule-2, points: 3 },
+          ]
       dupe_key:
         - CALL
         - BAND
@@ -69,19 +76,64 @@ contests:
         - STX_STRING
         - SRX_STRING
       multipliers:
-        - {id: mult-hawaii-district, name: Hawaii District, field: SRX_STRING, key: [SRX_STRING], in_sets: [Hawaii Districts]}
-        - {id: mult-state-province, name: State/Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [States, Washington DC, Canadian Provinces]}
-        - {id: mult-dxcc-country, name: DXCC Country, field: DXCC, key: [DXCC], exclude_values: ['1', '6', '110', '291']}
+        - {
+            id: mult-hawaii-district,
+            name: Hawaii District,
+            field: SRX_STRING,
+            key: [SRX_STRING],
+            in_sets: [Hawaii Districts],
+          }
+        - {
+            id: mult-state-province,
+            name: State/Province,
+            field: SRX_STRING,
+            key: [SRX_STRING],
+            in_sets: [States, Washington DC, Canadian Provinces],
+          }
+        - {
+            id: mult-dxcc-country,
+            name: DXCC Country,
+            field: DXCC,
+            key: [DXCC],
+            exclude_values: ['1', '6', '110', '291'],
+          }
     cabrillo:
       fixed_headers:
-        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
+        - { id: fixed-category-band, name: CATEGORY-BAND, value: ALL }
       export_fields:
-        - {id: export-club, preset: export-club-optional}
-        - {id: export-email, key: EMAIL, label: Email, type: String:75, regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$', preserve_case: true}
-        - {id: export-location, key: LOCATION, label: Location, type: String:32, help_text: 'Hawaii district, state, province, or country.'}
-        - {id: export-name, key: NAME, label: Name, type: String:75, preserve_case: true}
-        - {id: export-address, key: ADDRESS, label: Address, type: String:45, widget: textarea, max_lines: 6, preserve_case: true}
-        - {id: export-soapbox, preset: export-soapbox-optional}
+        - { id: export-club, preset: export-club-optional }
+        - {
+            id: export-email,
+            key: EMAIL,
+            label: Email,
+            type: String:75,
+            regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$',
+            preserve_case: true,
+          }
+        - {
+            id: export-location,
+            key: LOCATION,
+            label: Location,
+            type: String:32,
+            help_text: 'Hawaii district, state, province, or country.',
+          }
+        - {
+            id: export-name,
+            key: NAME,
+            label: Name,
+            type: String:75,
+            preserve_case: true,
+          }
+        - {
+            id: export-address,
+            key: ADDRESS,
+            label: Address,
+            type: String:45,
+            widget: textarea,
+            max_lines: 6,
+            preserve_case: true,
+          }
+        - { id: export-soapbox, preset: export-soapbox-optional }
     metadata:
       source: https://www.hawaiiqsoparty.org/rules-page/
       notes: Digital modes and grid-square exchanges are intentionally not supported.
@@ -126,9 +178,9 @@ contests:
         after: rst-received
     scoring:
       multipliers:
-        - {id: mult-state-province, remove: true}
-        - {id: mult-dxcc-country, remove: true}
-        - {key: [SRX_STRING, BAND], id: mult-hawaii-district}
+        - { id: mult-state-province, remove: true }
+        - { id: mult-dxcc-country, remove: true }
+        - { key: [SRX_STRING, BAND], id: mult-hawaii-district }
     metadata:
       notes: >-
         Outside-Hawaii stations may score only Hawaii contacts; digital modes and grid-square

@@ -29,8 +29,11 @@ export function useRadioSocket({
   const [catStatus, setCatStatus] = useState('offline');
   const [messageSentEvent, setMessageSentEvent] = useState(null);
   const [wsjtxTarget, setWsjtXTargetState] = useState(false);
+  const [digitalIoTarget, setDigitalIoTargetState] = useState(false);
+  const [digitalIoText, setDigitalIoText] = useState('');
   const radioSocketRef = useRef(null);
   const wsjtxTargetIntentRef = useRef(false);
+  const digitalIoTargetIntentRef = useRef(false);
   const onWsjtXLoggedAdifRef = useRef(onWsjtXLoggedAdif);
   onWsjtXLoggedAdifRef.current = onWsjtXLoggedAdif;
 
@@ -53,10 +56,29 @@ export function useRadioSocket({
     }
   }, []);
 
+  const setDigitalIoTarget = useCallback((enabled) => {
+    const nextEnabled = Boolean(enabled);
+    digitalIoTargetIntentRef.current = nextEnabled;
+    setDigitalIoTargetState(nextEnabled);
+    const socket = radioSocketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(
+        JSON.stringify({ type: 'set_digital_io_target', enabled: nextEnabled }),
+      );
+    }
+  }, []);
+
+  const clearDigitalIo = useCallback(() => {
+    setDigitalIoText('');
+    sendRadioMessage({ type: 'digital_io_clear' });
+  }, [sendRadioMessage]);
+
   useEffect(() => {
     setRadioState(DEFAULT_RADIO_STATE);
     setMessageSentEvent(null);
     setWsjtXTargetState(false);
+    setDigitalIoTargetState(false);
+    setDigitalIoText('');
     if (
       !radioWebsocketUrl ||
       !Number.isInteger(numericRadioId) ||
@@ -246,6 +268,11 @@ export function useRadioSocket({
             JSON.stringify({ type: 'set_wsjtx_target', enabled: true }),
           );
         }
+        if (digitalIoTargetIntentRef.current) {
+          socket.send(
+            JSON.stringify({ type: 'set_digital_io_target', enabled: true }),
+          );
+        }
       });
 
       socket.addEventListener('message', (event) => {
@@ -308,6 +335,29 @@ export function useRadioSocket({
               message.message,
               { logId: numericLogId, radioId: numericRadioId },
             );
+          } else if (message.type === 'digital_io_target') {
+            const isTarget =
+              String(message.logger_id ?? '') === loggerId &&
+              Number(message.log_id) === numericLogId;
+            setDigitalIoTargetState(isTarget);
+            if (message.logger_id) {
+              digitalIoTargetIntentRef.current = isTarget;
+            } else if (digitalIoTargetIntentRef.current) {
+              socket.send(
+                JSON.stringify({ type: 'set_digital_io_target', enabled: true }),
+              );
+            }
+          } else if (message.type === 'digital_io_received') {
+            if (Number(message.log_id) === numericLogId) {
+              setDigitalIoText((current) => `${current}${String(message.text ?? '')}`.slice(-65536));
+            }
+          } else if (message.type === 'digital_io_error') {
+            notifyOperationalError(
+              'digitalIo',
+              'Digital I/O integration error.',
+              message.message,
+              { logId: numericLogId, radioId: numericRadioId },
+            );
           }
         } catch (error) {
           if (messageIsWsjtXLoggedAdif(event.data)) {
@@ -336,6 +386,7 @@ export function useRadioSocket({
         setRadioSocketStatus('disconnected');
         setCatStatus('offline');
         setWsjtXTargetState(false);
+        setDigitalIoTargetState(false);
         scheduleReconnect();
       });
 
@@ -407,6 +458,10 @@ export function useRadioSocket({
     sendRadioMessage,
     wsjtxTarget,
     setWsjtXTarget,
+    digitalIoTarget,
+    digitalIoText,
+    setDigitalIoTarget,
+    clearDigitalIo,
   };
 }
 

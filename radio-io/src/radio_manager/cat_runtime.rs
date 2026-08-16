@@ -234,8 +234,8 @@ pub(super) async fn run_managed_radio(
                                 let _ = completed.send(Err("cw task unavailable".to_string()));
                             }
                         }
-                        RadioCommand::SendCwText { text, wait_for_completion, completed } => {
-                            debug!(radio_id = config.id, text, wait_for_completion, "forwarding cw text send command");
+                        RadioCommand::SendText { text, wait_for_completion, completed } => {
+                            debug!(radio_id = config.id, text, wait_for_completion, "forwarding text send command to CW keyer");
                             if let Err(error) = cw_tx.send(CwTaskCommand::SendText { text, wait_for_completion, completed }).await {
                                 let CwTaskCommand::SendText { completed, .. } = error.0 else { unreachable!() };
                                 let _ = completed.send(Err("cw task unavailable".to_string()));
@@ -567,10 +567,15 @@ mod tests {
                 options: String::new(),
                 data_mode: "DATA-USB".to_string(),
                 rtty_mode: "RTTY".to_string(),
+                digital_program: "none".to_string(),
                 wsjtx_enabled: false,
                 wsjtx_bind_address: "127.0.0.1".to_string(),
                 wsjtx_port: 2237,
                 wsjtx_multicast_group: String::new(),
+                fldigi_data_enabled: false,
+                fldigi_rtty_enabled: false,
+                fldigi_host: crate::DEFAULT_FLDIGI_HOST.to_string(),
+                fldigi_port: crate::DEFAULT_FLDIGI_PORT,
                 flrig_enabled: false,
                 flrig_port: crate::DEFAULT_FLRIG_PORT,
                 cw_tuning_increment_hz: 20,
@@ -584,6 +589,7 @@ mod tests {
                 cw_serial_baud_rate: 9_600,
                 cw_serial_line: "dtr".to_string(),
                 cw_messages: String::new(),
+                digital_messages: crate::digital_messages::DEFAULT_DIGITAL_MESSAGES.to_string(),
                 voice_messages: crate::voice_messages::DEFAULT_VOICE_MESSAGES.to_string(),
             },
         )

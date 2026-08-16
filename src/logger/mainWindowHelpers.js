@@ -9,6 +9,7 @@ import {
   adifModeForLoggerMode,
   isSelectableMode,
   modeIsCw,
+  modeIsDigital,
   modeIsPhone,
   normalizeLoggerMode,
 } from '../domain/modes.js';
@@ -17,7 +18,13 @@ import {
   messageActionForConfig,
 } from '../domain/messages.js';
 
-export { adifModeForLoggerMode, isSelectableMode, modeIsCw, modeIsPhone };
+export {
+  adifModeForLoggerMode,
+  isSelectableMode,
+  modeIsCw,
+  modeIsDigital,
+  modeIsPhone,
+};
 
 export const MODE_OPTIONS = LOGGER_MODE_OPTIONS;
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
@@ -44,6 +51,7 @@ export const CALLSIGN_LOOKUP_DEBOUNCE_MS = 500;
 export const CW_ACTIVE_TIMEOUT_WIKEYER_MS = 30000;
 export const CW_ACTIVE_TIMEOUT_CAT_MS = 30000;
 export const CW_ACTIVE_TIMEOUT_NONE_MS = 500;
+export const MESSAGE_ACTIVE_TIMEOUT_COMPLETION_MS = 30000;
 export const CW_REPEAT_DELAY_MS = 2000;
 export const DEFAULT_CW_TUNING_INCREMENT_HZ = 20;
 export const DEFAULT_SSB_TUNING_INCREMENT_HZ = 100;
@@ -221,6 +229,13 @@ export function cwActiveTimeoutMs(cwKeyerType) {
   }
 }
 
+export function messageActiveTimeoutMs(radioMode, cwKeyerType) {
+  if (modeIsDigital(radioMode) || modeIsPhone(radioMode)) {
+    return MESSAGE_ACTIVE_TIMEOUT_COMPLETION_MS;
+  }
+  return cwActiveTimeoutMs(cwKeyerType);
+}
+
 export function formatFrequency(frequencyHz) {
   return Math.round(frequencyHz / HZ_PER_KHZ);
 }
@@ -318,8 +333,13 @@ export function messageActionForRadioMode(
   mode,
   key,
   radioMode,
+  digitalConfig = cwConfig,
 ) {
-  const config = modeIsPhone(radioMode) ? voiceConfig : cwConfig;
+  const config = modeIsPhone(radioMode)
+    ? voiceConfig
+    : modeIsDigital(radioMode)
+      ? digitalConfig
+      : cwConfig;
   return cwActionForMessage(config, mode, key);
 }
 
@@ -586,4 +606,25 @@ export function esmEnterAction({
     nextRunCallsignAttempt: '',
     nextExchangeSentCallsign: normalizedCallsign,
   };
+}
+
+export function alphanumericWordAt(text, offset) {
+  const value = String(text ?? '');
+  const index = Number(offset);
+  if (!Number.isInteger(index) || index < 0 || index >= value.length) {
+    return '';
+  }
+  if (!/[A-Za-z0-9]/.test(value[index])) return '';
+
+  let start = index;
+  while (start > 0 && /[A-Za-z0-9]/.test(value[start - 1])) {
+    start -= 1;
+  }
+
+  let end = index + 1;
+  while (end < value.length && /[A-Za-z0-9]/.test(value[end])) {
+    end += 1;
+  }
+
+  return value.slice(start, end);
 }

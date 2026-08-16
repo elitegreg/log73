@@ -51,7 +51,7 @@ the logger UI.</p>
 </tr>
 <tr class="odd">
 <td><code>Esc</code></td>
-<td>Stop sending / clear queue (or close CW text dialog)</td>
+<td>Stop sending / clear queue (or close text dialog)</td>
 </tr>
 <tr class="even">
 <td><code>PageUp</code></td>
@@ -63,7 +63,7 @@ the logger UI.</p>
 </tr>
 <tr class="even">
 <td><code>Ctrl+K</code></td>
-<td>Open CW text dialog (CW/CW-R only)</td>
+<td>Open text dialog for CW or targeted FLDigi DATA/RTTY</td>
 </tr>
 <tr class="odd">
 <td><code>Alt+PageUp</code></td>
@@ -129,7 +129,14 @@ log entry fields.</li>
 <li><code>Shift+Tab</code> moves to the previous editable field and
 wraps within the log entry fields.</li>
 </ul>
-<h2 id="cw-text-dialog-ctrlk">CW text dialog (<code>Ctrl+K</code>)</h2>
+<p>In DATA/RTTY, function-key messages use the digital message bank and
+transmit through FLDigi when it is configured for that mode and this
+logger is the selected Digital I/O target.</p>
+<h2 id="send-text-dialog-ctrlk">Send Text dialog
+(<code>Ctrl+K</code>)</h2>
+<p>The dialog sends through the CW keyer in CW/CW-R or through FLDigi in
+eligible DATA/RTTY operation. CW words are uppercased; FLDigi text
+preserves the entered letter case.</p>
 <table>
 <thead>
 <tr class="header">

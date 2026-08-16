@@ -3,9 +3,10 @@ import {
   CW_REPEAT_DELAY_MS,
   DEFAULT_MESSAGE_LABELS,
   createMessageRequestId,
-  cwActiveTimeoutMs,
   messageActionForRadioMode,
+  messageActiveTimeoutMs,
   messageButtonIsSendable,
+  modeIsDigital,
   modeIsPhone,
 } from '../mainWindowHelpers';
 import {
@@ -25,6 +26,7 @@ export function useMessageSending({
   storeCurrentCqFrequency,
   markEsmExchangeSentForCurrentCallsign,
   clearEntryFields,
+  messageSendingEnabled = true,
   onSendMessage,
   onStopKeying,
 }) {
@@ -73,7 +75,7 @@ export function useMessageSending({
     setActiveMessageKeys(
       activeMessageKeysFromRequests(activeMessageRequestsRef.current),
     );
-    const timeoutMs = cwActiveTimeoutMs(radio?.cw_keyer_type);
+    const timeoutMs = messageActiveTimeoutMs(radioMode, radio?.cw_keyer_type);
     const timeoutId = window.setTimeout(
       () => clearMessageRequest(requestId),
       timeoutMs,
@@ -112,7 +114,9 @@ export function useMessageSending({
     const sendableKeys = [];
     const labels = modeIsPhone(radioMode)
       ? (messageLabels?.voice ?? null)
-      : (messageLabels?.cw ?? messageLabels);
+      : modeIsDigital(radioMode)
+        ? (messageLabels?.digital ?? messageLabels?.cw ?? messageLabels)
+        : (messageLabels?.cw ?? messageLabels);
 
     for (const key of keys) {
       const action = messageActionForRadioMode(
@@ -121,6 +125,7 @@ export function useMessageSending({
         mode,
         key,
         radioMode,
+        radio?.digital_messages,
       );
       if (action && performMessageAction(action)) {
         continue;
@@ -137,6 +142,7 @@ export function useMessageSending({
     }
 
     if (sendableKeys.length === 0) return null;
+    if (!messageSendingEnabled) return null;
 
     const requestId = createMessageRequestId();
     markMessageKeyActive(requestId, sendableKeys);

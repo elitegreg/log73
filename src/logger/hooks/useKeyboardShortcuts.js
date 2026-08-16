@@ -3,7 +3,6 @@ import {
   FUNCTION_KEY_PATTERN,
   isPageDownKey,
   isPageUpKey,
-  modeIsCw,
   nextCwWpm,
 } from '../mainWindowHelpers';
 import {
@@ -12,12 +11,12 @@ import {
 } from '../../domain/bandMap';
 
 export function useKeyboardShortcuts({
-  radioMode,
   bandMapSpotStore,
   radioFrequencyHz,
-  isCwTextDialogOpen,
-  openCwTextDialog,
-  closeCwTextDialog,
+  textSendingEnabled,
+  isTextDialogOpen,
+  openTextDialog,
+  closeTextDialog,
   jumpToLastCqFrequency,
   markCurrentFrequency,
   storeCurrentBandMapSpot,
@@ -101,16 +100,16 @@ export function useKeyboardShortcuts({
         !event.altKey &&
         !event.metaKey &&
         event.key.toLowerCase() === 'k' &&
-        modeIsCw(radioMode)
+        textSendingEnabled
       ) {
         event.preventDefault();
-        openCwTextDialog();
+        openTextDialog();
         return;
       }
-      if (isCwTextDialogOpen) {
+      if (isTextDialogOpen) {
         if (event.key === 'Escape') {
           event.preventDefault();
-          closeCwTextDialog();
+          closeTextDialog();
         }
         return;
       }

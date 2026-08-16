@@ -3,7 +3,7 @@ contests:
   ARRL-10:
     name: ARRL 10-Meter Contest
     bands:
-      - 10
+      - 10M
     modes:
       - CW
       - SSB

@@ -593,6 +593,14 @@ async fn main() {
         .route("/radios/cw-messages/default", get(default_cw_messages))
         .route("/radios/cw-messages/validate", post(validate_cw_messages))
         .route(
+            "/radios/digital-messages/default",
+            get(default_digital_messages),
+        )
+        .route(
+            "/radios/digital-messages/validate",
+            post(validate_digital_messages),
+        )
+        .route(
             "/radios/voice-messages/default",
             get(default_voice_messages),
         )
@@ -2041,6 +2049,7 @@ async fn message_labels(
     match app_state.db.radio(id).await {
         Ok(Some(radio)) => Ok(Json(serde_json::json!({
             "cw": cw::labels(&radio.cw_messages),
+            "digital": cw::labels(&radio.digital_messages),
             "voice": voice_messages::labels(&radio.voice_messages)
         }))),
         Ok(None) => Err(ApiError::not_found("not found")),
@@ -2051,6 +2060,11 @@ async fn message_labels(
 #[derive(Debug, serde::Deserialize)]
 struct CwMessagesPayload {
     cw_messages: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DigitalMessagesPayload {
+    digital_messages: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -2067,6 +2081,22 @@ async fn validate_cw_messages(Json(payload): Json<CwMessagesPayload>) -> Json<se
         Ok(()) => Json(serde_json::json!({
             "ok": true,
             "labels": cw::labels(&payload.cw_messages)
+        })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
+    }
+}
+
+async fn default_digital_messages() -> Json<String> {
+    Json(radio_io::digital_messages::DEFAULT_DIGITAL_MESSAGES.to_string())
+}
+
+async fn validate_digital_messages(
+    Json(payload): Json<DigitalMessagesPayload>,
+) -> Json<serde_json::Value> {
+    match radio_io::validate_digital_messages(&payload.digital_messages) {
+        Ok(()) => Json(serde_json::json!({
+            "ok": true,
+            "labels": cw::labels(&payload.digital_messages)
         })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
     }
@@ -2964,9 +2994,9 @@ mod tests {
         assert_eq!(state.scope, SerialScope::Band);
         assert!(!state.reservation_required);
         assert_eq!(state.next, None);
-        assert_eq!(state.next_by_band.get("20m"), Some(&67));
-        assert_eq!(state.next_by_band.get("15m"), Some(&9));
-        assert_eq!(state.next_by_band.get("40m"), Some(&1));
+        assert_eq!(state.next_by_band.get("20M"), Some(&67));
+        assert_eq!(state.next_by_band.get("15M"), Some(&9));
+        assert_eq!(state.next_by_band.get("40M"), Some(&1));
     }
 
     #[test]
@@ -3036,8 +3066,8 @@ mod tests {
             serial_state_from_contacts(rules, &log_for("TWO", "FIXED"), field, &contacts)
                 .expect("multi-two serial state resolves");
         assert_eq!(multi_two.scope, SerialScope::Band);
-        assert_eq!(multi_two.next_by_band.get("20m"), Some(&13));
-        assert_eq!(multi_two.next_by_band.get("40m"), Some(&8));
+        assert_eq!(multi_two.next_by_band.get("20M"), Some(&13));
+        assert_eq!(multi_two.next_by_band.get("40M"), Some(&8));
         assert!(!multi_two.reservation_required);
 
         let distributed = serial_state_from_contacts(
@@ -3048,8 +3078,8 @@ mod tests {
         )
         .expect("distributed serial state resolves");
         assert_eq!(distributed.scope, SerialScope::Band);
-        assert_eq!(distributed.next_by_band.get("20m"), Some(&13));
-        assert_eq!(distributed.next_by_band.get("40m"), Some(&8));
+        assert_eq!(distributed.next_by_band.get("20M"), Some(&13));
+        assert_eq!(distributed.next_by_band.get("40M"), Some(&8));
         assert!(!distributed.reservation_required);
     }
 

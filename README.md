@@ -393,6 +393,8 @@ GET    /api/radios/:id/cw-labels
 GET    /api/radios/:id/message-labels
 GET    /api/radios/cw-messages/default
 POST   /api/radios/cw-messages/validate
+GET    /api/radios/digital-messages/default
+POST   /api/radios/digital-messages/validate
 GET    /api/radios/voice-messages/default
 POST   /api/radios/voice-messages/validate
 ```
@@ -516,6 +518,7 @@ cw_serial_port
 cw_serial_baud_rate
 cw_serial_line
 cw_messages
+digital_messages
 voice_messages
 ```
 
@@ -540,6 +543,7 @@ cw_serial_port: ""
 cw_serial_baud_rate: 9600
 cw_serial_line: dtr
 cw_messages: built-in default Run/S&P CW function-key messages
+digital_messages: built-in Run/S&P digital function-key messages (initially copied from the CW defaults)
 voice_messages: built-in default Run/S&P voice function-key messages
 ```
 
@@ -655,11 +659,12 @@ High Contrast
 - The server indicator shows websocket connection status.
 - The title bar shows log, radio, contest, mode, and frequency.
 - CW WPM is stored in browser local storage under `log73.cw_wpm` and sent to the backend when the websocket is connected.
-- Function-key labels are loaded from `/api/radios/:id/message-labels` for separate CW/voice and Run/S&P banks.
-- Run/S&P operating mode chooses which function-key bank is active; radio mode chooses CW messages or voice messages.
-- Run F1 can be repeated automatically after CW or voice-keyer completion when repeat is enabled.
+- Function-key labels are loaded from `/api/radios/:id/message-labels` for separate CW/digital/voice and Run/S&P banks.
+- Run/S&P operating mode chooses which function-key bank is active; radio mode chooses CW, digital, or voice messages. DATA/RTTY messages transmit through FLDigi when this logger owns the Digital I/O target.
+- Run F1 can be repeated automatically after CW, voice-keyer, or FLDigi transmit completion when repeat is enabled.
+- Ctrl+K opens Send Text for CW or targeted FLDigi DATA/RTTY operation.
 - S&P F1 sends the QRL message and then switches to Run mode.
-- Stop Sending sends a websocket `stop_keying` command to stop CW or voice keying.
+- Stop Sending sends a websocket `stop_keying` command to stop CW, voice, or active FLDigi DATA/RTTY transmission.
 - Exit Logger returns to the log/radio selection screen.
 - Fixed exchange fields are read-only and skipped during tab navigation.
 - RST validation depends on mode:

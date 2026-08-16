@@ -30,7 +30,7 @@ pub enum RadioClientMessage {
         keys: Vec<String>,
         fields: serde_json::Map<String, serde_json::Value>,
     },
-    SendCwText {
+    SendText {
         request_id: String,
         text: String,
         #[serde(default = "default_wait_for_completion")]
@@ -45,6 +45,16 @@ pub enum RadioClientMessage {
     SetWsjtXTarget {
         enabled: bool,
     },
+    #[serde(rename = "set_digital_io_target")]
+    SetDigitalIoTarget {
+        enabled: bool,
+    },
+    #[serde(rename = "digital_io_send")]
+    DigitalIoSend {
+        text: String,
+    },
+    #[serde(rename = "digital_io_clear")]
+    DigitalIoClear,
     #[serde(rename = "wsjtx_event_received", alias = "wsjt_x_event_received")]
     WsjtXEventReceived {
         event_id: String,
@@ -78,6 +88,21 @@ pub enum RadioServerMessage {
         log_id: i64,
         message: String,
     },
+    #[serde(rename = "digital_io_target")]
+    DigitalIoTarget {
+        logger_id: Option<String>,
+        log_id: Option<i64>,
+    },
+    #[serde(rename = "digital_io_received")]
+    DigitalIoReceived {
+        log_id: i64,
+        text: String,
+    },
+    #[serde(rename = "digital_io_error")]
+    DigitalIoError {
+        log_id: i64,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -106,7 +131,7 @@ pub enum RadioCommand {
         fields: serde_json::Map<String, serde_json::Value>,
         completed: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
-    SendCwText {
+    SendText {
         text: String,
         wait_for_completion: bool,
         completed: tokio::sync::oneshot::Sender<Result<(), String>>,
@@ -244,18 +269,26 @@ mod tests {
         );
 
         let command = serde_json::from_value::<RadioClientMessage>(serde_json::json!({
-            "type": "send_cw_text",
-            "request_id": "cw-1",
+            "type": "send_text",
+            "request_id": "text-1",
             "text": "CQ"
         }))
         .expect("command deserializes");
         assert!(matches!(
             command,
-            RadioClientMessage::SendCwText {
+            RadioClientMessage::SendText {
                 wait_for_completion: true,
                 ..
             }
         ));
+        assert!(
+            serde_json::from_value::<RadioClientMessage>(serde_json::json!({
+                "type": "send_cw_text",
+                "request_id": "text-1",
+                "text": "CQ"
+            }))
+            .is_err()
+        );
     }
 
     #[test]
@@ -321,6 +354,36 @@ mod tests {
                 "type": "wsjtx_error",
                 "log_id": 42,
                 "message": "bind failed"
+            })
+        );
+    }
+
+    #[test]
+    fn digital_io_protocol_uses_generic_wire_names() {
+        let send: RadioClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "digital_io_send",
+            "text": "CQ TEST"
+        }))
+        .expect("send command deserializes");
+        assert!(matches!(send, RadioClientMessage::DigitalIoSend { .. }));
+
+        let clear: RadioClientMessage = serde_json::from_value(serde_json::json!({
+            "type": "digital_io_clear"
+        }))
+        .expect("clear command deserializes");
+        assert!(matches!(clear, RadioClientMessage::DigitalIoClear));
+
+        let received = serde_json::to_value(RadioServerMessage::DigitalIoReceived {
+            log_id: 42,
+            text: "K1ABC DE N0CALL".to_string(),
+        })
+        .expect("received event serializes");
+        assert_eq!(
+            received,
+            serde_json::json!({
+                "type": "digital_io_received",
+                "log_id": 42,
+                "text": "K1ABC DE N0CALL"
             })
         );
     }

@@ -2,22 +2,46 @@ schema: 2
 profiles:
   hf-bands:
     bands:
-      - 160
-      - 80
-      - 40
-      - 20
-      - 15
-      - 10
+      - 160M
+      - 80M
+      - 40M
+      - 20M
+      - 15M
+      - 10M
   hf-vhf-bands:
     bands:
-      - 160
-      - 80
-      - 40
-      - 20
-      - 15
-      - 10
-      - 6
-      - 2
+      - 160M
+      - 80M
+      - 40M
+      - 20M
+      - 15M
+      - 10M
+      - 6M
+      - 2M
+  all-contest-bands:
+    bands:
+      - 160M
+      - 80M
+      - 40M
+      - 20M
+      - 15M
+      - 10M
+      - 6M
+      - 2M
+      - 1.25M
+      - 70cm
+      - 33cm
+      - 23cm
+      - 13cm
+      - 9cm
+      - 5Ghz
+      - 10Ghz
+      - 24Ghz
+      - 47Ghz
+      - 76Ghz
+      - 122Ghz
+      - 134Ghz
+      - 241Ghz
   cw-mode:
     modes:
       - CW

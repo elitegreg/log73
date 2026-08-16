@@ -3,15 +3,16 @@ contests:
   KS-QSO-PARTY (In State):
     name: Kansas QSO Party (In State)
     bands:
-      - 80
-      - 40
-      - 20
-      - 15
-      - 10
-      - 6
+      - 80M
+      - 40M
+      - 20M
+      - 15M
+      - 10M
+      - 6M
     modes:
       - CW
       - SSB
+      - RTTY
     value_sets:
       DX:
         use: dx
@@ -64,7 +65,11 @@ contests:
         in_sets: [Kansas Counties, States, Canadian Provinces, DX]
     scoring:
       qso_points:
-        rules: [{id: qso-rule-1, when: {field: MODE, values: [SSB]}, points: 2}, {id: qso-rule-2, points: 3}]
+        rules:
+          [
+            { id: qso-rule-1, when: { field: MODE, values: [SSB] }, points: 2 },
+            { id: qso-rule-2, points: 3 },
+          ]
       dupe_key:
         - CALL
         - BAND
@@ -72,20 +77,66 @@ contests:
         - STX_STRING
         - SRX_STRING
       multipliers:
-        - {id: mult-kansas, name: Kansas, field: SRX_STRING, key: [SRX_STRING], in_sets: [Kansas Counties], fixed_key: KS}
-        - {id: mult-state-province-dx, name: State/Province/DX, field: SRX_STRING, key: [SRX_STRING], in_sets: [States, Canadian Provinces, DX]}
+        - {
+            id: mult-kansas,
+            name: Kansas,
+            field: SRX_STRING,
+            key: [SRX_STRING],
+            in_sets: [Kansas Counties],
+            fixed_key: KS,
+          }
+        - {
+            id: mult-state-province-dx,
+            name: State/Province/DX,
+            field: SRX_STRING,
+            key: [SRX_STRING],
+            in_sets: [States, Canadian Provinces, DX],
+          }
       bonus_points:
-        - {id: bonus-bonus-station, name: Bonus Station, field: CALL, key: [CALL], values: {KS0KS: 100}}
+        - {
+            id: bonus-bonus-station,
+            name: Bonus Station,
+            field: CALL,
+            key: [CALL],
+            values: { KS0KS: 100 },
+          }
     cabrillo:
       fixed_headers:
-        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
+        - { id: fixed-category-band, name: CATEGORY-BAND, value: ALL }
       export_fields:
-        - {id: export-name, key: NAME, label: Name, type: String:75, preserve_case: true}
-        - {id: export-address, key: ADDRESS, label: Address, type: String:45, widget: textarea, max_lines: 6, preserve_case: true}
-        - {id: export-location, key: LOCATION, label: Location, type: String:32, help_text: 'Kansas county, state, province, or DX.'}
-        - {id: export-email, key: EMAIL, label: Email, type: String:75, regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$', preserve_case: true}
-        - {id: export-club, preset: export-club-optional}
-        - {id: export-soapbox, preset: export-soapbox-optional}
+        - {
+            id: export-name,
+            key: NAME,
+            label: Name,
+            type: String:75,
+            preserve_case: true,
+          }
+        - {
+            id: export-address,
+            key: ADDRESS,
+            label: Address,
+            type: String:45,
+            widget: textarea,
+            max_lines: 6,
+            preserve_case: true,
+          }
+        - {
+            id: export-location,
+            key: LOCATION,
+            label: Location,
+            type: String:32,
+            help_text: 'Kansas county, state, province, or DX.',
+          }
+        - {
+            id: export-email,
+            key: EMAIL,
+            label: Email,
+            type: String:75,
+            regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$',
+            preserve_case: true,
+          }
+        - { id: export-club, preset: export-club-optional }
+        - { id: export-soapbox, preset: export-soapbox-optional }
     metadata:
       source: https://www.ksqsoparty.org/rules/KSQPRules2026.pdf?1=
       notes: >-
@@ -130,9 +181,15 @@ contests:
         after: rst-received
     scoring:
       multipliers:
-        - {id: mult-kansas, remove: true}
-        - {id: mult-state-province-dx, remove: true}
-        - {id: mult-kansas-county, name: Kansas County, field: SRX_STRING, key: [SRX_STRING], in_sets: [Kansas Counties]}
+        - { id: mult-kansas, remove: true }
+        - { id: mult-state-province-dx, remove: true }
+        - {
+            id: mult-kansas-county,
+            name: Kansas County,
+            field: SRX_STRING,
+            key: [SRX_STRING],
+            in_sets: [Kansas Counties],
+          }
     metadata:
       notes: Outside-Kansas stations score Kansas county multipliers only. CW and SSB only.
     extends: KS-QSO-PARTY (In State)

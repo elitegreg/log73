@@ -19,11 +19,13 @@ pub struct ConfigureScreen {
     tcp_port: String,
     serial_baud_rate: String,
     wsjtx_port: String,
+    fldigi_port: String,
     flrig_port: String,
     cw_increment: String,
     ssb_increment: String,
     cw_serial_baud_rate: String,
     cw_message_editor: text_editor::Content,
+    digital_message_editor: text_editor::Content,
     voice_message_editor: text_editor::Content,
 }
 
@@ -42,10 +44,13 @@ pub enum Message {
     OptionsChanged(String),
     DataModeSelected(String),
     RttyModeSelected(String),
-    WsjtxEnabledChanged(bool),
+    DigitalProgramSelected(String),
     WsjtxBindSelected(String),
     WsjtxPortChanged(String),
     WsjtxMulticastChanged(String),
+    FldigiRttyEnabledChanged(bool),
+    FldigiHostChanged(String),
+    FldigiPortChanged(String),
     FlrigEnabledChanged(bool),
     FlrigPortChanged(String),
     CwIncrementChanged(String),
@@ -60,10 +65,13 @@ pub enum Message {
     CwSerialBaudChanged(String),
     CwSerialLineSelected(String),
     CwMessagesEdited(text_editor::Action),
+    DigitalMessagesEdited(text_editor::Action),
     VoiceMessagesEdited(text_editor::Action),
     ValidateCwMessages,
+    ValidateDigitalMessages,
     ValidateVoiceMessages,
     ResetCwMessages,
+    ResetDigitalMessages,
     ResetVoiceMessages,
     SetDefaults,
     Save,
@@ -102,11 +110,15 @@ impl ConfigureScreen {
             tcp_port: settings.radio.tcp_port.to_string(),
             serial_baud_rate: settings.radio.serial_baud_rate.to_string(),
             wsjtx_port: settings.radio.wsjtx_port.to_string(),
+            fldigi_port: settings.radio.fldigi_port.to_string(),
             flrig_port: settings.radio.flrig_port.to_string(),
             cw_increment: settings.radio.cw_tuning_increment_hz.to_string(),
             ssb_increment: settings.radio.ssb_tuning_increment_hz.to_string(),
             cw_serial_baud_rate: settings.radio.cw_serial_baud_rate.to_string(),
             cw_message_editor: text_editor::Content::with_text(&settings.radio.cw_messages),
+            digital_message_editor: text_editor::Content::with_text(
+                &settings.radio.digital_messages,
+            ),
             voice_message_editor: text_editor::Content::with_text(&settings.radio.voice_messages),
         }
     }
@@ -133,10 +145,19 @@ impl ConfigureScreen {
             Message::OptionsChanged(value) => self.draft.radio.options = value,
             Message::DataModeSelected(value) => self.draft.radio.data_mode = value,
             Message::RttyModeSelected(value) => self.draft.radio.rtty_mode = value,
-            Message::WsjtxEnabledChanged(value) => self.draft.radio.wsjtx_enabled = value,
+            Message::DigitalProgramSelected(value) => {
+                self.draft.radio.digital_program = value.clone();
+                self.draft.radio.wsjtx_enabled = value == "wsjtx";
+                self.draft.radio.fldigi_data_enabled = value == "fldigi";
+            }
             Message::WsjtxBindSelected(value) => self.draft.radio.wsjtx_bind_address = value,
             Message::WsjtxPortChanged(value) => self.wsjtx_port = value,
             Message::WsjtxMulticastChanged(value) => self.draft.radio.wsjtx_multicast_group = value,
+            Message::FldigiRttyEnabledChanged(value) => {
+                self.draft.radio.fldigi_rtty_enabled = value
+            }
+            Message::FldigiHostChanged(value) => self.draft.radio.fldigi_host = value,
+            Message::FldigiPortChanged(value) => self.fldigi_port = value,
             Message::FlrigEnabledChanged(value) => self.draft.radio.flrig_enabled = value,
             Message::FlrigPortChanged(value) => self.flrig_port = value,
             Message::CwIncrementChanged(value) => self.cw_increment = value,
@@ -166,6 +187,10 @@ impl ConfigureScreen {
                 self.cw_message_editor.perform(action);
                 self.draft.radio.cw_messages = self.cw_message_editor.text();
             }
+            Message::DigitalMessagesEdited(action) => {
+                self.digital_message_editor.perform(action);
+                self.draft.radio.digital_messages = self.digital_message_editor.text();
+            }
             Message::VoiceMessagesEdited(action) => {
                 self.voice_message_editor.perform(action);
                 self.draft.radio.voice_messages = self.voice_message_editor.text();
@@ -175,6 +200,12 @@ impl ConfigureScreen {
                     radio_io::validate_cw_messages(&self.draft.radio.cw_messages)
                         .err()
                         .or(Some("CW messages are valid.".to_string()))
+            }
+            Message::ValidateDigitalMessages => {
+                self.validation_message =
+                    radio_io::validate_digital_messages(&self.draft.radio.digital_messages)
+                        .err()
+                        .or(Some("Digital messages are valid.".to_string()))
             }
             Message::ValidateVoiceMessages => {
                 self.validation_message =
@@ -187,6 +218,11 @@ impl ConfigureScreen {
                 self.cw_message_editor =
                     text_editor::Content::with_text(&self.draft.radio.cw_messages);
             }
+            Message::ResetDigitalMessages => {
+                self.draft.radio.digital_messages = RadioSettings::default().digital_messages;
+                self.digital_message_editor =
+                    text_editor::Content::with_text(&self.draft.radio.digital_messages);
+            }
             Message::ResetVoiceMessages => {
                 self.draft.radio.voice_messages = RadioSettings::default().voice_messages;
                 self.voice_message_editor =
@@ -197,6 +233,8 @@ impl ConfigureScreen {
                 self.reset_numeric_fields();
                 self.cw_message_editor =
                     text_editor::Content::with_text(&self.draft.radio.cw_messages);
+                self.digital_message_editor =
+                    text_editor::Content::with_text(&self.draft.radio.digital_messages);
                 self.voice_message_editor =
                     text_editor::Content::with_text(&self.draft.radio.voice_messages);
             }
@@ -254,6 +292,7 @@ impl ConfigureScreen {
         self.tcp_port = self.draft.radio.tcp_port.to_string();
         self.serial_baud_rate = self.draft.radio.serial_baud_rate.to_string();
         self.wsjtx_port = self.draft.radio.wsjtx_port.to_string();
+        self.fldigi_port = self.draft.radio.fldigi_port.to_string();
         self.flrig_port = self.draft.radio.flrig_port.to_string();
         self.cw_increment = self.draft.radio.cw_tuning_increment_hz.to_string();
         self.ssb_increment = self.draft.radio.ssb_tuning_increment_hz.to_string();
@@ -265,6 +304,7 @@ impl ConfigureScreen {
         settings.radio.tcp_port = parse_u16(&self.tcp_port);
         settings.radio.serial_baud_rate = parse_u32(&self.serial_baud_rate);
         settings.radio.wsjtx_port = parse_u16(&self.wsjtx_port);
+        settings.radio.fldigi_port = parse_u16(&self.fldigi_port);
         settings.radio.flrig_port = parse_u16(&self.flrig_port);
         settings.radio.cw_tuning_increment_hz = parse_u32(&self.cw_increment);
         settings.radio.ssb_tuning_increment_hz = parse_u32(&self.ssb_increment);
@@ -443,8 +483,8 @@ impl ConfigureScreen {
             ],
         ));
         content = content.push(section(
-            "WSJT-X",
-            wsjtx_fields(&self.draft.radio, &self.wsjtx_port),
+            "Digital programs",
+            digital_program_fields(&self.draft.radio, &self.wsjtx_port, &self.fldigi_port),
         ));
         content = content.push(section(
             "FLRig emulation",
@@ -566,6 +606,20 @@ impl ConfigureScreen {
                 row![
                     button("Validate").on_press(Message::ValidateCwMessages),
                     button("Reset to defaults").on_press(Message::ResetCwMessages)
+                ]
+                .spacing(10),
+            ],
+        ));
+        content = content.push(section(
+            "Digital messages",
+            column![
+                text_editor(&self.digital_message_editor)
+                    .placeholder("Digital messages")
+                    .on_action(Message::DigitalMessagesEdited)
+                    .height(220),
+                row![
+                    button("Validate").on_press(Message::ValidateDigitalMessages),
+                    button("Reset to defaults").on_press(Message::ResetDigitalMessages)
                 ]
                 .spacing(10),
             ],
@@ -829,13 +883,26 @@ fn keyer_options(driver: &str) -> Vec<String> {
     values
 }
 
-fn wsjtx_fields<'a>(radio: &'a RadioSettings, port: &'a str) -> Element<'a, Message> {
-    let mut body = column![
-        checkbox("Enable WSJT-X in DATA mode", radio.wsjtx_enabled)
-            .on_toggle(Message::WsjtxEnabledChanged)
-    ]
+fn digital_program_fields<'a>(
+    radio: &'a RadioSettings,
+    wsjtx_port: &'a str,
+    fldigi_port: &'a str,
+) -> Element<'a, Message> {
+    let programs = vec![
+        "none".to_string(),
+        "wsjtx".to_string(),
+        "fldigi".to_string(),
+    ];
+    let mut body = column![field(
+        "DATA digital program",
+        pick_list(
+            programs.clone(),
+            selected_value(&programs, &radio.digital_program),
+            Message::DigitalProgramSelected,
+        ),
+    )]
     .spacing(8);
-    if radio.wsjtx_enabled {
+    if radio.digital_program == "wsjtx" {
         body = body
             .push(field(
                 "Bind address",
@@ -850,7 +917,7 @@ fn wsjtx_fields<'a>(radio: &'a RadioSettings, port: &'a str) -> Element<'a, Mess
             ))
             .push(field(
                 "UDP port",
-                numeric_input(port, Message::WsjtxPortChanged),
+                numeric_input(wsjtx_port, Message::WsjtxPortChanged),
             ))
             .push(field(
                 "Multicast group",
@@ -859,6 +926,21 @@ fn wsjtx_fields<'a>(radio: &'a RadioSettings, port: &'a str) -> Element<'a, Mess
                     &radio.wsjtx_multicast_group,
                 )
                 .on_input(Message::WsjtxMulticastChanged),
+            ));
+    }
+    body = body.push(
+        checkbox("Enable FLDigi (RTTY)", radio.fldigi_rtty_enabled)
+            .on_toggle(Message::FldigiRttyEnabledChanged),
+    );
+    if radio.digital_program == "fldigi" || radio.fldigi_rtty_enabled {
+        body = body
+            .push(field(
+                "FLDigi host",
+                text_input("127.0.0.1", &radio.fldigi_host).on_input(Message::FldigiHostChanged),
+            ))
+            .push(field(
+                "FLDigi TCP port",
+                numeric_input(fldigi_port, Message::FldigiPortChanged),
             ));
     }
     body.into()

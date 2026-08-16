@@ -63,28 +63,91 @@ contests:
     scoring:
       qso_points:
         category_band_param: CATEGORY-BAND
-        geography: {country_field: APP_LOG73_DXCC_PFX, station_country_field: APP_LOG73_MY_DXCC_PFX, continent_field: CONT, station_continent_field: MY_CONT, same_country: 0, different_country_north_america: 2, different_country_same_continent: 1, different_continent: 3, unresolved: 0}
+        geography:
+          {
+            country_field: APP_LOG73_DXCC_PFX,
+            station_country_field: APP_LOG73_MY_DXCC_PFX,
+            continent_field: CONT,
+            station_continent_field: MY_CONT,
+            same_country: 0,
+            different_country_north_america: 2,
+            different_country_same_continent: 1,
+            different_continent: 3,
+            unresolved: 0,
+          }
       dupe_key:
         - CALL
         - BAND
       multipliers:
-        - {id: mult-zone, name: Zone, field: CQZ, key: [CQZ, BAND]}
-        - {id: mult-country, name: Country, field: APP_LOG73_DXCC_PFX, key: [APP_LOG73_DXCC_PFX, BAND], exclude_call_suffixes: [/MM]}
+        - { id: mult-zone, name: Zone, field: CQZ, key: [CQZ, BAND] }
+        - {
+            id: mult-country,
+            name: Country,
+            field: APP_LOG73_DXCC_PFX,
+            key: [APP_LOG73_DXCC_PFX, BAND],
+            exclude_call_suffixes: [/MM],
+          }
     cabrillo:
       fixed_headers:
-        - {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}
+        - { id: fixed-category-mode, name: CATEGORY-MODE, value: CW }
       export_fields:
-        - {id: export-location, key: LOCATION, label: Location, type: String:32, help_text: 'State, province, ARRL section, or DX.'}
-        - {id: export-club, preset: export-club-optional}
-        - {id: export-email, preset: export-email-optional}
-        - {id: export-grid-locator, key: GRID-LOCATOR, label: Grid Locator, type: String:6, required: false}
-        - {id: export-name, key: NAME, label: Name, type: String:75, preserve_case: true}
-        - {id: export-address, preset: export-address-optional}
-        - {id: export-address-city, key: ADDRESS-CITY, label: Address City, type: String:45, required: false, preserve_case: true}
-        - {id: export-address-state-province, key: ADDRESS-STATE-PROVINCE, label: Address State/Province, type: String:45, required: false, preserve_case: true}
-        - {id: export-address-postalcode, key: ADDRESS-POSTALCODE, label: Address Postal Code, type: String:16, required: false, preserve_case: true}
-        - {id: export-address-country, key: ADDRESS-COUNTRY, label: Address Country, type: String:45, required: false, preserve_case: true}
-        - {id: export-soapbox, preset: export-soapbox-optional}
+        - {
+            id: export-location,
+            key: LOCATION,
+            label: Location,
+            type: String:32,
+            help_text: 'State, province, ARRL section, or DX.',
+          }
+        - { id: export-club, preset: export-club-optional }
+        - { id: export-email, preset: export-email-optional }
+        - {
+            id: export-grid-locator,
+            key: GRID-LOCATOR,
+            label: Grid Locator,
+            type: String:6,
+            required: false,
+          }
+        - {
+            id: export-name,
+            key: NAME,
+            label: Name,
+            type: String:75,
+            preserve_case: true,
+          }
+        - { id: export-address, preset: export-address-optional }
+        - {
+            id: export-address-city,
+            key: ADDRESS-CITY,
+            label: Address City,
+            type: String:45,
+            required: false,
+            preserve_case: true,
+          }
+        - {
+            id: export-address-state-province,
+            key: ADDRESS-STATE-PROVINCE,
+            label: Address State/Province,
+            type: String:45,
+            required: false,
+            preserve_case: true,
+          }
+        - {
+            id: export-address-postalcode,
+            key: ADDRESS-POSTALCODE,
+            label: Address Postal Code,
+            type: String:16,
+            required: false,
+            preserve_case: true,
+          }
+        - {
+            id: export-address-country,
+            key: ADDRESS-COUNTRY,
+            label: Address Country,
+            type: String:45,
+            required: false,
+            preserve_case: true,
+          }
+        - { id: export-soapbox, preset: export-soapbox-optional }
     metadata:
       source: https://cqww.com/rules.htm
       notes: Countries use DXCC/WAE primary prefixes; received CQ zone is the logged exchange.
@@ -97,5 +160,77 @@ contests:
       - SSB
     cabrillo:
       fixed_headers:
-        - {value: SSB, id: fixed-category-mode}
+        - { value: SSB, id: fixed-category-mode }
+    extends: CQ-WW-CW
+  CQ-WW-RTTY:
+    name: CQ World Wide RTTY DX Contest
+    bands:
+      - 80M
+      - 40M
+      - 20M
+      - 15M
+      - 10M
+    modes:
+      - RTTY
+    value_sets:
+      CQ WW RTTY States:
+        use: us-states
+        exclude: [AK, HI]
+      CQ WW RTTY Canadian Call Areas:
+        values: [NB, NS, QC, ON, MB, SK, AB, BC, NWT, NF, LB, NU, YT, PEI]
+      CQ WW RTTY DX:
+        values: [DX]
+    setup_fields:
+      - id: param-qth
+        key: QTH
+        label: QTH
+        type: String:3
+        required: true
+        in_sets: [CQ WW RTTY States, CQ WW RTTY Canadian Call Areas, CQ WW RTTY DX]
+        help_text: Continental US state, Canadian call area, or DX.
+      - id: header-category-band
+        valid_values: [ALL, 80M, 40M, 20M, 15M, 10M]
+        after: param-qth
+    exchange:
+      - id: qth-sent
+        label: QTH(s)
+        type: String:3
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        in_sets: [CQ WW RTTY States, CQ WW RTTY Canadian Call Areas, CQ WW RTTY DX]
+        source: QTH
+        after: zone-sent
+      - id: rst-received
+        after: qth-sent
+      - id: qth-received
+        label: QTH
+        type: String:3
+        adif: SRX_STRING
+        direction: received
+        in_sets: [CQ WW RTTY States, CQ WW RTTY Canadian Call Areas, CQ WW RTTY DX]
+        after: zone-received
+    scoring:
+      qso_points:
+        geography:
+          same_country: 1
+          different_country_north_america: 2
+          different_country_same_continent: 2
+          different_continent: 3
+      multipliers:
+        - {
+            id: mult-w-ve-qth,
+            name: W/VE QTH,
+            field: SRX_STRING,
+            key: [SRX_STRING, BAND],
+            in_sets: [CQ WW RTTY States, CQ WW RTTY Canadian Call Areas],
+          }
+    cabrillo:
+      fixed_headers:
+        - {value: RTTY, id: fixed-category-mode}
+    metadata:
+      source: https://cqwwrtty.com/rules.htm
+      notes: >-
+        QTH is DX for stations outside the continental US and Canada. W/VE QTH, zone, and country
+        multipliers count once per band; country multipliers use DXCC/WAE primary prefixes.
     extends: CQ-WW-CW

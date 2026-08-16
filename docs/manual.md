@@ -403,24 +403,24 @@ Practical caution:
 
 ### Global logger shortcuts
 
-| Hotkey           | Action                                                  |
-| ---------------- | ------------------------------------------------------- |
-| `Ctrl+O`         | Prompt/change operator callsign                         |
-| `F1`..`F12`      | Send CW message in active Run/S&P bank                  |
-| `Esc`            | Stop CW sending / clear queue (or close CW text dialog) |
-| `PageUp`         | CW WPM +1                                               |
-| `PageDown`       | CW WPM -1                                               |
-| `Ctrl+K`         | Open CW text dialog (CW/CW-R only)                      |
-| `Alt+PageUp`     | Shift band up                                           |
-| `Alt+PageDown`   | Shift band down                                         |
-| `ArrowUp`        | Tune frequency up by configured increment               |
-| `ArrowDown`      | Tune frequency down by configured increment             |
-| `Ctrl+ArrowDown` | Jump to next band-map spot above VFO                    |
-| `Ctrl+ArrowUp`   | Jump to next band-map spot below VFO                    |
-| `Alt+M`          | Mark current frequency                                  |
-| `Alt+O`          | Store current spot                                      |
-| `Alt+Q`          | Jump to last stored CQ frequency                        |
-| `Ctrl+P`         | Spot It                                                 |
+| Hotkey           | Action                                               |
+| ---------------- | ---------------------------------------------------- |
+| `Ctrl+O`         | Prompt/change operator callsign                      |
+| `F1`..`F12`      | Send message in active Run/S&P bank                  |
+| `Esc`            | Stop sending / clear queue (or close text dialog)    |
+| `PageUp`         | CW WPM +1                                            |
+| `PageDown`       | CW WPM -1                                            |
+| `Ctrl+K`         | Open text dialog for CW or targeted FLDigi DATA/RTTY |
+| `Alt+PageUp`     | Shift band up                                        |
+| `Alt+PageDown`   | Shift band down                                      |
+| `ArrowUp`        | Tune frequency up by configured increment            |
+| `ArrowDown`      | Tune frequency down by configured increment          |
+| `Ctrl+ArrowDown` | Jump to next band-map spot above VFO                 |
+| `Ctrl+ArrowUp`   | Jump to next band-map spot below VFO                 |
+| `Alt+M`          | Mark current frequency                               |
+| `Alt+O`          | Store current spot                                   |
+| `Alt+Q`          | Jump to last stored CQ frequency                     |
+| `Ctrl+P`         | Spot It                                              |
 
 Notes:
 
@@ -441,7 +441,12 @@ When cursor is in callsign field:
 - `Shift+Tab` remains normal browser reverse behavior.
 - Fixed/read-only fields are skipped for custom forward tabbing.
 
-### CW text dialog (`Ctrl+K`)
+In DATA/RTTY, function-key messages use the digital message bank and transmit through FLDigi when it is configured for that mode and this logger is the selected Digital I/O target.
+Message buttons remain highlighted until FLDigi reports that their text has finished transmitting. Stop Sending or `Esc` aborts the active transmission, clears queued FLDigi transmit text, and returns FLDigi to receive.
+
+### Send Text dialog (`Ctrl+K`)
+
+The dialog sends through the CW keyer in CW/CW-R or through FLDigi in eligible DATA/RTTY operation. CW words are uppercased; FLDigi text preserves the entered letter case.
 
 | Key                        | Action                                |
 | -------------------------- | ------------------------------------- |

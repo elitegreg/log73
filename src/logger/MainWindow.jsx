@@ -1,5 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { buildSentExchange, fieldDefault } from '../domain/contactFields';
+import {
+  buildSentExchange,
+  fieldDefault,
+  sanitizeCallsign,
+} from '../domain/contactFields';
 import { cabrilloTransmitterAdif } from '../domain/cabrilloTransmitter';
 import { callsignPrefix, dxccContinent } from '../domain/dxcc';
 import { validateCallsign, validateExchangeField } from '../domain/validation';
@@ -19,6 +23,7 @@ import {
   isFrequencyInput,
   adifModeForLoggerMode,
   modeIsCw,
+  modeIsDigital,
   modeIsPhone,
   esmEnterAction,
   esmStateAfterCallsignEdit,
@@ -33,6 +38,7 @@ import {
   shouldAdvanceFromCallsignAutofill,
   callsignClearThresholdHz,
   loggerFrequencyChangeAction,
+  alphanumericWordAt,
 } from './mainWindowHelpers';
 import RadioControls from './components/RadioControls';
 import EntryFields from './components/EntryFields';
@@ -41,7 +47,7 @@ import CommandButtons from './components/CommandButtons';
 import StatusBar from './components/StatusBar';
 import { useBandControls } from './hooks/useBandControls';
 import { useCompletions } from './hooks/useCompletions';
-import { useCwTextDialog } from './hooks/useCwTextDialog';
+import { useTextDialog } from './hooks/useTextDialog';
 import { useEntryFields } from './hooks/useEntryFields';
 import { useEsm } from './hooks/useEsm';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -77,6 +83,10 @@ function MainWindow({
   messageSentEvent,
   wsjtxTarget,
   onSetWsjtXTarget,
+  digitalIoTarget,
+  digitalIoText,
+  onSetDigitalIoTarget,
+  onClearDigitalIo,
   sessionId,
   logId,
   bandMapEnabled,
@@ -95,7 +105,7 @@ function MainWindow({
   onIncrementRit,
   onDecrementRit,
   onSendMessage,
-  onSendCwText,
+  onSendText,
   onSendDxClusterSpot,
   onStopKeying,
   onSetCwWpm,
@@ -108,8 +118,20 @@ function MainWindow({
   onSerialContactLogged,
   onExit,
 }) {
+  const digitalIoTextRef = useRef(null);
   const radioMode = radioState?.mode ?? 'CW';
   const wsjtxDataLocked = wsjtxDataModeLocked(radio, radioMode, wsjtxTarget);
+  const digitalIoEnabled =
+    (String(radioMode).toUpperCase() === 'DATA' &&
+      radio?.fldigi_data_enabled) ||
+    (String(radioMode).toUpperCase() === 'RTTY' && radio?.fldigi_rtty_enabled);
+  const digitalTextEnabled = digitalIoEnabled && digitalIoTarget;
+  useEffect(() => {
+    const textArea = digitalIoTextRef.current;
+    if (textArea) {
+      textArea.scrollTop = textArea.scrollHeight;
+    }
+  }, [digitalIoText]);
   const radioFrequencyHz =
     radioState?.frequency_hz ?? DEFAULT_RADIO_FREQUENCY_HZ;
   const {
@@ -230,7 +252,9 @@ function MainWindow({
   const messageModeKey = operatingMode === 'Run' ? 'run' : 's&p';
   const modeMessageLabels = modeIsPhone(radioMode)
     ? (messageLabels?.voice ?? null)
-    : (messageLabels?.cw ?? messageLabels);
+    : modeIsDigital(radioMode)
+      ? (messageLabels?.digital ?? messageLabels?.cw ?? messageLabels)
+      : (messageLabels?.cw ?? messageLabels);
   const activeMessageLabels =
     modeMessageLabels?.[messageModeKey] ??
     DEFAULT_MESSAGE_LABELS[messageModeKey];
@@ -309,17 +333,19 @@ function MainWindow({
   });
 
   const {
-    isCwTextDialogOpen,
-    cwTextCommittedWords,
-    cwTextCurrentWord,
-    cwTextInputRef,
-    openCwTextDialog,
-    closeCwTextDialog,
-    handleCwTextInputChange,
-    handleCwTextInputKeyDown,
-  } = useCwTextDialog({
+    textSendingEnabled,
+    isTextDialogOpen,
+    textCommittedWords,
+    textCurrentWord,
+    textInputRef,
+    openTextDialog,
+    closeTextDialog,
+    handleTextInputChange,
+    handleTextInputKeyDown,
+  } = useTextDialog({
     radioMode,
-    onSendCwText,
+    digitalTextEnabled,
+    onSendText,
     callSignRef,
   });
 
@@ -391,6 +417,8 @@ function MainWindow({
     storeCurrentCqFrequency,
     markEsmExchangeSentForCurrentCallsign,
     clearEntryFields,
+    messageSendingEnabled:
+      !modeIsDigital(radioMode) || Boolean(digitalTextEnabled),
     onSendMessage,
     onStopKeying,
   });
@@ -410,9 +438,9 @@ function MainWindow({
     pendingBandMapTuneFrequencyRef.current = null;
     setEsmRunCallsignAttempt('');
     setEsmExchangeSentCallsign('');
-    closeCwTextDialog();
+    closeTextDialog();
   }, [
-    closeCwTextDialog,
+    closeTextDialog,
     setEsmEnabled,
     setEsmExchangeSentCallsign,
     setEsmRunCallsignAttempt,
@@ -427,12 +455,12 @@ function MainWindow({
   ]);
 
   useKeyboardShortcuts({
-    radioMode,
     bandMapSpotStore,
     radioFrequencyHz,
-    isCwTextDialogOpen,
-    openCwTextDialog,
-    closeCwTextDialog,
+    textSendingEnabled,
+    isTextDialogOpen,
+    openTextDialog,
+    closeTextDialog,
     jumpToLastCqFrequency,
     markCurrentFrequency,
     storeCurrentBandMapSpot,
@@ -674,6 +702,47 @@ function MainWindow({
     });
   }
 
+  function handleDigitalIoTextClick(event) {
+    if (!event.ctrlKey || wsjtxDataLocked) return;
+
+    const word = alphanumericWordAt(
+      digitalIoText,
+      event.currentTarget.selectionStart,
+    );
+    if (!word) return;
+
+    const nextBlankField = entryFields().find(
+      (field) => field.editable && String(field.value).trim() === '',
+    );
+    if (!nextBlankField) return;
+
+    if (nextBlankField.name === 'CALL') {
+      const callsign = sanitizeCallsign(word);
+      if (!callsign) return;
+      stopRepeat();
+      setCallSign(callsign);
+      pendingPreviousContactAutofillRef.current = '';
+      callsignFrequencyBaselineRef.current = radioFrequencyHz;
+      pendingBandMapTuneFrequencyRef.current = null;
+      callSignEditedAtRef.current = new Date();
+      const nextState = esmStateAfterCallsignEdit({
+        callsign,
+        runCallsignAttempt: esmRunCallsignAttempt,
+        exchangeSentCallsign: esmExchangeSentCallsign,
+      });
+      setEsmRunCallsignAttempt(nextState.runCallsignAttempt);
+      setEsmExchangeSentCallsign(nextState.exchangeSentCallsign);
+    } else {
+      const field = (settings?.exchange ?? []).find(
+        (item) => item.id === nextBlankField.name,
+      );
+      if (!field) return;
+      updateExchangeField(field, word);
+    }
+
+    focusNextEditableField(nextBlankField.name);
+  }
+
   function handleFieldTab(event, currentFieldName, values = exchangeValues) {
     if (event.key !== 'Tab') {
       return;
@@ -757,7 +826,7 @@ function MainWindow({
       modeIsCw(radioMode) &&
       callsignHasQuery(callSign)
     ) {
-      onSendCwText?.({
+      onSendText?.({
         request_id: createMessageRequestId(),
         text: callSign,
       });
@@ -788,7 +857,7 @@ function MainWindow({
       operatingMode === 'Run' &&
       esmAction.correctionText
     ) {
-      onSendCwText?.({
+      onSendText?.({
         request_id: createMessageRequestId(),
         text: `${esmAction.correctionText} `,
       });
@@ -1032,6 +1101,9 @@ function MainWindow({
         wsjtxEnabled={Boolean(radio?.wsjtx_enabled)}
         wsjtxTarget={wsjtxTarget}
         onSetWsjtXTarget={onSetWsjtXTarget}
+        digitalIoEnabled={digitalIoEnabled}
+        digitalIoTarget={digitalIoTarget}
+        onSetDigitalIoTarget={onSetDigitalIoTarget}
         cwWpm={cwWpm}
         cwWpmMin={CW_WPM_MIN}
         cwWpmMax={CW_WPM_MAX}
@@ -1076,34 +1148,52 @@ function MainWindow({
         aria-label="Completion matches"
         value={completionMatches.join(' ')}
       />
-      {modeIsCw(radioMode) && isCwTextDialogOpen ? (
-        <div className="cw-text-dialog-overlay" onClick={closeCwTextDialog}>
+      {digitalIoEnabled && digitalIoTarget ? (
+        <div className="digital-io-box">
+          <div className="digital-io-header">
+            <span>RX/TX:</span>
+            <button type="button" onClick={onClearDigitalIo}>
+              Clear
+            </button>
+          </div>
+          <textarea
+            ref={digitalIoTextRef}
+            rows="8"
+            readOnly
+            aria-label="Digital I/O received text"
+            value={digitalIoText}
+            onClick={handleDigitalIoTextClick}
+          />
+        </div>
+      ) : null}
+      {textSendingEnabled && isTextDialogOpen ? (
+        <div className="text-dialog-overlay" onClick={closeTextDialog}>
           <div
-            className="cw-text-dialog"
+            className="text-dialog"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="cw-text-dialog-header">
-              <strong>CW Text</strong>
+            <div className="text-dialog-header">
+              <strong>Send Text</strong>
               <button
                 className="title-button"
                 type="button"
-                aria-label="Close CW text dialog"
-                onClick={closeCwTextDialog}
+                aria-label="Close text dialog"
+                onClick={closeTextDialog}
               >
                 ×
               </button>
             </div>
-            <div className="cw-text-dialog-body">
-              <div className="cw-text-dialog-sent" aria-live="polite">
-                {cwTextCommittedWords.join(' ')}
+            <div className="text-dialog-body">
+              <div className="text-dialog-sent" aria-live="polite">
+                {textCommittedWords.join(' ')}
               </div>
               <input
-                ref={cwTextInputRef}
-                className="cw-text-dialog-input"
+                ref={textInputRef}
+                className="text-dialog-input"
                 type="text"
-                value={cwTextCurrentWord}
-                onChange={handleCwTextInputChange}
-                onKeyDown={handleCwTextInputKeyDown}
+                value={textCurrentWord}
+                onChange={handleTextInputChange}
+                onKeyDown={handleTextInputKeyDown}
                 spellCheck={false}
                 autoComplete="off"
                 autoCorrect="off"

@@ -15,6 +15,7 @@ import {
   shouldBlockEsmCallEnter,
   cwActionFromTemplate,
   cwActiveTimeoutMs,
+  messageActiveTimeoutMs,
   correctedEsmCallsignText,
   exchangeDefaults,
   esmEnterAction,
@@ -26,10 +27,25 @@ import {
   previousContactExchangeAutofill,
   normalizedContactFrequencyHz,
   shouldAdvanceFromCallsignAutofill,
+  alphanumericWordAt,
   tuningIncrementHzForMode,
   steppedFrequencyHz,
   typedModeFromCallsignInput,
 } from './mainWindowHelpers.js';
+
+test('alphanumericWordAt returns the letters and numbers under the offset', () => {
+  const text = 'CQ, K1ABC/VE3\n599.';
+
+  assert.equal(alphanumericWordAt(text, 0), 'CQ');
+  assert.equal(alphanumericWordAt(text, 4), 'K1ABC');
+  assert.equal(alphanumericWordAt(text, 10), 'VE3');
+  assert.equal(alphanumericWordAt(text, 14), '599');
+  assert.equal(alphanumericWordAt(text, 2), '');
+  assert.equal(alphanumericWordAt(text, 9), '');
+  assert.equal(alphanumericWordAt(text, 13), '');
+  assert.equal(alphanumericWordAt(text, text.length - 1), '');
+  assert.equal(alphanumericWordAt(text, text.length), '');
+});
 
 test('CAT indicator combines the radio websocket and CAT connection states', () => {
   assert.equal(catIndicatorState('connected', 'online'), 'connected');
@@ -257,6 +273,13 @@ test('cwActiveTimeoutMs waits for completion-capable keyers', () => {
   assert.equal(cwActiveTimeoutMs('none'), 500);
 });
 
+test('messageActiveTimeoutMs waits for digital and voice completion regardless of CW keyer', () => {
+  assert.equal(messageActiveTimeoutMs('DATA', 'none'), 30000);
+  assert.equal(messageActiveTimeoutMs('RTTY', 'none'), 30000);
+  assert.equal(messageActiveTimeoutMs('SSB', 'none'), 30000);
+  assert.equal(messageActiveTimeoutMs('CW', 'none'), 500);
+});
+
 test('shouldAdvanceFromCallsignAutofill skips run mode so ESM sends the full sequence first', () => {
   assert.equal(
     shouldAdvanceFromCallsignAutofill({
@@ -319,7 +342,7 @@ test('messageButtonIsSendable requires a non-empty message label', () => {
   assert.equal(messageButtonIsSendable({ key: 'F1', label: 'Cq' }), true);
 });
 
-test('messageActionForRadioMode uses CW config in CW modes and voice config in phone modes', () => {
+test('messageActionForRadioMode selects the config for each radio mode family', () => {
   const cwConfig = `
 # RUN Messages
 F12 Clear,{Action:Clear}
@@ -332,6 +355,12 @@ F12 Voice Clear,{Action:Clear}
 # S&P Messages
 F12 Voice Clear,{Action:Clear}
 `;
+  const digitalConfig = `
+# RUN Messages
+F12 Digital Clear,{Action:Clear}
+# S&P Messages
+F12 Digital Clear,{Action:Clear}
+`;
 
   assert.equal(
     messageActionForRadioMode(cwConfig, voiceConfig, 'run', 'F12', 'CW'),
@@ -343,6 +372,17 @@ F12 Voice Clear,{Action:Clear}
   );
   assert.equal(
     messageActionForRadioMode(cwConfig, voiceConfig, 's&p', 'F12', 'FM'),
+    'Clear',
+  );
+  assert.equal(
+    messageActionForRadioMode(
+      cwConfig,
+      voiceConfig,
+      'run',
+      'F12',
+      'DATA',
+      digitalConfig,
+    ),
     'Clear',
   );
 });

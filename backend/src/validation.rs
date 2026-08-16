@@ -53,6 +53,8 @@ const MAX_CW_REQUEST_ID_LEN: usize = 64;
 #[allow(dead_code)]
 const MAX_CW_MESSAGES_LEN: usize = 16_384;
 #[allow(dead_code)]
+const MAX_DIGITAL_MESSAGES_LEN: usize = 16_384;
+#[allow(dead_code)]
 const MAX_VOICE_MESSAGES_LEN: usize = 16_384;
 #[allow(dead_code)]
 const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat", "serial"];
@@ -245,6 +247,7 @@ pub fn validate_radio(payload: &RadioPayload) -> Result<(), String> {
     }
 
     validate_cw_messages(&payload.cw_messages)?;
+    validate_digital_messages(&payload.digital_messages)?;
     validate_voice_messages(&payload.voice_messages)?;
 
     Ok(())
@@ -265,6 +268,26 @@ pub fn validate_cw_messages(value: &str) -> Result<(), String> {
         .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
     {
         return Err("CW messages cannot contain control characters".to_string());
+    }
+
+    cw::validate(value).map(|_| ())
+}
+
+#[allow(dead_code)]
+pub fn validate_digital_messages(value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err("Digital messages are required".to_string());
+    }
+    if value.chars().count() > MAX_DIGITAL_MESSAGES_LEN {
+        return Err(format!(
+            "Digital messages must be at most {MAX_DIGITAL_MESSAGES_LEN} characters"
+        ));
+    }
+    if value
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err("Digital messages cannot contain control characters".to_string());
     }
 
     cw::validate(value).map(|_| ())
@@ -1281,10 +1304,15 @@ mod tests {
             options: String::new(),
             data_mode: "DATA-USB".to_string(),
             rtty_mode: "RTTY".to_string(),
+            digital_program: "none".to_string(),
             wsjtx_enabled: false,
             wsjtx_bind_address: "127.0.0.1".to_string(),
             wsjtx_port: 2237,
             wsjtx_multicast_group: String::new(),
+            fldigi_data_enabled: false,
+            fldigi_rtty_enabled: false,
+            fldigi_host: radio_io::DEFAULT_FLDIGI_HOST.to_string(),
+            fldigi_port: radio_io::DEFAULT_FLDIGI_PORT,
             flrig_enabled: false,
             flrig_port: radio_io::DEFAULT_FLRIG_PORT,
             cw_tuning_increment_hz: db::DEFAULT_CW_TUNING_INCREMENT_HZ,
@@ -1298,6 +1326,7 @@ mod tests {
             cw_serial_baud_rate: 9_600,
             cw_serial_line: "dtr".to_string(),
             cw_messages: cw::DEFAULT_CW_MESSAGES.to_string(),
+            digital_messages: radio_io::digital_messages::DEFAULT_DIGITAL_MESSAGES.to_string(),
             voice_messages: voice_messages::DEFAULT_VOICE_MESSAGES.to_string(),
         }
     }

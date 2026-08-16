@@ -5,6 +5,8 @@ contests:
     modes:
       - CW
       - SSB
+      - DATA
+      - RTTY
     value_sets:
       Tennessee Counties:
         values_from_file: tennessee-counties.dat
@@ -71,22 +73,82 @@ contests:
         - STX_STRING
         - SRX_STRING
       multipliers:
-        - {id: mult-tennessee-county, name: Tennessee County, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [Tennessee Counties]}
-        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [States]}
-        - {id: mult-canadian-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [Canadian Provinces]}
-        - {id: mult-dxcc-entity, name: DXCC Entity, field: DXCC, key: [DXCC, BAND], exclude_values: ['1', '6', '110', '291']}
+        - {
+            id: mult-tennessee-county,
+            name: Tennessee County,
+            field: SRX_STRING,
+            key: [SRX_STRING, BAND],
+            in_sets: [Tennessee Counties],
+          }
+        - {
+            id: mult-state,
+            name: State,
+            field: SRX_STRING,
+            key: [SRX_STRING, BAND],
+            in_sets: [States],
+          }
+        - {
+            id: mult-canadian-province,
+            name: Canadian Province,
+            field: SRX_STRING,
+            key: [SRX_STRING, BAND],
+            in_sets: [Canadian Provinces],
+          }
+        - {
+            id: mult-dxcc-entity,
+            name: DXCC Entity,
+            field: DXCC,
+            key: [DXCC, BAND],
+            exclude_values: ['1', '6', '110', '291'],
+          }
       bonus_points:
-        - {id: bonus-tcg-headquarters, name: TCG Headquarters, field: CALL, key: [CALL, BAND, MODE, STX_STRING], values: {K4TCG: 100}}
+        - {
+            id: bonus-tcg-headquarters,
+            name: TCG Headquarters,
+            field: CALL,
+            key: [CALL, BAND, MODE, STX_STRING],
+            values: { K4TCG: 100 },
+          }
     cabrillo:
       fixed_headers:
-        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
+        - { id: fixed-category-band, name: CATEGORY-BAND, value: ALL }
       export_fields:
-        - {id: export-club, preset: export-club-optional}
-        - {id: export-email, key: EMAIL, label: Email, type: String:75, regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$', preserve_case: true}
-        - {id: export-location, key: LOCATION, label: Location, type: String:4, regex: ^\S+$, valid_values_or_regex: true, in_sets: [Tennessee Counties, States, Canadian Provinces], help_text: 'Tennessee county, state, province/territory, or DXCC prefix.'}
-        - {id: export-name, key: NAME, label: Name, type: String:75, preserve_case: true}
-        - {id: export-address, key: ADDRESS, label: Address, type: String:45, widget: textarea, max_lines: 6, preserve_case: true}
-        - {id: export-soapbox, preset: export-soapbox-optional}
+        - { id: export-club, preset: export-club-optional }
+        - {
+            id: export-email,
+            key: EMAIL,
+            label: Email,
+            type: String:75,
+            regex: '^[^\s@]+@[^\s@]+\.[^\s@]+$',
+            preserve_case: true,
+          }
+        - {
+            id: export-location,
+            key: LOCATION,
+            label: Location,
+            type: String:4,
+            regex: ^\S+$,
+            valid_values_or_regex: true,
+            in_sets: [Tennessee Counties, States, Canadian Provinces],
+            help_text: 'Tennessee county, state, province/territory, or DXCC prefix.',
+          }
+        - {
+            id: export-name,
+            key: NAME,
+            label: Name,
+            type: String:75,
+            preserve_case: true,
+          }
+        - {
+            id: export-address,
+            key: ADDRESS,
+            label: Address,
+            type: String:45,
+            widget: textarea,
+            max_lines: 6,
+            preserve_case: true,
+          }
+        - { id: export-soapbox, preset: export-soapbox-optional }
     metadata:
       notes: >-
         Based on the supplied 2025 rules. Digital modes, 1.25m/70cm, and the mobile/rover 10-QSO
@@ -136,9 +198,9 @@ contests:
         after: rst-received
     scoring:
       multipliers:
-        - {id: mult-state, remove: true}
-        - {id: mult-canadian-province, remove: true}
-        - {id: mult-dxcc-entity, remove: true}
+        - { id: mult-state, remove: true }
+        - { id: mult-canadian-province, remove: true }
+        - { id: mult-dxcc-entity, remove: true }
     metadata:
       notes: >-
         Outside-Tennessee stations score only Tennessee county contacts. Digital modes, 1.25m/70cm,

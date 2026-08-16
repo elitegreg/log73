@@ -1,10 +1,10 @@
 use super::models::{RadioConfig, RadioControlLocation, RadioPayload, RadioRecord};
 use rusqlite::{Connection, OptionalExtension, params};
 
-const SELECT_RADIOS: &str = "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, WSJTX_ENABLED, WSJTX_BIND_ADDRESS, WSJTX_PORT, WSJTX_MULTICAST_GROUP, FLRIG_ENABLED, FLRIG_PORT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES, CONTROL_LOCATION, CLIENT_INSTANCE_ID, RADIO_WS_URL FROM radios ORDER BY ID";
-const SELECT_RADIO: &str = "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, WSJTX_ENABLED, WSJTX_BIND_ADDRESS, WSJTX_PORT, WSJTX_MULTICAST_GROUP, FLRIG_ENABLED, FLRIG_PORT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES, CONTROL_LOCATION, CLIENT_INSTANCE_ID, RADIO_WS_URL FROM radios WHERE ID = ?1";
-const SELECT_CLIENT_RADIO: &str = "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, WSJTX_ENABLED, WSJTX_BIND_ADDRESS, WSJTX_PORT, WSJTX_MULTICAST_GROUP, FLRIG_ENABLED, FLRIG_PORT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES, CONTROL_LOCATION, CLIENT_INSTANCE_ID, RADIO_WS_URL FROM radios WHERE CONTROL_LOCATION = 'client' AND CLIENT_INSTANCE_ID = ?1";
-const SELECT_BACKEND_RADIOS: &str = "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, WSJTX_ENABLED, WSJTX_BIND_ADDRESS, WSJTX_PORT, WSJTX_MULTICAST_GROUP, FLRIG_ENABLED, FLRIG_PORT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES, CONTROL_LOCATION, CLIENT_INSTANCE_ID, RADIO_WS_URL FROM radios WHERE CONTROL_LOCATION = 'backend' ORDER BY ID";
+const SELECT_RADIOS: &str = "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, DIGITAL_PROGRAM, WSJTX_ENABLED, WSJTX_BIND_ADDRESS, WSJTX_PORT, WSJTX_MULTICAST_GROUP, FLDIGI_DATA_ENABLED, FLDIGI_RTTY_ENABLED, FLDIGI_HOST, FLDIGI_PORT, FLRIG_ENABLED, FLRIG_PORT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, DIGITAL_MESSAGES, VOICE_MESSAGES, CONTROL_LOCATION, CLIENT_INSTANCE_ID, RADIO_WS_URL FROM radios ORDER BY ID";
+const SELECT_RADIO: &str = "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, DIGITAL_PROGRAM, WSJTX_ENABLED, WSJTX_BIND_ADDRESS, WSJTX_PORT, WSJTX_MULTICAST_GROUP, FLDIGI_DATA_ENABLED, FLDIGI_RTTY_ENABLED, FLDIGI_HOST, FLDIGI_PORT, FLRIG_ENABLED, FLRIG_PORT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, DIGITAL_MESSAGES, VOICE_MESSAGES, CONTROL_LOCATION, CLIENT_INSTANCE_ID, RADIO_WS_URL FROM radios WHERE ID = ?1";
+const SELECT_CLIENT_RADIO: &str = "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, DIGITAL_PROGRAM, WSJTX_ENABLED, WSJTX_BIND_ADDRESS, WSJTX_PORT, WSJTX_MULTICAST_GROUP, FLDIGI_DATA_ENABLED, FLDIGI_RTTY_ENABLED, FLDIGI_HOST, FLDIGI_PORT, FLRIG_ENABLED, FLRIG_PORT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, DIGITAL_MESSAGES, VOICE_MESSAGES, CONTROL_LOCATION, CLIENT_INSTANCE_ID, RADIO_WS_URL FROM radios WHERE CONTROL_LOCATION = 'client' AND CLIENT_INSTANCE_ID = ?1";
+const SELECT_BACKEND_RADIOS: &str = "SELECT ID, NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, DIGITAL_PROGRAM, WSJTX_ENABLED, WSJTX_BIND_ADDRESS, WSJTX_PORT, WSJTX_MULTICAST_GROUP, FLDIGI_DATA_ENABLED, FLDIGI_RTTY_ENABLED, FLDIGI_HOST, FLDIGI_PORT, FLRIG_ENABLED, FLRIG_PORT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, DIGITAL_MESSAGES, VOICE_MESSAGES, CONTROL_LOCATION, CLIENT_INSTANCE_ID, RADIO_WS_URL FROM radios WHERE CONTROL_LOCATION = 'backend' ORDER BY ID";
 
 pub(super) fn normalized_optional_device_id(value: Option<&str>) -> Option<String> {
     value
@@ -33,7 +33,7 @@ pub(super) fn db_create_radio(
     radio: RadioPayload,
 ) -> rusqlite::Result<RadioRecord> {
     connection.execute(
-        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, WSJTX_ENABLED, WSJTX_BIND_ADDRESS, WSJTX_PORT, WSJTX_MULTICAST_GROUP, FLRIG_ENABLED, FLRIG_PORT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
+        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, DIGITAL_PROGRAM, WSJTX_ENABLED, WSJTX_BIND_ADDRESS, WSJTX_PORT, WSJTX_MULTICAST_GROUP, FLDIGI_DATA_ENABLED, FLDIGI_RTTY_ENABLED, FLDIGI_HOST, FLDIGI_PORT, FLRIG_ENABLED, FLRIG_PORT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, DIGITAL_MESSAGES, VOICE_MESSAGES) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34)",
         params![
             radio.name.trim(),
             radio.radio_kind.trim(),
@@ -45,10 +45,15 @@ pub(super) fn db_create_radio(
             radio.options,
             radio.data_mode,
             radio.rtty_mode,
+            radio.digital_program,
             radio.wsjtx_enabled,
             radio.wsjtx_bind_address.trim(),
             radio.wsjtx_port,
             radio.wsjtx_multicast_group.trim(),
+            radio.fldigi_data_enabled,
+            radio.fldigi_rtty_enabled,
+            radio.fldigi_host.trim(),
+            radio.fldigi_port,
             radio.flrig_enabled,
             radio.flrig_port,
             radio.cw_tuning_increment_hz,
@@ -62,6 +67,7 @@ pub(super) fn db_create_radio(
             radio.cw_serial_baud_rate,
             radio.cw_serial_line.trim(),
             radio.cw_messages,
+            radio.digital_messages,
             radio.voice_messages
         ],
     )?;
@@ -75,7 +81,7 @@ pub(super) fn db_update_radio(
     radio: RadioPayload,
 ) -> rusqlite::Result<Option<RadioRecord>> {
     let updated = connection.execute(
-        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, OPTIONS = ?8, DATA_MODE = ?9, RTTY_MODE = ?10, WSJTX_ENABLED = ?11, WSJTX_BIND_ADDRESS = ?12, WSJTX_PORT = ?13, WSJTX_MULTICAST_GROUP = ?14, FLRIG_ENABLED = ?15, FLRIG_PORT = ?16, CW_TUNING_INCREMENT_HZ = ?17, SSB_TUNING_INCREMENT_HZ = ?18, RIT_CLEAR_ON_LOG = ?19, VOICE_INPUT_DEVICE_ID = ?20, VOICE_OUTPUT_DEVICE_ID = ?21, CW_KEYER_TYPE = ?22, WINKEYER_SERIAL_PORT = ?23, CW_SERIAL_PORT = ?24, CW_SERIAL_BAUD_RATE = ?25, CW_SERIAL_LINE = ?26, CW_MESSAGES = ?27, VOICE_MESSAGES = ?28 WHERE ID = ?29 AND CONTROL_LOCATION = 'backend'",
+        "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, OPTIONS = ?8, DATA_MODE = ?9, RTTY_MODE = ?10, DIGITAL_PROGRAM = ?11, WSJTX_ENABLED = ?12, WSJTX_BIND_ADDRESS = ?13, WSJTX_PORT = ?14, WSJTX_MULTICAST_GROUP = ?15, FLDIGI_DATA_ENABLED = ?16, FLDIGI_RTTY_ENABLED = ?17, FLDIGI_HOST = ?18, FLDIGI_PORT = ?19, FLRIG_ENABLED = ?20, FLRIG_PORT = ?21, CW_TUNING_INCREMENT_HZ = ?22, SSB_TUNING_INCREMENT_HZ = ?23, RIT_CLEAR_ON_LOG = ?24, VOICE_INPUT_DEVICE_ID = ?25, VOICE_OUTPUT_DEVICE_ID = ?26, CW_KEYER_TYPE = ?27, WINKEYER_SERIAL_PORT = ?28, CW_SERIAL_PORT = ?29, CW_SERIAL_BAUD_RATE = ?30, CW_SERIAL_LINE = ?31, CW_MESSAGES = ?32, DIGITAL_MESSAGES = ?33, VOICE_MESSAGES = ?34 WHERE ID = ?35 AND CONTROL_LOCATION = 'backend'",
         params![
             radio.name.trim(),
             radio.radio_kind.trim(),
@@ -87,10 +93,15 @@ pub(super) fn db_update_radio(
             radio.options,
             radio.data_mode,
             radio.rtty_mode,
+            radio.digital_program,
             radio.wsjtx_enabled,
             radio.wsjtx_bind_address.trim(),
             radio.wsjtx_port,
             radio.wsjtx_multicast_group.trim(),
+            radio.fldigi_data_enabled,
+            radio.fldigi_rtty_enabled,
+            radio.fldigi_host.trim(),
+            radio.fldigi_port,
             radio.flrig_enabled,
             radio.flrig_port,
             radio.cw_tuning_increment_hz,
@@ -104,6 +115,7 @@ pub(super) fn db_update_radio(
             radio.cw_serial_baud_rate,
             radio.cw_serial_line.trim(),
             radio.cw_messages,
+            radio.digital_messages,
             radio.voice_messages,
             id
         ],
@@ -148,15 +160,15 @@ pub(super) fn db_upsert_client_radio(
 ) -> rusqlite::Result<RadioRecord> {
     if let Some(existing) = select_client_radio(connection, client_instance_id)? {
         connection.execute(
-            "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, OPTIONS = ?8, DATA_MODE = ?9, RTTY_MODE = ?10, WSJTX_ENABLED = ?11, WSJTX_BIND_ADDRESS = ?12, WSJTX_PORT = ?13, WSJTX_MULTICAST_GROUP = ?14, FLRIG_ENABLED = ?15, FLRIG_PORT = ?16, CW_TUNING_INCREMENT_HZ = ?17, SSB_TUNING_INCREMENT_HZ = ?18, RIT_CLEAR_ON_LOG = ?19, VOICE_INPUT_DEVICE_ID = ?20, VOICE_OUTPUT_DEVICE_ID = ?21, CW_KEYER_TYPE = ?22, WINKEYER_SERIAL_PORT = ?23, CW_SERIAL_PORT = ?24, CW_SERIAL_BAUD_RATE = ?25, CW_SERIAL_LINE = ?26, CW_MESSAGES = ?27, VOICE_MESSAGES = ?28, RADIO_WS_URL = ?29 WHERE ID = ?30 AND CONTROL_LOCATION = 'client'",
-            params![radio.name.trim(), radio.radio_kind.trim(), radio.transport_kind.trim(), radio.tcp_host.trim(), radio.tcp_port, radio.serial_port.trim(), radio.serial_baud_rate, radio.options, radio.data_mode, radio.rtty_mode, radio.wsjtx_enabled, radio.wsjtx_bind_address.trim(), radio.wsjtx_port, radio.wsjtx_multicast_group.trim(), radio.flrig_enabled, radio.flrig_port, radio.cw_tuning_increment_hz, radio.ssb_tuning_increment_hz, radio.rit_clear_on_log, normalized_optional_device_id(radio.voice_input_device_id.as_deref()), normalized_optional_device_id(radio.voice_output_device_id.as_deref()), radio.cw_keyer_type.trim(), radio.winkeyer_serial_port.trim(), radio.cw_serial_port.trim(), radio.cw_serial_baud_rate, radio.cw_serial_line.trim(), radio.cw_messages, radio.voice_messages, radio_ws_url.trim(), existing.id],
+            "UPDATE radios SET NAME = ?1, RADIO_KIND = ?2, TRANSPORT_KIND = ?3, TCP_HOST = ?4, TCP_PORT = ?5, SERIAL_PORT = ?6, SERIAL_BAUD_RATE = ?7, OPTIONS = ?8, DATA_MODE = ?9, RTTY_MODE = ?10, DIGITAL_PROGRAM = ?11, WSJTX_ENABLED = ?12, WSJTX_BIND_ADDRESS = ?13, WSJTX_PORT = ?14, WSJTX_MULTICAST_GROUP = ?15, FLDIGI_DATA_ENABLED = ?16, FLDIGI_RTTY_ENABLED = ?17, FLDIGI_HOST = ?18, FLDIGI_PORT = ?19, FLRIG_ENABLED = ?20, FLRIG_PORT = ?21, CW_TUNING_INCREMENT_HZ = ?22, SSB_TUNING_INCREMENT_HZ = ?23, RIT_CLEAR_ON_LOG = ?24, VOICE_INPUT_DEVICE_ID = ?25, VOICE_OUTPUT_DEVICE_ID = ?26, CW_KEYER_TYPE = ?27, WINKEYER_SERIAL_PORT = ?28, CW_SERIAL_PORT = ?29, CW_SERIAL_BAUD_RATE = ?30, CW_SERIAL_LINE = ?31, CW_MESSAGES = ?32, DIGITAL_MESSAGES = ?33, VOICE_MESSAGES = ?34, RADIO_WS_URL = ?35 WHERE ID = ?36 AND CONTROL_LOCATION = 'client'",
+            params![radio.name.trim(), radio.radio_kind.trim(), radio.transport_kind.trim(), radio.tcp_host.trim(), radio.tcp_port, radio.serial_port.trim(), radio.serial_baud_rate, radio.options, radio.data_mode, radio.rtty_mode, radio.digital_program, radio.wsjtx_enabled, radio.wsjtx_bind_address.trim(), radio.wsjtx_port, radio.wsjtx_multicast_group.trim(), radio.fldigi_data_enabled, radio.fldigi_rtty_enabled, radio.fldigi_host.trim(), radio.fldigi_port, radio.flrig_enabled, radio.flrig_port, radio.cw_tuning_increment_hz, radio.ssb_tuning_increment_hz, radio.rit_clear_on_log, normalized_optional_device_id(radio.voice_input_device_id.as_deref()), normalized_optional_device_id(radio.voice_output_device_id.as_deref()), radio.cw_keyer_type.trim(), radio.winkeyer_serial_port.trim(), radio.cw_serial_port.trim(), radio.cw_serial_baud_rate, radio.cw_serial_line.trim(), radio.cw_messages, radio.digital_messages, radio.voice_messages, radio_ws_url.trim(), existing.id],
         )?;
         return select_radio(connection, existing.id)?.ok_or(rusqlite::Error::QueryReturnedNoRows);
     }
 
     connection.execute(
-        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, WSJTX_ENABLED, WSJTX_BIND_ADDRESS, WSJTX_PORT, WSJTX_MULTICAST_GROUP, FLRIG_ENABLED, FLRIG_PORT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, VOICE_MESSAGES, CONTROL_LOCATION, CLIENT_INSTANCE_ID, RADIO_WS_URL) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, 'client', ?29, ?30)",
-        params![radio.name.trim(), radio.radio_kind.trim(), radio.transport_kind.trim(), radio.tcp_host.trim(), radio.tcp_port, radio.serial_port.trim(), radio.serial_baud_rate, radio.options, radio.data_mode, radio.rtty_mode, radio.wsjtx_enabled, radio.wsjtx_bind_address.trim(), radio.wsjtx_port, radio.wsjtx_multicast_group.trim(), radio.flrig_enabled, radio.flrig_port, radio.cw_tuning_increment_hz, radio.ssb_tuning_increment_hz, radio.rit_clear_on_log, normalized_optional_device_id(radio.voice_input_device_id.as_deref()), normalized_optional_device_id(radio.voice_output_device_id.as_deref()), radio.cw_keyer_type.trim(), radio.winkeyer_serial_port.trim(), radio.cw_serial_port.trim(), radio.cw_serial_baud_rate, radio.cw_serial_line.trim(), radio.cw_messages, radio.voice_messages, client_instance_id.trim(), radio_ws_url.trim()],
+        "INSERT INTO radios (NAME, RADIO_KIND, TRANSPORT_KIND, TCP_HOST, TCP_PORT, SERIAL_PORT, SERIAL_BAUD_RATE, OPTIONS, DATA_MODE, RTTY_MODE, DIGITAL_PROGRAM, WSJTX_ENABLED, WSJTX_BIND_ADDRESS, WSJTX_PORT, WSJTX_MULTICAST_GROUP, FLDIGI_DATA_ENABLED, FLDIGI_RTTY_ENABLED, FLDIGI_HOST, FLDIGI_PORT, FLRIG_ENABLED, FLRIG_PORT, CW_TUNING_INCREMENT_HZ, SSB_TUNING_INCREMENT_HZ, RIT_CLEAR_ON_LOG, VOICE_INPUT_DEVICE_ID, VOICE_OUTPUT_DEVICE_ID, CW_KEYER_TYPE, WINKEYER_SERIAL_PORT, CW_SERIAL_PORT, CW_SERIAL_BAUD_RATE, CW_SERIAL_LINE, CW_MESSAGES, DIGITAL_MESSAGES, VOICE_MESSAGES, CONTROL_LOCATION, CLIENT_INSTANCE_ID, RADIO_WS_URL) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31, ?32, ?33, ?34, 'client', ?35, ?36)",
+        params![radio.name.trim(), radio.radio_kind.trim(), radio.transport_kind.trim(), radio.tcp_host.trim(), radio.tcp_port, radio.serial_port.trim(), radio.serial_baud_rate, radio.options, radio.data_mode, radio.rtty_mode, radio.digital_program, radio.wsjtx_enabled, radio.wsjtx_bind_address.trim(), radio.wsjtx_port, radio.wsjtx_multicast_group.trim(), radio.fldigi_data_enabled, radio.fldigi_rtty_enabled, radio.fldigi_host.trim(), radio.fldigi_port, radio.flrig_enabled, radio.flrig_port, radio.cw_tuning_increment_hz, radio.ssb_tuning_increment_hz, radio.rit_clear_on_log, normalized_optional_device_id(radio.voice_input_device_id.as_deref()), normalized_optional_device_id(radio.voice_output_device_id.as_deref()), radio.cw_keyer_type.trim(), radio.winkeyer_serial_port.trim(), radio.cw_serial_port.trim(), radio.cw_serial_baud_rate, radio.cw_serial_line.trim(), radio.cw_messages, radio.digital_messages, radio.voice_messages, client_instance_id.trim(), radio_ws_url.trim()],
     )?;
     select_radio(connection, connection.last_insert_rowid())?
         .ok_or(rusqlite::Error::QueryReturnedNoRows)
@@ -169,6 +181,7 @@ fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioRecord> {
     let ssb_tuning_increment_hz: i64 = row.get("SSB_TUNING_INCREMENT_HZ")?;
     let cw_serial_baud_rate: i64 = row.get("CW_SERIAL_BAUD_RATE")?;
     let wsjtx_port: i64 = row.get("WSJTX_PORT")?;
+    let fldigi_port: i64 = row.get("FLDIGI_PORT")?;
     let flrig_port: i64 = row.get("FLRIG_PORT")?;
     let voice_input_device_id: Option<String> = row.get("VOICE_INPUT_DEVICE_ID")?;
     let voice_output_device_id: Option<String> = row.get("VOICE_OUTPUT_DEVICE_ID")?;
@@ -194,10 +207,15 @@ fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioRecord> {
                 options: row.get("OPTIONS")?,
                 data_mode: row.get("DATA_MODE")?,
                 rtty_mode: row.get("RTTY_MODE")?,
+                digital_program: row.get("DIGITAL_PROGRAM")?,
                 wsjtx_enabled: row.get("WSJTX_ENABLED")?,
                 wsjtx_bind_address: row.get("WSJTX_BIND_ADDRESS")?,
                 wsjtx_port: wsjtx_port as u16,
                 wsjtx_multicast_group: row.get("WSJTX_MULTICAST_GROUP")?,
+                fldigi_data_enabled: row.get("FLDIGI_DATA_ENABLED")?,
+                fldigi_rtty_enabled: row.get("FLDIGI_RTTY_ENABLED")?,
+                fldigi_host: row.get("FLDIGI_HOST")?,
+                fldigi_port: fldigi_port as u16,
                 flrig_enabled: row.get("FLRIG_ENABLED")?,
                 flrig_port: flrig_port as u16,
                 cw_tuning_increment_hz: cw_tuning_increment_hz as u32,
@@ -215,6 +233,7 @@ fn row_to_radio(row: &rusqlite::Row<'_>) -> rusqlite::Result<RadioRecord> {
                 cw_serial_baud_rate: cw_serial_baud_rate as u32,
                 cw_serial_line: row.get("CW_SERIAL_LINE")?,
                 cw_messages: row.get("CW_MESSAGES")?,
+                digital_messages: row.get("DIGITAL_MESSAGES")?,
                 voice_messages: row.get("VOICE_MESSAGES")?,
             },
         ),

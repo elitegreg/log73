@@ -3,9 +3,9 @@ contests:
   NA-SPRINT-SSB (North America):
     name: North American SSB Sprint (North America)
     bands:
-      - 80
-      - 40
-      - 20
+      - 80M
+      - 40M
+      - 20M
     modes:
       - SSB
     value_sets:

@@ -1,6 +1,7 @@
 mod bands;
 mod cat_keyer;
 mod config;
+mod digital_io;
 mod flrig;
 mod message_mode;
 mod messages;
@@ -10,6 +11,7 @@ mod websocket;
 mod wsjtx;
 
 pub mod cw;
+pub mod digital_messages;
 pub mod modes;
 pub mod voice_keyer;
 pub mod voice_messages;
@@ -17,10 +19,16 @@ pub mod voice_messages;
 pub use bands::{Band, BandCatalog, band_for_frequency};
 pub use config::{
     ConfiguredRadio, DEFAULT_CW_SERIAL_BAUD_RATE, DEFAULT_CW_SERIAL_LINE,
-    DEFAULT_CW_TUNING_INCREMENT_HZ, DEFAULT_FLRIG_PORT, DEFAULT_SSB_TUNING_INCREMENT_HZ,
-    DEFAULT_WSJTX_BIND_ADDRESS, DEFAULT_WSJTX_PORT, RadioConfig, RadioIoConfig, RadioSettings,
-    normalize_radio_settings, validate_cw_messages, validate_radio_settings,
-    validate_voice_messages,
+    DEFAULT_CW_TUNING_INCREMENT_HZ, DEFAULT_FLDIGI_HOST, DEFAULT_FLDIGI_PORT, DEFAULT_FLRIG_PORT,
+    DEFAULT_SSB_TUNING_INCREMENT_HZ, DEFAULT_WSJTX_BIND_ADDRESS, DEFAULT_WSJTX_PORT, RadioConfig,
+    RadioIoConfig, RadioSettings, normalize_radio_settings, validate_cw_messages,
+    validate_digital_messages, validate_radio_settings, validate_voice_messages,
+};
+pub use digital_io::{DigitalIoEvent, DigitalIoManager, DigitalIoTargetState};
+pub use ham_radio_digital_interfacing::fldigi::{
+    DEFAULT_FLDIGI_ENDPOINT, DEFAULT_FLDIGI_POLL_INTERVAL, DEFAULT_FLDIGI_REQUEST_TIMEOUT,
+    DEFAULT_FLDIGI_TX_POLL_INTERVAL, FldigiConfig, FldigiError, FldigiInterface,
+    FldigiInterfaceError, FldigiTransmission, FldigiTransmissionError,
 };
 pub use message_mode::is_valid_message_mode;
 pub use radio::{

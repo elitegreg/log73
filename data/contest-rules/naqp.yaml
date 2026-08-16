@@ -19,7 +19,13 @@ contests:
         label: State, Province, or NA Country
         type: String:5
         required: true
-        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]
+        in_sets:
+          [
+            US Multipliers,
+            District of Columbia,
+            Canadian Multipliers,
+            North American Countries,
+          ]
       - id: header-category-operator
         preset: category-operator
         default: SINGLE-OP
@@ -66,7 +72,13 @@ contests:
         adif: STX_STRING
         direction: sent
         fixed: true
-        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]
+        in_sets:
+          [
+            US Multipliers,
+            District of Columbia,
+            Canadian Multipliers,
+            North American Countries,
+          ]
         source: QTH
       - id: name-received
         label: Name
@@ -79,7 +91,14 @@ contests:
         type: String:5
         adif: SRX_STRING
         direction: received
-        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries, DX]
+        in_sets:
+          [
+            US Multipliers,
+            District of Columbia,
+            Canadian Multipliers,
+            North American Countries,
+            DX,
+          ]
     scoring:
       qso_points:
         points: 1
@@ -87,19 +106,67 @@ contests:
         - CALL
         - BAND
       multipliers:
-        - {id: mult-north-american-location, name: North American Location, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]}
+        - {
+            id: mult-north-american-location,
+            name: North American Location,
+            field: SRX_STRING,
+            key: [SRX_STRING, BAND],
+            in_sets:
+              [
+                US Multipliers,
+                District of Columbia,
+                Canadian Multipliers,
+                North American Countries,
+              ],
+          }
     cabrillo:
       fixed_headers:
-        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
-        - {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}
+        - { id: fixed-category-band, name: CATEGORY-BAND, value: ALL }
+        - { id: fixed-category-mode, name: CATEGORY-MODE, value: CW }
       export_fields:
-        - {id: export-email, key: EMAIL, label: Email, type: String:75, required: false, regex: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$', preserve_case: true}
-        - {id: export-address, preset: export-address-optional}
-        - {id: export-address-city, key: ADDRESS-CITY, label: Address City, type: String:45, required: false, preserve_case: true}
-        - {id: export-address-state-province, key: ADDRESS-STATE-PROVINCE, label: Address State/Province, type: String:45, required: false, preserve_case: true}
-        - {id: export-address-postalcode, key: ADDRESS-POSTALCODE, label: Address Postal Code, type: String:16, required: false, preserve_case: true}
-        - {id: export-address-country, key: ADDRESS-COUNTRY, label: Address Country, type: String:45, required: false, preserve_case: true}
-        - {id: export-soapbox, preset: export-soapbox-optional}
+        - {
+            id: export-email,
+            key: EMAIL,
+            label: Email,
+            type: String:75,
+            required: false,
+            regex: '^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$',
+            preserve_case: true,
+          }
+        - { id: export-address, preset: export-address-optional }
+        - {
+            id: export-address-city,
+            key: ADDRESS-CITY,
+            label: Address City,
+            type: String:45,
+            required: false,
+            preserve_case: true,
+          }
+        - {
+            id: export-address-state-province,
+            key: ADDRESS-STATE-PROVINCE,
+            label: Address State/Province,
+            type: String:45,
+            required: false,
+            preserve_case: true,
+          }
+        - {
+            id: export-address-postalcode,
+            key: ADDRESS-POSTALCODE,
+            label: Address Postal Code,
+            type: String:16,
+            required: false,
+            preserve_case: true,
+          }
+        - {
+            id: export-address-country,
+            key: ADDRESS-COUNTRY,
+            label: Address Country,
+            type: String:45,
+            required: false,
+            preserve_case: true,
+          }
+        - { id: export-soapbox, preset: export-soapbox-optional }
     metadata:
       source: https://ncjweb.com/NAQP-Rules.pdf
       notes: >-
@@ -118,12 +185,36 @@ contests:
         remove: true
       - id: name-received
         after: name-sent
-      - in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]
+      - in_sets:
+          [
+            US Multipliers,
+            District of Columbia,
+            Canadian Multipliers,
+            North American Countries,
+          ]
         id: qth-received
     scoring:
       qso_points:
         points: null
-        rules: [{id: qso-rule-1, when: {field: SRX_STRING, in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]}, points: 1}, {id: qso-rule-2, points: 0}]
+        rules:
+          [
+            {
+              id: qso-rule-1,
+              when:
+                {
+                  field: SRX_STRING,
+                  in_sets:
+                    [
+                      US Multipliers,
+                      District of Columbia,
+                      Canadian Multipliers,
+                      North American Countries,
+                    ],
+                },
+              points: 1,
+            },
+            { id: qso-rule-2, points: 0 },
+          ]
     metadata:
       notes: >-
         DX entrants send only their name and score North American contacts. Single-operator off-time
@@ -136,7 +227,7 @@ contests:
       - SSB
     cabrillo:
       fixed_headers:
-        - {value: SSB, id: fixed-category-mode}
+        - { value: SSB, id: fixed-category-mode }
     extends: NAQP-CW (North America)
   NAQP-SSB (DX):
     name: North American QSO Party SSB (DX)
@@ -144,5 +235,21 @@ contests:
       - SSB
     cabrillo:
       fixed_headers:
-        - {value: SSB, id: fixed-category-mode}
+        - { value: SSB, id: fixed-category-mode }
+    extends: NAQP-CW (DX)
+  NAQP-RTTY (North America):
+    name: North American QSO Party RTTY (North America)
+    modes:
+      - RTTY
+    cabrillo:
+      fixed_headers:
+        - { value: RTTY, id: fixed-category-mode }
+    extends: NAQP-CW (North America)
+  NAQP-RTTY (DX):
+    name: North American QSO Party RTTY (DX)
+    modes:
+      - RTTY
+    cabrillo:
+      fixed_headers:
+        - { value: RTTY, id: fixed-category-mode }
     extends: NAQP-CW (DX)
