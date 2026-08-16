@@ -51,6 +51,7 @@ export const CALLSIGN_LOOKUP_DEBOUNCE_MS = 500;
 export const CW_ACTIVE_TIMEOUT_WIKEYER_MS = 30000;
 export const CW_ACTIVE_TIMEOUT_CAT_MS = 30000;
 export const CW_ACTIVE_TIMEOUT_NONE_MS = 500;
+export const MESSAGE_ACTIVE_TIMEOUT_COMPLETION_MS = 30000;
 export const CW_REPEAT_DELAY_MS = 2000;
 export const DEFAULT_CW_TUNING_INCREMENT_HZ = 20;
 export const DEFAULT_SSB_TUNING_INCREMENT_HZ = 100;
@@ -226,6 +227,13 @@ export function cwActiveTimeoutMs(cwKeyerType) {
     default:
       return CW_ACTIVE_TIMEOUT_NONE_MS;
   }
+}
+
+export function messageActiveTimeoutMs(radioMode, cwKeyerType) {
+  if (modeIsDigital(radioMode) || modeIsPhone(radioMode)) {
+    return MESSAGE_ACTIVE_TIMEOUT_COMPLETION_MS;
+  }
+  return cwActiveTimeoutMs(cwKeyerType);
 }
 
 export function formatFrequency(frequencyHz) {
@@ -600,16 +608,23 @@ export function esmEnterAction({
   };
 }
 
-export function spaceDelimitedWordAt(text, offset) {
+export function alphanumericWordAt(text, offset) {
   const value = String(text ?? '');
   const index = Number(offset);
   if (!Number.isInteger(index) || index < 0 || index >= value.length) {
     return '';
   }
-  if (value[index] === ' ') return '';
+  if (!/[A-Za-z0-9]/.test(value[index])) return '';
 
-  const start = value.lastIndexOf(' ', index - 1) + 1;
-  const nextSpace = value.indexOf(' ', index);
-  const end = nextSpace === -1 ? value.length : nextSpace;
+  let start = index;
+  while (start > 0 && /[A-Za-z0-9]/.test(value[start - 1])) {
+    start -= 1;
+  }
+
+  let end = index + 1;
+  while (end < value.length && /[A-Za-z0-9]/.test(value[end])) {
+    end += 1;
+  }
+
   return value.slice(start, end);
 }

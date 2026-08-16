@@ -38,7 +38,7 @@ import {
   shouldAdvanceFromCallsignAutofill,
   callsignClearThresholdHz,
   loggerFrequencyChangeAction,
-  spaceDelimitedWordAt,
+  alphanumericWordAt,
 } from './mainWindowHelpers';
 import RadioControls from './components/RadioControls';
 import EntryFields from './components/EntryFields';
@@ -705,7 +705,7 @@ function MainWindow({
   function handleDigitalIoTextClick(event) {
     if (!event.ctrlKey || wsjtxDataLocked) return;
 
-    const word = spaceDelimitedWordAt(
+    const word = alphanumericWordAt(
       digitalIoText,
       event.currentTarget.selectionStart,
     );

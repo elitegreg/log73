@@ -15,6 +15,7 @@ import {
   shouldBlockEsmCallEnter,
   cwActionFromTemplate,
   cwActiveTimeoutMs,
+  messageActiveTimeoutMs,
   correctedEsmCallsignText,
   exchangeDefaults,
   esmEnterAction,
@@ -26,20 +27,24 @@ import {
   previousContactExchangeAutofill,
   normalizedContactFrequencyHz,
   shouldAdvanceFromCallsignAutofill,
-  spaceDelimitedWordAt,
+  alphanumericWordAt,
   tuningIncrementHzForMode,
   steppedFrequencyHz,
   typedModeFromCallsignInput,
 } from './mainWindowHelpers.js';
 
-test('spaceDelimitedWordAt returns only the word under the offset', () => {
-  const text = 'CQ K1ABC 599';
+test('alphanumericWordAt returns the letters and numbers under the offset', () => {
+  const text = 'CQ, K1ABC/VE3\n599.';
 
-  assert.equal(spaceDelimitedWordAt(text, 0), 'CQ');
-  assert.equal(spaceDelimitedWordAt(text, 4), 'K1ABC');
-  assert.equal(spaceDelimitedWordAt(text, text.length - 1), '599');
-  assert.equal(spaceDelimitedWordAt(text, 2), '');
-  assert.equal(spaceDelimitedWordAt(text, text.length), '');
+  assert.equal(alphanumericWordAt(text, 0), 'CQ');
+  assert.equal(alphanumericWordAt(text, 4), 'K1ABC');
+  assert.equal(alphanumericWordAt(text, 10), 'VE3');
+  assert.equal(alphanumericWordAt(text, 14), '599');
+  assert.equal(alphanumericWordAt(text, 2), '');
+  assert.equal(alphanumericWordAt(text, 9), '');
+  assert.equal(alphanumericWordAt(text, 13), '');
+  assert.equal(alphanumericWordAt(text, text.length - 1), '');
+  assert.equal(alphanumericWordAt(text, text.length), '');
 });
 
 test('CAT indicator combines the radio websocket and CAT connection states', () => {
@@ -266,6 +271,13 @@ test('cwActiveTimeoutMs waits for completion-capable keyers', () => {
   assert.equal(cwActiveTimeoutMs('cat'), 30000);
   assert.equal(cwActiveTimeoutMs('serial'), 30000);
   assert.equal(cwActiveTimeoutMs('none'), 500);
+});
+
+test('messageActiveTimeoutMs waits for digital and voice completion regardless of CW keyer', () => {
+  assert.equal(messageActiveTimeoutMs('DATA', 'none'), 30000);
+  assert.equal(messageActiveTimeoutMs('RTTY', 'none'), 30000);
+  assert.equal(messageActiveTimeoutMs('SSB', 'none'), 30000);
+  assert.equal(messageActiveTimeoutMs('CW', 'none'), 500);
 });
 
 test('shouldAdvanceFromCallsignAutofill skips run mode so ESM sends the full sequence first', () => {
