@@ -936,6 +936,7 @@ mod tests {
             cw_serial_baud_rate: 9_600,
             cw_serial_line: "dtr".to_string(),
             cw_messages: DEFAULT_CW_MESSAGES.to_string(),
+            digital_messages: radio_io::digital_messages::DEFAULT_DIGITAL_MESSAGES.to_string(),
             voice_messages: DEFAULT_VOICE_MESSAGES.to_string(),
         }
     }
@@ -1354,6 +1355,10 @@ mod tests {
         assert_eq!(radio.cw_serial_port, "");
         assert_eq!(radio.cw_serial_baud_rate, 9_600);
         assert_eq!(radio.cw_serial_line, "dtr");
+        assert_eq!(
+            radio.digital_messages,
+            radio_io::digital_messages::DEFAULT_DIGITAL_MESSAGES
+        );
         assert_eq!(radio.voice_messages, DEFAULT_VOICE_MESSAGES);
         assert_eq!(
             radio.control_location,

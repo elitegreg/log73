@@ -186,6 +186,11 @@ function CreateRadioScreen() {
   const [isCwMessagesOpen, setIsCwMessagesOpen] = useState(false);
   const [cwMessagesValidationMessage, setCwMessagesValidationMessage] =
     useState('');
+  const [defaultDigitalMessages, setDefaultDigitalMessages] = useState('');
+  const [digitalMessages, setDigitalMessages] = useState('');
+  const [isDigitalMessagesOpen, setIsDigitalMessagesOpen] = useState(false);
+  const [digitalMessagesValidationMessage, setDigitalMessagesValidationMessage] =
+    useState('');
   const [defaultVoiceMessages, setDefaultVoiceMessages] = useState('');
   const [voiceMessages, setVoiceMessages] = useState('');
   const [isVoiceMessagesOpen, setIsVoiceMessagesOpen] = useState(false);
@@ -297,6 +302,18 @@ function CreateRadioScreen() {
         );
       }
 
+      let loadedDefaultDigitalMessages = '';
+      try {
+        loadedDefaultDigitalMessages =
+          (await apiJson('/radios/digital-messages/default')) ?? '';
+      } catch (error) {
+        notifyOperationalError(
+          'CreateRadioScreen.loadDefaultDigitalMessages',
+          'Unable to load default digital messages.',
+          error,
+        );
+      }
+
       let loadedVoiceInputDevices = [];
       try {
         const inputDevicesResult = await apiJson('/audio-devices/input');
@@ -329,6 +346,7 @@ function CreateRadioScreen() {
       setRadioKinds(kinds);
       setSerialPorts(serialPorts);
       setDefaultCwMessages(loadedDefaultCwMessages);
+      setDefaultDigitalMessages(loadedDefaultDigitalMessages);
       setDefaultVoiceMessages(loadedDefaultVoiceMessages);
       setVoiceInputDevices(loadedVoiceInputDevices);
       setVoiceOutputDevices(loadedVoiceOutputDevices);
@@ -351,6 +369,7 @@ function CreateRadioScreen() {
             : DEFAULT_REAL_RADIO_TRANSPORT_KIND,
         );
         setCwMessages(loadedDefaultCwMessages);
+        setDigitalMessages(loadedDefaultDigitalMessages);
         setVoiceMessages(loadedDefaultVoiceMessages);
         setWsjtxPort(nextAvailableWsjtxPort(radios));
         const hosts = soundDeviceHosts([
@@ -443,6 +462,7 @@ function CreateRadioScreen() {
       );
       setCwSerialLine(radio.cw_serial_line ?? DEFAULT_CW_SERIAL_LINE);
       setCwMessages(radio.cw_messages ?? loadedDefaultCwMessages);
+      setDigitalMessages(radio.digital_messages ?? loadedDefaultDigitalMessages);
       setVoiceMessages(radio.voice_messages ?? loadedDefaultVoiceMessages);
     }
 
@@ -506,6 +526,29 @@ function CreateRadioScreen() {
     return true;
   }
 
+  async function validateDigitalMessages() {
+    setDigitalMessagesValidationMessage('');
+    try {
+      await apiJson('/radios/digital-messages/validate', {
+        method: 'POST',
+        body: JSON.stringify({ digital_messages: digitalMessages }),
+      });
+    } catch (error) {
+      setDigitalMessagesValidationMessage(
+        errorMessage(error, 'Digital messages are invalid.'),
+      );
+      notifyOperationalError(
+        'CreateRadioScreen.validateDigitalMessages',
+        'Digital messages are invalid.',
+        error,
+      );
+      return false;
+    }
+
+    setDigitalMessagesValidationMessage('Digital messages are valid.');
+    return true;
+  }
+
   function openHelpWindow() {
     window.open('/help/index.html', '_blank', 'noopener,noreferrer');
   }
@@ -547,6 +590,7 @@ function CreateRadioScreen() {
   async function saveRadio(event) {
     event.preventDefault();
     if (!(await validateCwMessages())) return;
+    if (!(await validateDigitalMessages())) return;
     if (!(await validateVoiceMessages())) return;
 
     try {
@@ -590,6 +634,7 @@ function CreateRadioScreen() {
           cw_serial_line:
             cwKeyerType === 'serial' ? cwSerialLine : DEFAULT_CW_SERIAL_LINE,
           cw_messages: cwMessages,
+          digital_messages: digitalMessages,
           voice_messages: voiceMessages,
         }),
       });
@@ -992,6 +1037,55 @@ function CreateRadioScreen() {
             </select>
           </label>
         </>
+      ) : null}
+      <div className="selection-actions">
+        <button
+          className="cmd-btn"
+          type="button"
+          onClick={() => setIsDigitalMessagesOpen((current) => !current)}
+        >
+          {isDigitalMessagesOpen
+            ? 'Hide Digital Messages'
+            : 'Edit Digital Messages'}
+        </button>
+      </div>
+      {isDigitalMessagesOpen ? (
+        <div className="cw-messages-editor">
+          <label>
+            Digital Messages
+            <textarea
+              value={digitalMessages}
+              onChange={(event) => {
+                setDigitalMessages(event.target.value);
+                setDigitalMessagesValidationMessage('');
+              }}
+              rows={18}
+              spellCheck={false}
+            />
+          </label>
+          {digitalMessagesValidationMessage ? (
+            <div className="cw-messages-validation-status">
+              {digitalMessagesValidationMessage}
+            </div>
+          ) : null}
+          <div className="selection-actions">
+            <button
+              className="cmd-btn"
+              type="button"
+              onClick={() => setDigitalMessages(defaultDigitalMessages)}
+              disabled={!defaultDigitalMessages}
+            >
+              Reset to Defaults
+            </button>
+            <button
+              className="cmd-btn"
+              type="button"
+              onClick={() => validateDigitalMessages()}
+            >
+              Validate Digital Messages
+            </button>
+          </div>
+        </div>
       ) : null}
       <div className="selection-actions">
         <button

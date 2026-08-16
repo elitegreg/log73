@@ -23,6 +23,7 @@ import {
   isFrequencyInput,
   adifModeForLoggerMode,
   modeIsCw,
+  modeIsDigital,
   modeIsPhone,
   esmEnterAction,
   esmStateAfterCallsignEdit,
@@ -249,7 +250,9 @@ function MainWindow({
   const messageModeKey = operatingMode === 'Run' ? 'run' : 's&p';
   const modeMessageLabels = modeIsPhone(radioMode)
     ? (messageLabels?.voice ?? null)
-    : (messageLabels?.cw ?? messageLabels);
+    : modeIsDigital(radioMode)
+      ? (messageLabels?.digital ?? messageLabels?.cw ?? messageLabels)
+      : (messageLabels?.cw ?? messageLabels);
   const activeMessageLabels =
     modeMessageLabels?.[messageModeKey] ??
     DEFAULT_MESSAGE_LABELS[messageModeKey];

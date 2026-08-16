@@ -25,6 +25,7 @@ pub struct ConfigureScreen {
     ssb_increment: String,
     cw_serial_baud_rate: String,
     cw_message_editor: text_editor::Content,
+    digital_message_editor: text_editor::Content,
     voice_message_editor: text_editor::Content,
 }
 
@@ -64,10 +65,13 @@ pub enum Message {
     CwSerialBaudChanged(String),
     CwSerialLineSelected(String),
     CwMessagesEdited(text_editor::Action),
+    DigitalMessagesEdited(text_editor::Action),
     VoiceMessagesEdited(text_editor::Action),
     ValidateCwMessages,
+    ValidateDigitalMessages,
     ValidateVoiceMessages,
     ResetCwMessages,
+    ResetDigitalMessages,
     ResetVoiceMessages,
     SetDefaults,
     Save,
@@ -112,6 +116,9 @@ impl ConfigureScreen {
             ssb_increment: settings.radio.ssb_tuning_increment_hz.to_string(),
             cw_serial_baud_rate: settings.radio.cw_serial_baud_rate.to_string(),
             cw_message_editor: text_editor::Content::with_text(&settings.radio.cw_messages),
+            digital_message_editor: text_editor::Content::with_text(
+                &settings.radio.digital_messages,
+            ),
             voice_message_editor: text_editor::Content::with_text(&settings.radio.voice_messages),
         }
     }
@@ -180,6 +187,10 @@ impl ConfigureScreen {
                 self.cw_message_editor.perform(action);
                 self.draft.radio.cw_messages = self.cw_message_editor.text();
             }
+            Message::DigitalMessagesEdited(action) => {
+                self.digital_message_editor.perform(action);
+                self.draft.radio.digital_messages = self.digital_message_editor.text();
+            }
             Message::VoiceMessagesEdited(action) => {
                 self.voice_message_editor.perform(action);
                 self.draft.radio.voice_messages = self.voice_message_editor.text();
@@ -189,6 +200,12 @@ impl ConfigureScreen {
                     radio_io::validate_cw_messages(&self.draft.radio.cw_messages)
                         .err()
                         .or(Some("CW messages are valid.".to_string()))
+            }
+            Message::ValidateDigitalMessages => {
+                self.validation_message =
+                    radio_io::validate_digital_messages(&self.draft.radio.digital_messages)
+                        .err()
+                        .or(Some("Digital messages are valid.".to_string()))
             }
             Message::ValidateVoiceMessages => {
                 self.validation_message =
@@ -201,6 +218,11 @@ impl ConfigureScreen {
                 self.cw_message_editor =
                     text_editor::Content::with_text(&self.draft.radio.cw_messages);
             }
+            Message::ResetDigitalMessages => {
+                self.draft.radio.digital_messages = RadioSettings::default().digital_messages;
+                self.digital_message_editor =
+                    text_editor::Content::with_text(&self.draft.radio.digital_messages);
+            }
             Message::ResetVoiceMessages => {
                 self.draft.radio.voice_messages = RadioSettings::default().voice_messages;
                 self.voice_message_editor =
@@ -211,6 +233,8 @@ impl ConfigureScreen {
                 self.reset_numeric_fields();
                 self.cw_message_editor =
                     text_editor::Content::with_text(&self.draft.radio.cw_messages);
+                self.digital_message_editor =
+                    text_editor::Content::with_text(&self.draft.radio.digital_messages);
                 self.voice_message_editor =
                     text_editor::Content::with_text(&self.draft.radio.voice_messages);
             }
@@ -582,6 +606,20 @@ impl ConfigureScreen {
                 row![
                     button("Validate").on_press(Message::ValidateCwMessages),
                     button("Reset to defaults").on_press(Message::ResetCwMessages)
+                ]
+                .spacing(10),
+            ],
+        ));
+        content = content.push(section(
+            "Digital messages",
+            column![
+                text_editor(&self.digital_message_editor)
+                    .placeholder("Digital messages")
+                    .on_action(Message::DigitalMessagesEdited)
+                    .height(220),
+                row![
+                    button("Validate").on_press(Message::ValidateDigitalMessages),
+                    button("Reset to defaults").on_press(Message::ResetDigitalMessages)
                 ]
                 .spacing(10),
             ],

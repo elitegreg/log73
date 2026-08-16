@@ -6,6 +6,7 @@ import {
   cwActiveTimeoutMs,
   messageActionForRadioMode,
   messageButtonIsSendable,
+  modeIsDigital,
   modeIsPhone,
 } from '../mainWindowHelpers';
 import {
@@ -112,7 +113,9 @@ export function useMessageSending({
     const sendableKeys = [];
     const labels = modeIsPhone(radioMode)
       ? (messageLabels?.voice ?? null)
-      : (messageLabels?.cw ?? messageLabels);
+      : modeIsDigital(radioMode)
+        ? (messageLabels?.digital ?? messageLabels?.cw ?? messageLabels)
+        : (messageLabels?.cw ?? messageLabels);
 
     for (const key of keys) {
       const action = messageActionForRadioMode(
@@ -121,6 +124,7 @@ export function useMessageSending({
         mode,
         key,
         radioMode,
+        radio?.digital_messages,
       );
       if (action && performMessageAction(action)) {
         continue;

@@ -9,6 +9,7 @@ import {
   adifModeForLoggerMode,
   isSelectableMode,
   modeIsCw,
+  modeIsDigital,
   modeIsPhone,
   normalizeLoggerMode,
 } from '../domain/modes.js';
@@ -17,7 +18,13 @@ import {
   messageActionForConfig,
 } from '../domain/messages.js';
 
-export { adifModeForLoggerMode, isSelectableMode, modeIsCw, modeIsPhone };
+export {
+  adifModeForLoggerMode,
+  isSelectableMode,
+  modeIsCw,
+  modeIsDigital,
+  modeIsPhone,
+};
 
 export const MODE_OPTIONS = LOGGER_MODE_OPTIONS;
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
@@ -318,8 +325,13 @@ export function messageActionForRadioMode(
   mode,
   key,
   radioMode,
+  digitalConfig = cwConfig,
 ) {
-  const config = modeIsPhone(radioMode) ? voiceConfig : cwConfig;
+  const config = modeIsPhone(radioMode)
+    ? voiceConfig
+    : modeIsDigital(radioMode)
+      ? digitalConfig
+      : cwConfig;
   return cwActionForMessage(config, mode, key);
 }
 

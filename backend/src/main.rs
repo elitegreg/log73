@@ -593,6 +593,14 @@ async fn main() {
         .route("/radios/cw-messages/default", get(default_cw_messages))
         .route("/radios/cw-messages/validate", post(validate_cw_messages))
         .route(
+            "/radios/digital-messages/default",
+            get(default_digital_messages),
+        )
+        .route(
+            "/radios/digital-messages/validate",
+            post(validate_digital_messages),
+        )
+        .route(
             "/radios/voice-messages/default",
             get(default_voice_messages),
         )
@@ -2041,6 +2049,7 @@ async fn message_labels(
     match app_state.db.radio(id).await {
         Ok(Some(radio)) => Ok(Json(serde_json::json!({
             "cw": cw::labels(&radio.cw_messages),
+            "digital": cw::labels(&radio.digital_messages),
             "voice": voice_messages::labels(&radio.voice_messages)
         }))),
         Ok(None) => Err(ApiError::not_found("not found")),
@@ -2051,6 +2060,11 @@ async fn message_labels(
 #[derive(Debug, serde::Deserialize)]
 struct CwMessagesPayload {
     cw_messages: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DigitalMessagesPayload {
+    digital_messages: String,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -2067,6 +2081,22 @@ async fn validate_cw_messages(Json(payload): Json<CwMessagesPayload>) -> Json<se
         Ok(()) => Json(serde_json::json!({
             "ok": true,
             "labels": cw::labels(&payload.cw_messages)
+        })),
+        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
+    }
+}
+
+async fn default_digital_messages() -> Json<String> {
+    Json(radio_io::digital_messages::DEFAULT_DIGITAL_MESSAGES.to_string())
+}
+
+async fn validate_digital_messages(
+    Json(payload): Json<DigitalMessagesPayload>,
+) -> Json<serde_json::Value> {
+    match radio_io::validate_digital_messages(&payload.digital_messages) {
+        Ok(()) => Json(serde_json::json!({
+            "ok": true,
+            "labels": cw::labels(&payload.digital_messages)
         })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
     }

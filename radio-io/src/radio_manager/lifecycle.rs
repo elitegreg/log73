@@ -327,6 +327,7 @@ mod tests {
                 cw_serial_baud_rate: 9_600,
                 cw_serial_line: "dtr".to_string(),
                 cw_messages: DEFAULT_CW_MESSAGES.to_string(),
+                digital_messages: crate::digital_messages::DEFAULT_DIGITAL_MESSAGES.to_string(),
                 voice_messages: DEFAULT_VOICE_MESSAGES.to_string(),
             },
         )

@@ -1,4 +1,4 @@
-use crate::{cw, modes, voice_messages};
+use crate::{cw, digital_messages, modes, voice_messages};
 use radio_cat_rs::supported_drivers;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -22,6 +22,7 @@ const MAX_SERIAL_PORT_LEN: usize = 255;
 const MAX_SOUND_DEVICE_ID_LEN: usize = 1024;
 const MAX_RADIO_TUNING_INCREMENT_HZ: u32 = 9_999;
 const MAX_CW_MESSAGES_LEN: usize = 16_384;
+const MAX_DIGITAL_MESSAGES_LEN: usize = 16_384;
 const MAX_VOICE_MESSAGES_LEN: usize = 16_384;
 const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat", "serial"];
 
@@ -65,6 +66,7 @@ pub struct RadioSettings {
     pub cw_serial_baud_rate: u32,
     pub cw_serial_line: String,
     pub cw_messages: String,
+    pub digital_messages: String,
     pub voice_messages: String,
 }
 
@@ -103,6 +105,7 @@ impl Default for RadioSettings {
             cw_serial_baud_rate: DEFAULT_CW_SERIAL_BAUD_RATE,
             cw_serial_line: DEFAULT_CW_SERIAL_LINE.to_string(),
             cw_messages: cw::DEFAULT_CW_MESSAGES.to_string(),
+            digital_messages: digital_messages::DEFAULT_DIGITAL_MESSAGES.to_string(),
             voice_messages: voice_messages::DEFAULT_VOICE_MESSAGES.to_string(),
         }
     }
@@ -317,6 +320,7 @@ pub fn validate_radio_settings(settings: &RadioSettings) -> Result<(), String> {
         }
     }
     validate_cw_messages(&settings.cw_messages)?;
+    validate_digital_messages(&settings.digital_messages)?;
     validate_voice_messages(&settings.voice_messages)
 }
 
@@ -331,6 +335,11 @@ fn normalized_digital_program(value: &str) -> Result<String, String> {
 
 pub fn validate_cw_messages(value: &str) -> Result<(), String> {
     validate_message_text("CW messages", value, MAX_CW_MESSAGES_LEN)?;
+    cw::validate(value).map(|_| ())
+}
+
+pub fn validate_digital_messages(value: &str) -> Result<(), String> {
+    validate_message_text("Digital messages", value, MAX_DIGITAL_MESSAGES_LEN)?;
     cw::validate(value).map(|_| ())
 }
 
@@ -446,6 +455,10 @@ mod tests {
         assert!(!settings.flrig_enabled);
         assert_eq!(settings.flrig_port, DEFAULT_FLRIG_PORT);
         assert_eq!(settings.cw_messages, cw::DEFAULT_CW_MESSAGES);
+        assert_eq!(
+            settings.digital_messages,
+            digital_messages::DEFAULT_DIGITAL_MESSAGES
+        );
     }
 
     #[test]

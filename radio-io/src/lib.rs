@@ -11,6 +11,7 @@ mod websocket;
 mod wsjtx;
 
 pub mod cw;
+pub mod digital_messages;
 pub mod modes;
 pub mod voice_keyer;
 pub mod voice_messages;
@@ -21,7 +22,7 @@ pub use config::{
     DEFAULT_CW_TUNING_INCREMENT_HZ, DEFAULT_FLDIGI_HOST, DEFAULT_FLDIGI_PORT, DEFAULT_FLRIG_PORT,
     DEFAULT_SSB_TUNING_INCREMENT_HZ, DEFAULT_WSJTX_BIND_ADDRESS, DEFAULT_WSJTX_PORT, RadioConfig,
     RadioIoConfig, RadioSettings, normalize_radio_settings, validate_cw_messages,
-    validate_radio_settings, validate_voice_messages,
+    validate_digital_messages, validate_radio_settings, validate_voice_messages,
 };
 pub use digital_io::{DigitalIoEvent, DigitalIoManager, DigitalIoTargetState};
 pub use ham_radio_digital_interfacing::fldigi::{

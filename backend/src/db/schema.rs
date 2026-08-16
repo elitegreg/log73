@@ -58,6 +58,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
             CW_SERIAL_BAUD_RATE INTEGER NOT NULL DEFAULT 9600 CHECK (CW_SERIAL_BAUD_RATE > 0),
             CW_SERIAL_LINE TEXT NOT NULL DEFAULT 'dtr',
             CW_MESSAGES TEXT NOT NULL,
+            DIGITAL_MESSAGES TEXT NOT NULL,
             VOICE_MESSAGES TEXT NOT NULL,
             CONTROL_LOCATION TEXT NOT NULL DEFAULT 'backend' CHECK (CONTROL_LOCATION IN ('backend', 'client')),
             CLIENT_INSTANCE_ID TEXT,

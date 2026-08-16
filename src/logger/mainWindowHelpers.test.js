@@ -330,7 +330,7 @@ test('messageButtonIsSendable requires a non-empty message label', () => {
   assert.equal(messageButtonIsSendable({ key: 'F1', label: 'Cq' }), true);
 });
 
-test('messageActionForRadioMode uses CW config in CW modes and voice config in phone modes', () => {
+test('messageActionForRadioMode selects the config for each radio mode family', () => {
   const cwConfig = `
 # RUN Messages
 F12 Clear,{Action:Clear}
@@ -343,6 +343,12 @@ F12 Voice Clear,{Action:Clear}
 # S&P Messages
 F12 Voice Clear,{Action:Clear}
 `;
+  const digitalConfig = `
+# RUN Messages
+F12 Digital Clear,{Action:Clear}
+# S&P Messages
+F12 Digital Clear,{Action:Clear}
+`;
 
   assert.equal(
     messageActionForRadioMode(cwConfig, voiceConfig, 'run', 'F12', 'CW'),
@@ -354,6 +360,17 @@ F12 Voice Clear,{Action:Clear}
   );
   assert.equal(
     messageActionForRadioMode(cwConfig, voiceConfig, 's&p', 'F12', 'FM'),
+    'Clear',
+  );
+  assert.equal(
+    messageActionForRadioMode(
+      cwConfig,
+      voiceConfig,
+      'run',
+      'F12',
+      'DATA',
+      digitalConfig,
+    ),
     'Clear',
   );
 });

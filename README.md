@@ -393,6 +393,8 @@ GET    /api/radios/:id/cw-labels
 GET    /api/radios/:id/message-labels
 GET    /api/radios/cw-messages/default
 POST   /api/radios/cw-messages/validate
+GET    /api/radios/digital-messages/default
+POST   /api/radios/digital-messages/validate
 GET    /api/radios/voice-messages/default
 POST   /api/radios/voice-messages/validate
 ```
@@ -516,6 +518,7 @@ cw_serial_port
 cw_serial_baud_rate
 cw_serial_line
 cw_messages
+digital_messages
 voice_messages
 ```
 
@@ -540,6 +543,7 @@ cw_serial_port: ""
 cw_serial_baud_rate: 9600
 cw_serial_line: dtr
 cw_messages: built-in default Run/S&P CW function-key messages
+digital_messages: built-in Run/S&P digital function-key messages (initially copied from the CW defaults)
 voice_messages: built-in default Run/S&P voice function-key messages
 ```
 
