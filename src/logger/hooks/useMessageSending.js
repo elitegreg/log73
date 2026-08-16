@@ -3,8 +3,8 @@ import {
   CW_REPEAT_DELAY_MS,
   DEFAULT_MESSAGE_LABELS,
   createMessageRequestId,
-  cwActiveTimeoutMs,
   messageActionForRadioMode,
+  messageActiveTimeoutMs,
   messageButtonIsSendable,
   modeIsDigital,
   modeIsPhone,
@@ -75,7 +75,7 @@ export function useMessageSending({
     setActiveMessageKeys(
       activeMessageKeysFromRequests(activeMessageRequestsRef.current),
     );
-    const timeoutMs = cwActiveTimeoutMs(radio?.cw_keyer_type);
+    const timeoutMs = messageActiveTimeoutMs(radioMode, radio?.cw_keyer_type);
     const timeoutId = window.setTimeout(
       () => clearMessageRequest(requestId),
       timeoutMs,

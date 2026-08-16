@@ -1,7 +1,7 @@
 use crate::{
-    DigitalIoEvent, DigitalIoManager, DigitalIoTargetState, FldigiCommand, RadioClientMessage,
-    RadioCommand, RadioConfig, RadioIoConfig, RadioManager, RadioServerMessage, WsjtXEvent,
-    WsjtXManager, WsjtXTargetState, cw, is_valid_message_mode, modes,
+    DigitalIoEvent, DigitalIoManager, DigitalIoTargetState, RadioClientMessage, RadioCommand,
+    RadioConfig, RadioIoConfig, RadioManager, RadioServerMessage, WsjtXEvent, WsjtXManager,
+    WsjtXTargetState, cw, is_valid_message_mode, modes,
 };
 use axum::{
     Extension,
@@ -695,6 +695,21 @@ async fn handle_radio_socket(
             }
             Ok(RadioClientMessage::StopKeying) => {
                 let _ = radio_handle.send_command(RadioCommand::StopKeying).await;
+                let current_mode = radio_handle
+                    .current_state()
+                    .await
+                    .map(|radio_state| radio_state.mode);
+                if current_mode
+                    .as_deref()
+                    .is_some_and(|mode| fldigi_enabled_for_mode(&config, mode))
+                    && let Some(identity) = &identity
+                    && let Err(error) = state
+                        .digital_io_manager
+                        .stop_transmitting(radio_id, &identity.logger_id)
+                        .await
+                {
+                    send_digital_io_error(&direct_tx, identity.log_id, error).await;
+                }
             }
             Ok(RadioClientMessage::SetWpm { wpm }) => {
                 if let Err(error) = validate_cw_wpm(wpm) {
@@ -749,7 +764,7 @@ async fn handle_radio_socket(
                 }
                 if let Err(error) = state
                     .digital_io_manager
-                    .send(radio_id, &identity.logger_id, FldigiCommand::Transmit(text))
+                    .transmit(radio_id, &identity.logger_id, text)
                     .await
                 {
                     warn!(radio_id, logger_id = %identity.logger_id, %error, "unable to send digital I/O text");
@@ -765,11 +780,7 @@ async fn handle_radio_socket(
                 };
                 if let Err(error) = state
                     .digital_io_manager
-                    .send(
-                        radio_id,
-                        &identity.logger_id,
-                        FldigiCommand::ClearReceiveBuffer,
-                    )
+                    .clear_receive_buffer(radio_id, &identity.logger_id)
                     .await
                 {
                     warn!(radio_id, logger_id = %identity.logger_id, %error, "unable to clear digital I/O text");
@@ -1020,19 +1031,18 @@ async fn send_fldigi_text(
     request_id: Option<String>,
     direct_tx: &mpsc::Sender<RadioServerMessage>,
 ) {
-    let result = if text.is_empty() {
-        Ok(())
-    } else {
-        manager
-            .send(radio_id, &identity.logger_id, FldigiCommand::Transmit(text))
-            .await
-    };
-    match result {
-        Ok(()) => {
+    if text.is_empty() {
+        if let Some(request_id) = request_id {
+            let _ = direct_tx
+                .send(RadioServerMessage::MessageSent { request_id })
+                .await;
+        }
+        return;
+    }
+    match manager.transmit(radio_id, &identity.logger_id, text).await {
+        Ok(completed) => {
             if let Some(request_id) = request_id {
-                let _ = direct_tx
-                    .send(RadioServerMessage::MessageSent { request_id })
-                    .await;
+                spawn_radio_message_completion(direct_tx.clone(), request_id, completed);
             }
         }
         Err(error) => send_digital_io_error(direct_tx, identity.log_id, error).await,
@@ -1412,6 +1422,46 @@ mod tests {
         ));
         assert!(digital_io_event_message(event.clone(), 1, "logger-2").is_none());
         assert!(digital_io_event_message(event, 2, "logger-1").is_none());
+    }
+
+    #[tokio::test]
+    async fn message_sent_waits_for_successful_transmission_completion() {
+        let (direct_tx, mut direct_rx) = mpsc::channel(2);
+        let (completed, result) = oneshot::channel();
+        spawn_radio_message_completion(direct_tx, "request-1".to_string(), result);
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(10), direct_rx.recv())
+                .await
+                .is_err()
+        );
+        completed.send(Ok(())).expect("transmission completes");
+
+        let message = tokio::time::timeout(std::time::Duration::from_secs(1), direct_rx.recv())
+            .await
+            .expect("completion message arrives")
+            .expect("completion channel remains open");
+        assert_eq!(
+            message,
+            RadioServerMessage::MessageSent {
+                request_id: "request-1".to_string(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_or_cancelled_transmission_does_not_report_message_sent() {
+        let (direct_tx, mut direct_rx) = mpsc::channel(2);
+        let (completed, result) = oneshot::channel();
+        spawn_radio_message_completion(direct_tx, "request-1".to_string(), result);
+        completed
+            .send(Err("FLDigi transmission cancelled".to_string()))
+            .expect("transmission is cancelled");
+
+        let message = tokio::time::timeout(std::time::Duration::from_secs(1), direct_rx.recv())
+            .await
+            .expect("completion is processed");
+        assert!(message.is_none());
     }
 
     #[tokio::test]

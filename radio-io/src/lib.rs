@@ -27,7 +27,8 @@ pub use config::{
 pub use digital_io::{DigitalIoEvent, DigitalIoManager, DigitalIoTargetState};
 pub use ham_radio_digital_interfacing::fldigi::{
     DEFAULT_FLDIGI_ENDPOINT, DEFAULT_FLDIGI_POLL_INTERVAL, DEFAULT_FLDIGI_REQUEST_TIMEOUT,
-    FldigiCommand, FldigiConfig, FldigiError, FldigiInterface,
+    DEFAULT_FLDIGI_TX_POLL_INTERVAL, FldigiConfig, FldigiError, FldigiInterface,
+    FldigiInterfaceError, FldigiTransmission, FldigiTransmissionError,
 };
 pub use message_mode::is_valid_message_mode;
 pub use radio::{

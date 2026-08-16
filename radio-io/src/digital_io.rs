@@ -1,6 +1,6 @@
 use crate::{
-    DEFAULT_FLDIGI_POLL_INTERVAL, DEFAULT_FLDIGI_REQUEST_TIMEOUT, FldigiCommand, FldigiConfig,
-    FldigiInterface, RadioConfig, RadioState,
+    DEFAULT_FLDIGI_POLL_INTERVAL, DEFAULT_FLDIGI_REQUEST_TIMEOUT, DEFAULT_FLDIGI_TX_POLL_INTERVAL,
+    FldigiConfig, FldigiInterface, RadioConfig, RadioState,
 };
 use std::{collections::HashMap, sync::Arc};
 use tokio::{
@@ -63,9 +63,17 @@ pub enum DigitalIoEvent {
 }
 
 enum ControllerCommand {
-    Send {
+    Transmit {
         logger_id: String,
-        command: FldigiCommand,
+        accepted: oneshot::Sender<Result<oneshot::Receiver<Result<(), String>>, String>>,
+        text: String,
+    },
+    StopTransmit {
+        logger_id: String,
+        completed: oneshot::Sender<Result<(), String>>,
+    },
+    ClearReceiveBuffer {
+        logger_id: String,
         completed: oneshot::Sender<Result<(), String>>,
     },
     Shutdown(oneshot::Sender<()>),
@@ -75,7 +83,20 @@ struct RunningDigitalIo {
     target: DigitalIoTarget,
     shutdown: oneshot::Sender<()>,
     task: JoinHandle<()>,
-    commands: mpsc::Sender<FldigiCommand>,
+    commands: mpsc::Sender<RunningCommand>,
+}
+
+enum RunningCommand {
+    Transmit {
+        text: String,
+        completed: oneshot::Sender<Result<(), String>>,
+    },
+    StopTransmit {
+        completed: oneshot::Sender<Result<(), String>>,
+    },
+    ClearReceiveBuffer {
+        completed: oneshot::Sender<Result<(), String>>,
+    },
 }
 
 impl DigitalIoManager {
@@ -224,11 +245,73 @@ impl DigitalIoManager {
         Ok(state)
     }
 
-    pub async fn send(
+    pub async fn transmit(
         &self,
         radio_id: i64,
         logger_id: &str,
-        command: FldigiCommand,
+        text: String,
+    ) -> Result<oneshot::Receiver<Result<(), String>>, String> {
+        let commands = {
+            let listeners = self.inner.listeners.lock().await;
+            let listener = listeners
+                .get(&radio_id)
+                .ok_or_else(|| format!("radio {radio_id} has no open logger"))?;
+            if !listener
+                .target
+                .as_ref()
+                .is_some_and(|target| target.logger_id == logger_id)
+            {
+                return Err("digital I/O is not enabled for this logger".to_string());
+            }
+            listener.commands.clone()
+        };
+        let (accepted, result) = oneshot::channel();
+        commands
+            .send(ControllerCommand::Transmit {
+                logger_id: logger_id.to_string(),
+                accepted,
+                text,
+            })
+            .await
+            .map_err(|_| "digital I/O controller is unavailable".to_string())?;
+        result.await.map_err(|_| {
+            "digital I/O controller stopped before accepting the transmission".to_string()
+        })?
+    }
+
+    pub async fn stop_transmitting(&self, radio_id: i64, logger_id: &str) -> Result<(), String> {
+        self.control(radio_id, logger_id, |logger_id, completed| {
+            ControllerCommand::StopTransmit {
+                logger_id,
+                completed,
+            }
+        })
+        .await
+    }
+
+    pub async fn clear_receive_buffer(&self, radio_id: i64, logger_id: &str) -> Result<(), String> {
+        self.control(radio_id, logger_id, |logger_id, completed| {
+            ControllerCommand::ClearReceiveBuffer {
+                logger_id,
+                completed,
+            }
+        })
+        .await
+    }
+
+    pub fn subscribe_targets(&self) -> broadcast::Receiver<DigitalIoTargetState> {
+        self.inner.targets.subscribe()
+    }
+
+    pub fn subscribe_events(&self) -> broadcast::Receiver<DigitalIoEvent> {
+        self.inner.events.subscribe()
+    }
+
+    async fn control(
+        &self,
+        radio_id: i64,
+        logger_id: &str,
+        command: impl FnOnce(String, oneshot::Sender<Result<(), String>>) -> ControllerCommand,
     ) -> Result<(), String> {
         let commands = {
             let listeners = self.inner.listeners.lock().await;
@@ -246,24 +329,12 @@ impl DigitalIoManager {
         };
         let (completed, result) = oneshot::channel();
         commands
-            .send(ControllerCommand::Send {
-                logger_id: logger_id.to_string(),
-                command,
-                completed,
-            })
+            .send(command(logger_id.to_string(), completed))
             .await
             .map_err(|_| "digital I/O controller is unavailable".to_string())?;
-        result
-            .await
-            .map_err(|_| "digital I/O controller stopped before sending".to_string())?
-    }
-
-    pub fn subscribe_targets(&self) -> broadcast::Receiver<DigitalIoTargetState> {
-        self.inner.targets.subscribe()
-    }
-
-    pub fn subscribe_events(&self) -> broadcast::Receiver<DigitalIoEvent> {
-        self.inner.events.subscribe()
+        result.await.map_err(|_| {
+            "digital I/O controller stopped before completing the command".to_string()
+        })?
     }
 }
 
@@ -352,7 +423,7 @@ async fn run_controller(
                 running = reconcile(running, radio_id, &config, &mode, target, &events).await;
             }
             command = commands.recv() => match command {
-                Some(ControllerCommand::Send { logger_id, command, completed }) => {
+                Some(ControllerCommand::Transmit { logger_id, text, accepted }) => {
                     if running.is_none() {
                         let target = target_updates.borrow().clone();
                         running = reconcile(
@@ -366,14 +437,63 @@ async fn run_controller(
                         .await;
                     }
                     let result = if let Some(running) = &running {
-                        running.commands.send(command).await.map_err(|_| {
+                        let (completed, result) = oneshot::channel();
+                        running.commands.send(RunningCommand::Transmit { text, completed }).await.map(|()| result).map_err(|_| {
                             warn!(radio_id, logger_id, "FLDigi command channel closed");
                             "FLDigi command channel is unavailable".to_string()
                         })
                     } else {
                         Err("FLDigi is not active for this logger and mode".to_string())
                     };
-                    let _ = completed.send(result);
+                    if let Err(error) = &result {
+                        warn!(radio_id, logger_id, %error, "unable to queue FLDigi transmission");
+                    }
+                    let _ = accepted.send(result);
+                }
+                Some(ControllerCommand::StopTransmit { logger_id, completed }) => {
+                    let result = if let Some(running) = &running {
+                        running.commands.send(RunningCommand::StopTransmit { completed }).await.map_err(|error| {
+                            warn!(radio_id, logger_id, "FLDigi command channel closed");
+                            let RunningCommand::StopTransmit { completed } = error.0 else { unreachable!() };
+                            let _ = completed.send(Err("FLDigi command channel is unavailable".to_string()));
+                            "FLDigi command channel is unavailable".to_string()
+                        })
+                    } else {
+                        let _ = completed.send(Ok(()));
+                        Ok(())
+                    };
+                    if let Err(error) = result {
+                        warn!(radio_id, logger_id, %error, "unable to queue FLDigi stop command");
+                    }
+                }
+                Some(ControllerCommand::ClearReceiveBuffer { logger_id, completed }) => {
+                    if running.is_none() {
+                        let target = target_updates.borrow().clone();
+                        running = reconcile(
+                            running,
+                            radio_id,
+                            &config,
+                            &mode,
+                            target,
+                            &events,
+                        )
+                        .await;
+                    }
+                    let result = if let Some(running) = &running {
+                        running.commands.send(RunningCommand::ClearReceiveBuffer { completed }).await.map_err(|error| {
+                            warn!(radio_id, logger_id, "FLDigi command channel closed");
+                            let RunningCommand::ClearReceiveBuffer { completed } = error.0 else { unreachable!() };
+                            let _ = completed.send(Err("FLDigi command channel is unavailable".to_string()));
+                            "FLDigi command channel is unavailable".to_string()
+                        })
+                    } else {
+                        let error = "FLDigi is not active for this logger and mode".to_string();
+                        let _ = completed.send(Err(error.clone()));
+                        Err(error)
+                    };
+                    if let Err(error) = result {
+                        warn!(radio_id, logger_id, %error, "unable to queue FLDigi clear command");
+                    }
                 }
                 Some(ControllerCommand::Shutdown(completed)) => {
                     stop_running(running).await;
@@ -461,13 +581,15 @@ fn start_running(
     let interface = FldigiInterface::start(FldigiConfig {
         endpoint: format!("http://{}:{}/RPC2", config.fldigi_host, config.fldigi_port),
         poll_interval: DEFAULT_FLDIGI_POLL_INTERVAL,
+        tx_poll_interval: DEFAULT_FLDIGI_TX_POLL_INTERVAL,
         request_timeout: DEFAULT_FLDIGI_REQUEST_TIMEOUT,
     })?;
-    let commands = interface.commands.clone();
+    let (commands, command_rx) = mpsc::channel(32);
     let (shutdown, shutdown_rx) = oneshot::channel();
     let events = events.clone();
     let task = tokio::spawn(run_fldigi_interface(
         interface,
+        command_rx,
         shutdown_rx,
         radio_id,
         target.clone(),
@@ -490,6 +612,7 @@ async fn stop_running(running: Option<RunningDigitalIo>) {
 
 async fn run_fldigi_interface(
     mut interface: FldigiInterface,
+    mut commands: mpsc::Receiver<RunningCommand>,
     mut shutdown: oneshot::Receiver<()>,
     radio_id: i64,
     target: DigitalIoTarget,
@@ -501,6 +624,39 @@ async fn run_fldigi_interface(
                 interface.shutdown().await;
                 return;
             }
+            command = commands.recv() => match command {
+                Some(RunningCommand::Transmit { text, completed }) => {
+                    match interface.transmit(text).await {
+                        Ok(transmission) => {
+                            tokio::spawn(async move {
+                                let result = transmission.await.map_err(|error| error.to_string());
+                                let _ = completed.send(result);
+                            });
+                        }
+                        Err(error) => {
+                            let _ = completed.send(Err(error.to_string()));
+                        }
+                    }
+                }
+                Some(RunningCommand::StopTransmit { completed }) => {
+                    let result = interface
+                        .clear_transmit_buffer()
+                        .await
+                        .map_err(|error| error.to_string());
+                    let _ = completed.send(result);
+                }
+                Some(RunningCommand::ClearReceiveBuffer { completed }) => {
+                    let result = interface
+                        .clear_receive_buffer()
+                        .await
+                        .map_err(|error| error.to_string());
+                    let _ = completed.send(result);
+                }
+                None => {
+                    interface.shutdown().await;
+                    return;
+                }
+            },
             text = interface.received.recv() => match text {
                 Some(text) => {
                     let _ = events.send(DigitalIoEvent::Received {
@@ -569,25 +725,25 @@ mod tests {
             .await
             .expect("logger registers");
 
-        let not_targeted = manager
-            .send(1, "logger-1", FldigiCommand::Transmit("CQ".to_string()))
-            .await;
-        assert_eq!(
+        let not_targeted = manager.transmit(1, "logger-1", "CQ".to_string()).await;
+        assert!(matches!(
             not_targeted,
-            Err("digital I/O is not enabled for this logger".to_string())
-        );
+            Err(error) if error == "digital I/O is not enabled for this logger"
+        ));
 
         manager
             .set_target(1, "logger-1", true)
             .await
             .expect("logger becomes target");
-        let inactive_mode = manager
-            .send(1, "logger-1", FldigiCommand::Transmit("CQ".to_string()))
-            .await;
-        assert_eq!(
+        manager
+            .stop_transmitting(1, "logger-1")
+            .await
+            .expect("stopping is idempotent when FLDigi is inactive");
+        let inactive_mode = manager.transmit(1, "logger-1", "CQ".to_string()).await;
+        assert!(matches!(
             inactive_mode,
-            Err("FLDigi is not active for this logger and mode".to_string())
-        );
+            Err(error) if error == "FLDigi is not active for this logger and mode"
+        ));
 
         manager.shutdown_all().await;
         drop(updates);

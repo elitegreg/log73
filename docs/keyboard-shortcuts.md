@@ -35,6 +35,7 @@ This page summarizes keyboard shortcuts and special key behavior in the logger U
 - `Shift+Tab` moves to the previous editable field and wraps within the log entry fields.
 
 In DATA/RTTY, function-key messages use the digital message bank and transmit through FLDigi when it is configured for that mode and this logger is the selected Digital I/O target.
+Message buttons remain highlighted until FLDigi reports transmit completion. `Esc` or Stop Sending aborts FLDigi transmission, clears queued transmit text, and returns FLDigi to receive.
 
 ## Send Text dialog (`Ctrl+K`)
 

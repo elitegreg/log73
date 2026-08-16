@@ -442,6 +442,7 @@ When cursor is in callsign field:
 - Fixed/read-only fields are skipped for custom forward tabbing.
 
 In DATA/RTTY, function-key messages use the digital message bank and transmit through FLDigi when it is configured for that mode and this logger is the selected Digital I/O target.
+Message buttons remain highlighted until FLDigi reports that their text has finished transmitting. Stop Sending or `Esc` aborts the active transmission, clears queued FLDigi transmit text, and returns FLDigi to receive.
 
 ### Send Text dialog (`Ctrl+K`)
 
