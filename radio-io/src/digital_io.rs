@@ -66,6 +66,7 @@ enum ControllerCommand {
     Send {
         logger_id: String,
         command: FldigiCommand,
+        completed: oneshot::Sender<Result<(), String>>,
     },
     Shutdown(oneshot::Sender<()>),
 }
@@ -243,13 +244,18 @@ impl DigitalIoManager {
             }
             listener.commands.clone()
         };
+        let (completed, result) = oneshot::channel();
         commands
             .send(ControllerCommand::Send {
                 logger_id: logger_id.to_string(),
                 command,
+                completed,
             })
             .await
-            .map_err(|_| "digital I/O controller is unavailable".to_string())
+            .map_err(|_| "digital I/O controller is unavailable".to_string())?;
+        result
+            .await
+            .map_err(|_| "digital I/O controller stopped before sending".to_string())?
     }
 
     pub fn subscribe_targets(&self) -> broadcast::Receiver<DigitalIoTargetState> {
@@ -346,12 +352,28 @@ async fn run_controller(
                 running = reconcile(running, radio_id, &config, &mode, target, &events).await;
             }
             command = commands.recv() => match command {
-                Some(ControllerCommand::Send { logger_id, command }) => {
-                    if let Some(running) = &running
-                        && running.commands.send(command).await.is_err()
-                    {
-                        warn!(radio_id, logger_id, "FLDigi command channel closed");
+                Some(ControllerCommand::Send { logger_id, command, completed }) => {
+                    if running.is_none() {
+                        let target = target_updates.borrow().clone();
+                        running = reconcile(
+                            running,
+                            radio_id,
+                            &config,
+                            &mode,
+                            target,
+                            &events,
+                        )
+                        .await;
                     }
+                    let result = if let Some(running) = &running {
+                        running.commands.send(command).await.map_err(|_| {
+                            warn!(radio_id, logger_id, "FLDigi command channel closed");
+                            "FLDigi command channel is unavailable".to_string()
+                        })
+                    } else {
+                        Err("FLDigi is not active for this logger and mode".to_string())
+                    };
+                    let _ = completed.send(result);
                 }
                 Some(ControllerCommand::Shutdown(completed)) => {
                     stop_running(running).await;
@@ -523,5 +545,51 @@ mod tests {
         config.fldigi_rtty_enabled = false;
         assert!(!digital_io_enabled_for_mode(&config, "DATA"));
         assert!(!digital_io_enabled_for_mode(&config, "RTTY"));
+    }
+
+    #[tokio::test]
+    async fn sending_requires_the_selected_logger_and_an_active_mode() {
+        let mut config = RadioConfig::new(1, crate::RadioSettings::default());
+        config.fldigi_data_enabled = true;
+        let (updates, update_rx) = broadcast::channel(4);
+        let manager = DigitalIoManager::new();
+        manager
+            .acquire(
+                1,
+                "logger-1",
+                42,
+                config,
+                Some(RadioState {
+                    frequency_hz: 14_074_000,
+                    mode: "CW".to_string(),
+                    rit_offset_hz: 0,
+                }),
+                update_rx,
+            )
+            .await
+            .expect("logger registers");
+
+        let not_targeted = manager
+            .send(1, "logger-1", FldigiCommand::Transmit("CQ".to_string()))
+            .await;
+        assert_eq!(
+            not_targeted,
+            Err("digital I/O is not enabled for this logger".to_string())
+        );
+
+        manager
+            .set_target(1, "logger-1", true)
+            .await
+            .expect("logger becomes target");
+        let inactive_mode = manager
+            .send(1, "logger-1", FldigiCommand::Transmit("CQ".to_string()))
+            .await;
+        assert_eq!(
+            inactive_mode,
+            Err("FLDigi is not active for this logger and mode".to_string())
+        );
+
+        manager.shutdown_all().await;
+        drop(updates);
     }
 }

@@ -659,9 +659,10 @@ High Contrast
 - The server indicator shows websocket connection status.
 - The title bar shows log, radio, contest, mode, and frequency.
 - CW WPM is stored in browser local storage under `log73.cw_wpm` and sent to the backend when the websocket is connected.
-- Function-key labels are loaded from `/api/radios/:id/message-labels` for separate CW/voice and Run/S&P banks.
-- Run/S&P operating mode chooses which function-key bank is active; radio mode chooses CW messages or voice messages.
-- Run F1 can be repeated automatically after CW or voice-keyer completion when repeat is enabled.
+- Function-key labels are loaded from `/api/radios/:id/message-labels` for separate CW/digital/voice and Run/S&P banks.
+- Run/S&P operating mode chooses which function-key bank is active; radio mode chooses CW, digital, or voice messages. DATA/RTTY messages transmit through FLDigi when this logger owns the Digital I/O target.
+- Run F1 can be repeated automatically after CW or voice-keyer completion, or FLDigi queue acceptance, when repeat is enabled.
+- Ctrl+K opens Send Text for CW or targeted FLDigi DATA/RTTY operation.
 - S&P F1 sends the QRL message and then switches to Run mode.
 - Stop Sending sends a websocket `stop_keying` command to stop CW or voice keying.
 - Exit Logger returns to the log/radio selection screen.

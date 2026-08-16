@@ -30,7 +30,7 @@ pub enum RadioClientMessage {
         keys: Vec<String>,
         fields: serde_json::Map<String, serde_json::Value>,
     },
-    SendCwText {
+    SendText {
         request_id: String,
         text: String,
         #[serde(default = "default_wait_for_completion")]
@@ -131,7 +131,7 @@ pub enum RadioCommand {
         fields: serde_json::Map<String, serde_json::Value>,
         completed: tokio::sync::oneshot::Sender<Result<(), String>>,
     },
-    SendCwText {
+    SendText {
         text: String,
         wait_for_completion: bool,
         completed: tokio::sync::oneshot::Sender<Result<(), String>>,
@@ -269,18 +269,26 @@ mod tests {
         );
 
         let command = serde_json::from_value::<RadioClientMessage>(serde_json::json!({
-            "type": "send_cw_text",
-            "request_id": "cw-1",
+            "type": "send_text",
+            "request_id": "text-1",
             "text": "CQ"
         }))
         .expect("command deserializes");
         assert!(matches!(
             command,
-            RadioClientMessage::SendCwText {
+            RadioClientMessage::SendText {
                 wait_for_completion: true,
                 ..
             }
         ));
+        assert!(
+            serde_json::from_value::<RadioClientMessage>(serde_json::json!({
+                "type": "send_cw_text",
+                "request_id": "text-1",
+                "text": "CQ"
+            }))
+            .is_err()
+        );
     }
 
     #[test]

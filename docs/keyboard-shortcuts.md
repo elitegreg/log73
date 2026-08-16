@@ -8,10 +8,10 @@ This page summarizes keyboard shortcuts and special key behavior in the logger U
 | ---------------- | --------------------------------------------------------- |
 | `Ctrl+O`         | Prompt/change operator callsign                           |
 | `F1`..`F12`      | Send message for active Run/S&P bank                      |
-| `Esc`            | Stop sending / clear queue (or close CW text dialog)      |
+| `Esc`            | Stop sending / clear queue (or close text dialog)         |
 | `PageUp`         | Increase CW WPM by 1                                      |
 | `PageDown`       | Decrease CW WPM by 1                                      |
-| `Ctrl+K`         | Open CW text dialog (CW/CW-R only)                        |
+| `Ctrl+K`         | Open text dialog for CW or targeted FLDigi DATA/RTTY      |
 | `Alt+PageUp`     | Shift band up                                             |
 | `Alt+PageDown`   | Shift band down                                           |
 | `ArrowUp`        | Tune up by configured increment (Using RIT in Run Mode)   |
@@ -34,7 +34,11 @@ This page summarizes keyboard shortcuts and special key behavior in the logger U
 - `Tab` moves to the next empty editable field; if none are empty, it moves to the next editable field. Forward tab wraps within the log entry fields.
 - `Shift+Tab` moves to the previous editable field and wraps within the log entry fields.
 
-## CW text dialog (`Ctrl+K`)
+In DATA/RTTY, function-key messages use the digital message bank and transmit through FLDigi when it is configured for that mode and this logger is the selected Digital I/O target.
+
+## Send Text dialog (`Ctrl+K`)
+
+The dialog sends through the CW keyer in CW/CW-R or through FLDigi in eligible DATA/RTTY operation. CW words are uppercased; FLDigi text preserves the entered letter case.
 
 | Key                       | Action                                |
 | ------------------------- | ------------------------------------- |

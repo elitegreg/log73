@@ -956,7 +956,7 @@
   font-weight: bold;
 }
 
-.cw-text-dialog-overlay {
+.text-dialog-overlay {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
@@ -966,7 +966,7 @@
   z-index: 1000;
 }
 
-.cw-text-dialog {
+.text-dialog {
   min-width: 340px;
   max-width: 520px;
   background: #d4d0c8;
@@ -975,20 +975,20 @@
   padding: 8px;
 }
 
-.cw-text-dialog-header {
+.text-dialog-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 8px;
 }
 
-.cw-text-dialog-body {
+.text-dialog-body {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.cw-text-dialog-sent {
+.text-dialog-sent {
   min-height: 20px;
   padding: 4px;
   border: 1px solid #808080;
@@ -999,7 +999,7 @@
   overflow-wrap: anywhere;
 }
 
-.cw-text-dialog-input {
+.text-dialog-input {
   border: 1px solid #808080;
   background: #fff;
   color: #000;

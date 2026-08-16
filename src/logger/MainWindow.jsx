@@ -47,7 +47,7 @@ import CommandButtons from './components/CommandButtons';
 import StatusBar from './components/StatusBar';
 import { useBandControls } from './hooks/useBandControls';
 import { useCompletions } from './hooks/useCompletions';
-import { useCwTextDialog } from './hooks/useCwTextDialog';
+import { useTextDialog } from './hooks/useTextDialog';
 import { useEntryFields } from './hooks/useEntryFields';
 import { useEsm } from './hooks/useEsm';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
@@ -105,7 +105,7 @@ function MainWindow({
   onIncrementRit,
   onDecrementRit,
   onSendMessage,
-  onSendCwText,
+  onSendText,
   onSendDxClusterSpot,
   onStopKeying,
   onSetCwWpm,
@@ -122,8 +122,10 @@ function MainWindow({
   const radioMode = radioState?.mode ?? 'CW';
   const wsjtxDataLocked = wsjtxDataModeLocked(radio, radioMode, wsjtxTarget);
   const digitalIoEnabled =
-    (String(radioMode).toUpperCase() === 'DATA' && radio?.fldigi_data_enabled) ||
+    (String(radioMode).toUpperCase() === 'DATA' &&
+      radio?.fldigi_data_enabled) ||
     (String(radioMode).toUpperCase() === 'RTTY' && radio?.fldigi_rtty_enabled);
+  const digitalTextEnabled = digitalIoEnabled && digitalIoTarget;
   useEffect(() => {
     const textArea = digitalIoTextRef.current;
     if (textArea) {
@@ -331,17 +333,19 @@ function MainWindow({
   });
 
   const {
-    isCwTextDialogOpen,
-    cwTextCommittedWords,
-    cwTextCurrentWord,
-    cwTextInputRef,
-    openCwTextDialog,
-    closeCwTextDialog,
-    handleCwTextInputChange,
-    handleCwTextInputKeyDown,
-  } = useCwTextDialog({
+    textSendingEnabled,
+    isTextDialogOpen,
+    textCommittedWords,
+    textCurrentWord,
+    textInputRef,
+    openTextDialog,
+    closeTextDialog,
+    handleTextInputChange,
+    handleTextInputKeyDown,
+  } = useTextDialog({
     radioMode,
-    onSendCwText,
+    digitalTextEnabled,
+    onSendText,
     callSignRef,
   });
 
@@ -413,6 +417,8 @@ function MainWindow({
     storeCurrentCqFrequency,
     markEsmExchangeSentForCurrentCallsign,
     clearEntryFields,
+    messageSendingEnabled:
+      !modeIsDigital(radioMode) || Boolean(digitalTextEnabled),
     onSendMessage,
     onStopKeying,
   });
@@ -432,9 +438,9 @@ function MainWindow({
     pendingBandMapTuneFrequencyRef.current = null;
     setEsmRunCallsignAttempt('');
     setEsmExchangeSentCallsign('');
-    closeCwTextDialog();
+    closeTextDialog();
   }, [
-    closeCwTextDialog,
+    closeTextDialog,
     setEsmEnabled,
     setEsmExchangeSentCallsign,
     setEsmRunCallsignAttempt,
@@ -449,12 +455,12 @@ function MainWindow({
   ]);
 
   useKeyboardShortcuts({
-    radioMode,
     bandMapSpotStore,
     radioFrequencyHz,
-    isCwTextDialogOpen,
-    openCwTextDialog,
-    closeCwTextDialog,
+    textSendingEnabled,
+    isTextDialogOpen,
+    openTextDialog,
+    closeTextDialog,
     jumpToLastCqFrequency,
     markCurrentFrequency,
     storeCurrentBandMapSpot,
@@ -820,7 +826,7 @@ function MainWindow({
       modeIsCw(radioMode) &&
       callsignHasQuery(callSign)
     ) {
-      onSendCwText?.({
+      onSendText?.({
         request_id: createMessageRequestId(),
         text: callSign,
       });
@@ -851,7 +857,7 @@ function MainWindow({
       operatingMode === 'Run' &&
       esmAction.correctionText
     ) {
-      onSendCwText?.({
+      onSendText?.({
         request_id: createMessageRequestId(),
         text: `${esmAction.correctionText} `,
       });
@@ -1160,34 +1166,34 @@ function MainWindow({
           />
         </div>
       ) : null}
-      {modeIsCw(radioMode) && isCwTextDialogOpen ? (
-        <div className="cw-text-dialog-overlay" onClick={closeCwTextDialog}>
+      {textSendingEnabled && isTextDialogOpen ? (
+        <div className="text-dialog-overlay" onClick={closeTextDialog}>
           <div
-            className="cw-text-dialog"
+            className="text-dialog"
             onClick={(event) => event.stopPropagation()}
           >
-            <div className="cw-text-dialog-header">
-              <strong>CW Text</strong>
+            <div className="text-dialog-header">
+              <strong>Send Text</strong>
               <button
                 className="title-button"
                 type="button"
-                aria-label="Close CW text dialog"
-                onClick={closeCwTextDialog}
+                aria-label="Close text dialog"
+                onClick={closeTextDialog}
               >
                 ×
               </button>
             </div>
-            <div className="cw-text-dialog-body">
-              <div className="cw-text-dialog-sent" aria-live="polite">
-                {cwTextCommittedWords.join(' ')}
+            <div className="text-dialog-body">
+              <div className="text-dialog-sent" aria-live="polite">
+                {textCommittedWords.join(' ')}
               </div>
               <input
-                ref={cwTextInputRef}
-                className="cw-text-dialog-input"
+                ref={textInputRef}
+                className="text-dialog-input"
                 type="text"
-                value={cwTextCurrentWord}
-                onChange={handleCwTextInputChange}
-                onKeyDown={handleCwTextInputKeyDown}
+                value={textCurrentWord}
+                onChange={handleTextInputChange}
+                onKeyDown={handleTextInputKeyDown}
                 spellCheck={false}
                 autoComplete="off"
                 autoCorrect="off"

@@ -48,8 +48,7 @@ pub(super) fn logger_state_from_cat_state(
 
 pub(super) fn fail_unavailable_radio_command(command: RadioCommand, reason: &str) {
     match command {
-        RadioCommand::SendMessage { completed, .. }
-        | RadioCommand::SendCwText { completed, .. } => {
+        RadioCommand::SendMessage { completed, .. } | RadioCommand::SendText { completed, .. } => {
             let _ = completed.send(Err(reason.to_string()));
         }
         RadioCommand::StopKeying
@@ -216,7 +215,7 @@ pub(super) async fn apply_command(
             Ok(())
         }
         RadioCommand::SendMessage { .. }
-        | RadioCommand::SendCwText { .. }
+        | RadioCommand::SendText { .. }
         | RadioCommand::StopKeying
         | RadioCommand::SetWpm(_) => Ok(()),
     }

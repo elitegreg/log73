@@ -1,7 +1,7 @@
 use crate::{
     DigitalIoEvent, DigitalIoManager, DigitalIoTargetState, FldigiCommand, RadioClientMessage,
     RadioCommand, RadioConfig, RadioIoConfig, RadioManager, RadioServerMessage, WsjtXEvent,
-    WsjtXManager, WsjtXTargetState, is_valid_message_mode, modes,
+    WsjtXManager, WsjtXTargetState, cw, is_valid_message_mode, modes,
 };
 use axum::{
     Extension,
@@ -29,7 +29,7 @@ const MIN_CW_WPM: u8 = 5;
 const MAX_CW_WPM: u8 = 60;
 const MAX_REQUEST_ID_LEN: usize = 64;
 const MAX_LOGGER_ID_LEN: usize = 128;
-const MAX_CW_TEXT_LEN: usize = 256;
+const MAX_TEXT_LEN: usize = 256;
 const MAX_DIGITAL_IO_TEXT_LEN: usize = 16_384;
 const MAX_MESSAGE_FIELDS: usize = 100;
 const MAX_FIELD_NAME_LEN: usize = 64;
@@ -589,6 +589,40 @@ async fn handle_radio_socket(
                     warn!(radio_id, request_id, mode, ?keys, %error, "invalid radio websocket send_message command");
                     continue;
                 }
+                let current_mode = radio_handle
+                    .current_state()
+                    .await
+                    .map(|radio_state| radio_state.mode);
+                if current_mode
+                    .as_deref()
+                    .is_some_and(|mode| fldigi_enabled_for_mode(&config, mode))
+                {
+                    let result =
+                        render_digital_messages(&config.digital_messages, &mode, &keys, &fields);
+                    match (identity.as_ref(), result) {
+                        (Some(identity), Ok(text)) => {
+                            send_fldigi_text(
+                                &state.digital_io_manager,
+                                radio_id,
+                                identity,
+                                text,
+                                Some(request_id),
+                                &direct_tx,
+                            )
+                            .await;
+                        }
+                        (Some(identity), Err(error)) => {
+                            send_digital_io_error(&direct_tx, identity.log_id, error).await;
+                        }
+                        (None, _) => {
+                            warn!(
+                                radio_id,
+                                "unidentified radio websocket cannot send FLDigi messages"
+                            );
+                        }
+                    }
+                    continue;
+                }
                 let (completed, result) = oneshot::channel();
                 if radio_handle
                     .send_command(RadioCommand::SendMessage {
@@ -603,18 +637,52 @@ async fn handle_radio_socket(
                     spawn_radio_message_completion(direct_tx.clone(), request_id, result);
                 }
             }
-            Ok(RadioClientMessage::SendCwText {
+            Ok(RadioClientMessage::SendText {
                 request_id,
                 text,
                 wait_for_completion,
             }) => {
-                if let Err(error) = validate_cw_text_request(&request_id, &text) {
-                    warn!(radio_id, request_id, %error, "invalid radio websocket send_cw_text command");
+                if let Err(error) = validate_text_request(&request_id, &text) {
+                    warn!(radio_id, request_id, %error, "invalid radio websocket send_text command");
+                    continue;
+                }
+                let current_mode = radio_handle
+                    .current_state()
+                    .await
+                    .map(|radio_state| radio_state.mode);
+                if current_mode
+                    .as_deref()
+                    .is_some_and(|mode| fldigi_enabled_for_mode(&config, mode))
+                {
+                    if let Some(identity) = &identity {
+                        send_fldigi_text(
+                            &state.digital_io_manager,
+                            radio_id,
+                            identity,
+                            text,
+                            Some(request_id),
+                            &direct_tx,
+                        )
+                        .await;
+                    } else {
+                        warn!(
+                            radio_id,
+                            "unidentified radio websocket cannot send FLDigi text"
+                        );
+                    }
+                    continue;
+                }
+                if !current_mode.as_deref().is_some_and(mode_is_cw) {
+                    let error = "text sending requires CW or active FLDigi DATA/RTTY";
+                    warn!(radio_id, radio_mode = ?current_mode, error);
+                    if let Some(identity) = &identity {
+                        send_digital_io_error(&direct_tx, identity.log_id, error.to_string()).await;
+                    }
                     continue;
                 }
                 let (completed, result) = oneshot::channel();
                 if radio_handle
-                    .send_command(RadioCommand::SendCwText {
+                    .send_command(RadioCommand::SendText {
                         text,
                         wait_for_completion,
                         completed,
@@ -913,6 +981,74 @@ fn spawn_radio_message_completion(
     });
 }
 
+fn fldigi_enabled_for_mode(config: &RadioConfig, mode: &str) -> bool {
+    if mode.eq_ignore_ascii_case("DATA") {
+        config.fldigi_data_enabled
+    } else if mode.eq_ignore_ascii_case("RTTY") {
+        config.fldigi_rtty_enabled
+    } else {
+        false
+    }
+}
+
+fn mode_is_cw(mode: &str) -> bool {
+    mode.eq_ignore_ascii_case("CW") || mode.eq_ignore_ascii_case("CW-R")
+}
+
+fn render_digital_messages(
+    config: &str,
+    mode: &str,
+    keys: &[String],
+    fields: &serde_json::Map<String, Value>,
+) -> Result<String, String> {
+    let mut rendered = Vec::new();
+    for key in keys {
+        let text = cw::render(config, mode, key, fields)
+            .ok_or_else(|| format!("unknown digital message {key}"))?;
+        if !text.is_empty() {
+            rendered.push(text);
+        }
+    }
+    Ok(rendered.join(" "))
+}
+
+async fn send_fldigi_text(
+    manager: &DigitalIoManager,
+    radio_id: i64,
+    identity: &LoggerIdentity,
+    text: String,
+    request_id: Option<String>,
+    direct_tx: &mpsc::Sender<RadioServerMessage>,
+) {
+    let result = if text.is_empty() {
+        Ok(())
+    } else {
+        manager
+            .send(radio_id, &identity.logger_id, FldigiCommand::Transmit(text))
+            .await
+    };
+    match result {
+        Ok(()) => {
+            if let Some(request_id) = request_id {
+                let _ = direct_tx
+                    .send(RadioServerMessage::MessageSent { request_id })
+                    .await;
+            }
+        }
+        Err(error) => send_digital_io_error(direct_tx, identity.log_id, error).await,
+    }
+}
+
+async fn send_digital_io_error(
+    direct_tx: &mpsc::Sender<RadioServerMessage>,
+    log_id: i64,
+    message: String,
+) {
+    let _ = direct_tx
+        .send(RadioServerMessage::DigitalIoError { log_id, message })
+        .await;
+}
+
 fn validate_radio_frequency_hz(frequency_hz: u64) -> Result<(), String> {
     if frequency_hz == 0 || frequency_hz > MAX_RADIO_FREQUENCY_HZ {
         return Err(format!(
@@ -989,9 +1125,9 @@ fn validate_message_request(
     Ok(())
 }
 
-fn validate_cw_text_request(request_id: &str, text: &str) -> Result<(), String> {
-    validate_required_text("CW request id", request_id, MAX_REQUEST_ID_LEN)?;
-    validate_required_text("CW text", text, MAX_CW_TEXT_LEN)
+fn validate_text_request(request_id: &str, text: &str) -> Result<(), String> {
+    validate_required_text("Text request id", request_id, MAX_REQUEST_ID_LEN)?;
+    validate_required_text("Text", text, MAX_TEXT_LEN)
 }
 
 fn validate_cw_wpm(wpm: u8) -> Result<(), String> {
@@ -1156,8 +1292,53 @@ mod tests {
         assert!(
             validate_message_request("request-1", "run", &["F13".to_string()], &fields).is_err()
         );
-        assert!(validate_cw_text_request("request-1", "CQ TEST").is_ok());
-        assert!(validate_cw_text_request("request-1", "").is_err());
+        assert!(validate_text_request("request-1", "CQ TEST").is_ok());
+        assert!(validate_text_request("request-1", "").is_err());
+    }
+
+    #[test]
+    fn identifies_modes_with_configured_fldigi() {
+        let mut radio = test_radio(1, "Digital");
+        radio.fldigi_data_enabled = true;
+        radio.fldigi_rtty_enabled = false;
+
+        assert!(fldigi_enabled_for_mode(&radio, "DATA"));
+        assert!(!fldigi_enabled_for_mode(&radio, "RTTY"));
+        assert!(!fldigi_enabled_for_mode(&radio, "CW"));
+
+        radio.fldigi_data_enabled = false;
+        radio.fldigi_rtty_enabled = true;
+        assert!(!fldigi_enabled_for_mode(&radio, "DATA"));
+        assert!(fldigi_enabled_for_mode(&radio, "rtty"));
+        assert!(mode_is_cw("CW"));
+        assert!(mode_is_cw("cw-r"));
+        assert!(!mode_is_cw("DATA"));
+    }
+
+    #[test]
+    fn renders_digital_message_sequences() {
+        let fields = serde_json::Map::from_iter([
+            ("CALL".to_string(), Value::from("K1ABC")),
+            ("EXCH".to_string(), Value::from("599 001")),
+        ]);
+        let rendered = render_digital_messages(
+            crate::digital_messages::DEFAULT_DIGITAL_MESSAGES,
+            "run",
+            &["F5".to_string(), "F2".to_string()],
+            &fields,
+        )
+        .expect("digital messages render");
+
+        assert_eq!(rendered, "K1ABC 599 001");
+        assert!(
+            render_digital_messages(
+                crate::digital_messages::DEFAULT_DIGITAL_MESSAGES,
+                "run",
+                &["F13".to_string()],
+                &fields,
+            )
+            .is_err()
+        );
     }
 
     #[test]

@@ -234,8 +234,8 @@ pub(super) async fn run_managed_radio(
                                 let _ = completed.send(Err("cw task unavailable".to_string()));
                             }
                         }
-                        RadioCommand::SendCwText { text, wait_for_completion, completed } => {
-                            debug!(radio_id = config.id, text, wait_for_completion, "forwarding cw text send command");
+                        RadioCommand::SendText { text, wait_for_completion, completed } => {
+                            debug!(radio_id = config.id, text, wait_for_completion, "forwarding text send command to CW keyer");
                             if let Err(error) = cw_tx.send(CwTaskCommand::SendText { text, wait_for_completion, completed }).await {
                                 let CwTaskCommand::SendText { completed, .. } = error.0 else { unreachable!() };
                                 let _ = completed.send(Err("cw task unavailable".to_string()));

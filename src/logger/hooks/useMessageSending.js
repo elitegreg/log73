@@ -26,6 +26,7 @@ export function useMessageSending({
   storeCurrentCqFrequency,
   markEsmExchangeSentForCurrentCallsign,
   clearEntryFields,
+  messageSendingEnabled = true,
   onSendMessage,
   onStopKeying,
 }) {
@@ -141,6 +142,7 @@ export function useMessageSending({
     }
 
     if (sendableKeys.length === 0) return null;
+    if (!messageSendingEnabled) return null;
 
     const requestId = createMessageRequestId();
     markMessageKeyActive(requestId, sendableKeys);
