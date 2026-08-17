@@ -14,6 +14,11 @@ import {
   addActiveMessageRequest,
   removeActiveMessageRequest,
 } from './messageSendingState';
+import {
+  completionTrackedTextRequest,
+  messageSendBatches,
+  renderMessageForConfig,
+} from '../../domain/messages';
 
 export function useMessageSending({
   radio,
@@ -27,7 +32,7 @@ export function useMessageSending({
   markEsmExchangeSentForCurrentCallsign,
   clearEntryFields,
   messageSendingEnabled = true,
-  onSendMessage,
+  onSendText,
   onStopKeying,
 }) {
   const [repeatRunF1, setRepeatRunF1] = useState(false);
@@ -111,12 +116,17 @@ export function useMessageSending({
     mode = messageModeKey,
     values = currentMessageFields(),
   ) {
-    const sendableKeys = [];
+    const sendableMessages = [];
     const labels = modeIsPhone(radioMode)
       ? (messageLabels?.voice ?? null)
       : modeIsDigital(radioMode)
         ? (messageLabels?.digital ?? messageLabels?.cw ?? messageLabels)
         : (messageLabels?.cw ?? messageLabels);
+    const config = modeIsPhone(radioMode)
+      ? radio?.voice_messages
+      : modeIsDigital(radioMode)
+        ? (radio?.digital_messages ?? radio?.cw_messages)
+        : radio?.cw_messages;
 
     for (const key of keys) {
       const action = messageActionForRadioMode(
@@ -135,24 +145,27 @@ export function useMessageSending({
         (label) => label.key === key,
       );
       if (!messageButtonIsSendable(button)) continue;
+      const text = renderMessageForConfig(config, mode, key, values);
+      if (!text) continue;
       if (mode === 'run' && key === 'F1') {
         storeCurrentCqFrequency();
       }
-      sendableKeys.push(key);
+      sendableMessages.push({ key, text });
     }
 
-    if (sendableKeys.length === 0) return null;
-    if (!messageSendingEnabled) return null;
+    if (sendableMessages.length === 0) return [];
+    if (!messageSendingEnabled) return [];
 
-    const requestId = createMessageRequestId();
-    markMessageKeyActive(requestId, sendableKeys);
-    onSendMessage?.({
-      request_id: requestId,
-      mode,
-      keys: sendableKeys,
-      fields: values,
+    const batches = messageSendBatches(
+      sendableMessages,
+      modeIsPhone(radioMode),
+    );
+    return batches.map(({ keys: batchKeys, text }) => {
+      const requestId = createMessageRequestId();
+      markMessageKeyActive(requestId, batchKeys);
+      onSendText?.(completionTrackedTextRequest(requestId, text));
+      return requestId;
     });
-    return requestId;
   }
 
   function sendSingleMessageKey(
@@ -160,7 +173,7 @@ export function useMessageSending({
     mode = messageModeKey,
     values = currentMessageFields(),
   ) {
-    return sendMessageKeys([key], mode, values);
+    return sendMessageKeys([key], mode, values)[0] ?? null;
   }
 
   repeatSendRunF1Ref.current = () => {
@@ -197,14 +210,14 @@ export function useMessageSending({
         : currentMessageFields(exchangeValues);
 
     stopRepeat();
-    const requestId = sendMessageKeys(keys, messageModeKey, values);
-    if (!requestId) return;
+    const requestIds = sendMessageKeys(keys, messageModeKey, values);
+    if (requestIds.length === 0) return;
     if (keys.includes('F2')) {
       markEsmExchangeSentForCurrentCallsign();
     }
     if (shouldRepeatF1) {
       repeatActiveRef.current = true;
-      repeatRequestIdRef.current = requestId;
+      repeatRequestIdRef.current = requestIds[0];
     }
   }
 

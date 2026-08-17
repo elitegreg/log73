@@ -227,15 +227,8 @@ pub(super) async fn run_managed_radio(
                     };
                     debug!(radio_id = config.id, ?command, "received radio command");
                     match command {
-                        RadioCommand::SendMessage { mode, keys, fields, completed } => {
-                            debug!(radio_id = config.id, mode, ?keys, "forwarding message send command");
-                            if let Err(error) = cw_tx.send(CwTaskCommand::SendMessage { mode, keys, fields, completed }).await {
-                                let CwTaskCommand::SendMessage { completed, .. } = error.0 else { unreachable!() };
-                                let _ = completed.send(Err("cw task unavailable".to_string()));
-                            }
-                        }
                         RadioCommand::SendText { text, wait_for_completion, completed } => {
-                            debug!(radio_id = config.id, text, wait_for_completion, "forwarding text send command to CW keyer");
+                            debug!(radio_id = config.id, text, wait_for_completion, "forwarding text send command to keying task");
                             if let Err(error) = cw_tx.send(CwTaskCommand::SendText { text, wait_for_completion, completed }).await {
                                 let CwTaskCommand::SendText { completed, .. } = error.0 else { unreachable!() };
                                 let _ = completed.send(Err("cw task unavailable".to_string()));

@@ -1,7 +1,7 @@
 use crate::{
     DigitalIoEvent, DigitalIoManager, DigitalIoTargetState, RadioClientMessage, RadioCommand,
     RadioConfig, RadioIoConfig, RadioManager, RadioServerMessage, WsjtXEvent, WsjtXManager,
-    WsjtXTargetState, cw, is_valid_message_mode, modes,
+    WsjtXTargetState, mode_is_phone, modes,
 };
 use axum::{
     Extension,
@@ -14,7 +14,6 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
-use serde_json::Value;
 use std::{
     collections::{HashMap, hash_map::Entry},
     fmt,
@@ -31,12 +30,6 @@ const MAX_REQUEST_ID_LEN: usize = 64;
 const MAX_LOGGER_ID_LEN: usize = 128;
 const MAX_TEXT_LEN: usize = 256;
 const MAX_DIGITAL_IO_TEXT_LEN: usize = 16_384;
-const MAX_MESSAGE_FIELDS: usize = 100;
-const MAX_FIELD_NAME_LEN: usize = 64;
-const MAX_FIELD_STRING_LEN: usize = 1024;
-const MAX_FIELD_ARRAY_ITEMS: usize = 100;
-const MAX_FIELD_OBJECT_ENTRIES: usize = 100;
-const MAX_FIELD_JSON_DEPTH: usize = 4;
 
 #[derive(Clone)]
 pub struct RadioWebSocketState {
@@ -579,64 +572,6 @@ async fn handle_radio_socket(
                     .send_command(RadioCommand::RitDecrement(hz))
                     .await;
             }
-            Ok(RadioClientMessage::SendMessage {
-                request_id,
-                mode,
-                keys,
-                fields,
-            }) => {
-                if let Err(error) = validate_message_request(&request_id, &mode, &keys, &fields) {
-                    warn!(radio_id, request_id, mode, ?keys, %error, "invalid radio websocket send_message command");
-                    continue;
-                }
-                let current_mode = radio_handle
-                    .current_state()
-                    .await
-                    .map(|radio_state| radio_state.mode);
-                if current_mode
-                    .as_deref()
-                    .is_some_and(|mode| fldigi_enabled_for_mode(&config, mode))
-                {
-                    let result =
-                        render_digital_messages(&config.digital_messages, &mode, &keys, &fields);
-                    match (identity.as_ref(), result) {
-                        (Some(identity), Ok(text)) => {
-                            send_fldigi_text(
-                                &state.digital_io_manager,
-                                radio_id,
-                                identity,
-                                text,
-                                Some(request_id),
-                                &direct_tx,
-                            )
-                            .await;
-                        }
-                        (Some(identity), Err(error)) => {
-                            send_digital_io_error(&direct_tx, identity.log_id, error).await;
-                        }
-                        (None, _) => {
-                            warn!(
-                                radio_id,
-                                "unidentified radio websocket cannot send FLDigi messages"
-                            );
-                        }
-                    }
-                    continue;
-                }
-                let (completed, result) = oneshot::channel();
-                if radio_handle
-                    .send_command(RadioCommand::SendMessage {
-                        mode,
-                        keys,
-                        fields,
-                        completed,
-                    })
-                    .await
-                    .is_ok()
-                {
-                    spawn_radio_message_completion(direct_tx.clone(), request_id, result);
-                }
-            }
             Ok(RadioClientMessage::SendText {
                 request_id,
                 text,
@@ -672,8 +607,11 @@ async fn handle_radio_socket(
                     }
                     continue;
                 }
-                if !current_mode.as_deref().is_some_and(mode_is_cw) {
-                    let error = "text sending requires CW or active FLDigi DATA/RTTY";
+                if !current_mode
+                    .as_deref()
+                    .is_some_and(|mode| mode_is_cw(mode) || mode_is_phone(mode))
+                {
+                    let error = "text sending requires CW, phone, or active FLDigi DATA/RTTY";
                     warn!(radio_id, radio_mode = ?current_mode, error);
                     if let Some(identity) = &identity {
                         send_digital_io_error(&direct_tx, identity.log_id, error.to_string()).await;
@@ -1006,23 +944,6 @@ fn mode_is_cw(mode: &str) -> bool {
     mode.eq_ignore_ascii_case("CW") || mode.eq_ignore_ascii_case("CW-R")
 }
 
-fn render_digital_messages(
-    config: &str,
-    mode: &str,
-    keys: &[String],
-    fields: &serde_json::Map<String, Value>,
-) -> Result<String, String> {
-    let mut rendered = Vec::new();
-    for key in keys {
-        let text = cw::render(config, mode, key, fields)
-            .ok_or_else(|| format!("unknown digital message {key}"))?;
-        if !text.is_empty() {
-            rendered.push(text);
-        }
-    }
-    Ok(rendered.join(" "))
-}
-
 async fn send_fldigi_text(
     manager: &DigitalIoManager,
     radio_id: i64,
@@ -1101,40 +1022,6 @@ fn validate_rit_adjustment_hz(hz: i32) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_message_request(
-    request_id: &str,
-    mode: &str,
-    keys: &[String],
-    fields: &serde_json::Map<String, Value>,
-) -> Result<(), String> {
-    validate_required_text("Message request id", request_id, MAX_REQUEST_ID_LEN)?;
-    if !is_valid_message_mode(mode) {
-        return Err("Message mode must be run or S&P".to_string());
-    }
-    if keys.is_empty() {
-        return Err("Message keys must contain at least one key".to_string());
-    }
-    for key in keys {
-        let normalized_key = key.trim().to_uppercase();
-        if !matches!(
-            normalized_key.as_str(),
-            "F1" | "F2" | "F3" | "F4" | "F5" | "F6" | "F7" | "F8" | "F9" | "F10" | "F11" | "F12"
-        ) {
-            return Err("Message keys must contain only F1 through F12".to_string());
-        }
-    }
-    if fields.len() > MAX_MESSAGE_FIELDS {
-        return Err(format!(
-            "Message fields cannot contain more than {MAX_MESSAGE_FIELDS} entries"
-        ));
-    }
-    for (key, value) in fields {
-        validate_field_name(key)?;
-        validate_json_value_size(value, 0).map_err(|error| format!("{key}: {error}"))?;
-    }
-    Ok(())
-}
-
 fn validate_text_request(request_id: &str, text: &str) -> Result<(), String> {
     validate_required_text("Text request id", request_id, MAX_REQUEST_ID_LEN)?;
     validate_required_text("Text", text, MAX_TEXT_LEN)
@@ -1168,60 +1055,6 @@ fn validate_required_text(label: &str, value: &str, max_length: usize) -> Result
         return Err(format!("{label} cannot contain control characters"));
     }
     Ok(())
-}
-
-fn validate_field_name(key: &str) -> Result<(), String> {
-    if key.is_empty() {
-        return Err("field names cannot be empty".to_string());
-    }
-    if key.chars().count() > MAX_FIELD_NAME_LEN {
-        return Err(format!(
-            "field name {key} must be at most {MAX_FIELD_NAME_LEN} characters"
-        ));
-    }
-    if key.chars().any(char::is_control) {
-        return Err(format!(
-            "field name {key} cannot contain control characters"
-        ));
-    }
-    Ok(())
-}
-
-fn validate_json_value_size(value: &Value, depth: usize) -> Result<(), String> {
-    if depth > MAX_FIELD_JSON_DEPTH {
-        return Err(format!(
-            "nested JSON cannot be deeper than {MAX_FIELD_JSON_DEPTH} levels"
-        ));
-    }
-    match value {
-        Value::String(value) if value.chars().count() > MAX_FIELD_STRING_LEN => Err(format!(
-            "string value must be at most {MAX_FIELD_STRING_LEN} characters"
-        )),
-        Value::Array(values) => {
-            if values.len() > MAX_FIELD_ARRAY_ITEMS {
-                return Err(format!(
-                    "array value cannot contain more than {MAX_FIELD_ARRAY_ITEMS} items"
-                ));
-            }
-            for value in values {
-                validate_json_value_size(value, depth + 1)?;
-            }
-            Ok(())
-        }
-        Value::Object(values) => {
-            if values.len() > MAX_FIELD_OBJECT_ENTRIES {
-                return Err(format!(
-                    "object value cannot contain more than {MAX_FIELD_OBJECT_ENTRIES} fields"
-                ));
-            }
-            for (key, value) in values {
-                validate_field_name(key)?;
-                validate_json_value_size(value, depth + 1)?;
-            }
-            Ok(())
-        }
-        _ => Ok(()),
-    }
 }
 
 #[cfg(test)]
@@ -1297,11 +1130,6 @@ mod tests {
 
     #[test]
     fn validates_keying_message_shape() {
-        let fields = serde_json::Map::from_iter([("CALL".to_string(), Value::from("K1ABC"))]);
-        assert!(validate_message_request("request-1", "run", &["F1".to_string()], &fields).is_ok());
-        assert!(
-            validate_message_request("request-1", "run", &["F13".to_string()], &fields).is_err()
-        );
         assert!(validate_text_request("request-1", "CQ TEST").is_ok());
         assert!(validate_text_request("request-1", "").is_err());
     }
@@ -1323,32 +1151,6 @@ mod tests {
         assert!(mode_is_cw("CW"));
         assert!(mode_is_cw("cw-r"));
         assert!(!mode_is_cw("DATA"));
-    }
-
-    #[test]
-    fn renders_digital_message_sequences() {
-        let fields = serde_json::Map::from_iter([
-            ("CALL".to_string(), Value::from("K1ABC")),
-            ("EXCH".to_string(), Value::from("599 001")),
-        ]);
-        let rendered = render_digital_messages(
-            crate::digital_messages::DEFAULT_DIGITAL_MESSAGES,
-            "run",
-            &["F5".to_string(), "F2".to_string()],
-            &fields,
-        )
-        .expect("digital messages render");
-
-        assert_eq!(rendered, "K1ABC 599 001");
-        assert!(
-            render_digital_messages(
-                crate::digital_messages::DEFAULT_DIGITAL_MESSAGES,
-                "run",
-                &["F13".to_string()],
-                &fields,
-            )
-            .is_err()
-        );
     }
 
     #[test]

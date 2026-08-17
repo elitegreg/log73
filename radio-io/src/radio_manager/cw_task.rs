@@ -1,10 +1,8 @@
 use super::keyers::{CwSerialDevice, cw_keyer_for_config};
 use super::voice::{VoiceDataPttGuard, spawn_voice_playback_thread};
 use crate::config::RadioConfig;
-use crate::cw;
 use crate::radio::mode_is_phone;
 use crate::voice_keyer::{VoiceKeyer, VoicePlaybackThread};
-use crate::voice_messages;
 use futures_util::future::BoxFuture;
 use radio_cat_rs::{ChangeFlags, Radio, StateField, StateUpdate};
 use std::collections::VecDeque;
@@ -13,12 +11,6 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{debug, warn};
 
 pub(super) enum CwTaskCommand {
-    SendMessage {
-        mode: String,
-        keys: Vec<String>,
-        fields: serde_json::Map<String, serde_json::Value>,
-        completed: oneshot::Sender<Result<(), String>>,
-    },
     SendText {
         text: String,
         wait_for_completion: bool,
@@ -30,11 +22,6 @@ pub(super) enum CwTaskCommand {
 }
 
 enum PendingCwPayload {
-    Message {
-        mode: String,
-        keys: Vec<String>,
-        fields: serde_json::Map<String, serde_json::Value>,
-    },
     Text {
         text: String,
         wait_for_completion: bool,
@@ -58,36 +45,21 @@ pub(super) async fn run_cw_task(
     let mut pending = VecDeque::new();
 
     loop {
-        let (next_send, prepend_space) = if let Some(send) = pending.pop_front() {
-            (Some(send), true)
+        let next_send = if let Some(send) = pending.pop_front() {
+            Some(send)
         } else {
             match commands.recv().await {
-                Some(CwTaskCommand::SendMessage {
-                    mode,
-                    keys,
-                    fields,
-                    completed,
-                }) => (
-                    Some(PendingCwSend {
-                        payload: PendingCwPayload::Message { mode, keys, fields },
-                        completed,
-                    }),
-                    false,
-                ),
                 Some(CwTaskCommand::SendText {
                     text,
                     wait_for_completion,
                     completed,
-                }) => (
-                    Some(PendingCwSend {
-                        payload: PendingCwPayload::Text {
-                            text,
-                            wait_for_completion,
-                        },
-                        completed,
-                    }),
-                    false,
-                ),
+                }) => Some(PendingCwSend {
+                    payload: PendingCwPayload::Text {
+                        text,
+                        wait_for_completion,
+                    },
+                    completed,
+                }),
                 Some(CwTaskCommand::Stop) => {
                     debug!(radio_id = config.id, "cw task received stop command");
                     controller.stop().await;
@@ -118,18 +90,6 @@ pub(super) async fn run_cw_task(
             "cw task starting queued send"
         );
         let result = match &send.payload {
-            PendingCwPayload::Message { mode, keys, fields } => {
-                controller
-                    .send_message(
-                        mode,
-                        keys,
-                        fields,
-                        prepend_space,
-                        &mut commands,
-                        &mut pending,
-                    )
-                    .await
-            }
             PendingCwPayload::Text {
                 text,
                 wait_for_completion,
@@ -161,8 +121,6 @@ pub(super) async fn run_cw_task(
 struct CwController {
     radio_id: i64,
     radio: Radio,
-    messages: String,
-    voice_messages: String,
     voice_playback: Option<VoicePlaybackThread>,
     voice_data_ptt_supported: bool,
     keyer: Option<Box<dyn CwKeyer>>,
@@ -186,8 +144,6 @@ impl CwController {
         let mut controller = Self {
             radio_id: config.id,
             radio: radio.clone(),
-            messages: config.cw_messages.clone(),
-            voice_messages: config.voice_messages.clone(),
             voice_playback: spawn_voice_playback_thread(config, voice_keyer),
             voice_data_ptt_supported,
             keyer: cw_keyer_for_config(config, radio, shared_cw_serial_keyer).await,
@@ -204,224 +160,37 @@ impl CwController {
         }
     }
 
-    async fn send_message(
+    async fn send_voice_file(
         &mut self,
-        mode: &str,
-        keys: &[String],
-        fields: &serde_json::Map<String, serde_json::Value>,
-        prepend_space: bool,
+        file_path: &str,
         commands: &mut mpsc::Receiver<CwTaskCommand>,
         pending: &mut VecDeque<PendingCwSend>,
     ) -> Result<(), String> {
-        let Some(logger_mode) = self.radio_logger_mode() else {
-            debug!(
-                radio_id = self.radio_id,
-                mode,
-                ?keys,
-                "ignoring message send; unable to determine radio mode"
-            );
-            return Ok(());
+        let Some(voice_playback) = self.voice_playback.as_ref() else {
+            return Err("voice keyer thread unavailable".to_string());
         };
-        if mode_is_phone(&logger_mode) {
-            return self
-                .send_voice_messages(mode, keys, fields, commands, pending)
-                .await;
-        }
-        if logger_mode != "CW" && logger_mode != "CW-R" {
-            debug!(
-                radio_id = self.radio_id,
-                mode,
-                ?keys,
-                radio_mode = %logger_mode,
-                "ignoring message send; radio mode is not CW or phone"
-            );
-            return Ok(());
-        }
-
-        let mut rendered_parts = Vec::new();
-        for key in keys {
-            let Some(rendered_text) = cw::render(&self.messages, mode, key, fields) else {
-                warn!(
-                    radio_id = self.radio_id,
-                    mode,
-                    ?keys,
-                    key,
-                    "unknown cw message"
-                );
-                return Err("unknown cw message".to_string());
-            };
-            if rendered_text.is_empty() {
-                debug!(
-                    radio_id = self.radio_id,
-                    mode, key, "ignoring empty cw message"
-                );
-                continue;
+        let mut data_ptt = VoiceDataPttGuard::acquire(
+            self.radio_id,
+            self.radio.clone(),
+            self.voice_data_ptt_supported,
+        )
+        .await;
+        let completed = match voice_playback.play_file_path(file_path) {
+            Ok(completed) => completed,
+            Err(error) => {
+                data_ptt.release().await;
+                return Err(error);
             }
-            rendered_parts.push(rendered_text);
-        }
-        if rendered_parts.is_empty() {
-            debug!(
-                radio_id = self.radio_id,
-                mode,
-                ?keys,
-                "ignoring empty cw message sequence"
-            );
-            return Ok(());
-        }
-        let text = cw_send_text(rendered_parts.join(" "), prepend_space);
+        };
         debug!(
             radio_id = self.radio_id,
-            mode,
-            ?keys,
-            text,
-            "sending cw text"
+            file_path, "queued voice keyer playback"
         );
-        let completion = {
-            let Some(keyer) = self.keyer.as_mut() else {
-                debug!(
-                    radio_id = self.radio_id,
-                    "ignoring CW send; no CW keyer configured"
-                );
-                return Err("cw keyer unavailable".to_string());
-            };
-            let keyer_name = keyer.name();
-            let completion = keyer.send_text(self.radio_id, &text).await?;
-            debug!(
-                radio_id = self.radio_id,
-                mode,
-                ?keys,
-                keyer = keyer_name,
-                "cw text queued"
-            );
-            completion
-        };
-
-        match completion {
-            CwSendCompletion::PollStatus { wait_for_busy } => {
-                if wait_for_busy {
-                    debug!(
-                        radio_id = self.radio_id,
-                        mode,
-                        ?keys,
-                        "waiting for cw keyer busy"
-                    );
-                    self.wait_until_busy_or_stopped(commands, pending).await?;
-                }
-                debug!(
-                    radio_id = self.radio_id,
-                    mode,
-                    ?keys,
-                    "waiting for cw keyer idle"
-                );
-                let result = self.wait_until_idle_or_stopped(commands, pending).await;
-                debug!(
-                    radio_id = self.radio_id,
-                    mode,
-                    ?keys,
-                    ?result,
-                    "finished waiting for cw keyer idle"
-                );
-                result
-            }
-            CwSendCompletion::RadioCatUpdates(updates) => {
-                debug!(
-                    radio_id = self.radio_id,
-                    mode,
-                    ?keys,
-                    "waiting for radio-cat cw completion updates"
-                );
-                self.wait_until_radio_cat_cw_complete_or_stopped(updates, commands, pending)
-                    .await
-            }
-        }
-    }
-
-    async fn send_voice_messages(
-        &mut self,
-        mode: &str,
-        keys: &[String],
-        fields: &serde_json::Map<String, serde_json::Value>,
-        commands: &mut mpsc::Receiver<CwTaskCommand>,
-        pending: &mut VecDeque<PendingCwSend>,
-    ) -> Result<(), String> {
-        for key in keys {
-            let Some(file_path) = voice_messages::file_path_for(&self.voice_messages, mode, key)
-            else {
-                debug!(
-                    radio_id = self.radio_id,
-                    mode, key, "ignoring voice message without a file"
-                );
-                continue;
-            };
-            let Some(voice_playback) = self.voice_playback.as_ref() else {
-                return Err("voice keyer thread unavailable".to_string());
-            };
-
-            let mut data_ptt = VoiceDataPttGuard::acquire(
-                self.radio_id,
-                self.radio.clone(),
-                self.voice_data_ptt_supported,
-            )
+        let result = self
+            .wait_until_voice_playback_done_or_stopped(file_path, completed, commands, pending)
             .await;
-            let completed = if voice_messages::file_path_has_template(&file_path) {
-                let resolved = voice_messages::resolved_file_path_for(
-                    &self.voice_messages,
-                    mode,
-                    key,
-                    fields,
-                )?
-                .ok_or_else(|| "voice message without a file".to_string())?;
-                debug!(
-                    radio_id = self.radio_id,
-                    mode,
-                    key,
-                    configured_voice_file = %file_path,
-                    resolved_voice_file = %resolved,
-                    operator = ?fields.get("OPERATOR"),
-                    station_callsign = ?fields.get("STATION_CALLSIGN"),
-                    ?fields,
-                    "resolved templated voice message file path"
-                );
-                match voice_playback.play_file_path(&resolved) {
-                    Ok(completed) => completed,
-                    Err(error) => {
-                        warn!(
-                            radio_id = self.radio_id,
-                            mode,
-                            key,
-                            configured_voice_file = %file_path,
-                            resolved_voice_file = %resolved,
-                            operator = ?fields.get("OPERATOR"),
-                            station_callsign = ?fields.get("STATION_CALLSIGN"),
-                            ?fields,
-                            %error,
-                            "failed to play templated voice message file"
-                        );
-                        data_ptt.release().await;
-                        return Err(error);
-                    }
-                }
-            } else {
-                match voice_playback.play_message(mode, key) {
-                    Ok(completed) => completed,
-                    Err(error) => {
-                        data_ptt.release().await;
-                        return Err(error);
-                    }
-                }
-            };
-            debug!(
-                radio_id = self.radio_id,
-                mode, key, "queued voice keyer playback"
-            );
-            let result = self
-                .wait_until_voice_playback_done_or_stopped(key, completed, commands, pending)
-                .await;
-            data_ptt.release().await;
-            result?;
-        }
-
-        Ok(())
+        data_ptt.release().await;
+        result
     }
 
     async fn wait_until_voice_playback_done_or_stopped(
@@ -476,6 +245,14 @@ impl CwController {
     ) -> Result<(), String> {
         if text.trim().is_empty() {
             return Ok(());
+        }
+
+        if self
+            .radio_logger_mode()
+            .as_deref()
+            .is_some_and(mode_is_phone)
+        {
+            return self.send_voice_file(text, commands, pending).await;
         }
 
         debug!(radio_id = self.radio_id, text, "sending cw text");
@@ -807,26 +584,6 @@ fn handle_wait_command(
             fail_pending_cw_sends(pending, context.shutdown_reason);
             WaitCommandEffect::Interrupt(context.shutdown_reason)
         }
-        Some(CwTaskCommand::SendMessage {
-            mode,
-            keys,
-            fields,
-            completed,
-        }) => {
-            debug!(
-                radio_id,
-                mode,
-                ?keys,
-                waiting_for = context.waiting_for,
-                pending_count = pending.len(),
-                "queueing message send command while waiting"
-            );
-            pending.push_back(PendingCwSend {
-                payload: PendingCwPayload::Message { mode, keys, fields },
-                completed,
-            });
-            WaitCommandEffect::Continue
-        }
         Some(CwTaskCommand::SendText {
             text,
             wait_for_completion,
@@ -855,14 +612,6 @@ fn handle_wait_command(
 fn fail_pending_cw_sends(pending: &mut VecDeque<PendingCwSend>, reason: &str) {
     while let Some(send) = pending.pop_front() {
         let _ = send.completed.send(Err(reason.to_string()));
-    }
-}
-
-fn cw_send_text(text: String, prepend_space: bool) -> String {
-    if prepend_space {
-        format!(" {text}")
-    } else {
-        text
     }
 }
 
@@ -895,16 +644,14 @@ pub(super) trait CwKeyer: Send {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::Map;
 
-    fn pending_message(key: &str) -> (PendingCwSend, oneshot::Receiver<Result<(), String>>) {
+    fn pending_text(text: &str) -> (PendingCwSend, oneshot::Receiver<Result<(), String>>) {
         let (completed, received) = oneshot::channel();
         (
             PendingCwSend {
-                payload: PendingCwPayload::Message {
-                    mode: "run".to_string(),
-                    keys: vec![key.to_string()],
-                    fields: Map::new(),
+                payload: PendingCwPayload::Text {
+                    text: text.to_string(),
+                    wait_for_completion: true,
                 },
                 completed,
             },
@@ -914,8 +661,8 @@ mod tests {
 
     #[tokio::test]
     async fn fail_pending_cw_sends_rejects_all_queued_requests() {
-        let (first, first_rx) = pending_message("F1");
-        let (second, second_rx) = pending_message("F2");
+        let (first, first_rx) = pending_text("CQ");
+        let (second, second_rx) = pending_text("TEST");
         let mut pending = VecDeque::from([first, second]);
 
         fail_pending_cw_sends(&mut pending, "cw stopped");
@@ -923,42 +670,6 @@ mod tests {
         assert!(pending.is_empty());
         assert_eq!(first_rx.await.unwrap(), Err("cw stopped".to_string()));
         assert_eq!(second_rx.await.unwrap(), Err("cw stopped".to_string()));
-    }
-
-    #[test]
-    fn queued_cw_send_text_prepends_single_space() {
-        assert_eq!(cw_send_text("CQ TEST".to_string(), false), "CQ TEST");
-        assert_eq!(cw_send_text("CQ TEST".to_string(), true), " CQ TEST");
-    }
-
-    #[test]
-    fn handle_wait_command_queues_message_sends() {
-        let mut pending = VecDeque::new();
-        let (completed, _rx) = oneshot::channel();
-
-        let effect = handle_wait_command(
-            7,
-            Some(CwTaskCommand::SendMessage {
-                mode: "run".to_string(),
-                keys: vec!["F1".to_string(), "F2".to_string()],
-                fields: Map::new(),
-                completed,
-            }),
-            &mut pending,
-            WaitContext::new("cw idle wait", "cw stopped", "cw shutdown"),
-        );
-
-        assert!(matches!(effect, WaitCommandEffect::Continue));
-        assert_eq!(pending.len(), 1);
-        let Some(PendingCwSend {
-            payload: PendingCwPayload::Message { mode, keys, .. },
-            ..
-        }) = pending.pop_front()
-        else {
-            panic!("expected queued message send");
-        };
-        assert_eq!(mode, "run");
-        assert_eq!(keys, vec!["F1", "F2"]);
     }
 
     #[test]
@@ -996,7 +707,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_wait_command_stop_fails_pending_and_interrupts() {
-        let (queued, queued_rx) = pending_message("F1");
+        let (queued, queued_rx) = pending_text("CQ");
         let mut pending = VecDeque::from([queued]);
 
         let effect = handle_wait_command(
@@ -1013,7 +724,7 @@ mod tests {
 
     #[tokio::test]
     async fn handle_wait_command_shutdown_fails_pending_and_interrupts() {
-        let (queued, queued_rx) = pending_message("F1");
+        let (queued, queued_rx) = pending_text("CQ");
         let mut pending = VecDeque::from([queued]);
 
         let effect = handle_wait_command(
@@ -1033,7 +744,7 @@ mod tests {
 
     #[test]
     fn handle_wait_command_returns_set_wpm_without_disturbing_queue() {
-        let (queued, _queued_rx) = pending_message("F1");
+        let (queued, _queued_rx) = pending_text("CQ");
         let mut pending = VecDeque::from([queued]);
 
         let effect = handle_wait_command(

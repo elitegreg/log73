@@ -6,7 +6,6 @@ use crate::messages::{
     ParsedMessageEntry, action_from_template, parse_message_entries, validate_message_config,
 };
 use serde::Serialize;
-use serde_json::{Map, Value};
 use std::path::{Component, Path, PathBuf};
 
 pub const DEFAULT_VOICE_MESSAGES: &str = r#"###################
@@ -131,27 +130,6 @@ pub fn entries(config: &str) -> Vec<VoiceMessageEntry> {
     entries
 }
 
-pub fn file_path_for(config: &str, mode: &str, key: &str) -> Option<String> {
-    let normalized_mode = normalize_message_mode(mode);
-    let normalized_key = key.trim().to_uppercase();
-    entries(config)
-        .into_iter()
-        .find(|entry| entry.mode == normalized_mode && entry.key == normalized_key)
-        .and_then(|entry| entry.file_path)
-}
-
-pub fn resolved_file_path_for(
-    config: &str,
-    mode: &str,
-    key: &str,
-    fields: &Map<String, Value>,
-) -> Result<Option<String>, String> {
-    let Some(file_path) = file_path_for(config, mode, key) else {
-        return Ok(None);
-    };
-    resolve_file_path_template(&file_path, fields).map(Some)
-}
-
 pub fn normalize_message_mode(mode: &str) -> &'static str {
     normalized_message_mode(mode)
 }
@@ -190,20 +168,6 @@ pub fn existing_voicekeyer_file_path(
     }
 
     Ok(canonical_path)
-}
-
-pub fn resolve_file_path_template(
-    template: &str,
-    fields: &Map<String, Value>,
-) -> Result<String, String> {
-    let rendered = render_path_template(template, fields);
-    validate_voice_file_path(&rendered).map_err(|error| {
-        format!(
-            "voice path template '{}' rendered to '{}' is invalid: {}",
-            template, rendered, error
-        )
-    })?;
-    Ok(rendered)
 }
 
 pub fn file_path_has_template(path: &str) -> bool {
@@ -330,55 +294,11 @@ fn file_path_from_target(target: &str) -> Option<String> {
     }
 }
 
-fn render_path_template(template: &str, fields: &Map<String, Value>) -> String {
-    let mut rendered = String::with_capacity(template.len());
-    let mut chars = template.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch != '{' {
-            rendered.push(ch);
-            continue;
-        }
-
-        let mut name = String::new();
-        let mut closed = false;
-        while let Some(&next) = chars.peek() {
-            chars.next();
-            if next == '}' {
-                closed = true;
-                break;
-            }
-            name.push(next);
-        }
-
-        if closed && is_field_placeholder(&name) {
-            rendered.push_str(&field_string(fields, &name));
-        } else {
-            rendered.push('{');
-            rendered.push_str(&name);
-            if closed {
-                rendered.push('}');
-            }
-        }
-    }
-
-    rendered
-}
-
 fn is_field_placeholder(name: &str) -> bool {
     !name.is_empty()
         && name
             .chars()
             .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '_')
-}
-
-fn field_string(fields: &Map<String, Value>, key: &str) -> String {
-    match fields.get(key) {
-        Some(Value::String(value)) => value.trim().to_string(),
-        Some(Value::Number(value)) => value.to_string(),
-        Some(Value::Bool(value)) => value.to_string(),
-        _ => String::new(),
-    }
 }
 
 pub fn validate_voice_file_path(path: &str) -> Result<(), String> {
@@ -480,53 +400,11 @@ F2 -,
     }
 
     #[test]
-    fn returns_file_path_by_mode_and_key() {
-        assert_eq!(
-            file_path_for(TEST_MESSAGES, "run", "f1"),
-            Some("{OPERATOR}/CQ.wav".to_string())
-        );
-        assert_eq!(file_path_for(TEST_MESSAGES, "run", "F12"), None);
-        assert_eq!(file_path_for(TEST_MESSAGES, "s&p", "F2"), None);
-        assert_eq!(
-            file_path_for(TEST_MESSAGES, "search_and_pounce", "F2"),
-            None
-        );
-    }
-
-    #[test]
-    fn resolves_voice_file_path_templates_from_message_fields() {
-        let fields = serde_json::json!({
-            "OPERATOR": "operator1",
-            "STATION_CALLSIGN": "N0CALL"
-        })
-        .as_object()
-        .expect("test fields should be an object")
-        .clone();
-
-        assert_eq!(
-            resolved_file_path_for(TEST_MESSAGES, "run", "F1", &fields),
-            Ok(Some("operator1/CQ.wav".to_string()))
-        );
-    }
-
-    #[test]
     fn template_file_paths_are_detected() {
         assert!(file_path_has_template("{OPERATOR}/CQ.wav"));
         assert!(file_path_has_template("voice/{STATION_CALLSIGN}.wav"));
         assert!(!file_path_has_template("operator1/CQ.wav"));
         assert!(!file_path_has_template("{Action:Clear}"));
-    }
-
-    #[test]
-    fn resolved_voice_file_path_must_still_be_safe() {
-        let fields = serde_json::json!({ "OPERATOR": "../bad" })
-            .as_object()
-            .expect("test fields should be an object")
-            .clone();
-
-        let error = resolved_file_path_for(TEST_MESSAGES, "run", "F1", &fields)
-            .expect_err("unsafe path should fail");
-        assert!(error.contains("cannot contain '..'"));
     }
 
     #[test]

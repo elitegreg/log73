@@ -84,7 +84,7 @@ The following decisions are settled for the first implementation:
 | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Keep today's backend-attached multi-radio behavior                     | Retained as the SERVER-SIDE radio path and refactored to share, not replace, `radio-io`.                                                                                         |
 | Serve a WebSocket to the frontend                                      | Axum binds `127.0.0.1:0` and serves the shared protocol at `/radiows`; the exact URL is registered with the backend.                                                             |
-| Message and text sending                                               | Reuse CAT, Winkeyer, and serial-line keyers plus current `send_message`, `send_text`, stop, WPM, and completion messages.                                                        |
+| Message and text sending                                               | Reuse CAT, Winkeyer, serial-line keyers, and voice playback through the unified `send_text`, stop, WPM, and completion messages.                                                 |
 | Voice message keying to a chosen output                                | Reuse `VoiceKeyer`/`VoicePlaybackThread`; enumerate the local output devices and preload local WAV bytes.                                                                        |
 | Proxy WSJT-X log messages to Log73 upserts                             | Send Logged ADIF on the radio WebSocket, convert it to a normal pending QSO in the selected logger, and use the existing contact outbox/API.                                     |
 | Share the `radio-io` crate                                             | Both `log73-backend` and `log73-radio-client` host the same manager, WebSocket protocol, keyers, voice cache, and WSJT-X manager.                                                |
@@ -412,7 +412,7 @@ The handler validates nonempty logger identity and a positive log ID before regi
 
 Keep the existing `radio-io` protocol messages and validation:
 
-- Browser to radio: `ping`, `set_frequency`, `set_mode`, `rit_clear`, `rit_increment`, `rit_decrement`, `send_message`, `send_text`, `stop_keying`, and `set_wpm`.
+- Browser to radio: `ping`, `set_frequency`, `set_mode`, `rit_clear`, `rit_increment`, `rit_decrement`, `send_text`, `stop_keying`, and `set_wpm`.
 - Radio to browser: `radio_status`, `radio_state`, `pong`, and `message_sent`.
 
 ### WSJT-X messages moved/added
@@ -497,8 +497,8 @@ An open logger window remains required. With no target, `radio-io` does not run 
 
 No separate proxy protocol is required beyond the existing radio WebSocket:
 
-- Function-key messages use `send_message` with mode, keys, and field values.
-- Arbitrary text uses `send_text`.
+- The browser renders function-key templates from logger state and sends the result with `send_text` and completion waiting enabled.
+- Arbitrary text also uses `send_text`.
 - `stop_keying` and `set_wpm` retain current behavior.
 - CAT, Winkeyer, and serial DTR/RTS implementations continue to live in `radio-io`.
 - Message completion returns `message_sent` so ESM/UI behavior stays unchanged.
@@ -508,6 +508,8 @@ The client-owned CW message text is included in the backend read-only snapshot s
 ### Voice
 
 Client-side voice files live under the Radio Client's data directory `voicekeyer/`. This deliberately revises the original “fetch voice files from the backend” idea: because the Radio Client owns configuration and playback hardware, it also owns the audio assets.
+
+The browser renders a configured voice file-name template and sends the relative WAV path as `send_text.text`; each file in a multi-key sequence is sent as its own completion-tracked request.
 
 At Start:
 

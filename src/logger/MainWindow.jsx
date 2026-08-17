@@ -104,7 +104,6 @@ function MainWindow({
   onClearRit,
   onIncrementRit,
   onDecrementRit,
-  onSendMessage,
   onSendText,
   onSendDxClusterSpot,
   onStopKeying,
@@ -419,7 +418,7 @@ function MainWindow({
     clearEntryFields,
     messageSendingEnabled:
       !modeIsDigital(radioMode) || Boolean(digitalTextEnabled),
-    onSendMessage,
+    onSendText,
     onStopKeying,
   });
 

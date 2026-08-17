@@ -48,7 +48,7 @@ pub(super) fn logger_state_from_cat_state(
 
 pub(super) fn fail_unavailable_radio_command(command: RadioCommand, reason: &str) {
     match command {
-        RadioCommand::SendMessage { completed, .. } | RadioCommand::SendText { completed, .. } => {
+        RadioCommand::SendText { completed, .. } => {
             let _ = completed.send(Err(reason.to_string()));
         }
         RadioCommand::StopKeying
@@ -214,10 +214,9 @@ pub(super) async fn apply_command(
             );
             Ok(())
         }
-        RadioCommand::SendMessage { .. }
-        | RadioCommand::SendText { .. }
-        | RadioCommand::StopKeying
-        | RadioCommand::SetWpm(_) => Ok(()),
+        RadioCommand::SendText { .. } | RadioCommand::StopKeying | RadioCommand::SetWpm(_) => {
+            Ok(())
+        }
     }
 }
 
@@ -242,18 +241,16 @@ async fn publish_requested_logger_mode(
 mod tests {
     use super::*;
     use crate::radio::RadioCommand;
-    use serde_json::Map;
     use tokio::sync::oneshot;
 
     #[tokio::test]
-    async fn fail_unavailable_radio_command_rejects_send_message() {
+    async fn fail_unavailable_radio_command_rejects_send_text() {
         let (completed_tx, completed_rx) = oneshot::channel();
 
         fail_unavailable_radio_command(
-            RadioCommand::SendMessage {
-                mode: "run".to_string(),
-                keys: vec!["F1".to_string()],
-                fields: Map::new(),
+            RadioCommand::SendText {
+                text: "CQ TEST".to_string(),
+                wait_for_completion: true,
                 completed: completed_tx,
             },
             "radio disconnected",

@@ -410,9 +410,6 @@ function LoggerScreen() {
               onDecrementRit={(hz) =>
                 sendRadioMessage({ type: 'rit_decrement', hz })
               }
-              onSendMessage={(payload) =>
-                sendRadioMessage({ type: 'send_message', ...payload })
-              }
               onSendText={(payload) =>
                 sendRadioMessage({ type: 'send_text', ...payload })
               }

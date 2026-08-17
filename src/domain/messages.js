@@ -44,14 +44,71 @@ export function actionFromTemplate(template) {
 }
 
 export function messageActionForConfig(config, mode, key) {
+  const entry = messageEntryForConfig(config, mode, key);
+  return entry ? actionFromTemplate(entry.target) : null;
+}
+
+export function messageEntryForConfig(config, mode, key) {
   const normalizedMode = normalizeMessageMode(mode);
   const normalizedKey = String(key ?? '')
     .trim()
     .toUpperCase();
   if (!normalizedKey) return null;
-  const entry = parseMessageEntries(config).find(
-    (candidate) =>
-      candidate.mode === normalizedMode && candidate.key === normalizedKey,
+  return (
+    parseMessageEntries(config).find(
+      (candidate) =>
+        candidate.mode === normalizedMode && candidate.key === normalizedKey,
+    ) ?? null
   );
-  return entry ? actionFromTemplate(entry.target) : null;
+}
+
+function messageFieldText(fields, key) {
+  const value = fields?.[key];
+  if (value === undefined || value === null) return '';
+  return String(value).trim();
+}
+
+function cutNumberText(value) {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replaceAll('9', 'N');
+}
+
+export function renderMessageTemplate(template, fields = {}) {
+  return String(template ?? '')
+    .replace(/\{([A-Z][A-Z0-9_]*)\}/g, (_match, key) => {
+      if (key === 'RST_SENT' || key === 'SENTRSTCUT') {
+        return cutNumberText(fields.RST_SENT);
+      }
+      return messageFieldText(fields, key);
+    })
+    .trim();
+}
+
+export function renderMessageForConfig(config, mode, key, fields = {}) {
+  const entry = messageEntryForConfig(config, mode, key);
+  if (!entry || actionFromTemplate(entry.target)) return null;
+  return renderMessageTemplate(entry.target, fields);
+}
+
+export function messageSendBatches(messages, separateMessages = false) {
+  if (messages.length === 0) return [];
+  if (separateMessages) {
+    return messages.map(({ key, text }) => ({ keys: [key], text }));
+  }
+  return [
+    {
+      keys: messages.map(({ key }) => key),
+      text: messages.map(({ text }) => text).join(' '),
+    },
+  ];
+}
+
+export function completionTrackedTextRequest(requestId, text) {
+  return {
+    request_id: requestId,
+    text,
+    wait_for_completion: true,
+  };
 }

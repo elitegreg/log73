@@ -24,12 +24,6 @@ pub enum RadioClientMessage {
     RitDecrement {
         hz: i32,
     },
-    SendMessage {
-        request_id: String,
-        mode: String,
-        keys: Vec<String>,
-        fields: serde_json::Map<String, serde_json::Value>,
-    },
     SendText {
         request_id: String,
         text: String,
@@ -125,12 +119,6 @@ pub enum RadioCommand {
     RitClear,
     RitIncrement(i32),
     RitDecrement(i32),
-    SendMessage {
-        mode: String,
-        keys: Vec<String>,
-        fields: serde_json::Map<String, serde_json::Value>,
-        completed: tokio::sync::oneshot::Sender<Result<(), String>>,
-    },
     SendText {
         text: String,
         wait_for_completion: bool,
@@ -286,6 +274,16 @@ mod tests {
                 "type": "send_cw_text",
                 "request_id": "text-1",
                 "text": "CQ"
+            }))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_value::<RadioClientMessage>(serde_json::json!({
+                "type": "send_message",
+                "request_id": "message-1",
+                "mode": "run",
+                "keys": ["F1"],
+                "fields": {}
             }))
             .is_err()
         );

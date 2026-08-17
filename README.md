@@ -455,13 +455,16 @@ Client radio commands:
 { "type": "set_mode", "mode": "SSB" }
 ```
 
-Client CW commands:
+Client keying commands:
 
 ```json
-{ "type": "send_message", "request_id": "uuid-or-client-id", "mode": "run", "keys": ["F1"], "fields": { "CALL": "K1ABC" } }
+{ "type": "send_text", "request_id": "uuid-or-client-id", "text": "CQ TEST K1ABC", "wait_for_completion": true }
+{ "type": "send_text", "request_id": "uuid-or-client-id", "text": "operator1/CQ.wav", "wait_for_completion": true }
 { "type": "stop_keying" }
 { "type": "set_wpm", "wpm": 25 }
 ```
+
+The browser renders configured CW/digital message templates and voice file-name templates from the current logger fields before sending them. In phone modes, `send_text.text` is a WAV path relative to `voicekeyer/`.
 
 ## Database
 
