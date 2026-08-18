@@ -1,0 +1,53 @@
+schema: 2
+contests:
+  NY-QSO-PARTY (In State):
+    name: New York QSO Party (In State)
+    profiles: [all-contest-bands]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      New York Counties: {values_from_file: new-york-counties.dat}
+      States: {use: us-states, exclude: [NY]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: New York County, type: String:3, required: true, in_sets: [New York Counties]}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, MIXED]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, PORTABLE]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County(s), type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [New York Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:3, adif: SRX_STRING, direction: received, in_sets: [New York Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}
+          - {id: qso-cw, when: {field: MODE_CLASS, values: [CW]}, points: 2}
+          - {id: qso-digital, points: 3}
+      dupe_key: [CALL, BAND, MODE, STX_STRING, SRX_STRING]
+      multipliers:
+        - {id: mult-new-york-county, name: New York County, field: SRX_STRING, key: [SRX_STRING], in_sets: [New York Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+    metadata:
+      source: https://nyqp.org/wordpress/nyqp-rules/
+      notes: New York entrants score 62 New York counties, 49 other states, and 13 Canadian provinces; DX contacts score points only.
+  NY-QSO-PARTY:
+    name: New York QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-operator}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: New York County, type: String:3, adif: SRX_STRING, direction: received, in_sets: [New York Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+    metadata:
+      notes: Outside-New-York stations score each New York county once.
+    extends: NY-QSO-PARTY (In State)

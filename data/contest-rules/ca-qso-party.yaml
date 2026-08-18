@@ -1,0 +1,50 @@
+schema: 2
+contests:
+  CA-QSO-PARTY (In State):
+    name: California QSO Party (In State)
+    profiles: [hf-bands]
+    modes: [CW, PHONE]
+    value_sets:
+      California Counties: {values_from_file: california-counties.dat}
+      States: {use: us-states, exclude: [CA]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: California County, type: String:4, required: true, in_sets: [California Counties]}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, EXPEDITION]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: serial-sent, label: Serial(s), type: Serial:6, adif: STX, direction: sent}
+      - {id: county-sent, label: County(s), type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [California Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: serial-received, label: Serial, type: Serial:6, adif: SRX, direction: received}
+      - {id: exchange-received, label: Exchange, type: String:4, adif: SRX_STRING, direction: received, in_sets: [California Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points: {points: 3}
+      dupe_key: [CALL, BAND, MODE, STX_STRING, SRX_STRING]
+      multipliers:
+        - {id: mult-california, name: CQP Location, field: SRX_STRING, fixed_key: CA, in_sets: [California Counties], max_count: 58, cap_group: cqp-location}
+        - {id: mult-state-province, name: CQP Location, field: SRX_STRING, key: [SRX_STRING], in_sets: [States, Canadian Provinces], max_count: 58, cap_group: cqp-location}
+    metadata:
+      source: https://www.cqp.org/Rules.html
+      notes: California entrants receive one California multiplier plus states and Canadian provinces, capped at 58 scored multipliers; DX contacts score points only.
+  CA-QSO-PARTY:
+    name: California QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-operator}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: serial-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: California County, type: String:4, adif: SRX_STRING, direction: received, in_sets: [California Counties], after: serial-received}
+    scoring:
+      multipliers:
+        - {id: mult-california, remove: true}
+        - {id: mult-state-province, remove: true}
+        - {id: mult-california-county, name: California County, field: SRX_STRING, key: [SRX_STRING]}
+    metadata:
+      notes: Outside-California stations score the 58 California counties once each.
+    extends: CA-QSO-PARTY (In State)

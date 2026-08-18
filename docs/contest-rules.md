@@ -84,7 +84,9 @@ Supported authored field types are `String`, `RST`, `Numeric`, and `Serial`, opt
 
 ## Scoring and Cabrillo
 
-Scoring settings live under `scoring`: `qso_points`, `dupe_key`, `multipliers`, `bonus_points`, `param_multipliers`, and `multiplier_count_bonus_points`. Scoring rule lists use stable IDs. Conditions may use direct `values`, `in_set`/`in_sets`, `exclude_values`/`exclude_in_sets`, `matches_field` for a case-insensitive comparison to another QSO field, and callsign suffix filters. References to value sets are expanded before rules reach scoring or the API.
+Scoring settings live under `scoring`: `qso_points`, `dupe_key`, `multipliers`, `bonus_points`, `param_multipliers`, `multiplier_count_bonus_points`, and `qso_count_bonus_points`. Scoring rule lists use stable IDs. Conditions may use direct `values`, `in_set`/`in_sets`, `exclude_values`/`exclude_in_sets`, `matches_field` for a case-insensitive comparison to another QSO field, and callsign suffix filters. References to value sets are expanded before rules reach scoring or the API.
+
+Multipliers may set `max_count` to score only the first N distinct values. Rules sharing a `cap_group` share that limit. A `qso_count_bonus_points` rule awards its threshold value for every distinct value in `field` that reaches the threshold; it can be limited to selected log parameter values with `param` and `values`.
 
 `modes` accepts exact ADIF mode names as well as `PHONE` (SSB, FM, or AM) and `DIGITAL` (any non-CW, non-phone mode). `excluded_modes` uses the same matching rules and is applied after the allowed list. This supports contests that permit all digital modes except RTTY.
 

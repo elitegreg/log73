@@ -59,9 +59,19 @@ pub struct ContestScorer {
     module: Arc<ContestScoringModule>,
     dupe_keys: HashMap<String, usize>,
     multiplier_keys: HashSet<String>,
+    multiplier_counts: HashMap<String, usize>,
     bonus_keys: HashSet<String>,
+    qso_count_bonus_counts: HashMap<String, usize>,
     direct_bonus_points: i64,
     totals: ScoreTotals,
+}
+
+#[derive(Clone)]
+struct MultiplierCandidate {
+    id: String,
+    cap_group: Option<String>,
+    key: String,
+    max_count: Option<usize>,
 }
 
 impl ContestScoringModule {
@@ -83,6 +93,14 @@ impl ContestScoringModule {
 
     pub fn has_multipliers(&self) -> bool {
         !self.rules.scoring.multipliers.is_empty()
+    }
+
+    fn has_capped_multipliers(&self) -> bool {
+        self.rules
+            .scoring
+            .multipliers
+            .iter()
+            .any(|multiplier| multiplier.max_count.is_some())
     }
 
     pub fn score_factor(&self) -> i64 {
@@ -112,6 +130,13 @@ impl ContestScoringModule {
     }
 
     pub fn multiplier_keys_for(&self, contact: &Contact) -> Vec<String> {
+        self.multiplier_candidates_for(contact)
+            .into_iter()
+            .map(|candidate| candidate.key)
+            .collect()
+    }
+
+    fn multiplier_candidates_for(&self, contact: &Contact) -> Vec<MultiplierCandidate> {
         if !contact_in_category_band(&self.rules, &self.contest_params, contact) {
             return Vec::new();
         }
@@ -125,7 +150,12 @@ impl ContestScoringModule {
                     .fixed_key
                     .clone()
                     .unwrap_or_else(|| scoring_key(contact, &self.rules, &multiplier.key));
-                format!("{}:{}", multiplier.name.to_uppercase(), key)
+                MultiplierCandidate {
+                    id: multiplier.id.clone(),
+                    cap_group: multiplier.cap_group.clone(),
+                    key: format!("{}:{}", multiplier.name.to_uppercase(), key),
+                    max_count: multiplier.max_count,
+                }
             })
             .collect()
     }
@@ -152,6 +182,41 @@ impl ContestScoringModule {
         keys
     }
 
+    fn qso_count_bonus_keys_for(&self, contact: &Contact) -> Vec<String> {
+        self.rules
+            .scoring
+            .qso_count_bonus_points
+            .iter()
+            .filter(|bonus| {
+                let Some(param) = &bonus.param else {
+                    return true;
+                };
+                let selected = self
+                    .contest_params
+                    .as_object()
+                    .and_then(|params| {
+                        params
+                            .iter()
+                            .find(|(name, _)| name.eq_ignore_ascii_case(param))
+                    })
+                    .and_then(|(_, value)| value.as_str())
+                    .map(str::trim);
+                let Some(selected) = selected else {
+                    return false;
+                };
+                bonus.values.is_empty()
+                    || bonus
+                        .values
+                        .iter()
+                        .any(|value| value.eq_ignore_ascii_case(selected))
+            })
+            .filter_map(|bonus| {
+                field_value(contact, &self.rules, &bonus.field)
+                    .map(|value| format!("{}:{value}", bonus.id))
+            })
+            .collect()
+    }
+
     fn multiplier_count_bonus_points<'a, I>(&self, multiplier_keys: I) -> i64
     where
         I: IntoIterator<Item = &'a String>,
@@ -176,6 +241,29 @@ impl ContestScoringModule {
             })
             .sum()
     }
+
+    fn qso_count_bonus_points(&self, counts: &HashMap<String, usize>) -> i64 {
+        self.rules
+            .scoring
+            .qso_count_bonus_points
+            .iter()
+            .map(|bonus| {
+                let prefix = format!("{}:", bonus.id);
+                counts
+                    .iter()
+                    .filter(|(key, _)| key.starts_with(&prefix))
+                    .map(|(_, count)| {
+                        bonus
+                            .thresholds
+                            .iter()
+                            .rfind(|(threshold, _)| **threshold <= *count)
+                            .map(|(_, points)| *points)
+                            .unwrap_or(0)
+                    })
+                    .sum::<i64>()
+            })
+            .sum()
+    }
 }
 
 impl Default for ContestScoringModule {
@@ -192,7 +280,9 @@ impl ContestScorer {
     pub fn reset(&mut self) {
         self.dupe_keys.clear();
         self.multiplier_keys.clear();
+        self.multiplier_counts.clear();
         self.bonus_keys.clear();
+        self.qso_count_bonus_counts.clear();
         self.direct_bonus_points = 0;
         self.totals = ScoreTotals::default();
     }
@@ -214,6 +304,11 @@ impl ContestScorer {
         self.totals.qso_points += points;
         self.totals.multipliers += mults;
         self.direct_bonus_points += bonus;
+        if !is_dupe && points > 0 {
+            for key in self.module.qso_count_bonus_keys_for(contact) {
+                *self.qso_count_bonus_counts.entry(key).or_default() += 1;
+            }
+        }
         self.recalculate_score();
 
         set_contact_meta(contact, "pts", Value::Number(points.into()));
@@ -230,6 +325,11 @@ impl ContestScorer {
         self.totals.qso_points -= scored_i64(contact, "pts");
         self.totals.multipliers -= scored_i64(contact, "mult");
         self.direct_bonus_points -= scored_i64(contact, "bonus");
+        if !is_dupe_contact(contact) && scored_i64(contact, "pts") > 0 {
+            for key in self.module.qso_count_bonus_keys_for(contact) {
+                decrement_count(&mut self.qso_count_bonus_counts, &key);
+            }
+        }
         self.remove_dupe_key(contact);
         self.recalculate_score();
         self.totals.clone()
@@ -253,7 +353,10 @@ impl ContestScorer {
         self.totals.bonus_points = self.direct_bonus_points
             + self
                 .module
-                .multiplier_count_bonus_points(self.multiplier_keys.iter());
+                .multiplier_count_bonus_points(self.multiplier_keys.iter())
+            + self
+                .module
+                .qso_count_bonus_points(&self.qso_count_bonus_counts);
         self.totals.score = self.totals.qso_points * multiplier_factor * self.module.score_factor()
             + self.totals.bonus_points;
     }
@@ -291,9 +394,27 @@ impl ContestScorer {
 
     fn multipliers(&mut self, contact: &Contact) -> i64 {
         self.module
-            .multiplier_keys_for(contact)
+            .multiplier_candidates_for(contact)
             .into_iter()
-            .filter(|key| self.multiplier_keys.insert(key.clone()))
+            .filter(|candidate| {
+                if self.multiplier_keys.contains(&candidate.key)
+                    || candidate.max_count.is_some_and(|maximum| {
+                        self.multiplier_counts
+                            .get(candidate.cap_group.as_ref().unwrap_or(&candidate.id))
+                            .copied()
+                            .unwrap_or(0)
+                            >= maximum
+                    })
+                {
+                    return false;
+                }
+                self.multiplier_keys.insert(candidate.key.clone());
+                *self
+                    .multiplier_counts
+                    .entry(candidate.cap_group.clone().unwrap_or(candidate.id.clone()))
+                    .or_default() += 1;
+                true
+            })
             .count() as i64
     }
 
@@ -663,7 +784,9 @@ struct IncrementalLogState {
     dupe_counts: HashMap<String, usize>,
     dupe_owners: HashMap<String, i64>,
     multiplier_owners: HashMap<String, i64>,
+    multiplier_counts: HashMap<String, usize>,
     bonus_owners: HashMap<String, i64>,
+    qso_count_bonus_counts: HashMap<String, usize>,
 }
 
 impl IncrementalScoreTracker {
@@ -716,6 +839,15 @@ impl LogCacheProcessor for IncrementalScoreTracker {
             state.reset(Arc::clone(&module), contacts);
         }
 
+        if state.module.has_capped_multipliers() {
+            state.reset(Arc::clone(&module), contacts);
+            let committed_ids = committed_contacts
+                .iter()
+                .filter_map(contact_id_for)
+                .collect::<HashSet<_>>();
+            return collect_changed_contacts(contacts, &all_contact_ids(contacts), &committed_ids);
+        }
+
         let mut changed_contact_ids = HashSet::new();
         for previous_contact in previous_contacts.iter().flatten() {
             state.remove_contact(
@@ -765,6 +897,11 @@ impl LogCacheProcessor for IncrementalScoreTracker {
             return Vec::new();
         }
 
+        if state.module.has_capped_multipliers() {
+            state.reset(Arc::clone(&module), contacts);
+            return contacts.to_vec();
+        }
+
         let mut changed_contact_ids = HashSet::new();
         state.remove_contact(deleted_contact, contacts, &mut changed_contact_ids, None);
 
@@ -789,7 +926,9 @@ impl IncrementalLogState {
             dupe_counts: HashMap::new(),
             dupe_owners: HashMap::new(),
             multiplier_owners: HashMap::new(),
+            multiplier_counts: HashMap::new(),
             bonus_owners: HashMap::new(),
+            qso_count_bonus_counts: HashMap::new(),
         }
     }
 
@@ -800,7 +939,9 @@ impl IncrementalLogState {
         self.dupe_counts.clear();
         self.dupe_owners.clear();
         self.multiplier_owners.clear();
+        self.multiplier_counts.clear();
         self.bonus_owners.clear();
+        self.qso_count_bonus_counts.clear();
 
         for contact in contacts {
             self.add_contact(contact);
@@ -832,6 +973,11 @@ impl IncrementalLogState {
         self.totals.qso_points += points;
         self.totals.multipliers += mults;
         self.direct_bonus_points += bonus;
+        if points > 0 {
+            for key in self.module.qso_count_bonus_keys_for(contact) {
+                *self.qso_count_bonus_counts.entry(key).or_default() += 1;
+            }
+        }
         set_contact_score_fields(contact, points, mults, bonus, false);
 
         self.recalculate_score();
@@ -848,6 +994,11 @@ impl IncrementalLogState {
         self.totals.qso_points -= scored_i64(deleted_contact, "pts");
         self.totals.multipliers -= scored_i64(deleted_contact, "mult");
         self.direct_bonus_points -= scored_i64(deleted_contact, "bonus");
+        if !is_dupe_contact(deleted_contact) && scored_i64(deleted_contact, "pts") > 0 {
+            for key in self.module.qso_count_bonus_keys_for(deleted_contact) {
+                decrement_count(&mut self.qso_count_bonus_counts, &key);
+            }
+        }
 
         let deleted_contact_id = contact_id_for(deleted_contact);
         let deleted_dupe_key = self.module.dupe_key_for(deleted_contact);
@@ -953,6 +1104,11 @@ impl IncrementalLogState {
         self.totals.qso_points += points;
         self.totals.multipliers += mults;
         self.direct_bonus_points += bonus;
+        if points > 0 {
+            for key in self.module.qso_count_bonus_keys_for(contact) {
+                *self.qso_count_bonus_counts.entry(key).or_default() += 1;
+            }
+        }
         set_contact_score_fields(contact, points, mults, bonus, false);
 
         if let Some(contact_id) = contact_id {
@@ -969,11 +1125,22 @@ impl IncrementalLogState {
         let mut mults = 0;
         let mut bonus = 0;
 
-        for multiplier_key in self.module.multiplier_keys_for(contact) {
+        for candidate in self.module.multiplier_candidates_for(contact) {
             if let Some(contact_id) = contact_id
-                && !self.multiplier_owners.contains_key(&multiplier_key)
+                && !self.multiplier_owners.contains_key(&candidate.key)
+                && !candidate.max_count.is_some_and(|maximum| {
+                    self.multiplier_counts
+                        .get(candidate.cap_group.as_ref().unwrap_or(&candidate.id))
+                        .copied()
+                        .unwrap_or(0)
+                        >= maximum
+                })
             {
-                self.multiplier_owners.insert(multiplier_key, contact_id);
+                self.multiplier_owners.insert(candidate.key, contact_id);
+                *self
+                    .multiplier_counts
+                    .entry(candidate.cap_group.unwrap_or(candidate.id))
+                    .or_default() += 1;
                 mults += 1;
             }
         }
@@ -1066,7 +1233,10 @@ impl IncrementalLogState {
         self.totals.bonus_points = self.direct_bonus_points
             + self
                 .module
-                .multiplier_count_bonus_points(self.multiplier_owners.keys());
+                .multiplier_count_bonus_points(self.multiplier_owners.keys())
+            + self
+                .module
+                .qso_count_bonus_points(&self.qso_count_bonus_counts);
         self.totals.score = self.totals.qso_points * multiplier_factor * self.module.score_factor()
             + self.totals.bonus_points;
     }
@@ -1096,6 +1266,21 @@ fn is_dupe_contact(contact: &Contact) -> bool {
         .unwrap_or(false)
 }
 
+fn decrement_count(counts: &mut HashMap<String, usize>, key: &str) {
+    let Some(count) = counts.get_mut(key) else {
+        return;
+    };
+    if *count <= 1 {
+        counts.remove(key);
+    } else {
+        *count -= 1;
+    }
+}
+
+fn all_contact_ids(contacts: &[Contact]) -> HashSet<i64> {
+    contacts.iter().filter_map(contact_id_for).collect()
+}
+
 fn collect_changed_contacts(
     contacts: &[Contact],
     changed_contact_ids: &HashSet<i64>,
@@ -1120,8 +1305,8 @@ mod tests {
     use super::*;
     use crate::contest_rules::{
         BonusPointRule, ContestRules, ContestRulesStore, GeographyQsoPoints, GridDistanceQsoPoints,
-        MultiplierCountBonusRule, ParamMultiplierRule, QsoPointRule, QsoPoints, ScoringRules,
-        test_multiplier_rule, test_scoring_condition, test_setup_field,
+        MultiplierCountBonusRule, ParamMultiplierRule, QsoCountBonusRule, QsoPointRule, QsoPoints,
+        ScoringRules, test_multiplier_rule, test_scoring_condition, test_setup_field,
     };
     use serde_json::json;
     use std::{collections::BTreeMap, path::PathBuf};
@@ -1170,6 +1355,7 @@ mod tests {
                     .into_iter()
                     .collect(),
                 multiplier_count_bonus_points: Vec::new(),
+                qso_count_bonus_points: Vec::new(),
             },
             ..ContestRules::default()
         }
@@ -1988,6 +2174,144 @@ mod tests {
 
         assert_eq!(totals.multipliers, 1);
         assert_eq!(totals.score, 3);
+    }
+
+    #[test]
+    fn multiplier_max_count_limits_distinct_values() {
+        let mut state = state_multiplier();
+        state.max_count = Some(2);
+        let rules = test_rules(
+            fixed_points(1),
+            Vec::new(),
+            vec![state],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = vec![
+            contact(vec![("STATE", json!("AL"))]),
+            contact(vec![("STATE", json!("AK"))]),
+            contact(vec![("STATE", json!("AZ"))]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 3);
+        assert_eq!(totals.multipliers, 2);
+        assert_eq!(totals.score, 6);
+    }
+
+    #[test]
+    fn qso_count_bonus_applies_per_sent_location_and_category() {
+        let mut rules = test_rules(
+            fixed_points(1),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        rules
+            .scoring
+            .qso_count_bonus_points
+            .push(QsoCountBonusRule {
+                id: "mobile-county".to_string(),
+                name: "Mobile County".to_string(),
+                field: "STX_STRING".to_string(),
+                param: Some("CATEGORY-STATION".to_string()),
+                values: vec!["MOBILE".to_string(), "ROVER".to_string()],
+                thresholds: BTreeMap::from([(2, 500)]),
+            });
+        let mut contacts = vec![
+            contact(vec![("STX_STRING", json!("AAA"))]),
+            contact(vec![("STX_STRING", json!("AAA"))]),
+            contact(vec![("STX_STRING", json!("BBB"))]),
+        ];
+
+        let mobile = score_contacts(&rules, json!({"CATEGORY-STATION": "MOBILE"}), &mut contacts);
+        assert_eq!(mobile.qso_points, 3);
+        assert_eq!(mobile.bonus_points, 500);
+        assert_eq!(mobile.score, 503);
+
+        let fixed = score_contacts(&rules, json!({"CATEGORY-STATION": "FIXED"}), &mut contacts);
+        assert_eq!(fixed.bonus_points, 0);
+        assert_eq!(fixed.score, 3);
+    }
+
+    #[test]
+    fn bundled_cqp_paqp_and_ilqp_use_declarative_scoring_extensions() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+
+        let cqp = store
+            .get("CA-QSO-PARTY (In State)")
+            .expect("California rules should load");
+        let mut cqp_locations = cqp.value_sets["States"]
+            .iter()
+            .chain(cqp.value_sets["Canadian Provinces"].iter())
+            .cloned()
+            .collect::<Vec<_>>();
+        cqp_locations.push("ALAM".to_string());
+        let mut cqp_contacts = cqp_locations
+            .iter()
+            .enumerate()
+            .map(|(index, location)| {
+                contact(vec![
+                    ("CALL", json!(format!("K{index}CA"))),
+                    ("BAND", json!("20M")),
+                    ("MODE", json!("CW")),
+                    ("STX_STRING", json!("ALAM")),
+                    ("SRX_STRING", json!(location)),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let cqp_totals = score_contacts(cqp, Value::Null, &mut cqp_contacts);
+        assert_eq!(cqp_totals.qso_points, 189);
+        assert_eq!(cqp_totals.multipliers, 58);
+        assert_eq!(cqp_totals.score, 10_962);
+
+        let paqp = store
+            .get("PA-QSO-PARTY (In State)")
+            .expect("Pennsylvania rules should load");
+        let mut paqp_contacts = (0..10)
+            .map(|index| {
+                contact(vec![
+                    ("CALL", json!(format!("K{index}PA"))),
+                    ("BAND", json!("20M")),
+                    ("MODE", json!("CW")),
+                    ("STX_STRING", json!("ADA")),
+                    ("SRX_STRING", json!("CO")),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let paqp_totals = score_contacts(
+            paqp,
+            json!({"CATEGORY-STATION": "MOBILE", "CATEGORY-POWER": "LOW"}),
+            &mut paqp_contacts,
+        );
+        assert_eq!(paqp_totals.qso_points, 20);
+        assert_eq!(paqp_totals.bonus_points, 500);
+
+        let ilqp = store
+            .get("IL-QSO-PARTY (In State)")
+            .expect("Illinois rules should load");
+        let mut ilqp_contacts = (230..236)
+            .map(|dxcc| {
+                contact(vec![
+                    ("CALL", json!(format!("DL{dxcc}ABC"))),
+                    ("BAND", json!("20M")),
+                    ("MODE", json!("CW")),
+                    ("STX_STRING", json!("ADAM")),
+                    ("SRX_STRING", json!("DX")),
+                    ("DXCC", json!(dxcc)),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let ilqp_totals = score_contacts(ilqp, Value::Null, &mut ilqp_contacts);
+        assert_eq!(ilqp_totals.qso_points, 12);
+        assert_eq!(ilqp_totals.multipliers, 5);
+        assert_eq!(ilqp_totals.score, 60);
     }
 
     #[test]

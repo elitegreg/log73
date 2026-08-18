@@ -330,6 +330,10 @@ pub struct MultiplierRule {
     pub exclude_values: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixed_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cap_group: Option<String>,
     #[serde(default, skip_serializing)]
     in_sets: Vec<String>,
 }
@@ -356,6 +360,19 @@ pub struct MultiplierCountBonusRule {
     pub id: String,
     pub name: String,
     pub multiplier: String,
+    #[serde(deserialize_with = "deserialize_thresholds")]
+    pub thresholds: BTreeMap<usize, i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QsoCountBonusRule {
+    pub id: String,
+    pub name: String,
+    pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub param: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<String>,
     #[serde(deserialize_with = "deserialize_thresholds")]
     pub thresholds: BTreeMap<usize, i64>,
 }
@@ -390,6 +407,8 @@ pub struct ScoringRules {
     pub param_multipliers: Vec<ParamMultiplierRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub multiplier_count_bonus_points: Vec<MultiplierCountBonusRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub qso_count_bonus_points: Vec<QsoCountBonusRule>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -526,6 +545,8 @@ pub(crate) fn test_multiplier_rule(id: &str, name: &str, field: &str) -> Multipl
         exclude_call_suffixes: Vec::new(),
         exclude_values: Vec::new(),
         fixed_key: None,
+        max_count: None,
+        cap_group: None,
         in_sets: Vec::new(),
     }
 }
@@ -1493,6 +1514,14 @@ fn validate_contest(contest: &ContestRules) -> Result<(), String> {
     )?;
     validate_ids(
         contest
+            .scoring
+            .qso_count_bonus_points
+            .iter()
+            .map(|rule| rule.id.as_str()),
+        "QSO-count bonus rule",
+    )?;
+    validate_ids(
+        contest
             .qso_table
             .columns
             .iter()
@@ -1579,6 +1608,29 @@ fn validate_contest(contest: &ContestRules) -> Result<(), String> {
         {
             return Err(format!(
                 "multiplier_count_bonus_points {} must define positive thresholds and points",
+                bonus.name
+            ));
+        }
+    }
+    for multiplier in &contest.scoring.multipliers {
+        if multiplier.max_count == Some(0) {
+            return Err(format!(
+                "multiplier {} max_count must be greater than zero",
+                multiplier.id
+            ));
+        }
+    }
+    for bonus in &contest.scoring.qso_count_bonus_points {
+        if bonus.field.trim().is_empty()
+            || bonus.thresholds.is_empty()
+            || bonus
+                .thresholds
+                .iter()
+                .any(|(threshold, points)| *threshold == 0 || *points <= 0)
+            || (bonus.param.is_none() && !bonus.values.is_empty())
+        {
+            return Err(format!(
+                "qso_count_bonus_points {} must define a field, positive thresholds and points, and a parameter when values are set",
                 bonus.name
             ));
         }
@@ -2033,7 +2085,7 @@ contests:
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir]).expect("bundled rules load");
 
-        assert_eq!(store.summaries().len(), 63);
+        assert_eq!(store.summaries().len(), 77);
         for id in [
             "ARRL-10",
             "ARRL-SS-CW",
@@ -2049,6 +2101,13 @@ contests:
             "NJ-QSO-PARTY (In State)",
             "TX-QSO-PARTY (In State)",
             "CO-QSO-PARTY (In State)",
+            "ME-QSO-PARTY (In State)",
+            "CA-QSO-PARTY (In State)",
+            "AZ-QSO-PARTY (In State)",
+            "PA-QSO-PARTY (In State)",
+            "SD-QSO-PARTY (In State)",
+            "NY-QSO-PARTY (In State)",
+            "IL-QSO-PARTY (In State)",
         ] {
             assert!(store.get(id).is_some(), "missing bundled contest {id}");
         }

@@ -1,0 +1,42 @@
+schema: 2
+contests:
+  ME-QSO-PARTY (In State):
+    name: Maine QSO Party (In State)
+    profiles: [hf-bands]
+    modes: [CW, PHONE]
+    value_sets:
+      Maine Counties: {values_from_file: maine-counties.dat}
+      States: {use: us-states, exclude: [ME]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Maine County, type: String:3, required: true, in_sets: [Maine Counties]}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County(s), type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Maine Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:3, adif: SRX_STRING, direction: received, in_sets: [Maine Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-maine, when: {field: SRX_STRING, in_sets: [Maine Counties]}, points: 2}, {id: qso-other, points: 1}]
+      dupe_key: [CALL, BAND, MODE, STX_STRING, SRX_STRING]
+      multipliers:
+        - {id: mult-maine-county, name: Maine County, field: SRX_STRING, key: [SRX_STRING], in_sets: [Maine Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dxcc, name: DXCC Entity, field: DXCC, key: [DXCC], exclude_values: ['1', '291']}
+    metadata:
+      source: https://www.ws1sm.com/MEQP.html
+      notes: All stations may work one another; Maine contacts are worth two points and all others one point.
+  ME-QSO-PARTY:
+    name: Maine QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-operator}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+    extends: ME-QSO-PARTY (In State)
