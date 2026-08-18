@@ -1,4 +1,4 @@
-import { modeIsCw } from './modes.js';
+import { modeIsCw, modeIsDigital } from './modes.js';
 
 export function parseFieldInput(input = {}, radioMode = 'CW') {
   const kind = String(input?.kind ?? 'string').toUpperCase();
@@ -97,6 +97,25 @@ export function cutNumberString(value) {
     .replaceAll('9', 'N');
 }
 
+export function messageExchangeFieldValue(field, value, radioMode) {
+  const normalized = String(value ?? '')
+    .trim()
+    .toUpperCase();
+
+  if (field?.adif === 'RST_SENT') {
+    return cutNumberString(normalized);
+  }
+
+  const isSentSerial =
+    field?.direction === 'sent' &&
+    parseFieldInput(field?.input, radioMode).kind === 'SERIAL';
+  if (!normalized || !isSentSerial) return normalized;
+
+  if (modeIsCw(radioMode)) return normalized.padStart(2, '0');
+  if (modeIsDigital(radioMode)) return normalized.padStart(3, '0');
+  return normalized;
+}
+
 export function sentExchangeToken(
   field,
   exchangeValues = {},
@@ -106,15 +125,7 @@ export function sentExchangeToken(
   const value =
     exchangeValues?.[field?.id] ??
     fieldDefault(field, radioMode, contestParams);
-  const normalized = String(value ?? '')
-    .trim()
-    .toUpperCase();
-
-  if (field?.adif === 'RST_SENT') {
-    return cutNumberString(normalized);
-  }
-
-  return normalized;
+  return messageExchangeFieldValue(field, value, radioMode);
 }
 
 export function buildSentExchange(

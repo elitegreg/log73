@@ -4,6 +4,7 @@ import {
   buildSentExchange,
   cutNumberString,
   fieldDefault,
+  messageExchangeFieldValue,
   parseFieldInput,
   sanitizeCallsign,
   sanitizeConfiguredValue,
@@ -118,6 +119,25 @@ test('cutNumberString applies CW cut numbers for 9', () => {
   assert.equal(cutNumberString(59), '5N');
 });
 
+test('sent serial message fields use mode-specific minimum widths', () => {
+  const sentSerial = {
+    id: 'serial-sent',
+    adif: 'STX',
+    direction: 'sent',
+    input: { kind: 'serial', max_length: 4 },
+  };
+  const receivedSerial = { ...sentSerial, adif: 'SRX', direction: 'received' };
+
+  assert.equal(messageExchangeFieldValue(sentSerial, 5, 'CW'), '05');
+  assert.equal(messageExchangeFieldValue(sentSerial, 12, 'CW-R'), '12');
+  assert.equal(messageExchangeFieldValue(sentSerial, 1, 'RTTY'), '001');
+  assert.equal(messageExchangeFieldValue(sentSerial, 12, 'DATA'), '012');
+  assert.equal(messageExchangeFieldValue(sentSerial, 321, 'DATA'), '321');
+  assert.equal(messageExchangeFieldValue(sentSerial, 5, 'SSB'), '5');
+  assert.equal(messageExchangeFieldValue(receivedSerial, 5, 'RTTY'), '5');
+  assert.equal(messageExchangeFieldValue(sentSerial, '', 'CW'), '');
+});
+
 test('buildSentExchange uses sent fields in order with cut RST and fixed params', () => {
   const settings = {
     exchange: [
@@ -127,6 +147,13 @@ test('buildSentExchange uses sent fields in order with cut RST and fixed params'
         input: { kind: 'rst' },
         adif: 'RST_SENT',
         default: 599,
+        direction: 'sent',
+      },
+      {
+        id: 'serial-sent',
+        label: 'Serial',
+        input: { kind: 'serial', max_length: 4 },
+        adif: 'STX',
         direction: 'sent',
       },
       {
@@ -149,13 +176,18 @@ test('buildSentExchange uses sent fields in order with cut RST and fixed params'
   };
 
   assert.equal(
-    buildSentExchange(settings, {}, 'CW', { County: 'berk' }),
-    '5NN BERK',
-  );
-  assert.equal(
-    buildSentExchange(settings, { 'rst-sent': '579' }, 'CW', {
+    buildSentExchange(settings, { 'serial-sent': '5' }, 'CW', {
       County: 'berk',
     }),
-    '57N BERK',
+    '5NN 05 BERK',
+  );
+  assert.equal(
+    buildSentExchange(
+      settings,
+      { 'rst-sent': '579', 'serial-sent': '12' },
+      'RTTY',
+      { County: 'berk' },
+    ),
+    '57N 012 BERK',
   );
 });

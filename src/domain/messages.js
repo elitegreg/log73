@@ -86,10 +86,19 @@ export function renderMessageTemplate(template, fields = {}) {
     .trim();
 }
 
-export function renderMessageForConfig(config, mode, key, fields = {}) {
+export function renderMessageForConfig(
+  config,
+  mode,
+  key,
+  fields = {},
+  { replaceNewline = false } = {},
+) {
   const entry = messageEntryForConfig(config, mode, key);
   if (!entry || actionFromTemplate(entry.target)) return null;
-  return renderMessageTemplate(entry.target, fields);
+  const template = replaceNewline
+    ? String(entry.target).replaceAll('{NEWLINE}', '\n')
+    : entry.target;
+  return renderMessageTemplate(template, fields);
 }
 
 export function messageSendBatches(messages, separateMessages = false) {

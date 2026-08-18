@@ -464,7 +464,7 @@ Client keying commands:
 { "type": "set_wpm", "wpm": 25 }
 ```
 
-The browser renders configured CW/digital message templates and voice file-name templates from the current logger fields before sending them. In phone modes, `send_text.text` is a WAV path relative to `voicekeyer/`.
+The browser renders configured CW/digital message templates and voice file-name templates from the current logger fields before sending them. Digital message definitions may use `{NEWLINE}` for a literal line break. Sent serial fields are padded to at least two digits in CW/CW-R and three digits in DATA/RTTY. In phone modes, `send_text.text` is a WAV path relative to `voicekeyer/`.
 
 ## Database
 

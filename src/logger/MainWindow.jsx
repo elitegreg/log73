@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   buildSentExchange,
   fieldDefault,
+  messageExchangeFieldValue,
   sanitizeCallsign,
 } from '../domain/contactFields';
 import { cabrilloTransmitterAdif } from '../domain/cabrilloTransmitter';
@@ -266,12 +267,12 @@ function MainWindow({
     };
 
     for (const field of settings?.exchange ?? []) {
-      fields[field.adif] = String(
+      fields[field.adif] = messageExchangeFieldValue(
+        field,
         values?.[field.id] ??
           fieldDefault(field, radioMode, log?.contest_params ?? {}),
-      )
-        .trim()
-        .toUpperCase();
+        radioMode,
+      );
     }
 
     fields.EXCH = buildSentExchange(

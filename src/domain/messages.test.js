@@ -81,6 +81,32 @@ F1 Qrl?,{OPERATOR}/QRL.wav
   assert.equal(renderMessageForConfig(config, 'run', 'F9', {}), null);
 });
 
+test('digital message definitions replace NEWLINE with a literal newline', () => {
+  const config = `
+# RUN Messages
+F1 Multi,Line one{NEWLINE}Line two {CALL}
+# S&P Messages
+F1 Multi,First{NEWLINE}Second
+`;
+
+  assert.equal(
+    renderMessageForConfig(
+      config,
+      'run',
+      'F1',
+      { CALL: 'K1ABC' },
+      {
+        replaceNewline: true,
+      },
+    ),
+    'Line one\nLine two K1ABC',
+  );
+  assert.equal(
+    renderMessageForConfig(config, 'run', 'F1', {}, { replaceNewline: false }),
+    'Line oneLine two',
+  );
+});
+
 test('message batches join text messages and separate voice files', () => {
   const messages = [
     { key: 'F5', text: 'K1ABC' },

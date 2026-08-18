@@ -145,7 +145,9 @@ export function useMessageSending({
         (label) => label.key === key,
       );
       if (!messageButtonIsSendable(button)) continue;
-      const text = renderMessageForConfig(config, mode, key, values);
+      const text = renderMessageForConfig(config, mode, key, values, {
+        replaceNewline: modeIsDigital(radioMode),
+      });
       if (!text) continue;
       if (mode === 'run' && key === 'F1') {
         storeCurrentCqFrequency();
