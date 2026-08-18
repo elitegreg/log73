@@ -1,0 +1,100 @@
+schema: 2
+contests:
+  ARRL-RTTY:
+    name: ARRL RTTY Roundup
+    bands: [80M, 40M, 20M, 15M, 10M]
+    modes: [RTTY]
+    value_sets:
+      States:
+        use: us-states
+      Contiguous States:
+        use: us-states
+        exclude: [AK, HI]
+      District of Columbia:
+        use: district-of-columbia
+      Canadian Provinces:
+        use: canadian-provinces
+      W/VE DXCC:
+        values: ['1', '291']
+    setup_fields:
+      - id: param-location
+        key: Location
+        label: State or Province
+        type: String:3
+        required: true
+        in_sets: [States, District of Columbia, Canadian Provinces]
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, SINGLE-OP-UNLIMITED, MULTI-OP, CHECKLOG]
+      - id: header-category-assisted
+        preset: category-assisted
+        default: NON-ASSISTED
+        valid_values: [ASSISTED, NON-ASSISTED]
+      - id: header-category-power
+        preset: category-power
+        default: LOW
+        valid_values: [QRP, LOW, HIGH]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE, TWO, UNLIMITED]
+      - id: header-category-overlay
+        preset: category-overlay
+        required: false
+        valid_values: [LIMITED-ANTENNAS]
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: location-sent
+        label: Location(s)
+        type: String:3
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: Location
+        in_sets: [States, District of Columbia, Canadian Provinces]
+      - id: rst-received
+        preset: rst-received
+      - id: exchange-received
+        label: Exchange
+        type: String:4
+        adif: SRX_STRING
+        direction: received
+        regex: '^\d{1,4}$'
+        valid_values_or_regex: true
+        in_sets: [States, District of Columbia, Canadian Provinces]
+    scoring:
+      qso_points: {points: 1}
+      dupe_key: [CALL, BAND]
+      multipliers:
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [Contiguous States, District of Columbia]}
+        - {id: mult-canadian-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dxcc, name: DXCC Entity, field: DXCC, key: [DXCC], exclude_values: ['1', '291']}
+    cabrillo:
+      fixed_headers: [{id: fixed-category-mode, name: CATEGORY-MODE, value: RTTY}]
+      export_fields:
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://contests.arrl.org/ContestRules/RTTY-RU-Rules.pdf
+      notes: >-
+        States, DC, Canadian provinces and territories, and DXCC entities count once overall.
+        Alaska and Hawaii count as DXCC entities. Operating-time and category restrictions remain
+        operator-enforced.
+  ARRL-RTTY (DX):
+    name: ARRL RTTY Roundup (DX)
+    setup_fields:
+      - {id: param-location, remove: true}
+      - {id: param-serial, key: Serial, label: Starting Serial, type: Numeric:4, required: true, default: 1, regex: '^\d{1,4}$', before: header-category-operator}
+      - {id: header-category-operator, after: param-serial}
+    exchange:
+      - {id: location-sent, remove: true}
+      - {id: serial-sent, label: Serial(s), type: Serial:4, adif: STX, direction: sent, after: rst-sent}
+      - {id: rst-received, after: serial-sent}
+    metadata:
+      notes: DX stations send a serial number; W/VE stations send state or province.
+    extends: ARRL-RTTY

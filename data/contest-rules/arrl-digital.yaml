@@ -1,0 +1,66 @@
+schema: 2
+contests:
+  ARRL-DIGITAL:
+    name: ARRL International Digital Contest
+    bands: [160M, 80M, 40M, 20M, 15M, 10M, 6M]
+    modes: [DIGITAL]
+    excluded_modes: [RTTY]
+    setup_fields:
+      - id: param-grid
+        key: Grid
+        label: Grid Square
+        type: String:4
+        required: true
+        regex: '^[A-R]{2}\d{2}$'
+        help_text: Four-character Maidenhead grid square.
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP]
+      - id: header-category-power
+        preset: category-power
+        default: LOW
+        valid_values: [LOW, QRP]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE]
+    exchange:
+      - id: grid-sent
+        label: Grid(s)
+        type: String:4
+        adif: MY_GRIDSQUARE
+        direction: sent
+        fixed: true
+        regex: '^[A-R]{2}\d{2}$'
+        source: Grid
+      - id: grid-received
+        label: Grid
+        type: String:4
+        adif: GRIDSQUARE
+        direction: received
+        regex: '^[A-R]{2}\d{2}$'
+    scoring:
+      qso_points:
+        grid_distance:
+          station_grid_field: MY_GRIDSQUARE
+          contact_grid_field: GRIDSQUARE
+          base_points: 1
+          kilometers_per_point: 500
+          minimum_distance_points: 1
+      dupe_key: [CALL, BAND]
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: DIGITAL}
+      export_fields:
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://contests.arrl.org/ContestRules/Digital-Rules.pdf
+      notes: >-
+        Any non-RTTY digital mode that supports the required four-character Maidenhead grid
+        exchange is permitted. Single-operator off-time and category restrictions remain
+        operator-enforced.

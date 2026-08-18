@@ -1,0 +1,56 @@
+schema: 2
+contests:
+  WA-QSO-PARTY (In State):
+    name: Washington Salmon Run (In State)
+    bands: [160M, 80M, 40M, 20M, 15M, 10M, 6M]
+    modes: [CW, PHONE]
+    value_sets:
+      Washington Counties: {values_from_file: washington-counties.dat}
+      States: {use: us-states, exclude: [WA]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Washington County, type: String:4, required: true, in_sets: [Washington Counties]}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, MIXED]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, EXPEDITION, CLUB, UNLIMITED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County(s), type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Washington Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:4, adif: SRX_STRING, direction: received, regex: '^\S{1,4}$', valid_values_or_regex: true, in_sets: [Washington Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 2}, {id: cw, points: 3}]
+      dupe_key: [CALL, BAND, MODE_CLASS, STX_STRING]
+      multipliers:
+        - {id: mult-wa-county, name: Washington County, field: SRX_STRING, key: [SRX_STRING], in_sets: [Washington Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dxcc, name: DXCC Country, field: DXCC, key: [DXCC], exclude_values: ['1', '6', '110', '291']}
+      bonus_points:
+        - {id: bonus-w7dx, name: W7DX, field: CALL, key: [CALL, MODE_CLASS], values: {W7DX: 500}}
+    metadata:
+      source: https://salmonrun.wwdxc.org/rules/
+      notes: The rules limit Washington entrants to ten DXCC multipliers; that cap remains operator-enforced.
+  WA-QSO-PARTY:
+    name: Washington Salmon Run
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:4, required: true, regex: '^\S{1,4}$', valid_values_or_regex: true, in_sets: [States, Canadian Provinces, DX], before: header-category-operator}
+      - {id: header-category-operator, after: param-location}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: exchange-received, remove: true}
+      - {id: location-sent, label: Location(s), type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: Location, regex: '^\S{1,4}$', valid_values_or_regex: true, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: rst-received, after: location-sent}
+      - {id: county-received, label: County, type: String:4, adif: SRX_STRING, direction: received, in_sets: [Washington Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dxcc, remove: true}
+    metadata:
+      notes: Outside-Washington stations score Washington county multipliers only.
+    extends: WA-QSO-PARTY (In State)

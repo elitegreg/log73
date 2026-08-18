@@ -1,6 +1,7 @@
 use crate::contest_rules::{ContestRules, MultiplierRule, QsoPoints, ScoringCondition};
 use crate::db::{Contact, contact_adif_value, contact_id, contact_meta_value, set_contact_meta};
 use crate::dxcc::callsign_prefix;
+use crate::grid_distance::grid_distance_kilometers;
 use crate::log_cache::LogCacheProcessor;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -385,6 +386,15 @@ fn score_qso_points(
     contact: &Contact,
     rules: &ContestRules,
 ) -> Option<i64> {
+    if let Some(grid_distance) = &qso_points.grid_distance {
+        let station_grid = field_value(contact, rules, &grid_distance.station_grid_field)?;
+        let contact_grid = field_value(contact, rules, &grid_distance.contact_grid_field)?;
+        let distance = grid_distance_kilometers(&station_grid, &contact_grid)?;
+        let distance_points = (distance / grid_distance.kilometers_per_point as f64).ceil() as i64;
+        return Some(
+            grid_distance.base_points + distance_points.max(grid_distance.minimum_distance_points),
+        );
+    }
     if let Some(geography) = &qso_points.geography {
         let band = field_value(contact, rules, "BAND");
         let Some(country) = field_value(contact, rules, &geography.country_field) else {
@@ -453,6 +463,14 @@ fn condition_matches(
     let Some(value) = field_value(contact, rules, &condition.field) else {
         return false;
     };
+    if let Some(other_field) = &condition.matches_field {
+        let Some(other_value) = field_value(contact, rules, other_field) else {
+            return false;
+        };
+        if !value.eq_ignore_ascii_case(&other_value) {
+            return false;
+        }
+    }
     let suffix_value = json_string(contact_adif_value(contact, &condition.field))
         .or_else(|| json_string(contact_meta_value(contact, &condition.field)))
         .map(|value| value.trim().to_uppercase())
@@ -1101,7 +1119,7 @@ fn collect_changed_contacts(
 mod tests {
     use super::*;
     use crate::contest_rules::{
-        BonusPointRule, ContestRules, ContestRulesStore, GeographyQsoPoints,
+        BonusPointRule, ContestRules, ContestRulesStore, GeographyQsoPoints, GridDistanceQsoPoints,
         MultiplierCountBonusRule, ParamMultiplierRule, QsoPointRule, QsoPoints, ScoringRules,
         test_multiplier_rule, test_scoring_condition, test_setup_field,
     };
@@ -1162,6 +1180,7 @@ mod tests {
             points: Some(points),
             rules: Vec::new(),
             geography: None,
+            grid_distance: None,
             category_band_param: None,
         }
     }
@@ -1184,6 +1203,7 @@ mod tests {
                 },
             ],
             geography: None,
+            grid_distance: None,
             category_band_param: None,
         }
     }
@@ -1209,6 +1229,7 @@ mod tests {
                 different_continent: 3.into(),
                 unresolved: 0.into(),
             }),
+            grid_distance: None,
             category_band_param: None,
         }
     }
@@ -1349,6 +1370,51 @@ mod tests {
     }
 
     #[test]
+    fn grid_distance_points_round_up_each_500_kilometers() {
+        let points = QsoPoints {
+            points: None,
+            rules: Vec::new(),
+            geography: None,
+            grid_distance: Some(GridDistanceQsoPoints {
+                station_grid_field: "MY_GRIDSQUARE".to_string(),
+                contact_grid_field: "GRIDSQUARE".to_string(),
+                base_points: 1,
+                kilometers_per_point: 500,
+                minimum_distance_points: 1,
+            }),
+            category_band_param: None,
+        };
+        let rules = test_rules(
+            points,
+            vec!["CALL", "BAND"],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = vec![
+            contact(vec![
+                ("CALL", json!("W1AW")),
+                ("BAND", json!("20m")),
+                ("MY_GRIDSQUARE", json!("FN31")),
+                ("GRIDSQUARE", json!("FN31")),
+            ]),
+            contact(vec![
+                ("CALL", json!("K9XYZ")),
+                ("BAND", json!("20m")),
+                ("MY_GRIDSQUARE", json!("FN31")),
+                ("GRIDSQUARE", json!("EN50")),
+            ]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(contact_meta_value(&contacts[0], "pts"), Some(&json!(2)));
+        assert_eq!(contact_meta_value(&contacts[1], "pts"), Some(&json!(4)));
+        assert_eq!(totals.qso_points, 6);
+    }
+
+    #[test]
     fn conditional_point_rules_distinguish_arrl_160_domestic_and_dx_contacts() {
         let domestic = || test_scoring_condition("DXCC", &["1", "291"]);
         let station_domestic = || test_scoring_condition("MY_DXCC", &["1", "291"]);
@@ -1381,6 +1447,7 @@ mod tests {
                 },
             ],
             geography: None,
+            grid_distance: None,
             category_band_param: None,
         };
         let rules = test_rules(

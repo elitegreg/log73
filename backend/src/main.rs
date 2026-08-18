@@ -8,6 +8,7 @@ mod contest_rules;
 mod db;
 mod dxcc;
 mod dxcluster;
+mod grid_distance;
 mod log_cache;
 mod qso_time;
 mod radio;

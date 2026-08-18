@@ -899,11 +899,26 @@ fn validate_contact_mode(rules: &ContestRules, contact: &Contact) -> Result<Stri
         && !rules
             .modes
             .iter()
-            .any(|allowed_mode| allowed_mode.eq_ignore_ascii_case(&mode))
+            .any(|allowed| mode_matches(allowed, &mode))
     {
         return Err(format!("mode must be one of: {}", rules.modes.join(", ")));
     }
+    if rules
+        .excluded_modes
+        .iter()
+        .any(|excluded| mode_matches(excluded, &mode))
+    {
+        return Err(format!("mode is not allowed: {mode}"));
+    }
     Ok(mode)
+}
+
+fn mode_matches(allowed: &str, mode: &str) -> bool {
+    match allowed.trim().to_ascii_uppercase().as_str() {
+        "PHONE" => matches!(mode, "SSB" | "FM" | "AM"),
+        "DIGITAL" => !matches!(mode, "CW" | "CW-R" | "SSB" | "FM" | "AM"),
+        _ => allowed.eq_ignore_ascii_case(mode),
+    }
 }
 
 fn validate_exchange_field(
@@ -1290,6 +1305,30 @@ mod tests {
                 ("RST_RCVD".to_string(), json!(599)),
             ]),
         )
+    }
+
+    #[test]
+    fn digital_mode_family_accepts_ft8_and_excludes_rtty() {
+        let mut rules = test_rules();
+        rules.modes = vec!["DIGITAL".to_string()];
+        rules.excluded_modes = vec!["RTTY".to_string()];
+
+        let mut ft8 = test_contact();
+        ft8["adif"]
+            .as_object_mut()
+            .expect("test contact has ADIF fields")
+            .insert("MODE".to_string(), Value::String("FT8".to_string()));
+        assert_eq!(validate_contact_mode(&rules, &ft8), Ok("FT8".to_string()));
+
+        let mut rtty = test_contact();
+        rtty["adif"]
+            .as_object_mut()
+            .expect("test contact has ADIF fields")
+            .insert("MODE".to_string(), Value::String("RTTY".to_string()));
+        assert_eq!(
+            validate_contact_mode(&rules, &rtty),
+            Err("mode is not allowed: RTTY".to_string())
+        );
     }
 
     fn test_radio() -> RadioPayload {

@@ -1,0 +1,52 @@
+schema: 2
+contests:
+  IA-QSO-PARTY (In State):
+    name: Iowa QSO Party (In State)
+    bands: [160M, 80M, 40M, 20M, 15M, 10M, 6M, 2M, 1.25M, 70cm]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      Iowa Counties: {values_from_file: iowa-counties.dat}
+      States: {use: us-states, exclude: [IA]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Iowa County, type: String:3, required: true, in_sets: [Iowa Counties]}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, ROVER, PORTABLE]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, DIGITAL, MIXED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County(s), type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Iowa Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:3, adif: SRX_STRING, direction: received, in_sets: [Iowa Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: other, points: 2}]
+      dupe_key: [CALL, BAND, MODE_CLASS, STX_STRING]
+      multipliers:
+        - {id: mult-iowa-county, name: Iowa County, field: SRX_STRING, key: [SRX_STRING], in_sets: [Iowa Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+    metadata:
+      source: https://www.w0yl.com/IAQP
+      notes: Iowa stations may change their sent county for mobile/rover operation; county-line exchanges and award-category restrictions remain operator-enforced.
+  IA-QSO-PARTY:
+    name: Iowa QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-operator}
+      - {id: header-category-operator, after: param-location}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: exchange-received, remove: true}
+      - {id: location-sent, label: Location(s), type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: rst-received, after: location-sent}
+      - {id: county-received, label: County, type: String:3, adif: SRX_STRING, direction: received, in_sets: [Iowa Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+    metadata:
+      notes: Outside-Iowa stations score Iowa county multipliers only.
+    extends: IA-QSO-PARTY (In State)

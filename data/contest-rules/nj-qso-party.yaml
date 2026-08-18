@@ -1,0 +1,53 @@
+schema: 2
+contests:
+  NJ-QSO-PARTY (In State):
+    name: New Jersey QSO Party (In State)
+    bands: [80M, 40M, 20M, 15M, 10M]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      New Jersey Counties: {values_from_file: new-jersey-counties.dat}
+      States: {use: us-states, exclude: [NJ]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: New Jersey County, type: String:4, required: true, in_sets: [New Jersey Counties]}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, DIGITAL, MIXED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County(s), type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [New Jersey Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:4, adif: SRX_STRING, direction: received, in_sets: [New Jersey Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: qso-cw-digital, points: 2}]
+      dupe_key: [CALL, BAND, MODE_CLASS, STX_STRING, SRX_STRING]
+      multipliers:
+        - {id: mult-nj-county, name: New Jersey County, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], in_sets: [New Jersey Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], in_sets: [Canadian Provinces]}
+        - {id: mult-dx, name: DX, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], in_sets: [DX]}
+    metadata:
+      source: https://njqsoparty.org/rules/
+      notes: Low-power and QRP score factors are reported in category headers and are applied by the entrant when submitting a final score.
+  NJ-QSO-PARTY:
+    name: New Jersey QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:4, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-operator}
+      - {id: header-category-operator, after: param-location}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: exchange-received, remove: true}
+      - {id: location-sent, label: Location(s), type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: rst-received, after: location-sent}
+      - {id: county-received, label: County, type: String:4, adif: SRX_STRING, direction: received, in_sets: [New Jersey Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dx, remove: true}
+    metadata:
+      notes: Outside-New-Jersey stations score New Jersey county multipliers only; power factors remain operator-enforced.
+    extends: NJ-QSO-PARTY (In State)

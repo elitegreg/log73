@@ -1,0 +1,42 @@
+schema: 2
+contests:
+  CQ-160-CW:
+    name: CQ 160-Meter CW Contest
+    bands: [160M]
+    modes: [CW]
+    value_sets:
+      States: {use: us-states}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-location, key: Location, label: 'State, Province, or CQ Zone', type: String:3, required: true, regex: '^\\S{1,3}$', valid_values_or_regex: true}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: location-sent, label: Location(s), type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, regex: '^\\S{1,3}$', valid_values_or_regex: true}
+      - {id: rst-received, preset: rst-received}
+      - {id: location-received, label: 'State, Province, or CQ Zone', type: String:3, adif: SRX_STRING, direction: received, regex: '^\\S{1,3}$', valid_values_or_regex: true}
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-own-country, when: {field: DXCC, matches_field: MY_DXCC}, points: 2}
+          - {id: qso-own-continent, when: {field: CONT, matches_field: MY_CONT}, points: 5}
+          - {id: qso-other-continent, points: 10}
+      dupe_key: [CALL]
+      multipliers:
+        - {id: mult-us-state, name: US State/DC, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-canadian-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dxcc, name: DXCC Country, field: DXCC, key: [DXCC], exclude_values: ['1', '6', '110', '291']}
+    cabrillo:
+      fixed_headers: [{id: fixed-category-band, name: CATEGORY-BAND, value: 160M}, {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}]
+      export_fields: [{id: export-club, preset: export-club-optional}, {id: export-email, preset: export-email-optional}, {id: export-name, preset: export-name-optional}, {id: export-address, preset: export-address-optional}]
+    metadata:
+      source: https://cq160.com/rules.htm
+      notes: CQ zones are exchanged but do not count as multipliers. Maritime-mobile and WAE-country exceptions remain operator-enforced.
+  CQ-160-SSB:
+    name: CQ 160-Meter SSB Contest
+    modes: [SSB]
+    cabrillo:
+      fixed_headers: [{id: fixed-category-band, name: CATEGORY-BAND, value: 160M}, {id: fixed-category-mode, name: CATEGORY-MODE, value: SSB}]
+    extends: CQ-160-CW

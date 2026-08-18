@@ -68,7 +68,7 @@ contests:
 
 The main contest keys are:
 
-- `name`, `bands`, and `modes`
+- `name`, `bands`, `modes`, and optional `excluded_modes`
 - optional contest-local `value_sets`
 - `setup_fields` for all values collected when a log is created or edited
 - `exchange` for sent and received QSO fields
@@ -84,7 +84,11 @@ Supported authored field types are `String`, `RST`, `Numeric`, and `Serial`, opt
 
 ## Scoring and Cabrillo
 
-Scoring settings live under `scoring`: `qso_points`, `dupe_key`, `multipliers`, `bonus_points`, `param_multipliers`, and `multiplier_count_bonus_points`. Scoring rule lists use stable IDs. Conditions may use direct `values`, `in_set`/`in_sets`, `exclude_values`/`exclude_in_sets`, and callsign suffix filters. References to value sets are expanded before rules reach scoring or the API.
+Scoring settings live under `scoring`: `qso_points`, `dupe_key`, `multipliers`, `bonus_points`, `param_multipliers`, and `multiplier_count_bonus_points`. Scoring rule lists use stable IDs. Conditions may use direct `values`, `in_set`/`in_sets`, `exclude_values`/`exclude_in_sets`, `matches_field` for a case-insensitive comparison to another QSO field, and callsign suffix filters. References to value sets are expanded before rules reach scoring or the API.
+
+`modes` accepts exact ADIF mode names as well as `PHONE` (SSB, FM, or AM) and `DIGITAL` (any non-CW, non-phone mode). `excluded_modes` uses the same matching rules and is applied after the allowed list. This supports contests that permit all digital modes except RTTY.
+
+`qso_points.grid_distance` scores a contact from two Maidenhead locators. It names the station and contacted grid fields and defines `base_points`, `kilometers_per_point`, and `minimum_distance_points`. The scorer uses the centers of the first four locator characters and great-circle distance, then awards `base_points + max(minimum_distance_points, ceil(distance / kilometers_per_point))`.
 
 Cabrillo configuration uses `fixed_headers` and `export_fields`. All fixed headers and export fields use stable IDs. The Cabrillo `CONTEST` header is the first whitespace-delimited word of the contest rule ID, so a rule such as `SC-QSO-PARTY (In State)` exports `SC-QSO-PARTY`. Category and other log-specific headers belong in `setup_fields` with `cabrillo_header`, so there is only one setup-field list.
 

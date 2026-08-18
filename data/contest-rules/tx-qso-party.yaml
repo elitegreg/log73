@@ -1,0 +1,41 @@
+schema: 2
+contests:
+  TX-QSO-PARTY (In State):
+    name: Texas QSO Party (In State)
+    bands: [160M, 80M, 40M, 20M, 15M, 10M, 6M, 2M, 1.25M, 70cm]
+    modes: [CW, PHONE, DIGITAL]
+    setup_fields:
+      - {id: param-county, key: County, label: Texas County, type: String:4, required: true, regex: '^\\S{1,4}$', valid_values_or_regex: true}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, PORTABLE]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, DIGITAL, MIXED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County(s), type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: County, regex: '^\\S{1,4}$', valid_values_or_regex: true}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: 'County, State, Province, or DX', type: String:4, adif: SRX_STRING, direction: received, regex: '^\\S{1,4}$', valid_values_or_regex: true}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 2}, {id: qso-cw-digital, points: 3}]
+      dupe_key: [CALL, BAND, MODE_CLASS, STX_STRING]
+      multipliers:
+        - {id: mult-exchange, name: County/State/Province/DX, field: SRX_STRING, key: [SRX_STRING, BAND]}
+    metadata:
+      source: https://www.txqp.net/index.php/rules/operating-rules
+      notes: Texas county, state/province, and DX multipliers score once per band. Mobile/rover bonuses and special mobile tracking are intentionally not scored.
+  TX-QSO-PARTY:
+    name: Texas QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:4, required: true, regex: '^\\S{1,4}$', valid_values_or_regex: true, before: header-category-operator}
+      - {id: header-category-operator, after: param-location}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: exchange-received, remove: true}
+      - {id: location-sent, label: Location(s), type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: Location, regex: '^\\S{1,4}$', valid_values_or_regex: true, after: rst-sent}
+      - {id: rst-received, after: location-sent}
+      - {id: county-received, label: Texas County, type: String:4, adif: SRX_STRING, direction: received, regex: '^\\S{1,4}$', valid_values_or_regex: true, after: rst-received}
+    metadata:
+      notes: Outside-Texas stations use the same band multiplier logic; Texas mobile/rover bonus scoring is intentionally omitted.
+    extends: TX-QSO-PARTY (In State)

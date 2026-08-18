@@ -207,6 +207,8 @@ pub struct ContestMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScoringCondition {
     pub field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub matches_field: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -242,7 +244,18 @@ pub struct QsoPoints {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geography: Option<GeographyQsoPoints>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grid_distance: Option<GridDistanceQsoPoints>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category_band_param: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GridDistanceQsoPoints {
+    pub station_grid_field: String,
+    pub contact_grid_field: String,
+    pub base_points: i64,
+    pub kilometers_per_point: i64,
+    pub minimum_distance_points: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -417,6 +430,8 @@ pub struct ContestRules {
     pub name: String,
     pub bands: Vec<String>,
     pub modes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub excluded_modes: Vec<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub value_sets: BTreeMap<String, Vec<String>>,
     #[serde(default)]
@@ -487,6 +502,7 @@ pub(crate) fn test_setup_field(id: &str, key: &str, label: &str, input: &str) ->
 pub(crate) fn test_scoring_condition(field: &str, values: &[&str]) -> ScoringCondition {
     ScoringCondition {
         field: field.to_string(),
+        matches_field: None,
         values: values.iter().map(|value| (*value).to_string()).collect(),
         exclude_values: Vec::new(),
         suffixes: Vec::new(),
@@ -554,6 +570,8 @@ struct RawContestRules {
     name: Option<String>,
     bands: Vec<AllowedBandValue>,
     modes: Vec<String>,
+    #[serde(default)]
+    excluded_modes: Vec<String>,
     #[serde(default)]
     value_sets: BTreeMap<String, RawValueSet>,
     #[serde(default)]
@@ -1171,6 +1189,7 @@ fn normalize_contest(
         name: raw.name.unwrap_or_else(|| id.to_string()),
         bands: raw.bands.iter().map(allowed_band_name).collect(),
         modes: raw.modes,
+        excluded_modes: raw.excluded_modes,
         value_sets: referenced_sets
             .into_iter()
             .filter_map(|name| {
@@ -1493,6 +1512,20 @@ fn validate_contest(contest: &ContestRules) -> Result<(), String> {
                 field.id
             ));
         }
+    }
+    if let Some(grid_distance) = contest
+        .scoring
+        .qso_points
+        .as_ref()
+        .and_then(|points| points.grid_distance.as_ref())
+        && (grid_distance.base_points < 0
+            || grid_distance.kilometers_per_point <= 0
+            || grid_distance.minimum_distance_points < 0)
+    {
+        return Err(
+            "grid_distance scoring values must be non-negative and use a positive distance step"
+                .to_string(),
+        );
     }
     for multiplier in &contest.scoring.param_multipliers {
         let field = contest
@@ -2000,7 +2033,7 @@ contests:
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir]).expect("bundled rules load");
 
-        assert_eq!(store.summaries().len(), 45);
+        assert_eq!(store.summaries().len(), 63);
         for id in [
             "ARRL-10",
             "ARRL-SS-CW",
@@ -2009,6 +2042,13 @@ contests:
             "CQ-WPX-SSB",
             "NA-SPRINT-CW (North America)",
             "SC-QSO-PARTY (In State)",
+            "ARRL-DIGITAL",
+            "ARRL-RTTY",
+            "IARU-HF",
+            "CQ-160-CW",
+            "NJ-QSO-PARTY (In State)",
+            "TX-QSO-PARTY (In State)",
+            "CO-QSO-PARTY (In State)",
         ] {
             assert!(store.get(id).is_some(), "missing bundled contest {id}");
         }

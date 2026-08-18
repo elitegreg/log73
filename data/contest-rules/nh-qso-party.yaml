@@ -1,0 +1,54 @@
+schema: 2
+contests:
+  NH-QSO-PARTY (In State):
+    name: New Hampshire QSO Party (In State)
+    bands: [80M, 40M, 20M, 15M, 10M]
+    modes: [CW, PHONE]
+    value_sets:
+      New Hampshire Counties: {values_from_file: new-hampshire-counties.dat}
+      States: {use: us-states, exclude: [NH]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: New Hampshire County, type: String:3, required: true, in_sets: [New Hampshire Counties]}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, PORTABLE]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County(s), type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [New Hampshire Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:3, adif: SRX_STRING, direction: received, in_sets: [New Hampshire Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: other, points: 2}]
+      dupe_key: [CALL, BAND, MODE_CLASS, STX_STRING]
+      multipliers:
+        - {id: mult-nh-county, name: New Hampshire County, field: SRX_STRING, key: [SRX_STRING], in_sets: [New Hampshire Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dxcc, name: DXCC Country, field: DXCC, key: [DXCC], exclude_values: ['1', '6', '110', '291']}
+    metadata:
+      source: https://w1wqm.org/wp-content/uploads/2026/08/NHQP_Rules.pdf
+      notes: New Hampshire stations receive up to ten DXCC multipliers; the cap is operator-enforced.
+  NH-QSO-PARTY:
+    name: New Hampshire QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-operator}
+      - {id: header-category-operator, after: param-location}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: exchange-received, remove: true}
+      - {id: location-sent, label: Location(s), type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: rst-received, after: location-sent}
+      - {id: county-received, label: County, type: String:3, adif: SRX_STRING, direction: received, in_sets: [New Hampshire Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dxcc, remove: true}
+        - {id: mult-nh-county, key: [SRX_STRING, BAND]}
+    metadata:
+      notes: Outside-New Hampshire stations count each New Hampshire county once per band.
+    extends: NH-QSO-PARTY (In State)
