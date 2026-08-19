@@ -2085,7 +2085,7 @@ contests:
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir]).expect("bundled rules load");
 
-        assert_eq!(store.summaries().len(), 91);
+        assert_eq!(store.summaries().len(), 109);
         for id in [
             "ARRL-10",
             "ARRL-SS-CW",
@@ -2115,6 +2115,15 @@ contests:
             "ID-QSO-PARTY (In State)",
             "WI-QSO-PARTY (In State)",
             "VA-QSO-PARTY (In State)",
+            "LA-QSO-PARTY (In State)",
+            "MS-QSO-PARTY (In State)",
+            "NM-QSO-PARTY (In State)",
+            "MO-QSO-PARTY (In State)",
+            "GA-QSO-PARTY (In State)",
+            "ND-QSO-PARTY (In State)",
+            "MI-QSO-PARTY (In State)",
+            "NE-QSO-PARTY (In State)",
+            "FL-QSO-PARTY (In State)",
         ] {
             assert!(store.get(id).is_some(), "missing bundled contest {id}");
         }

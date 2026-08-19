@@ -1,0 +1,51 @@
+schema: 2
+contests:
+  LA-QSO-PARTY (In State):
+    name: Louisiana QSO Party (In State)
+    profiles: [hf-vhf-bands]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      Louisiana Parishes: {values_from_file: louisiana-parishes.dat}
+      States: {use: us-states, exclude: [LA]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-parish, key: Parish, label: Louisiana Parish, type: String:4, required: true, in_sets: [Louisiana Parishes]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, ROVER]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, MIXED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: parish-sent, label: Parish, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: Parish, in_sets: [Louisiana Parishes]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:4, adif: SRX_STRING, direction: received, in_sets: [Louisiana Parishes, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 2}, {id: qso-cw-digital, points: 4}]
+      dupe_key: [CALL, BAND, MODE_CLASS, STX_STRING, SRX_STRING]
+      multipliers:
+        - {id: mult-parish, name: Louisiana Parish, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], in_sets: [Louisiana Parishes]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], in_sets: [Canadian Provinces]}
+        - {id: mult-dxcc, name: DXCC Entity, field: DXCC, key: [DXCC, BAND, MODE_CLASS], exclude_values: ['1', '291']}
+      bonus_points:
+        - {id: bonus-n5lcc, name: Louisiana Contest Club, field: CALL, key: [CALL, BAND, MODE_CLASS], values: {N5LCC: 100}}
+    metadata:
+      source: https://laqp.louisianacontestclub.org/laqso-rules-htm/
+      notes: The rover parish activation bonus is operator-enforced; the published 100-point N5LCC bonus is supported.
+  LA-QSO-PARTY:
+    name: Louisiana QSO Party
+    setup_fields:
+      - {id: param-parish, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:4, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-power}
+    exchange:
+      - {id: parish-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: parish-received, label: Louisiana Parish, type: String:4, adif: SRX_STRING, direction: received, in_sets: [Louisiana Parishes], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dxcc, remove: true}
+    extends: LA-QSO-PARTY (In State)

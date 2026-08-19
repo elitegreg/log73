@@ -1,0 +1,56 @@
+schema: 2
+contests:
+  NM-QSO-PARTY (In State):
+    name: New Mexico QSO Party (In State)
+    profiles: [hf-vhf-bands]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      New Mexico Counties: {values_from_file: new-mexico-counties.dat}
+      States: {use: us-states, exclude: [NM]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: New Mexico County, type: String:4, required: true, in_sets: [New Mexico Counties]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, PORTABLE, MOBILE]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [New Mexico Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:4, adif: SRX_STRING, direction: received, in_sets: [New Mexico Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: qso-cw-digital, points: 2}]
+      dupe_key: [CALL, BAND, MODE]
+      multipliers:
+        - {id: mult-county, name: New Mexico County, field: SRX_STRING, key: [SRX_STRING], in_sets: [New Mexico Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dxcc, name: DXCC Entity, field: DXCC, key: [DXCC], exclude_values: ['1', '291']}
+      param_multipliers:
+        - {id: power-factor, param: CATEGORY-POWER, values: {QRP: 5, LOW: 2, HIGH: 1}}
+      qso_count_bonus_points:
+        - {id: mobile-county-bonus, name: Mobile County, field: STX_STRING, param: CATEGORY-STATION, values: [MOBILE], thresholds: {'15': 5000}}
+      bonus_points:
+        - {id: bonus-w1aw5, name: W1AW/5, field: CALL, key: [CALL], values: {W1AW/5: 250}}
+    metadata:
+      source: https://www.newmexicoqsoparty.org/wp/wp-content/uploads/2026/04/NMQP_Forms.pdf
+      notes: FT4/FT8 contacts use ordinary digital exchanges; grid-specific WSJT-X behavior is intentionally not modeled.
+  NM-QSO-PARTY:
+    name: New Mexico QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:4, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-power}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: New Mexico County, type: String:4, adif: SRX_STRING, direction: received, in_sets: [New Mexico Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dxcc, remove: true}
+      qso_count_bonus_points:
+        - {id: mobile-county-bonus, remove: true}
+    extends: NM-QSO-PARTY (In State)

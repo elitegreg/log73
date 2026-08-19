@@ -1,0 +1,48 @@
+schema: 2
+contests:
+  MI-QSO-PARTY (In State):
+    name: Michigan QSO Party (In State)
+    profiles: [hf-bands]
+    modes: [CW, PHONE]
+    value_sets:
+      Michigan Counties: {values_from_file: michigan-counties.dat}
+      States: {use: us-states, exclude: [MI]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Michigan County, type: String:4, required: true, in_sets: [Michigan Counties]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, ROVER]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Michigan Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:4, adif: SRX_STRING, direction: received, in_sets: [Michigan Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: qso-cw, points: 2}]
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-county, name: Michigan County, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [Michigan Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [Canadian Provinces]}
+        - {id: mult-dx, name: DX, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [DX]}
+    metadata:
+      source: https://miqp.org/index.php/rules/
+      notes: County-changing rover behavior is operator-enforced; multipliers are counted once per mode.
+  MI-QSO-PARTY:
+    name: Michigan QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:4, required: true, in_sets: [States, Canadian Provinces, DX]}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: Michigan County, type: String:4, adif: SRX_STRING, direction: received, in_sets: [Michigan Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dx, remove: true}
+    extends: MI-QSO-PARTY (In State)

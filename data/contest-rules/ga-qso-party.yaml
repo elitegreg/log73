@@ -1,0 +1,45 @@
+schema: 2
+contests:
+  GA-QSO-PARTY (In State):
+    name: Georgia QSO Party (In State)
+    profiles: [hf-vhf-bands]
+    modes: [CW, PHONE]
+    value_sets:
+      Georgia Counties: {values_from_file: georgia-counties.dat}
+      States: {use: us-states}
+      Canadian Provinces: {use: canadian-provinces}
+    setup_fields:
+      - {id: param-county, key: County, label: Georgia County, type: String:4, required: true, in_sets: [Georgia Counties]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, MIXED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Georgia Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:4, adif: SRX_STRING, direction: received, in_sets: [Georgia Counties, States, Canadian Provinces]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: qso-cw, points: 2}]
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-county, name: Georgia County, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [Georgia Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [Canadian Provinces]}
+    metadata:
+      source: https://gaqsoparty.com/georgia-qso-party-rules/
+      notes: DX contacts are points-only; Georgia rover county changes and county-line duplicate expansion are operator-enforced.
+  GA-QSO-PARTY:
+    name: Georgia QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State or Province', type: String:4, required: true, in_sets: [States, Canadian Provinces], before: header-category-power}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: Georgia County, type: String:4, adif: SRX_STRING, direction: received, in_sets: [Georgia Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+    extends: GA-QSO-PARTY (In State)

@@ -1,0 +1,43 @@
+schema: 2
+contests:
+  ND-QSO-PARTY (In State):
+    name: North Dakota QSO Party (In State)
+    profiles: [hf-vhf-bands]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      North Dakota Counties: {values_from_file: north-dakota-counties.dat}
+      States: {use: us-states, exclude: [ND]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: North Dakota County, type: String:3, required: true, in_sets: [North Dakota Counties]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [North Dakota Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:3, adif: SRX_STRING, direction: received, in_sets: [North Dakota Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points: {points: 1}
+      dupe_key: [CALL, BAND, MODE, STX_STRING]
+      multipliers:
+        - {id: mult-county, name: North Dakota County, field: SRX_STRING, key: [SRX_STRING], in_sets: [North Dakota Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+    metadata:
+      source: https://ndarrlsection.com/2026/2026_nd_qsp_party_rules.pdf
+      notes: FT8 is excluded by the published rules; digital scoring covers the supported RTTY/PSK-style contacts.
+  ND-QSO-PARTY:
+    name: North Dakota QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX]}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: North Dakota County, type: String:3, adif: SRX_STRING, direction: received, in_sets: [North Dakota Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+    extends: ND-QSO-PARTY (In State)

@@ -1447,6 +1447,108 @@ mod tests {
         crate::db::build_contact(meta, adif)
     }
 
+    fn seed_scoring_field(contact: &mut Contact, field: &str, value: &str) {
+        crate::db::set_contact_adif(contact, field, json!(value));
+    }
+
+    fn representative_mode(rules: &ContestRules) -> String {
+        let preferred = rules
+            .scoring
+            .qso_points
+            .as_ref()
+            .and_then(|qso_points| {
+                qso_points.rules.iter().find_map(|rule| {
+                    let condition = rule.when.as_ref()?;
+                    if !condition.field.eq_ignore_ascii_case("MODE_CLASS") {
+                        return None;
+                    }
+                    condition
+                        .values
+                        .iter()
+                        .find_map(|value| match value.to_uppercase().as_str() {
+                            "PHONE" => Some("SSB"),
+                            "CW" => Some("CW"),
+                            "DIGITAL" => Some("RTTY"),
+                            _ => None,
+                        })
+                })
+            })
+            .unwrap_or_else(|| rules.modes.first().map(String::as_str).unwrap_or("CW"));
+        match preferred.to_uppercase().as_str() {
+            "PHONE" => "SSB".to_string(),
+            "DIGITAL" => "RTTY".to_string(),
+            _ => preferred.to_string(),
+        }
+    }
+
+    fn representative_bundled_contact(rules: &ContestRules) -> Contact {
+        let mut result = contact(vec![
+            ("CALL", json!("W1ABC")),
+            (
+                "BAND",
+                json!(rules.bands.first().map(String::as_str).unwrap_or("20M")),
+            ),
+            ("MODE", json!(representative_mode(rules))),
+            ("DXCC", json!(230)),
+            ("CONT", json!("EU")),
+            ("MY_CONT", json!("NA")),
+            ("APP_LOG73_DXCC_PFX", json!("DL")),
+            ("APP_LOG73_MY_DXCC_PFX", json!("K")),
+            ("GRID_SQUARE", json!("FN20")),
+            ("MY_GRIDSQUARE", json!("FN20")),
+            ("PFX", json!("K1")),
+            ("STX", json!("1")),
+            ("SRX", json!("1")),
+        ]);
+
+        for field in &rules.exchange {
+            let value = field
+                .validation
+                .values
+                .first()
+                .map(String::as_str)
+                .unwrap_or_else(|| {
+                    if field.adif.to_uppercase().contains("GRID") {
+                        "FN20"
+                    } else if field.adif.to_uppercase().contains("RST") {
+                        "59"
+                    } else {
+                        "DX"
+                    }
+                });
+            seed_scoring_field(&mut result, &field.adif, value);
+        }
+
+        let mut conditions = Vec::new();
+        if let Some(qso_points) = &rules.scoring.qso_points {
+            conditions.extend(
+                qso_points
+                    .rules
+                    .iter()
+                    .filter_map(|rule| rule.when.as_ref()),
+            );
+            for rule in &qso_points.rules {
+                conditions.extend(rule.when_all.iter());
+            }
+        }
+        for multiplier in &rules.scoring.multipliers {
+            conditions.extend(multiplier.when.iter());
+            conditions.extend(multiplier.when_all.iter());
+            if let Some(value) = multiplier.values.first() {
+                seed_scoring_field(&mut result, &multiplier.field, value);
+            }
+        }
+        for condition in conditions {
+            if condition.field.eq_ignore_ascii_case("MODE_CLASS") {
+                continue;
+            }
+            if let Some(value) = condition.values.first() {
+                seed_scoring_field(&mut result, &condition.field, value);
+            }
+        }
+        result
+    }
+
     #[test]
     fn wpx_prefix_field_prefers_pfx_and_falls_back_to_callsign() {
         let rules = test_rules(
@@ -2543,6 +2645,88 @@ mod tests {
             assert_eq!(totals.qso_points, points, "{contest_id}");
             assert_eq!(totals.multipliers, 1, "{contest_id}");
             assert_eq!(totals.score, points, "{contest_id}");
+        }
+    }
+
+    #[test]
+    fn every_bundled_scored_contest_has_representative_scoring_coverage() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let mut scored_contests = 0;
+
+        for summary in store.summaries() {
+            let rules = store
+                .get(&summary.id)
+                .expect("bundled contest should resolve");
+            if rules.scoring.qso_points.is_none() {
+                continue;
+            }
+            scored_contests += 1;
+            let mut contacts = vec![representative_bundled_contact(rules)];
+            let totals = score_contacts(rules, Value::Null, &mut contacts);
+
+            assert!(
+                totals.qso_points > 0,
+                "{} representative contact should score points",
+                rules.id
+            );
+            let multiplier_factor = if rules.scoring.multipliers.is_empty() {
+                1
+            } else {
+                totals.multipliers
+            };
+            assert_eq!(
+                totals.score,
+                totals.qso_points * multiplier_factor,
+                "{} representative score",
+                rules.id
+            );
+        }
+
+        assert_eq!(scored_contests, store.summaries().len());
+    }
+
+    #[test]
+    fn new_state_qso_parties_score_cw_contacts_and_first_multipliers() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let cases = [
+            ("LA-QSO-PARTY (In State)", "Louisiana Parishes", 4),
+            ("MS-QSO-PARTY (In State)", "Mississippi Counties", 2),
+            ("NM-QSO-PARTY (In State)", "New Mexico Counties", 2),
+            ("MO-QSO-PARTY (In State)", "Missouri Counties", 2),
+            ("GA-QSO-PARTY (In State)", "Georgia Counties", 2),
+            ("ND-QSO-PARTY (In State)", "North Dakota Counties", 1),
+            ("MI-QSO-PARTY (In State)", "Michigan Counties", 2),
+            ("NE-QSO-PARTY (In State)", "Nebraska Counties", 3),
+            ("FL-QSO-PARTY (In State)", "States", 2),
+        ];
+
+        for (contest_id, value_set, expected_points) in cases {
+            let rules = store
+                .get(contest_id)
+                .expect("new contest rules should load");
+            let location = rules.value_sets[value_set]
+                .first()
+                .expect("contest should have a representative multiplier value");
+            let mut contacts = vec![contact(vec![
+                ("CALL", json!("W1ABC")),
+                ("BAND", json!(rules.bands.first().expect("contest band"))),
+                ("MODE", json!("CW")),
+                ("STX_STRING", json!(location)),
+                ("SRX_STRING", json!(location)),
+                ("DXCC", json!(230)),
+            ])];
+            let totals = score_contacts(rules, Value::Null, &mut contacts);
+            assert_eq!(totals.qso_points, expected_points, "{contest_id}");
+            assert!(totals.multipliers > 0, "{contest_id}");
+            assert_eq!(
+                totals.score,
+                expected_points * totals.multipliers,
+                "{contest_id}"
+            );
         }
     }
 

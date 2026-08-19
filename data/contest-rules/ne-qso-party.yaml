@@ -1,0 +1,65 @@
+schema: 2
+contests:
+  NE-QSO-PARTY (In State):
+    name: Nebraska QSO Party (In State)
+    profiles: [hf-vhf-bands]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      Nebraska Counties: {values_from_file: nebraska-counties.dat}
+      States: {use: us-states, exclude: [NE]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Nebraska County, type: String:4, required: true, in_sets: [Nebraska Counties]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, PORTABLE]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Nebraska Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:4, adif: SRX_STRING, direction: received, in_sets: [Nebraska Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 2}
+          - {id: qso-digital, when: {field: MODE_CLASS, values: [DIGITAL]}, points: 1}
+          - {id: qso-cw, points: 3}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-county, name: Nebraska County, field: SRX_STRING, key: [SRX_STRING], in_sets: [Nebraska Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dxcc, name: DXCC Entity, field: DXCC, key: [DXCC], exclude_values: ['1', '291']}
+      param_multipliers:
+        - {id: power-factor, param: CATEGORY-POWER, values: {QRP: 3, LOW: 2, HIGH: 1}}
+      bonus_points:
+        - {id: bonus-ne0qp, name: NE0QP, field: CALL, key: [CALL], values: {NE0QP: 25}}
+        - {id: bonus-ka0boj, name: KA0BOJ, field: CALL, key: [CALL], values: {KA0BOJ: 25}}
+      qso_count_bonus_points:
+        - {id: county-activation, name: Activated Nebraska County, field: STX_STRING, param: CATEGORY-STATION, values: [MOBILE, PORTABLE], thresholds: {'1': 50}}
+    metadata:
+      source: https://nebraskaqsoparty.com/qso-party-rules
+      notes: The supplied rules page exposes the sponsor's county-list and summary-sheet downloads; scoring follows the published county/state/province/DX exchange model.
+  NE-QSO-PARTY:
+    name: Nebraska QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:4, required: true, in_sets: [States, Canadian Provinces, DX]}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: Nebraska County, type: String:4, adif: SRX_STRING, direction: received, in_sets: [Nebraska Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dxcc, remove: true}
+      param_multipliers:
+        - {id: power-factor, remove: true}
+      bonus_points:
+        - {id: bonus-ne0qp, remove: true}
+        - {id: bonus-ka0boj, remove: true}
+      qso_count_bonus_points:
+        - {id: county-activation, remove: true}
+    extends: NE-QSO-PARTY (In State)

@@ -1,0 +1,49 @@
+schema: 2
+contests:
+  FL-QSO-PARTY (In State):
+    name: Florida QSO Party (In State)
+    bands: [40M, 20M, 15M, 10M]
+    modes: [CW, PHONE]
+    value_sets:
+      Florida Counties: {values_from_file: florida-counties.dat}
+      States: {use: us-states}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Florida County, type: String:4, required: true, in_sets: [Florida Counties]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, EXPEDITION]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Florida Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:4, adif: SRX_STRING, direction: received, in_sets: [Florida Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: qso-cw, points: 2}]
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [Canadian Provinces]}
+        - {id: mult-dxcc, name: DXCC Entity, field: DXCC, key: [DXCC, MODE_CLASS], exclude_values: ['1', '291']}
+      param_multipliers:
+        - {id: power-factor, param: CATEGORY-POWER, values: {QRP: 3, LOW: 2, HIGH: 1}}
+    metadata:
+      source: https://floridaqsoparty.org/rules/
+      notes: Digital contacts and 160M/80M/VHF contacts are excluded by the published rules; mobile county changes are operator-enforced.
+  FL-QSO-PARTY:
+    name: Florida QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:4, required: true, in_sets: [States, Canadian Provinces, DX]}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: Florida County, type: String:4, adif: SRX_STRING, direction: received, in_sets: [Florida Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dxcc, remove: true}
+    extends: FL-QSO-PARTY (In State)
