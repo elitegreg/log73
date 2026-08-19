@@ -1,0 +1,50 @@
+schema: 2
+contests:
+  AL-QSO-PARTY (In State):
+    name: Alabama QSO Party (In State)
+    profiles: [hf-bands]
+    modes: [CW, PHONE]
+    value_sets:
+      Alabama Counties: {values_from_file: alabama-counties.dat}
+      States: {use: us-states}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Alabama County, type: String:4, required: true, in_sets: [Alabama Counties]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, MIXED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Alabama Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: 'County, State, Province, or DX', type: String:4, adif: SRX_STRING, direction: received, in_sets: [Alabama Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points: {points: 2}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [Canadian Provinces]}
+        - {id: mult-dxcc, name: DXCC Entity, field: DXCC, key: [DXCC, MODE_CLASS], exclude_values: ['1', '291']}
+    metadata:
+      source: https://alabamacontestgroup.org/aqp/rules/
+      notes: >-
+        CW and phone QSOs are two points. Multipliers repeat by mode; Alabama county-line and
+        mobile handling remains operator-enforced.
+  AL-QSO-PARTY:
+    name: Alabama QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:4, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-power}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:4, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: Alabama County, type: String:4, adif: SRX_STRING, direction: received, in_sets: [Alabama Counties], after: rst-received}
+      - {id: rst-received, after: location-sent}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dxcc, remove: true}
+        - {id: mult-county, name: Alabama County, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS]}
+    extends: AL-QSO-PARTY (In State)

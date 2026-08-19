@@ -2731,6 +2731,64 @@ mod tests {
     }
 
     #[test]
+    fn newly_added_qso_parties_score_representative_contacts() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let cases = [
+            ("7-QSO-PARTY (In State)", "7QP Counties", "CA", 3),
+            ("7-QSO-PARTY", "7QP Counties", "AZAPH", 3),
+            ("IN-QSO-PARTY (In State)", "Indiana Counties", "CA", 2),
+            ("IN-QSO-PARTY", "Indiana Counties", "INADA", 2),
+            ("DE-QSO-PARTY (In State)", "Delaware Counties", "CA", 2),
+            ("DE-QSO-PARTY", "Delaware Counties", "KDE", 20),
+            (
+                "NEW-ENGLAND-QSO-PARTY (In State)",
+                "New England Counties",
+                "CTCAP",
+                2,
+            ),
+            ("NEW-ENGLAND-QSO-PARTY", "New England Counties", "CTCAP", 2),
+            ("AR-QSO-PARTY (In State)", "Arkansas Counties", "ARK", 1),
+            ("AR-QSO-PARTY", "Arkansas Counties", "ARK", 1),
+            ("KY-QSO-PARTY (In State)", "Kentucky Counties", "CA", 2),
+            ("KY-QSO-PARTY", "Kentucky Counties", "ADA", 2),
+            ("AL-QSO-PARTY (In State)", "Alabama Counties", "CA", 2),
+            ("AL-QSO-PARTY", "Alabama Counties", "AUTA", 2),
+        ];
+
+        for (contest_id, county_set, received, expected_points) in cases {
+            let rules = store
+                .get(contest_id)
+                .expect("new contest rules should load");
+            let sent = if contest_id.ends_with("(In State)") {
+                rules.value_sets[county_set]
+                    .first()
+                    .expect("contest should have a representative sent location")
+                    .clone()
+            } else {
+                "CA".to_string()
+            };
+            let mut contacts = vec![contact(vec![
+                ("CALL", json!("W1ABC")),
+                ("BAND", json!(rules.bands.first().expect("contest band"))),
+                ("MODE", json!("CW")),
+                ("STX_STRING", json!(sent)),
+                ("SRX_STRING", json!(received)),
+                ("DXCC", json!(291)),
+            ])];
+            let totals = score_contacts(rules, Value::Null, &mut contacts);
+            assert_eq!(totals.qso_points, expected_points, "{contest_id}");
+            assert!(totals.multipliers > 0, "{contest_id}");
+            assert_eq!(
+                totals.score,
+                expected_points * totals.multipliers,
+                "{contest_id}"
+            );
+        }
+    }
+
+    #[test]
     fn bundled_tn_qso_party_rules_score_bands_locations_and_bonus_station() {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir.as_path()])

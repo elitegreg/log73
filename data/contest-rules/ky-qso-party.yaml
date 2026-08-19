@@ -1,0 +1,52 @@
+schema: 2
+contests:
+  KY-QSO-PARTY (In State):
+    name: Kentucky QSO Party (In State)
+    profiles: [hf-vhf-bands]
+    modes: [CW, PHONE]
+    value_sets:
+      Kentucky Counties: {values_from_file: kentucky-counties.dat}
+      States: {use: us-states, exclude: [KY]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Kentucky County, type: String:3, required: true, in_sets: [Kentucky Counties]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, MIXED]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, EXPEDITION]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Kentucky Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: 'County, State, Province, or DX', type: String:3, adif: SRX_STRING, direction: received, in_sets: [Kentucky Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: qso-cw, points: 2}]
+      dupe_key: [CALL, BAND, MODE_CLASS, SRX_STRING]
+      multipliers:
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], in_sets: [Canadian Provinces]}
+        - {id: mult-dx, name: DX, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], in_sets: [DX]}
+    metadata:
+      source: https://kyqsoparty.org/rules/
+      notes: >-
+        Kentucky stations send three-letter county abbreviations. Power multipliers, the K4KCG
+        bonus station, and county-line duplicate expansion are not scored automatically.
+  KY-QSO-PARTY:
+    name: Kentucky QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-power}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: Kentucky County, type: String:3, adif: SRX_STRING, direction: received, in_sets: [Kentucky Counties], after: rst-received}
+      - {id: rst-received, after: location-sent}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dx, remove: true}
+        - {id: mult-county, name: Kentucky County, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS]}
+    extends: KY-QSO-PARTY (In State)

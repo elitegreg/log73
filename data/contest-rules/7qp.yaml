@@ -1,0 +1,51 @@
+schema: 2
+contests:
+  7-QSO-PARTY (In State):
+    name: 7th Call Area QSO Party (In State)
+    bands: [160M, 80M, 40M, 20M, 15M, 10M]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      7QP Counties: {values_from_file: 7qp-counties.dat}
+      7QP States: {values: [AZ, ID, MT, NV, OR, UT, WA, WY]}
+      States: {use: us-states}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-location, key: Location, label: 7QP State/County, type: String:5, required: true, in_sets: [7QP Counties]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, DIGITAL, MIXED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: location-sent, label: State/County, type: String:5, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [7QP Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: 'State/Province or 7QP County', type: String:5, adif: SRX_STRING, direction: received, in_sets: [7QP Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 2}, {id: qso-digital, when: {field: MODE_CLASS, values: [DIGITAL]}, points: 4}, {id: qso-cw, points: 3}]
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dx, name: DXCC Entity, field: DXCC, key: [DXCC], exclude_values: ['1', '291']}
+    metadata:
+      source: http://7qp.org/new/Page.asp?content=rules
+      notes: >-
+        7th-area stations exchange a five-character state/county code and score phone 2, CW 3,
+        and digital 4 points. FT8/FT4/WSJT-X overlays are not modeled; outside stations score the
+        259 7QP counties as multipliers.
+  7-QSO-PARTY:
+    name: 7th Call Area QSO Party
+    setup_fields:
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:5, required: true, in_sets: [States, Canadian Provinces, DX]}
+    exchange:
+      - {id: location-sent, label: Location, type: String:5, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: 7QP County, type: String:5, adif: SRX_STRING, direction: received, in_sets: [7QP Counties], after: rst-received}
+      - {id: rst-received, after: location-sent}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dx, remove: true}
+        - {id: mult-county, name: 7QP County, field: SRX_STRING, key: [SRX_STRING]}
+    extends: 7-QSO-PARTY (In State)

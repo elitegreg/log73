@@ -1,0 +1,51 @@
+schema: 2
+contests:
+  IN-QSO-PARTY (In State):
+    name: Indiana QSO Party (In State)
+    profiles: [hf-vhf-bands]
+    modes: [CW, PHONE]
+    value_sets:
+      Indiana Counties: {values_from_file: indiana-counties.dat}
+      States: {use: us-states, exclude: [IN]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Indiana County, type: String:5, required: true, in_sets: [Indiana Counties]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, MIXED]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, PORTABLE]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:5, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Indiana Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: 'County, State, Province, or DX', type: String:5, adif: SRX_STRING, direction: received, in_sets: [Indiana Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points: {points: 2}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dx, name: DX, field: SRX_STRING, fixed_key: DX, in_sets: [DX]}
+    metadata:
+      source: http://www.hdxcc.org/inqp/rules.html
+      notes: >-
+        Indiana and outside stations score two points for both CW and SSB in the 2026 rules.
+        County-line, mobile, and portable details remain operator-enforced.
+  IN-QSO-PARTY:
+    name: Indiana QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:5, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-power}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:5, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: Indiana County, type: String:5, adif: SRX_STRING, direction: received, in_sets: [Indiana Counties], after: rst-received}
+      - {id: rst-received, after: location-sent}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dx, remove: true}
+        - {id: mult-county, name: Indiana County, field: SRX_STRING, key: [SRX_STRING]}
+    extends: IN-QSO-PARTY (In State)

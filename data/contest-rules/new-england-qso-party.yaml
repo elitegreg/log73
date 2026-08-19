@@ -1,0 +1,61 @@
+schema: 2
+contests:
+  NEW-ENGLAND-QSO-PARTY (In State):
+    name: New England QSO Party (In State)
+    bands: [80M, 40M, 20M, 15M, 10M]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      New England Counties: {values_from_file: new-england-counties.dat}
+      New England States: {values: [CT, ME, MA, NH, RI, VT]}
+      States: {use: us-states}
+      District of Columbia: {use: district-of-columbia}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-state, key: State, label: New England State, type: String:2, required: true, in_sets: [New England States]}
+      - {id: param-county, key: County, label: New England County or Region, type: String:5, required: true, in_sets: [New England Counties]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, DIGITAL, MIXED]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: state-sent, label: State, type: String:2, adif: APP_LOG73_STX_STATE, direction: sent, fixed: true, source: State, in_sets: [New England States]}
+      - {id: county-sent, label: County, type: String:5, adif: APP_LOG73_STX_COUNTY, direction: sent, fixed: true, source: County, in_sets: [New England Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: 'County, State, Province, or DX', type: String:5, adif: SRX_STRING, direction: received, in_sets: [New England Counties, States, District of Columbia, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: qso-cw-digital, points: 2}]
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-county, name: New England County, field: SRX_STRING, key: [SRX_STRING], in_sets: [New England Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States, District of Columbia]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dx, name: DX, field: SRX_STRING, fixed_key: DX, in_sets: [DX]}
+    metadata:
+      source: https://neqp.org/rules/
+      notes: >-
+        New England stations exchange state and county/region; outside stations exchange state,
+        province, or DX. CW and digital are two points, phone is one point. FT8/FT4/WSJT-X overlays,
+        county-line contacts, and mobile county changes are operator-enforced.
+  NEW-ENGLAND-QSO-PARTY:
+    name: New England QSO Party
+    setup_fields:
+      - {id: param-state, remove: true}
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:5, required: true, in_sets: [States, District of Columbia, Canadian Provinces, DX], before: header-category-power}
+    exchange:
+      - {id: state-sent, remove: true}
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:5, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, District of Columbia, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: New England County, type: String:5, adif: SRX_STRING, direction: received, in_sets: [New England Counties], after: rst-received}
+      - {id: rst-received, after: location-sent}
+    scoring:
+      multipliers:
+        - {id: mult-county, remove: true}
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dx, remove: true}
+        - {id: mult-new-england-county, name: New England County, field: SRX_STRING, key: [SRX_STRING]}
+    extends: NEW-ENGLAND-QSO-PARTY (In State)

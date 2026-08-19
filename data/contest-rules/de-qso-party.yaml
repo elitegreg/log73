@@ -1,0 +1,58 @@
+schema: 2
+contests:
+  DE-QSO-PARTY (In State):
+    name: Delaware QSO Party (In State)
+    bands: [160M, 80M, 40M, 20M, 15M, 10M, 6M, 2M]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      Delaware Counties: {values_from_file: delaware-counties.dat}
+      States: {use: us-states}
+      District of Columbia: {use: district-of-columbia}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Delaware County, type: String:3, required: true, in_sets: [Delaware Counties]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Delaware Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: 'County, State, Province, or DX', type: String:3, adif: SRX_STRING, direction: received, in_sets: [Delaware Counties, States, District of Columbia, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: qso-other, points: 2}]
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [States, District of Columbia]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [Canadian Provinces]}
+        - {id: mult-dx, name: DX, field: DXCC, key: [DXCC, BAND], exclude_values: ['1', '6', '110', '291']}
+      param_multipliers:
+        - {id: power-factor, param: CATEGORY-POWER, values: {QRP: 3, LOW: 2, HIGH: 1}}
+    metadata:
+      source: https://www.fsarc.org/qsoparty/rules-2024.html
+      notes: >-
+        Delaware stations score phone QSOs at one point and CW/digital QSOs at two points;
+        outside stations use ten and twenty points respectively. Power and electronic-submission
+        bonuses are represented where supported by the rule schema; FT8/FT4/WSJT-X overlays are separate.
+  DE-QSO-PARTY:
+    name: Delaware QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, District of Columbia, Canadian Provinces, DX], before: header-category-power}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, District of Columbia, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: Delaware County, type: String:3, adif: SRX_STRING, direction: received, in_sets: [Delaware Counties], after: rst-received}
+      - {id: rst-received, after: location-sent}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 10}, {id: qso-other, points: 20}]
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dx, remove: true}
+        - {id: mult-county, name: Delaware County, field: SRX_STRING, key: [SRX_STRING, BAND]}
+      param_multipliers:
+        - {id: power-factor, param: CATEGORY-POWER, values: {QRP: 3, LOW: 2, HIGH: 1}}
+    extends: DE-QSO-PARTY (In State)

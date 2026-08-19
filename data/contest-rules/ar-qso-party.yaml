@@ -1,0 +1,53 @@
+schema: 2
+contests:
+  AR-QSO-PARTY (In State):
+    name: Arkansas QSO Party (In State)
+    profiles: [all-contest-bands]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      Arkansas Counties: {values_from_file: arkansas-counties.dat}
+      States: {use: us-states, exclude: [AR]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Arkansas County, type: String:3, required: true, in_sets: [Arkansas Counties]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, DIGITAL, MIXED]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, PORTABLE, ROVER]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Arkansas Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: 'County, State, Province, or DX', type: String:3, adif: SRX_STRING, direction: received, in_sets: [Arkansas Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points: {points: 1}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-county, name: Arkansas County, field: SRX_STRING, key: [SRX_STRING], in_sets: [Arkansas Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dx, name: DX, field: SRX_STRING, fixed_key: DX, in_sets: [DX]}
+      bonus_points:
+        - {id: bonus-wr5p, name: WR5P, field: CALL, key: [CALL], values: {WR5P: 200}}
+    metadata:
+      source: https://arkqp.com/arkansas-qso-party-rules/
+      notes: >-
+        CW, phone, and digital contacts are supported. FT8/FT4/WSJT-X overlays and mobile,
+        portable, rover, live-stream, and county-line bonus details are operator-enforced.
+  AR-QSO-PARTY:
+    name: Arkansas QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-power}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: Arkansas County, type: String:3, adif: SRX_STRING, direction: received, in_sets: [Arkansas Counties], after: rst-received}
+      - {id: rst-received, after: location-sent}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dx, remove: true}
+    extends: AR-QSO-PARTY (In State)
