@@ -1,0 +1,107 @@
+schema: 2
+contests:
+  RDXC:
+    name: Russian DX Contest
+    profiles: [hf-bands]
+    modes: [CW, SSB]
+    value_sets:
+      RDXC Russian Regions:
+        values_from_file: rdxc-regions.dat
+      RDXC Russian DXCC:
+        values: ['13', '15', '54', '61', '126']
+    setup_fields:
+      - id: param-region
+        key: Region
+        label: Russian Region
+        type: String:2
+        required: true
+        in_sets: [RDXC Russian Regions]
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP, SWL, CHECKLOG]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [MIXED, CW, SSB]}
+      - {id: header-category-band, preset: category-band, default: ALL, valid_values: [ALL, 160M, 80M, 40M, 20M, 15M, 10M]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-transmitter, preset: category-transmitter, default: ONE, valid_values: [ONE, TWO, UNLIMITED], multi_single_has_mult_transmitter: true}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - id: region-sent
+        label: Region(s)
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: Region
+        in_sets: [RDXC Russian Regions]
+      - {id: rst-received, preset: rst-received}
+      - {id: serial-received, label: Serial, type: Serial:3, adif: SRX, direction: received}
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-maritime-mobile, when: {field: CALL, suffixes: [/MM]}, points: 5}
+          - {id: qso-russian-same-continent, when_all: [{field: DXCC, in_sets: [RDXC Russian DXCC]}, {field: CONT, matches_field: MY_CONT}], points: 2}
+          - {id: qso-russian-different-continent, when: {field: DXCC, in_sets: [RDXC Russian DXCC]}, points: 5}
+          - {id: qso-foreign-same-continent, when: {field: CONT, matches_field: MY_CONT}, points: 3}
+          - {id: qso-foreign-different-continent, points: 5}
+          - {id: qso-ineligible, points: 0}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-region, name: Russian Region, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [RDXC Russian Regions], when: {field: DXCC, in_sets: [RDXC Russian DXCC]}}
+        - {id: mult-dxcc, name: DXCC Entity, field: DXCC, key: [DXCC, BAND], exclude_call_suffixes: [/MM]}
+    cabrillo:
+      fixed_headers: [{id: fixed-category-mode, name: CATEGORY-MODE, value: MIXED}]
+      export_fields:
+        - {id: export-location, key: LOCATION, label: RDA Location, type: String:32, required: false}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://www.rdxc.org/rules_eng
+      notes: >-
+        Russian stations send an oblast code and receive a serial; non-Russian stations send a
+        serial and receive an oblast code. Oblast and DXCC multipliers count once per band.
+        Senior, Classic, One Radio, band-change, transmitter, and SWL restrictions remain
+        operator-enforced.
+  RDXC (DX):
+    name: Russian DX Contest (DX)
+    setup_fields:
+      - {id: param-region, remove: true}
+      - id: param-serial
+        key: Serial
+        label: Starting Serial
+        type: Numeric:3
+        required: true
+        default: 1
+        regex: '^\d{1,3}$'
+        before: header-category-operator
+      - {id: header-category-operator, after: param-serial}
+    exchange:
+      - {id: region-sent, remove: true}
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:3
+        adif: STX
+        direction: sent
+        serial_scope: global
+        after: rst-sent
+      - {id: serial-received, remove: true}
+      - id: region-received
+        label: Russian Region
+        type: String:2
+        adif: SRX_STRING
+        direction: received
+        in_sets: [RDXC Russian Regions]
+        after: rst-received
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-maritime-mobile, when: {field: CALL, suffixes: [/MM]}, points: 5}
+          - {id: qso-russian-same-continent, when: {field: DXCC, in_sets: [RDXC Russian DXCC]}, points: 10}
+          - {id: qso-russian-different-continent, when: {field: DXCC, in_sets: [RDXC Russian DXCC]}, points: 10}
+          - {id: qso-own-country, when: {field: DXCC, matches_field: MY_DXCC}, points: 2, before: qso-ineligible}
+          - {id: qso-foreign-same-continent, when_all: [{field: DXCC, not_matches_field: MY_DXCC}, {field: CONT, matches_field: MY_CONT}], points: 3}
+          - {id: qso-foreign-different-continent, when: {field: CONT, not_matches_field: MY_CONT}, points: 5}
+          - {id: qso-ineligible, points: 0}
+    metadata:
+      notes: Non-Russian stations score 10 points for Russian contacts, 2 for their own country, 3 for a different country on the same continent, and 5 for another continent. The inherited region multiplier applies to Russian contacts.
+    extends: RDXC

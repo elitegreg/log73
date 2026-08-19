@@ -1,0 +1,146 @@
+schema: 2
+contests:
+  EUDX:
+    name: EU DX Contest
+    modes: [CW, SSB]
+    profiles: [hf-bands]
+    value_sets:
+      EU DXCC:
+        values: ['52', '145', '146', '206', '209', '212', '215', '221', '224', '227', '230', '236', '239', '245', '248', '254', '257', '263', '269', '272', '275', '281', '284', '497', '499', '503', '504']
+      EU Regions:
+        values_from_file: eu-dx-regions.dat
+      ITU Zones:
+        values: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63', '64', '65', '66', '67', '68', '69', '70', '71', '72', '73', '74', '75', '76', '77', '78', '79', '80', '81', '82', '83', '84', '85', '86', '87', '88', '89', '90']
+    setup_fields:
+      - id: param-region
+        key: Region
+        label: EU Region
+        type: String:4
+        required: true
+        in_sets: [EU Regions]
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]
+      - id: header-category-mode
+        preset: category-mode
+        default: MIXED
+        valid_values: [MIXED, CW, SSB]
+      - id: header-category-band
+        preset: category-band
+        default: ALL
+        valid_values: [ALL, 160M, 80M, 40M, 20M, 15M, 10M]
+      - id: header-category-power
+        preset: category-power
+        default: HIGH
+        valid_values: [HIGH, LOW, QRP]
+      - id: header-category-station
+        preset: category-station
+        default: FIXED
+        valid_values: [FIXED, DISTRIBUTED]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE, TWO, UNLIMITED]
+        multi_single_has_mult_transmitter: true
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: region-sent
+        label: EU Region(s)
+        type: String:4
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: Region
+        in_sets: [EU Regions]
+      - id: rst-received
+        preset: rst-received
+      - id: region-or-zone-received
+        label: EU Region or ITU Zone
+        type: String:4
+        adif: SRX_STRING
+        direction: received
+        in_sets: [EU Regions, ITU Zones]
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        rules:
+          - {id: qso-own-country, when: {field: APP_LOG73_DXCC_PFX, matches_field: APP_LOG73_MY_DXCC_PFX}, points: 2}
+          - {id: qso-eu-country, when: {field: DXCC, in_sets: [EU DXCC]}, points: 10}
+          - {id: qso-same-continent-non-eu, when_all: [{field: CONT, matches_field: MY_CONT}, {field: DXCC, exclude_in_sets: [EU DXCC]}], points: 3}
+          - {id: qso-different-continent, points: 5}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {
+            id: mult-country,
+            name: Country,
+            field: APP_LOG73_DXCC_PFX,
+            key: [APP_LOG73_DXCC_PFX, BAND],
+          }
+        - {
+            id: mult-eu-region,
+            name: EU Region,
+            field: SRX_STRING,
+            key: [SRX_STRING, BAND],
+            in_sets: [EU Regions],
+          }
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: MIXED}
+      export_fields:
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, required: false}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://www.eudx-contest.com/rules/
+      notes: >-
+        EU stations send an EU region and score 2 points for their own country, 10 for another
+        EU country, 3 for a non-EU country on the same continent, and 5 for another continent.
+        Country and EU-region multipliers count once per band and the final score is QSO points
+        multiplied by their sum. Non-EU stations use the alternate EUDX (DX) rule. The contest
+        runs for 24 hours on 160, 80, 40, 20, 15, and 10 meters; category, band, power,
+        multi-operator, 10-minute, distributed-station, and operating restrictions remain
+        operator-enforced.
+  EUDX (DX):
+    name: EU DX Contest (DX)
+    setup_fields:
+      - id: param-region
+        remove: true
+      - id: param-itu-zone
+        key: ITU Zone
+        label: ITU Zone
+        type: String:2
+        required: true
+        in_sets: [ITU Zones]
+        before: header-category-operator
+      - id: header-category-operator
+        after: param-itu-zone
+    exchange:
+      - id: region-sent
+        remove: true
+      - id: zone-sent
+        label: ITU Zone(s)
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: ITU Zone
+        in_sets: [ITU Zones]
+        after: rst-sent
+      - id: region-or-zone-received
+        label: EU Region
+        in_sets: [EU Regions]
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-eu-country, when: {field: DXCC, in_sets: [EU DXCC]}, points: 10}
+          - {id: qso-own-country, when: {field: APP_LOG73_DXCC_PFX, matches_field: APP_LOG73_MY_DXCC_PFX}, points: 2}
+          - {id: qso-same-continent, when: {field: CONT, matches_field: MY_CONT}, points: 3}
+          - {id: qso-different-continent, points: 5}
+    metadata:
+      notes: Non-EU stations send an ITU zone and receive an EU region; their QSO point values follow the non-EU station table.
+    extends: EUDX

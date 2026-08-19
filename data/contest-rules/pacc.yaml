@@ -1,0 +1,152 @@
+schema: 2
+contests:
+  PACC:
+    name: PACC
+    modes: [CW, SSB]
+    profiles: [hf-bands]
+    value_sets:
+      Dutch Provinces:
+        values: [DR, FL, FR, GD, GR, LB, NB, NH, OV, UT, ZH, ZL]
+      PACC Call Areas:
+        values: [UA8, UA9, UA0, CE, JA, LU, PY, VE, K, VK, ZS, ZL]
+    setup_fields:
+      - id: param-province
+        key: Province
+        label: Dutch Province
+        type: String:2
+        required: true
+        in_sets: [Dutch Provinces]
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP, SWL, CHECKLOG]
+      - id: header-category-assisted
+        preset: category-assisted
+        default: ASSISTED
+        valid_values: [ASSISTED]
+      - id: header-category-mode
+        preset: category-mode
+        default: MIXED
+        valid_values: [MIXED, CW, SSB]
+      - id: header-category-band
+        preset: category-band
+        default: ALL
+        valid_values: [ALL, 160M, 80M, 40M, 20M, 15M, 10M]
+      - id: header-category-power
+        preset: category-power
+        default: HIGH
+        valid_values: [HIGH, LOW, QRP]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE, TWO, UNLIMITED]
+        multi_single_has_mult_transmitter: true
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: province-sent
+        label: Province(s)
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        in_sets: [Dutch Provinces]
+        source: Province
+      - id: rst-received
+        preset: rst-received
+      - id: serial-received
+        label: Serial
+        type: Serial:4
+        adif: SRX
+        direction: received
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        points: 1
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {
+            id: mult-dxcc,
+            name: DXCC Entity,
+            field: APP_LOG73_DXCC_PFX,
+            key: [APP_LOG73_DXCC_PFX, BAND, MODE_CLASS],
+            when: {field: APP_LOG73_DXCC_PFX, exclude_in_sets: [PACC Call Areas]},
+          }
+        - {
+            id: mult-call-area,
+            name: Call Area,
+            field: WPX_PREFIX,
+            key: [WPX_PREFIX, BAND, MODE_CLASS],
+            when: {field: APP_LOG73_DXCC_PFX, in_sets: [PACC Call Areas]},
+          }
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: MIXED}
+      export_fields:
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, required: false}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://veron.nl/vereniging/commissies-en-werkgroepen/traffic-bureau/hf-contesten/pacc-rules/
+      notes: >-
+        Dutch stations send a province and receive a serial; non-Dutch stations use the alternate
+        PACC (DX) rule. Contacts score one point, and PA multipliers count per band and mode using
+        DXCC entities and the specified call-area exceptions. Mixed-mode, multi-operator, MOST,
+        MO2T, SWL, novice, power, and operating-time restrictions remain operator-enforced.
+  PACC (DX):
+    name: PACC (DX)
+    setup_fields:
+      - id: param-province
+        remove: true
+      - id: param-serial
+        key: Serial
+        label: Starting Serial
+        type: Numeric:3
+        required: true
+        default: 1
+        regex: '^\d{1,3}$'
+        before: header-category-operator
+      - id: header-category-operator
+        after: param-serial
+    exchange:
+      - id: province-sent
+        remove: true
+      - id: serial-received
+        remove: true
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:3
+        adif: STX
+        direction: sent
+        serial_scope: category_transmitter
+        after: rst-sent
+      - id: province-received
+        label: Province
+        type: String:2
+        adif: SRX_STRING
+        direction: received
+        in_sets: [Dutch Provinces]
+        after: rst-received
+    scoring:
+      qso_points:
+        points: null
+        rules:
+          - {id: qso-dutch, when: {field: DXCC, values: ['263']}, points: 1}
+          - {id: qso-ineligible, points: 0}
+      multipliers:
+        - {id: mult-dxcc, remove: true}
+        - {id: mult-call-area, remove: true}
+        - {
+            id: mult-dutch-province,
+            name: Dutch Province,
+            field: SRX_STRING,
+            key: [SRX_STRING, BAND, MODE_CLASS],
+            in_sets: [Dutch Provinces],
+            when: {field: DXCC, values: ['263']},
+          }
+    metadata:
+      notes: Non-Dutch stations send serial numbers and receive Dutch province codes; only contacts with PA count for points and province multipliers.
+    extends: PACC

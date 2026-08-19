@@ -1,0 +1,128 @@
+schema: 2
+contests:
+  RSGB-IOTA (World):
+    name: IOTA Contest (World Station)
+    bands: [80M, 40M, 20M, 15M, 10M]
+    modes: [CW, SSB]
+    setup_fields:
+      - id: header-category-location
+        key: CATEGORY-LOCATION
+        label: Category Location
+        type: String:16
+        widget: select
+        cabrillo_header: CATEGORY-LOCATION
+        default: WORLD
+        valid_values: [WORLD]
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP]
+      - id: header-category-assisted
+        preset: category-assisted
+        default: NON-ASSISTED
+        valid_values: [ASSISTED, NON-ASSISTED]
+      - id: header-category-overlay
+        preset: category-overlay
+        required: false
+        valid_values: [NEWCOMER]
+      - id: header-category-mode
+        preset: category-mode
+        default: MIXED
+        valid_values: [MIXED, CW, SSB]
+      - id: header-category-time
+        key: CATEGORY-TIME
+        label: Category Time
+        type: String:16
+        widget: select
+        cabrillo_header: CATEGORY-TIME
+        default: 24-HOURS
+        valid_values: [12-HOURS, 24-HOURS]
+      - id: header-category-power
+        preset: category-power
+        default: HIGH
+        valid_values: [HIGH, LOW, QRP]
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:4
+        adif: STX
+        direction: sent
+        serial_scope: global
+      - {id: rst-received, preset: rst-received}
+      - {id: serial-received, label: Serial, type: Serial:4, adif: SRX, direction: received}
+      - id: iota-reference-received
+        label: IOTA Reference
+        type: String:6
+        adif: SRX_STRING
+        direction: received
+        default: '0'
+        regex: '^(?:0|[A-Z]{2}-[0-9]{3})$'
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-world, when: {field: SRX_STRING, values: ['0']}, points: 2}
+          - {id: qso-island, when: {field: SRX_STRING, exclude_values: ['0']}, points: 15}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-iota-reference, name: IOTA Reference, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], exclude_values: ['0']}
+    cabrillo:
+      export_fields:
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://www.rsgbcc.org/hf/rules/2026/riota.shtml
+      notes: >-
+        World stations send serial numbers and receive an IOTA reference when the contacted
+        station is on an island. World-to-world contacts score 2 points and world-to-island
+        contacts score 15 points. IOTA references count as multipliers per band and mode.
+        Station-location, operating-time, remote-operation, self-spotting, and multiplier-station
+        restrictions remain operator-enforced.
+  RSGB-IOTA (Island):
+    name: IOTA Contest (Island Station)
+    setup_fields:
+      - id: param-iota-reference
+        key: IOTA Reference
+        label: IOTA Reference
+        type: String:6
+        required: true
+        regex: '^[A-Z]{2}-[0-9]{3}$'
+      - id: param-island-name
+        key: IOTA-ISLAND-NAME
+        label: IOTA Island Name
+        type: String:32
+        required: true
+        preserve_case: true
+        cabrillo_header: IOTA-ISLAND-NAME
+        before: header-category-location
+      - id: header-category-location
+        default: NON-DXPEDITION
+        valid_values: [NON-DXPEDITION, DXPEDITION]
+      - id: header-category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE, TWO]
+        multi_single_has_mult_transmitter: true
+    exchange:
+      - id: iota-reference-sent
+        label: IOTA Reference(s)
+        type: String:6
+        adif: MY_IOTA_REF
+        direction: sent
+        fixed: true
+        source: IOTA Reference
+        regex: '^[A-Z]{2}-[0-9]{3}$'
+        after: serial-sent
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-world, points: 5}
+          - {id: qso-same-reference, when: {field: SRX_STRING, matches_field: MY_IOTA_REF}, points: 5, before: qso-island}
+          - {id: qso-island, when_all: [{field: SRX_STRING, not_matches_field: MY_IOTA_REF}], points: 15}
+    extends: RSGB-IOTA (World)

@@ -1,0 +1,121 @@
+schema: 2
+contests:
+  CANADA-DAY:
+    name: RAC Canada Day Contest
+    bands: [160M, 80M, 40M, 20M, 15M, 10M, 6M, 2M]
+    modes: [CW, PHONE]
+    value_sets:
+      RAC Provinces and Territories:
+        use: canadian-provinces
+      RAC Canada DXCC:
+        values: ['1']
+      RAC Official Stations:
+        values_from_file: rac-official-stations.dat
+    setup_fields:
+      - id: param-location
+        key: Location
+        label: Canadian Province or Territory
+        type: String:2
+        required: false
+        in_sets: [RAC Provinces and Territories]
+        help_text: Required for Canadian stations; use a state, province, or DXCC entity for other stations.
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]
+      - id: header-category-assisted
+        preset: category-assisted
+        default: NON-ASSISTED
+        valid_values: [ASSISTED, NON-ASSISTED]
+      - id: header-category-mode
+        preset: category-mode
+        default: MIXED
+        valid_values: [MIXED, CW, SSB]
+      - id: header-category-band
+        preset: category-band
+        default: ALL
+        valid_values: [ALL, 160M, 80M, 40M, 20M, 15M, 10M, 6M, 2M]
+      - id: header-category-power
+        preset: category-power
+        default: HIGH
+        valid_values: [HIGH, LOW, QRP]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE, MULTI]
+      - id: header-category-overlay
+        preset: category-overlay
+        required: false
+        valid_values: [ROOKIE]
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: province-sent
+        label: Province or Territory(s)
+        type: String:2
+        adif: MY_RAC_SECT
+        direction: sent
+        fixed: true
+        source: Location
+        in_sets: [RAC Provinces and Territories]
+        only_when: {field: MY_DXCC, in_sets: [RAC Canada DXCC]}
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:4
+        adif: STX
+        direction: sent
+        serial_scope: global
+        only_when: {field: MY_DXCC, exclude_in_sets: [RAC Canada DXCC]}
+      - id: rst-received
+        preset: rst-received
+      - id: province-received
+        label: Province or Territory
+        type: String:2
+        adif: RAC_SECT
+        direction: received
+        in_sets: [RAC Provinces and Territories]
+        only_when: {field: DXCC, in_sets: [RAC Canada DXCC]}
+      - id: serial-received
+        label: Serial
+        type: Serial:4
+        adif: SRX
+        direction: received
+        only_when: {field: DXCC, exclude_in_sets: [RAC Canada DXCC]}
+    scoring:
+      minimum_multiplier_count: 1
+      qso_points:
+        rules:
+          - {id: qso-rac-official, when: {field: CALL, in_sets: [RAC Official Stations]}, points: 20}
+          - {id: qso-canadian, when: {field: DXCC, in_sets: [RAC Canada DXCC]}, points: 10}
+          - {id: qso-foreign, points: 2}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-rac-section, name: RAC Province or Territory, field: RAC_SECT, key: [RAC_SECT, BAND, MODE_CLASS], in_sets: [RAC Provinces and Territories], when: {field: DXCC, in_sets: [RAC Canada DXCC]}}
+    cabrillo:
+      fixed_headers: []
+      export_fields:
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, required: false, help_text: 'Canadian province or territory, US state or territory, or DXCC entity.'}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://www.rac.ca/rac-canada-day-contest-rules-2026/
+      notes: >-
+        Canadian stations send a province or territory; VE0 maritime-mobile and other stations
+        send a serial number. RAC official stations score 20 points, Canadian contacts 10, and
+        other contacts 2. The 13 Canadian province and territory multipliers count once per band
+        and mode. RAC team registration, operating limits, and eligibility restrictions remain
+        external to the logger.
+  CANADA-WINTER:
+    name: RAC Canada Winter Contest
+    metadata:
+      source: https://www.rac.ca/rac-canada-winter-contest-rules-2025/
+      notes: >-
+        Uses the latest published RAC Canada Winter rules. Canadian stations send a province or
+        territory; VE0 maritime-mobile and other stations send a serial number. RAC official
+        stations score 20 points, Canadian contacts 10, and other contacts 2. The 13 Canadian
+        province and territory multipliers count once per band and mode. RAC team registration,
+        operating limits, and eligibility restrictions remain external to the logger.
+    extends: CANADA-DAY

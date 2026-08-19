@@ -1,0 +1,105 @@
+schema: 2
+contests:
+  UKRAINDX:
+    name: Ukrainian DX Contest
+    profiles: [hf-bands]
+    modes: [CW, SSB]
+    value_sets:
+      Ukrainian Oblasts:
+        values_from_file: ukrainian-oblasts.dat
+    setup_fields:
+      - id: param-oblast
+        key: Oblast
+        label: Ukrainian Oblast
+        type: String:2
+        required: true
+        in_sets: [Ukrainian Oblasts]
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [MIXED, CW, SSB]}
+      - {id: header-category-band, preset: category-band, default: ALL, valid_values: [ALL, 160M, 80M, 40M, 20M, 15M, 10M]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-transmitter, preset: category-transmitter, default: ONE, valid_values: [ONE]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - id: oblast-sent
+        label: Oblast(s)
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: Oblast
+        in_sets: [Ukrainian Oblasts]
+      - {id: rst-received, preset: rst-received}
+      - {id: serial-or-oblast-received, label: Serial or Ukrainian Oblast, type: String:4, adif: SRX_STRING, direction: received, regex: '^\d{1,4}$', valid_values_or_regex: true, in_sets: [Ukrainian Oblasts]}
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        geography:
+          country_field: DXCC
+          station_country_field: MY_DXCC
+          continent_field: CONT
+          station_continent_field: MY_CONT
+          same_country: 1
+          different_country_north_america: 2
+          different_country_same_continent: 2
+          different_continent: 3
+          unresolved: 0
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-dxcc, name: DXCC/WAE Country, field: DXCC, key: [DXCC, BAND]}
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: MIXED}
+      export_fields:
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, required: false}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://urdxc.org/rules.php?english
+      notes: >-
+        Ukrainian stations send an oblast and foreign stations send a serial beginning
+        at 001. Foreign stations receive Ukrainian oblasts; Ukraine is worth 10 points
+        and supplies the additional country multiplier credit. Two contacts per band,
+        one CW and one SSB, are supported by the duplicate key.
+  UKRAINDX (DX):
+    name: Ukrainian DX Contest (DX)
+    setup_fields:
+      - {id: param-oblast, remove: true}
+      - id: param-serial
+        key: Serial
+        label: Starting Serial
+        type: Numeric:3
+        required: true
+        default: 1
+        regex: '^\d{1,3}$'
+        before: header-category-operator
+      - {id: header-category-operator, after: param-serial}
+    exchange:
+      - {id: oblast-sent, remove: true}
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:3
+        adif: STX
+        direction: sent
+        serial_scope: global
+        after: rst-sent
+      - {id: serial-or-oblast-received, label: Serial or Ukrainian Oblast, regex: '^\d{1,4}$', valid_values_or_regex: true}
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        geography: null
+        rules:
+          - {id: qso-ukraine, when: {field: DXCC, values: ['288']}, points: 10}
+          - {id: qso-own-country, when: {field: DXCC, matches_field: MY_DXCC}, points: 1}
+          - {id: qso-same-continent, when: {field: CONT, matches_field: MY_CONT}, points: 2}
+          - {id: qso-different-continent, points: 3}
+      multipliers:
+        - {id: mult-ukrainian-oblast, name: Ukrainian Oblast, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [Ukrainian Oblasts], when: {field: DXCC, values: ['288']}}
+        - {id: mult-dxcc, name: DXCC/WAE Country, field: DXCC, key: [DXCC, BAND]}
+        - {id: mult-ukraine-bonus, name: Ukraine Bonus, field: DXCC, key: [DXCC, BAND], values: ['288']}
+    metadata:
+      notes: Foreign stations send serial numbers and receive Ukrainian oblast abbreviations. Ukrainian contacts score 10 points; other contacts use the published own-country, same-continent, and different-continent values.
+    extends: UKRAINDX

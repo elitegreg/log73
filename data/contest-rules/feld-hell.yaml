@@ -1,0 +1,65 @@
+schema: 2
+contests:
+  FELD-HELL:
+    name: Feld Hell Sprint
+    modes: [HELL]
+    profiles: [all-contest-bands]
+    value_sets:
+      US Multipliers:
+        use: us-states
+      District of Columbia:
+        use: district-of-columbia
+      Canadian Multipliers:
+        use: canadian-provinces
+      Power Classes:
+        values: [QRP, QRO]
+    setup_fields:
+      - id: param-fh-number
+        key: FH_NUMBER
+        label: Feld Hell Number
+        type: String:8
+        required: true
+      - id: param-qth
+        key: QTH
+        label: State, Province, or Country
+        type: String:8
+        required: true
+      - id: param-grid
+        key: GRID
+        label: Grid Square
+        type: String:6
+        required: true
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, CHECKLOG]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [LOW, QRP]}
+    exchange:
+      - {id: fh-number-sent, label: 'FH #(s)', type: String:8, adif: STX_STRING, direction: sent, fixed: true, source: FH_NUMBER}
+      - {id: qth-sent, label: State/Province/Country(s), type: String:8, adif: MY_QTH, direction: sent, fixed: true, source: QTH}
+      - {id: grid-sent, label: Grid(s), type: String:6, adif: MY_GRIDSQUARE, direction: sent, fixed: true, source: GRID}
+      - {id: fh-number-received, label: 'FH #', type: String:8, adif: SRX_STRING, direction: received}
+      - {id: qth-received, label: State/Province/Country, type: String:8, adif: SRX_QTH, direction: received}
+      - {id: grid-received, label: Grid, type: String:6, adif: GRIDSQUARE, direction: received}
+    scoring:
+      qso_points:
+        points: null
+        rules:
+          - {id: qso-qrp, when: {field: CALL, suffixes: [/QRP]}, points: 3}
+          - {id: qso-standard, points: 1}
+      dupe_key: [CALL, BAND]
+      multipliers:
+        - {id: mult-us-state, name: US State, field: SRX_QTH, key: [SRX_QTH], in_sets: [US Multipliers, District of Columbia]}
+        - {id: mult-canadian, name: Canadian Province, field: SRX_QTH, key: [SRX_QTH], in_sets: [Canadian Multipliers]}
+        - {id: mult-dxcc, name: DXCC Country, field: DXCC, key: [DXCC]}
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: DIGITAL}
+        - {id: fixed-category-transmitter, name: CATEGORY-TRANSMITTER, value: ONE}
+    metadata:
+      source: https://sites.google.com/site/feldhellclub/Home/contests/sprint-rules
+      notes: >-
+        Feld Hell sprints permit all Hell modes on non-WARC bands, with 100 watts maximum and
+        a 5-watt QRP class. The exchange is sprint-specific FH number, location, and grid;
+        QRP stations identify themselves with /QRP. The declarative score models the standard
+        one-point contact and the two-point QRP bonus through /QRP (three total); member contacts
+        are worth three base points and first-member/first-non-member-per-band accounting remains
+        operator-enforced because membership is not part of the radio exchange.

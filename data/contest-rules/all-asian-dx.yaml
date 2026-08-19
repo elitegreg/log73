@@ -1,0 +1,121 @@
+schema: 2
+contests:
+  AADX-CW:
+    name: All Asian DX Contest (CW)
+    modes: [CW]
+    profiles: [hf-bands]
+    setup_fields:
+      - id: param-age
+        key: Age
+        label: Operator or Average Age
+        type: String:2
+        required: true
+        default: '01'
+        regex: '^(?:0[1-9]|[1-9][0-9])$'
+        help_text: Use 01 when the operator or operators do not want to send an age.
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]
+      - id: header-category-band
+        preset: category-band
+        default: ALL
+        valid_values: [ALL, 160M, 80M, 40M, 20M, 15M, 10M]
+      - id: header-category-power
+        preset: category-power
+        default: HIGH
+        valid_values: [HIGH, LOW]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE, TWO, UNLIMITED]
+        multi_single_has_mult_transmitter: true
+      - id: header-category-overlay
+        preset: category-overlay
+        required: false
+        valid_values: [JUNIOR, SENIOR]
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: age-sent
+        label: Age(s)
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: Age
+        regex: '^(?:0[1-9]|[1-9][0-9])$'
+      - id: rst-received
+        preset: rst-received
+      - id: age-received
+        label: Age
+        type: String:2
+        adif: SRX_STRING
+        direction: received
+        regex: '^(?:0[1-9]|[1-9][0-9])$'
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        rules:
+          - {id: qso-same-entity, when: {field: DXCC, matches_field: MY_DXCC}, points: 0}
+          - {id: qso-asian-station-asian-160m, when_all: [{field: MY_CONT, values: [AS]}, {field: CONT, values: [AS]}, {field: BAND, values: [160M]}], points: 3}
+          - {id: qso-asian-station-asian-80m, when_all: [{field: MY_CONT, values: [AS]}, {field: CONT, values: [AS]}, {field: BAND, values: [80M]}], points: 2}
+          - {id: qso-asian-station-asian-10m, when_all: [{field: MY_CONT, values: [AS]}, {field: CONT, values: [AS]}, {field: BAND, values: [10M]}], points: 2}
+          - {id: qso-asian-station-asian-other, when_all: [{field: MY_CONT, values: [AS]}, {field: CONT, values: [AS]}, {field: BAND, values: [40M, 20M, 15M]}], points: 1}
+          - {id: qso-asian-station-non-asian-160m, when_all: [{field: MY_CONT, values: [AS]}, {field: CONT, exclude_values: [AS]}, {field: BAND, values: [160M]}], points: 9}
+          - {id: qso-asian-station-non-asian-80m, when_all: [{field: MY_CONT, values: [AS]}, {field: CONT, exclude_values: [AS]}, {field: BAND, values: [80M]}], points: 6}
+          - {id: qso-asian-station-non-asian-10m, when_all: [{field: MY_CONT, values: [AS]}, {field: CONT, exclude_values: [AS]}, {field: BAND, values: [10M]}], points: 6}
+          - {id: qso-asian-station-non-asian-other, when_all: [{field: MY_CONT, values: [AS]}, {field: CONT, exclude_values: [AS]}, {field: BAND, values: [40M, 20M, 15M]}], points: 3}
+          - {id: qso-non-asian-station-asian-160m, when_all: [{field: MY_CONT, exclude_values: [AS]}, {field: CONT, values: [AS]}, {field: BAND, values: [160M]}], points: 3}
+          - {id: qso-non-asian-station-asian-80m, when_all: [{field: MY_CONT, exclude_values: [AS]}, {field: CONT, values: [AS]}, {field: BAND, values: [80M]}], points: 2}
+          - {id: qso-non-asian-station-asian-10m, when_all: [{field: MY_CONT, exclude_values: [AS]}, {field: CONT, values: [AS]}, {field: BAND, values: [10M]}], points: 2}
+          - {id: qso-non-asian-station-asian-other, when_all: [{field: MY_CONT, exclude_values: [AS]}, {field: CONT, values: [AS]}, {field: BAND, values: [40M, 20M, 15M]}], points: 1}
+          - {id: qso-ineligible, points: 0}
+      dupe_key: [CALL, BAND]
+      multipliers:
+        - {
+            id: mult-asian-dxcc,
+            name: Asian DXCC Entity,
+            field: APP_LOG73_DXCC_PFX,
+            key: [APP_LOG73_DXCC_PFX, BAND],
+            when_all: [
+              {field: MY_CONT, values: [AS]},
+              {field: CONT, values: [AS]},
+              {field: DXCC, not_matches_field: MY_DXCC},
+            ],
+            exclude_call_suffixes: [/MM],
+          }
+        - {
+            id: mult-asian-prefix,
+            name: Asian Prefix,
+            field: WPX_PREFIX,
+            key: [WPX_PREFIX, BAND],
+            when_all: [{field: MY_CONT, exclude_values: [AS]}, {field: CONT, values: [AS]}],
+            exclude_call_suffixes: [/MM],
+          }
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}
+      export_fields:
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, required: false}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://www.jarl.org/English/4_Library/A-4-3_Contests/aadx_eng.html
+      notes: >-
+        Asian stations score 3/2/2 points on 160/80/10 meters, 1 point on the other bands for
+        Asian contacts, and three times those values for non-Asian contacts. Non-Asian stations
+        score only for Asian contacts. Same-entity Asian contacts score neither points nor
+        multipliers. Asian stations use DXCC multipliers; non-Asian stations use Asian prefixes.
+        Age, junior/senior, multi-operator, 24-hour, 10-minute, station-location, and maritime
+        mobile restrictions remain operator-enforced.
+  AADX-SSB:
+    name: All Asian DX Contest (SSB)
+    modes: [SSB]
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: SSB}
+    extends: AADX-CW

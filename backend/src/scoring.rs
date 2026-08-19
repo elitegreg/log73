@@ -58,6 +58,7 @@ pub struct ScoreTotals {
 pub struct ContestScorer {
     module: Arc<ContestScoringModule>,
     dupe_keys: HashMap<String, usize>,
+    raw_multiplier_count: i64,
     multiplier_keys: HashSet<String>,
     multiplier_counts: HashMap<String, usize>,
     bonus_keys: HashSet<String>,
@@ -93,6 +94,10 @@ impl ContestScoringModule {
 
     pub fn has_multipliers(&self) -> bool {
         !self.rules.scoring.multipliers.is_empty()
+    }
+
+    fn minimum_multiplier_count(&self) -> i64 {
+        self.rules.scoring.minimum_multiplier_count
     }
 
     fn has_capped_multipliers(&self) -> bool {
@@ -279,6 +284,7 @@ impl Default for ContestScoringModule {
 impl ContestScorer {
     pub fn reset(&mut self) {
         self.dupe_keys.clear();
+        self.raw_multiplier_count = 0;
         self.multiplier_keys.clear();
         self.multiplier_counts.clear();
         self.bonus_keys.clear();
@@ -302,7 +308,7 @@ impl ContestScorer {
         };
 
         self.totals.qso_points += points;
-        self.totals.multipliers += mults;
+        self.raw_multiplier_count += mults;
         self.direct_bonus_points += bonus;
         if !is_dupe && points > 0 {
             for key in self.module.qso_count_bonus_keys_for(contact) {
@@ -323,7 +329,7 @@ impl ContestScorer {
     pub fn remove_scored_qso(&mut self, contact: &Contact) -> ScoreTotals {
         self.totals.qso_count = self.totals.qso_count.saturating_sub(1);
         self.totals.qso_points -= scored_i64(contact, "pts");
-        self.totals.multipliers -= scored_i64(contact, "mult");
+        self.raw_multiplier_count -= scored_i64(contact, "mult");
         self.direct_bonus_points -= scored_i64(contact, "bonus");
         if !is_dupe_contact(contact) && scored_i64(contact, "pts") > 0 {
             for key in self.module.qso_count_bonus_keys_for(contact) {
@@ -346,9 +352,15 @@ impl ContestScorer {
 
     fn recalculate_score(&mut self) {
         let multiplier_factor = if self.module.has_multipliers() {
-            self.totals.multipliers
+            self.raw_multiplier_count
+                .max(self.module.minimum_multiplier_count())
         } else {
             1
+        };
+        self.totals.multipliers = if self.module.has_multipliers() {
+            multiplier_factor
+        } else {
+            0
         };
         self.totals.bonus_points = self.direct_bonus_points
             + self
@@ -507,73 +519,109 @@ fn score_qso_points(
     contact: &Contact,
     rules: &ContestRules,
 ) -> Option<i64> {
-    if let Some(grid_distance) = &qso_points.grid_distance {
+    let base_points = if let Some(grid_distance) = &qso_points.grid_distance {
         let station_grid = field_value(contact, rules, &grid_distance.station_grid_field)?;
         let contact_grid = field_value(contact, rules, &grid_distance.contact_grid_field)?;
         let distance = grid_distance_kilometers(&station_grid, &contact_grid)?;
         let distance_points = (distance / grid_distance.kilometers_per_point as f64).ceil() as i64;
-        return Some(
-            grid_distance.base_points + distance_points.max(grid_distance.minimum_distance_points),
-        );
-    }
-    if let Some(geography) = &qso_points.geography {
+        Some(grid_distance.base_points + distance_points.max(grid_distance.minimum_distance_points))
+    } else if let Some(geography) = &qso_points.geography {
         let band = field_value(contact, rules, "BAND");
         let Some(country) = field_value(contact, rules, &geography.country_field) else {
-            return Some(geography.unresolved.for_band(band.as_deref()));
+            return Some(
+                geography.unresolved.for_band(band.as_deref())
+                    + time_bonus_points(qso_points, contact),
+            );
         };
         let Some(station_country) = field_value(contact, rules, &geography.station_country_field)
         else {
-            return Some(geography.unresolved.for_band(band.as_deref()));
+            return Some(
+                geography.unresolved.for_band(band.as_deref())
+                    + time_bonus_points(qso_points, contact),
+            );
         };
         let Some(continent) = field_value(contact, rules, &geography.continent_field) else {
-            return Some(geography.unresolved.for_band(band.as_deref()));
+            return Some(
+                geography.unresolved.for_band(band.as_deref())
+                    + time_bonus_points(qso_points, contact),
+            );
         };
         let Some(station_continent) =
             field_value(contact, rules, &geography.station_continent_field)
         else {
-            return Some(geography.unresolved.for_band(band.as_deref()));
+            return Some(
+                geography.unresolved.for_band(band.as_deref())
+                    + time_bonus_points(qso_points, contact),
+            );
         };
 
         if country == station_country {
-            return Some(geography.same_country.for_band(band.as_deref()));
-        }
-        if continent != station_continent {
-            return Some(geography.different_continent.for_band(band.as_deref()));
-        }
-        if continent == "NA" {
-            return Some(
+            Some(geography.same_country.for_band(band.as_deref()))
+        } else if continent != station_continent {
+            Some(geography.different_continent.for_band(band.as_deref()))
+        } else if continent == "NA" {
+            Some(
                 geography
                     .different_country_north_america
                     .for_band(band.as_deref()),
-            );
+            )
+        } else {
+            Some(
+                geography
+                    .different_country_same_continent
+                    .for_band(band.as_deref()),
+            )
         }
-        return Some(
-            geography
-                .different_country_same_continent
-                .for_band(band.as_deref()),
-        );
-    }
+    } else if let Some(points) = qso_points.points {
+        Some(points)
+    } else {
+        qso_points.rules.iter().find_map(|rule| {
+            let matches = rule
+                .when
+                .as_ref()
+                .map(|condition| condition_matches(condition, contact, rules))
+                .unwrap_or(true)
+                && rule
+                    .when_all
+                    .iter()
+                    .all(|condition| condition_matches(condition, contact, rules));
+            matches.then_some(rule.points)
+        })
+    }?;
 
-    if let Some(points) = qso_points.points {
-        return Some(points);
-    }
+    Some(base_points + time_bonus_points(qso_points, contact))
+}
 
-    for rule in &qso_points.rules {
-        let matches = rule
-            .when
-            .as_ref()
-            .map(|condition| condition_matches(condition, contact, rules))
-            .unwrap_or(true)
-            && rule
-                .when_all
-                .iter()
-                .all(|condition| condition_matches(condition, contact, rules));
-        if matches {
-            return Some(rule.points);
-        }
-    }
+fn time_bonus_points(qso_points: &QsoPoints, contact: &Contact) -> i64 {
+    let Some(timestamp) = contact_adif_value(contact, "QSO_DATE_TIME_ON").and_then(Value::as_i64)
+    else {
+        return 0;
+    };
+    let minute = (timestamp.rem_euclid(24 * 60 * 60) / 60) as u16;
 
-    None
+    qso_points
+        .time_bonus_points
+        .iter()
+        .filter_map(|rule| {
+            let start = parse_utc_minute(&rule.start_utc)?;
+            let end = parse_utc_minute(&rule.end_utc)?;
+            let matches = if start == end {
+                true
+            } else if start < end {
+                minute >= start && minute < end
+            } else {
+                minute >= start || minute < end
+            };
+            matches.then_some(rule.points)
+        })
+        .sum()
+}
+
+fn parse_utc_minute(value: &str) -> Option<u16> {
+    let (hour, minute) = value.trim().split_once(':')?;
+    let hour = hour.parse::<u16>().ok()?;
+    let minute = minute.parse::<u16>().ok()?;
+    (hour < 24 && minute < 60).then_some(hour * 60 + minute)
 }
 
 fn condition_matches(
@@ -589,6 +637,14 @@ fn condition_matches(
             return false;
         };
         if !value.eq_ignore_ascii_case(&other_value) {
+            return false;
+        }
+    }
+    if let Some(other_field) = &condition.not_matches_field {
+        let Some(other_value) = field_value(contact, rules, other_field) else {
+            return false;
+        };
+        if value.eq_ignore_ascii_case(&other_value) {
             return false;
         }
     }
@@ -682,18 +738,151 @@ fn field_value(contact: &Map<String, Value>, _rules: &ContestRules, field: &str)
         });
     }
     if field.eq_ignore_ascii_case("WPX_PREFIX") {
-        return json_string(contact_adif_value(contact, "PFX"))
-            .map(|prefix| prefix.trim().to_uppercase())
-            .filter(|prefix| !prefix.is_empty())
-            .or_else(|| {
-                json_string(contact_adif_value(contact, "CALL"))
-                    .and_then(|callsign| callsign_prefix(&callsign))
+        return contact_prefix(contact);
+    }
+    if field.eq_ignore_ascii_case("GRID_FIELD") {
+        return json_string(contact_adif_value(contact, "GRIDSQUARE"))
+            .map(|grid| grid.trim().to_uppercase())
+            .filter(|grid| grid.chars().count() >= 2)
+            .map(|grid| grid.chars().take(2).collect());
+    }
+    if field.eq_ignore_ascii_case("JARL_CALL_AREA") {
+        return jarl_call_area(contact);
+    }
+    if field.eq_ignore_ascii_case("JARL_ENTITY") {
+        let entity = json_string(contact_adif_value(contact, "DXCC"))
+            .map(|value| value.trim().to_uppercase())
+            .filter(|value| !value.is_empty());
+        return jarl_call_area(contact)
+            .is_none()
+            .then_some(entity)
+            .flatten();
+    }
+    if field.eq_ignore_ascii_case("DOK_AREA") {
+        return json_string(contact_adif_value(contact, "SRX_STRING"))
+            .or_else(|| json_string(contact_adif_value(contact, "SRX")))
+            .and_then(|exchange| {
+                exchange
+                    .chars()
+                    .find(|character| character.is_ascii_alphabetic())
+                    .map(|character| character.to_ascii_uppercase().to_string())
             });
+    }
+    if field.eq_ignore_ascii_case("SAC_AREA") {
+        return sac_area(contact);
     }
     json_string(contact_adif_value(contact, field))
         .or_else(|| json_string(contact_meta_value(contact, field)))
         .map(|value| normalized_field_value(field, &value))
         .filter(|value| !value.is_empty())
+}
+
+fn contact_prefix(contact: &Contact) -> Option<String> {
+    json_string(contact_adif_value(contact, "PFX"))
+        .map(|prefix| prefix.trim().to_uppercase())
+        .filter(|prefix| !prefix.is_empty())
+        .or_else(|| {
+            json_string(contact_adif_value(contact, "CALL"))
+                .and_then(|callsign| callsign_prefix(&callsign))
+        })
+}
+
+fn jarl_call_area(contact: &Contact) -> Option<String> {
+    let callsign = json_string(contact_adif_value(contact, "CALL"))?;
+    let prefix = callsign_prefix(&callsign)?;
+    let area = prefix
+        .chars()
+        .rev()
+        .find(|character| character.is_ascii_digit())
+        .unwrap_or('0');
+    let dxcc = json_string(contact_adif_value(contact, "DXCC"))
+        .and_then(|value| value.trim().parse::<u16>().ok());
+
+    match dxcc {
+        Some(339) if !prefix.starts_with("JD1") => Some(format!("JA{area}")),
+        Some(291) if is_jarl_us_mainland_prefix(&prefix) => Some(format!("W{area}")),
+        Some(1) if is_jarl_canadian_prefix(&prefix) => Some(format!("VE{area}")),
+        Some(150) if is_jarl_australian_prefix(&prefix) => Some(format!("VK{area}")),
+        Some(_) => None,
+        None if is_jarl_japanese_prefix(&prefix) && !prefix.starts_with("JD1") => {
+            Some(format!("JA{area}"))
+        }
+        None if is_jarl_us_mainland_prefix(&prefix) => Some(format!("W{area}")),
+        None if is_jarl_canadian_prefix(&prefix) => Some(format!("VE{area}")),
+        None if is_jarl_australian_prefix(&prefix) => Some(format!("VK{area}")),
+        None => None,
+    }
+}
+
+fn is_jarl_japanese_prefix(prefix: &str) -> bool {
+    matches!(
+        prefix.get(..2),
+        Some(
+            "JA" | "JE"
+                | "JF"
+                | "JG"
+                | "JH"
+                | "JI"
+                | "JJ"
+                | "JK"
+                | "JL"
+                | "JM"
+                | "JN"
+                | "JO"
+                | "JP"
+                | "JQ"
+                | "JR"
+                | "JS"
+                | "7J"
+                | "7K"
+                | "7L"
+                | "7M"
+                | "8J"
+        )
+    )
+}
+
+fn is_jarl_us_mainland_prefix(prefix: &str) -> bool {
+    matches!(prefix.chars().next(), Some('K' | 'N' | 'W'))
+        || (prefix.starts_with('A')
+            && prefix
+                .chars()
+                .nth(1)
+                .is_some_and(|character| ('A'..='L').contains(&character)))
+}
+
+fn is_jarl_canadian_prefix(prefix: &str) -> bool {
+    prefix.starts_with("VA")
+        || prefix.starts_with("VE")
+        || prefix.starts_with("VO")
+        || prefix.starts_with("VY")
+        || prefix.starts_with("CY")
+}
+
+fn is_jarl_australian_prefix(prefix: &str) -> bool {
+    prefix.starts_with("AX") || prefix.starts_with("VI") || prefix.starts_with("VK")
+}
+
+fn sac_area(contact: &Contact) -> Option<String> {
+    let dxcc = json_string(contact_adif_value(contact, "DXCC"))?
+        .parse::<u16>()
+        .ok()?;
+    let country = match dxcc {
+        259 => "JW",
+        118 => "JX",
+        266 => "LA",
+        224 => "OH",
+        237 => "OX",
+        222 => "OY",
+        221 => "OZ",
+        284 => "SM",
+        242 => "TF",
+        _ => return None,
+    };
+    let area = contact_prefix(contact)
+        .and_then(|prefix| prefix.chars().find(|character| character.is_ascii_digit()))
+        .unwrap_or('0');
+    Some(format!("{country}{area}"))
 }
 
 fn contact_in_category_band(
@@ -780,6 +969,7 @@ pub struct IncrementalScoreTracker {
 struct IncrementalLogState {
     module: Arc<ContestScoringModule>,
     totals: ScoreTotals,
+    raw_multiplier_count: i64,
     direct_bonus_points: i64,
     dupe_counts: HashMap<String, usize>,
     dupe_owners: HashMap<String, i64>,
@@ -922,6 +1112,7 @@ impl IncrementalLogState {
         Self {
             module,
             totals: ScoreTotals::default(),
+            raw_multiplier_count: 0,
             direct_bonus_points: 0,
             dupe_counts: HashMap::new(),
             dupe_owners: HashMap::new(),
@@ -935,6 +1126,7 @@ impl IncrementalLogState {
     fn reset(&mut self, module: Arc<ContestScoringModule>, contacts: &mut [Contact]) {
         self.module = module;
         self.totals = ScoreTotals::default();
+        self.raw_multiplier_count = 0;
         self.direct_bonus_points = 0;
         self.dupe_counts.clear();
         self.dupe_owners.clear();
@@ -971,7 +1163,7 @@ impl IncrementalLogState {
 
         let (points, mults, bonus) = self.score_non_dupe_contact(contact, contact_id);
         self.totals.qso_points += points;
-        self.totals.multipliers += mults;
+        self.raw_multiplier_count += mults;
         self.direct_bonus_points += bonus;
         if points > 0 {
             for key in self.module.qso_count_bonus_keys_for(contact) {
@@ -992,7 +1184,7 @@ impl IncrementalLogState {
     ) {
         self.totals.qso_count = self.totals.qso_count.saturating_sub(1);
         self.totals.qso_points -= scored_i64(deleted_contact, "pts");
-        self.totals.multipliers -= scored_i64(deleted_contact, "mult");
+        self.raw_multiplier_count -= scored_i64(deleted_contact, "mult");
         self.direct_bonus_points -= scored_i64(deleted_contact, "bonus");
         if !is_dupe_contact(deleted_contact) && scored_i64(deleted_contact, "pts") > 0 {
             for key in self.module.qso_count_bonus_keys_for(deleted_contact) {
@@ -1060,7 +1252,7 @@ impl IncrementalLogState {
 
             self.multiplier_owners.insert(multiplier_key, contact_id);
             increment_contact_score_field(&mut contacts[index], "mult", 1);
-            self.totals.multipliers += 1;
+            self.raw_multiplier_count += 1;
             changed_contact_ids.insert(contact_id);
         }
 
@@ -1102,7 +1294,7 @@ impl IncrementalLogState {
         let contact_id = contact_id_for(contact);
         let (points, mults, bonus) = self.score_non_dupe_contact(contact, contact_id);
         self.totals.qso_points += points;
-        self.totals.multipliers += mults;
+        self.raw_multiplier_count += mults;
         self.direct_bonus_points += bonus;
         if points > 0 {
             for key in self.module.qso_count_bonus_keys_for(contact) {
@@ -1226,9 +1418,15 @@ impl IncrementalLogState {
 
     fn recalculate_score(&mut self) {
         let multiplier_factor = if self.module.has_multipliers() {
-            self.totals.multipliers
+            self.raw_multiplier_count
+                .max(self.module.minimum_multiplier_count())
         } else {
             1
+        };
+        self.totals.multipliers = if self.module.has_multipliers() {
+            multiplier_factor
+        } else {
+            0
         };
         self.totals.bonus_points = self.direct_bonus_points
             + self
@@ -1306,7 +1504,8 @@ mod tests {
     use crate::contest_rules::{
         BonusPointRule, ContestRules, ContestRulesStore, GeographyQsoPoints, GridDistanceQsoPoints,
         MultiplierCountBonusRule, ParamMultiplierRule, QsoCountBonusRule, QsoPointRule, QsoPoints,
-        ScoringRules, test_multiplier_rule, test_scoring_condition, test_setup_field,
+        ScoringRules, TimeBonusPointRule, test_multiplier_rule, test_scoring_condition,
+        test_setup_field,
     };
     use serde_json::json;
     use std::{collections::BTreeMap, path::PathBuf};
@@ -1343,6 +1542,7 @@ mod tests {
                 .collect(),
             scoring: ScoringRules {
                 qso_points: Some(qso_points),
+                minimum_multiplier_count: 0,
                 dupe_key: dupe_key.into_iter().map(str::to_string).collect(),
                 multipliers,
                 bonus_points,
@@ -1365,6 +1565,7 @@ mod tests {
         QsoPoints {
             points: Some(points),
             rules: Vec::new(),
+            time_bonus_points: Vec::new(),
             geography: None,
             grid_distance: None,
             category_band_param: None,
@@ -1388,6 +1589,7 @@ mod tests {
                     points: 2,
                 },
             ],
+            time_bonus_points: Vec::new(),
             geography: None,
             grid_distance: None,
             category_band_param: None,
@@ -1404,6 +1606,7 @@ mod tests {
         QsoPoints {
             points: None,
             rules: Vec::new(),
+            time_bonus_points: Vec::new(),
             geography: Some(GeographyQsoPoints {
                 country_field: "APP_LOG73_DXCC_PFX".to_string(),
                 station_country_field: "APP_LOG73_MY_DXCC_PFX".to_string(),
@@ -1445,6 +1648,353 @@ mod tests {
             }
         }
         crate::db::build_contact(meta, adif)
+    }
+
+    #[test]
+    fn derived_contest_fields_normalize_grid_dok_and_sac_area_values() {
+        let rules = test_rules(
+            fixed_points(1),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let contact = contact(vec![
+            ("GRIDSQUARE", json!("fn31")),
+            ("SRX_STRING", json!("C25")),
+            ("DXCC", json!(284)),
+            ("PFX", json!("SI3")),
+        ]);
+
+        assert_eq!(
+            field_value(&contact, &rules, "GRID_FIELD").as_deref(),
+            Some("FN")
+        );
+        assert_eq!(
+            field_value(&contact, &rules, "DOK_AREA").as_deref(),
+            Some("C")
+        );
+        assert_eq!(
+            field_value(&contact, &rules, "SAC_AREA").as_deref(),
+            Some("SM3")
+        );
+    }
+
+    #[test]
+    fn derived_jarl_fields_separate_mainland_call_areas_and_entities() {
+        let rules = test_rules(
+            fixed_points(1),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let ja = contact(vec![("CALL", json!("JA1ABC")), ("DXCC", json!(339))]);
+        let jd1 = contact(vec![("CALL", json!("JD1ABC")), ("DXCC", json!(339))]);
+        let us = contact(vec![("CALL", json!("W7ABC")), ("DXCC", json!(291))]);
+
+        assert_eq!(
+            field_value(&ja, &rules, "JARL_CALL_AREA").as_deref(),
+            Some("JA1")
+        );
+        assert_eq!(field_value(&ja, &rules, "JARL_ENTITY"), None);
+        assert_eq!(field_value(&jd1, &rules, "JARL_CALL_AREA"), None);
+        assert_eq!(
+            field_value(&jd1, &rules, "JARL_ENTITY").as_deref(),
+            Some("339")
+        );
+        assert_eq!(
+            field_value(&us, &rules, "JARL_CALL_AREA").as_deref(),
+            Some("W7")
+        );
+        assert_eq!(field_value(&us, &rules, "JARL_ENTITY"), None);
+    }
+
+    #[test]
+    fn qso_time_bonuses_handle_overnight_utc_windows() {
+        let mut points = fixed_points(1);
+        points.time_bonus_points = vec![TimeBonusPointRule {
+            id: "overnight".to_string(),
+            start_utc: "23:00".to_string(),
+            end_utc: "05:00".to_string(),
+            points: 2,
+        }];
+        let rules = test_rules(
+            points,
+            vec!["CALL"],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = [
+            ("W1AAA", 22 * 60 * 60 + 59 * 60),
+            ("W1BBB", 23 * 60 * 60),
+            ("W1CCC", 4 * 60 * 60 + 59 * 60),
+            ("W1DDD", 5 * 60 * 60),
+        ]
+        .into_iter()
+        .map(|(call, timestamp)| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("QSO_DATE_TIME_ON", json!(timestamp)),
+            ])
+        })
+        .collect::<Vec<_>>();
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_points, 8);
+        assert_eq!(contact_meta_value(&contacts[0], "pts"), Some(&json!(1)));
+        assert_eq!(contact_meta_value(&contacts[1], "pts"), Some(&json!(3)));
+        assert_eq!(contact_meta_value(&contacts[2], "pts"), Some(&json!(3)));
+        assert_eq!(contact_meta_value(&contacts[3], "pts"), Some(&json!(1)));
+    }
+
+    #[test]
+    fn bundled_new_contests_score_their_special_multiplier_rules() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+
+        let mut nine_a = vec![contact(vec![
+            ("CALL", json!("9A1AAA")),
+            ("BAND", json!("160M")),
+            ("MODE", json!("CW")),
+            ("DXCC", json!(497)),
+            ("CONT", json!("EU")),
+            ("SRX_STRING", json!("15")),
+            ("QSO_DATE_TIME_ON", json!(23 * 60 * 60)),
+        ])];
+        let nine_a_totals = score_contacts(
+            store.get("9A-DX").expect("9A rules should load"),
+            Value::Null,
+            &mut nine_a,
+        );
+        assert_eq!(nine_a_totals.qso_points, 3);
+        assert_eq!(nine_a_totals.multipliers, 2);
+        assert_eq!(nine_a_totals.score, 6);
+
+        let mut ukraine = vec![contact(vec![
+            ("CALL", json!("UT1AAA")),
+            ("BAND", json!("20M")),
+            ("MODE", json!("SSB")),
+            ("DXCC", json!(288)),
+            ("SRX_STRING", json!("CH")),
+        ])];
+        let ukraine_totals = score_contacts(
+            store
+                .get("UKRAINDX (DX)")
+                .expect("Ukrainian DX rules should load"),
+            Value::Null,
+            &mut ukraine,
+        );
+        assert_eq!(ukraine_totals.qso_points, 10);
+        assert_eq!(ukraine_totals.multipliers, 3);
+        assert_eq!(ukraine_totals.score, 30);
+
+        let mut wag = vec![
+            contact(vec![
+                ("CALL", json!("DL1AAA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(230)),
+                ("SRX_STRING", json!("C25")),
+            ]),
+            contact(vec![
+                ("CALL", json!("DL2BBB")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("SSB")),
+                ("DXCC", json!(230)),
+                ("SRX_STRING", json!("C29")),
+            ]),
+        ];
+        let wag_totals = score_contacts(
+            store.get("WAG (DX)").expect("WAG rules should load"),
+            Value::Null,
+            &mut wag,
+        );
+        assert_eq!(wag_totals.qso_points, 6);
+        assert_eq!(wag_totals.multipliers, 2);
+        assert_eq!(wag_totals.score, 12);
+
+        let mut sac = vec![
+            contact(vec![
+                ("CALL", json!("SM3AAA")),
+                ("PFX", json!("SI3")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(284)),
+            ]),
+            contact(vec![
+                ("CALL", json!("SK3BBB")),
+                ("PFX", json!("SK3")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(284)),
+            ]),
+            contact(vec![
+                ("CALL", json!("OH1CCC")),
+                ("PFX", json!("OH1")),
+                ("BAND", json!("40M")),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(224)),
+            ]),
+        ];
+        let sac_totals = score_contacts(
+            store.get("SAC-CW (DX)").expect("SAC rules should load"),
+            Value::Null,
+            &mut sac,
+        );
+        assert_eq!(sac_totals.qso_points, 5);
+        assert_eq!(sac_totals.multipliers, 2);
+        assert_eq!(sac_totals.score, 10);
+
+        let mut digi = vec![
+            contact(vec![
+                ("CALL", json!("W1AAA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("FT4")),
+                ("MY_GRIDSQUARE", json!("FN31")),
+                ("GRIDSQUARE", json!("FN31")),
+            ]),
+            contact(vec![
+                ("CALL", json!("W1AAA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("FT8")),
+                ("MY_GRIDSQUARE", json!("FN31")),
+                ("GRIDSQUARE", json!("FN31")),
+            ]),
+        ];
+        let digi_totals = score_contacts(
+            store.get("WW-DIGI").expect("WW Digi rules should load"),
+            Value::Null,
+            &mut digi,
+        );
+        assert_eq!(digi_totals.qso_points, 1);
+        assert_eq!(digi_totals.multipliers, 1);
+        assert_eq!(digi_totals.score, 1);
+        assert_eq!(contact_meta_value(&digi[1], "dupe"), Some(&json!(true)));
+
+        let mut iota_world = vec![
+            contact(vec![
+                ("CALL", json!("W1IOTA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("CW")),
+                ("SRX_STRING", json!("0")),
+            ]),
+            contact(vec![
+                ("CALL", json!("EA5IOTA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("CW")),
+                ("SRX_STRING", json!("EU-005")),
+            ]),
+        ];
+        let iota_world_totals = score_contacts(
+            store
+                .get("RSGB-IOTA (World)")
+                .expect("IOTA World rules should load"),
+            Value::Null,
+            &mut iota_world,
+        );
+        assert_eq!(iota_world_totals.qso_points, 17);
+        assert_eq!(iota_world_totals.multipliers, 1);
+        assert_eq!(iota_world_totals.score, 17);
+
+        let mut iota_island = vec![
+            contact(vec![
+                ("CALL", json!("W1IOTA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("SSB")),
+                ("MY_IOTA_REF", json!("EU-005")),
+                ("SRX_STRING", json!("0")),
+            ]),
+            contact(vec![
+                ("CALL", json!("M6IOTA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("SSB")),
+                ("MY_IOTA_REF", json!("EU-005")),
+                ("SRX_STRING", json!("EU-005")),
+            ]),
+            contact(vec![
+                ("CALL", json!("EA5IOTA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("SSB")),
+                ("MY_IOTA_REF", json!("EU-005")),
+                ("SRX_STRING", json!("EU-123")),
+            ]),
+        ];
+        let iota_island_totals = score_contacts(
+            store
+                .get("RSGB-IOTA (Island)")
+                .expect("IOTA Island rules should load"),
+            Value::Null,
+            &mut iota_island,
+        );
+        assert_eq!(iota_island_totals.qso_points, 25);
+        assert_eq!(iota_island_totals.multipliers, 2);
+        assert_eq!(iota_island_totals.score, 50);
+
+        let mut jarl = vec![
+            contact(vec![
+                ("CALL", json!("JA1AAA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("RTTY")),
+                ("DXCC", json!(339)),
+                ("CONT", json!("AS")),
+                ("MY_CONT", json!("EU")),
+            ]),
+            contact(vec![
+                ("CALL", json!("JD1AAA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("RTTY")),
+                ("DXCC", json!(339)),
+                ("CONT", json!("AS")),
+                ("MY_CONT", json!("EU")),
+            ]),
+            contact(vec![
+                ("CALL", json!("W1AAA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("RTTY")),
+                ("DXCC", json!(291)),
+                ("CONT", json!("NA")),
+                ("MY_CONT", json!("EU")),
+            ]),
+            contact(vec![
+                ("CALL", json!("DL1AAA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("RTTY")),
+                ("DXCC", json!(230)),
+                ("CONT", json!("EU")),
+                ("MY_CONT", json!("EU")),
+            ]),
+            contact(vec![
+                ("CALL", json!("W2AAA")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("RTTY")),
+                ("DXCC", json!(291)),
+                ("CONT", json!("NA")),
+                ("MY_CONT", json!("EU")),
+            ]),
+            contact(vec![
+                ("CALL", json!("W3AAA/MM")),
+                ("BAND", json!("20M")),
+                ("MODE", json!("RTTY")),
+                ("DXCC", json!(291)),
+                ("CONT", json!("NA")),
+                ("MY_CONT", json!("EU")),
+            ]),
+        ];
+        let jarl_totals = score_contacts(
+            store.get("JARL-RTTY").expect("JARL rules should load"),
+            Value::Null,
+            &mut jarl,
+        );
+        assert_eq!(jarl_totals.qso_points, 16);
+        assert_eq!(jarl_totals.multipliers, 5);
+        assert_eq!(jarl_totals.score, 80);
     }
 
     fn seed_scoring_field(contact: &mut Contact, field: &str, value: &str) {
@@ -1490,6 +2040,7 @@ mod tests {
             ),
             ("MODE", json!(representative_mode(rules))),
             ("DXCC", json!(230)),
+            ("MY_DXCC", json!(291)),
             ("CONT", json!("EU")),
             ("MY_CONT", json!("NA")),
             ("APP_LOG73_DXCC_PFX", json!("DL")),
@@ -1500,6 +2051,33 @@ mod tests {
             ("STX", json!("1")),
             ("SRX", json!("1")),
         ]);
+
+        if rules.id.starts_with("AADX-") {
+            crate::db::set_contact_adif(&mut result, "DXCC", json!(339));
+            crate::db::set_contact_adif(&mut result, "CONT", json!("AS"));
+            crate::db::set_contact_adif(&mut result, "APP_LOG73_DXCC_PFX", json!("JA"));
+            crate::db::set_contact_adif(&mut result, "PFX", json!("JA1"));
+        }
+        if rules.id == "PACC (DX)" {
+            crate::db::set_contact_adif(&mut result, "DXCC", json!(263));
+            crate::db::set_contact_adif(&mut result, "APP_LOG73_DXCC_PFX", json!("PA"));
+            crate::db::set_contact_adif(&mut result, "CONT", json!("EU"));
+        }
+        if rules.id == "UKRAINDX (DX)" {
+            crate::db::set_contact_adif(&mut result, "DXCC", json!(288));
+            crate::db::set_contact_adif(&mut result, "CONT", json!("EU"));
+            crate::db::set_contact_adif(&mut result, "SRX_STRING", json!("CH"));
+        }
+        if rules.id == "WAG (DX)" {
+            crate::db::set_contact_adif(&mut result, "DXCC", json!(230));
+            crate::db::set_contact_adif(&mut result, "CONT", json!("EU"));
+            crate::db::set_contact_adif(&mut result, "SRX_STRING", json!("C25"));
+        }
+        if rules.id.ends_with("SAC-CW (DX)") || rules.id.ends_with("SAC-SSB (DX)") {
+            crate::db::set_contact_adif(&mut result, "DXCC", json!(284));
+            crate::db::set_contact_adif(&mut result, "CONT", json!("EU"));
+            crate::db::set_contact_adif(&mut result, "PFX", json!("SM3"));
+        }
 
         for field in &rules.exchange {
             let value = field
@@ -1545,6 +2123,21 @@ mod tests {
             if let Some(value) = condition.values.first() {
                 seed_scoring_field(&mut result, &condition.field, value);
             }
+        }
+        if rules.id == "UKRAINDX (DX)" {
+            crate::db::set_contact_adif(&mut result, "DXCC", json!(288));
+            crate::db::set_contact_adif(&mut result, "CONT", json!("EU"));
+            crate::db::set_contact_adif(&mut result, "SRX_STRING", json!("CH"));
+        }
+        if rules.id == "WAG (DX)" {
+            crate::db::set_contact_adif(&mut result, "DXCC", json!(230));
+            crate::db::set_contact_adif(&mut result, "CONT", json!("EU"));
+            crate::db::set_contact_adif(&mut result, "SRX_STRING", json!("C25"));
+        }
+        if rules.id.ends_with("SAC-CW (DX)") || rules.id.ends_with("SAC-SSB (DX)") {
+            crate::db::set_contact_adif(&mut result, "DXCC", json!(284));
+            crate::db::set_contact_adif(&mut result, "CONT", json!("EU"));
+            crate::db::set_contact_adif(&mut result, "PFX", json!("SM3"));
         }
         result
     }
@@ -1662,6 +2255,7 @@ mod tests {
         let points = QsoPoints {
             points: None,
             rules: Vec::new(),
+            time_bonus_points: Vec::new(),
             geography: None,
             grid_distance: Some(GridDistanceQsoPoints {
                 station_grid_field: "MY_GRIDSQUARE".to_string(),
@@ -1734,6 +2328,7 @@ mod tests {
                     points: 0,
                 },
             ],
+            time_bonus_points: Vec::new(),
             geography: None,
             grid_distance: None,
             category_band_param: None,
@@ -2685,6 +3280,366 @@ mod tests {
         }
 
         assert_eq!(scored_contests, store.summaries().len());
+    }
+
+    #[test]
+    fn eu_dx_rules_score_eu_and_dx_point_tables() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+
+        let contact = |my_continent: &str,
+                       my_prefix: &str,
+                       call: &str,
+                       dxcc: i64,
+                       prefix: &str,
+                       continent: &str,
+                       received: &str| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!("20M")),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(dxcc)),
+                ("CONT", json!(continent)),
+                ("MY_CONT", json!(my_continent)),
+                ("APP_LOG73_DXCC_PFX", json!(prefix)),
+                ("APP_LOG73_MY_DXCC_PFX", json!(my_prefix)),
+                ("SRX_STRING", json!(received)),
+            ])
+        };
+
+        let eu_rules = store.get("EUDX").expect("EU station rules should load");
+        let mut eu_contacts = vec![
+            contact("EU", "HA", "HA1ABC", 239, "HA", "EU", "HU01"),
+            contact("EU", "HA", "DL1ABC", 230, "DL", "EU", "DE01"),
+            contact("EU", "HA", "G1ABC", 223, "G", "EU", "27"),
+            contact("EU", "HA", "K1ABC", 291, "K", "NA", "8"),
+        ];
+        let eu_totals = score_contacts(eu_rules, Value::Null, &mut eu_contacts);
+        assert_eq!(eu_totals.qso_points, 20);
+        assert_eq!(eu_totals.multipliers, 6);
+        assert_eq!(eu_totals.score, 120);
+
+        let dx_rules = store
+            .get("EUDX (DX)")
+            .expect("DX station rules should load");
+        let mut dx_contacts = vec![
+            contact("NA", "K", "DL1ABC", 230, "DL", "EU", "DE01"),
+            contact("NA", "K", "K1ABC", 291, "K", "NA", "DE01"),
+            contact("NA", "K", "VE3ABC", 1, "VE", "NA", "DE01"),
+            contact("NA", "K", "JA1ABC", 339, "JA", "AS", "DE01"),
+        ];
+        let dx_totals = score_contacts(dx_rules, Value::Null, &mut dx_contacts);
+        assert_eq!(dx_totals.qso_points, 20);
+        assert_eq!(dx_totals.multipliers, 5);
+        assert_eq!(dx_totals.score, 100);
+
+        let mut mode_contacts = vec![
+            contact("EU", "HA", "HA1ABC", 239, "HA", "EU", "HU01"),
+            contact("EU", "HA", "HA1ABC", 239, "HA", "EU", "HU01"),
+        ];
+        crate::db::set_contact_adif(&mut mode_contacts[1], "MODE", json!("SSB"));
+        let mode_totals = score_contacts(eu_rules, Value::Null, &mut mode_contacts);
+        assert_eq!(mode_totals.qso_points, 4);
+        assert_eq!(mode_totals.multipliers, 2);
+        assert_eq!(mode_totals.score, 8);
+        assert_eq!(
+            contact_meta_value(&mode_contacts[0], "dupe"),
+            Some(&json!(false))
+        );
+        assert_eq!(
+            contact_meta_value(&mode_contacts[1], "dupe"),
+            Some(&json!(false))
+        );
+    }
+
+    #[test]
+    fn pacc_and_all_asian_rules_score_their_exchange_and_multiplier_tables() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+
+        let pacc_contact = |call: &str, mode: &str, dxcc: i64, prefix: &str, pfx: &str| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!("20M")),
+                ("MODE", json!(mode)),
+                ("DXCC", json!(dxcc)),
+                ("APP_LOG73_DXCC_PFX", json!(prefix)),
+                ("PFX", json!(pfx)),
+                ("SRX_STRING", json!("NH")),
+            ])
+        };
+        let pacc = store.get("PACC").expect("PACC rules should load");
+        let mut pacc_contacts = vec![
+            pacc_contact("DL1ABC", "CW", 230, "DL", "DL1"),
+            pacc_contact("DL1ABC", "SSB", 230, "DL", "DL1"),
+            pacc_contact("K1ABC", "CW", 291, "K", "K1"),
+        ];
+        let pacc_totals = score_contacts(pacc, Value::Null, &mut pacc_contacts);
+        assert_eq!(pacc_totals.qso_points, 3);
+        assert_eq!(pacc_totals.multipliers, 3);
+        assert_eq!(pacc_totals.score, 9);
+
+        let pacc_dx = store.get("PACC (DX)").expect("PACC DX rules should load");
+        let mut pacc_dx_contacts = vec![
+            pacc_contact("PA1ABC", "CW", 263, "PA", "PA1"),
+            pacc_contact("DL1ABC", "CW", 230, "DL", "DL1"),
+        ];
+        let pacc_dx_totals = score_contacts(pacc_dx, Value::Null, &mut pacc_dx_contacts);
+        assert_eq!(pacc_dx_totals.qso_points, 1);
+        assert_eq!(pacc_dx_totals.multipliers, 1);
+        assert_eq!(pacc_dx_totals.score, 1);
+
+        let aadx = store
+            .get("AADX-CW")
+            .expect("All Asian CW rules should load");
+        let aadx_contact =
+            |call: &str, band: &str, dxcc: i64, continent: &str, prefix: &str, pfx: &str| {
+                contact(vec![
+                    ("CALL", json!(call)),
+                    ("BAND", json!(band)),
+                    ("MODE", json!("CW")),
+                    ("DXCC", json!(dxcc)),
+                    ("MY_DXCC", json!(339)),
+                    ("CONT", json!(continent)),
+                    ("MY_CONT", json!("AS")),
+                    ("APP_LOG73_DXCC_PFX", json!(prefix)),
+                    ("PFX", json!(pfx)),
+                ])
+            };
+        let mut asian_contacts = vec![
+            aadx_contact("JA1SAME", "20M", 339, "JA", "JA1", "JA1"),
+            aadx_contact("HL1ABC", "160M", 137, "AS", "HL", "HL1"),
+            aadx_contact("K1ABC", "80M", 291, "NA", "K", "K1"),
+        ];
+        let asian_totals = score_contacts(aadx, Value::Null, &mut asian_contacts);
+        assert_eq!(asian_totals.qso_points, 9);
+        assert_eq!(asian_totals.multipliers, 1);
+        assert_eq!(asian_totals.score, 9);
+
+        let mut non_asian_contacts = vec![
+            contact(vec![
+                ("CALL", json!("JA1ABC")),
+                ("BAND", json!("160M")),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(339)),
+                ("MY_DXCC", json!(291)),
+                ("CONT", json!("AS")),
+                ("MY_CONT", json!("NA")),
+                ("PFX", json!("JA1")),
+            ]),
+            contact(vec![
+                ("CALL", json!("HL1ABC")),
+                ("BAND", json!("80M")),
+                ("MODE", json!("CW")),
+                ("DXCC", json!(137)),
+                ("MY_DXCC", json!(291)),
+                ("CONT", json!("AS")),
+                ("MY_CONT", json!("NA")),
+                ("PFX", json!("HL1")),
+            ]),
+        ];
+        let non_asian_totals = score_contacts(aadx, Value::Null, &mut non_asian_contacts);
+        assert_eq!(non_asian_totals.qso_points, 5);
+        assert_eq!(non_asian_totals.multipliers, 2);
+        assert_eq!(non_asian_totals.score, 10);
+    }
+
+    #[test]
+    fn new_dx_rules_score_home_and_foreign_variants() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+
+        let dx_contact = |call: &str,
+                          band: &str,
+                          mode: &str,
+                          dxcc: i64,
+                          my_dxcc: i64,
+                          continent: &str,
+                          my_continent: &str,
+                          received: &str| {
+            contact(vec![
+                ("CALL", json!(call)),
+                ("BAND", json!(band)),
+                ("MODE", json!(mode)),
+                ("DXCC", json!(dxcc)),
+                ("MY_DXCC", json!(my_dxcc)),
+                ("CONT", json!(continent)),
+                ("MY_CONT", json!(my_continent)),
+                ("SRX_STRING", json!(received)),
+            ])
+        };
+
+        let ref_rules = store.get("REF-CW").expect("REF rules should load");
+        let mut ref_contacts = vec![
+            dx_contact("F1REF", "20M", "CW", 227, 227, "EU", "EU", "01"),
+            dx_contact("DL1REF", "20M", "CW", 230, 227, "EU", "EU", "14"),
+            dx_contact("K1REF", "20M", "CW", 291, 227, "NA", "EU", "8"),
+            dx_contact("MM1REF/MM", "20M", "CW", 291, 227, "NA", "EU", "9"),
+        ];
+        let ref_totals = score_contacts(ref_rules, Value::Null, &mut ref_contacts);
+        assert_eq!(ref_totals.qso_points, 12);
+        assert_eq!(ref_totals.multipliers, 3);
+        assert_eq!(ref_totals.score, 36);
+
+        let ref_dx_rules = store.get("REF-CW (DX)").expect("REF DX rules should load");
+        let mut ref_dx_contacts = vec![
+            dx_contact("F1DX", "20M", "CW", 227, 291, "EU", "EU", "01"),
+            dx_contact("TK1DX", "20M", "CW", 214, 291, "EU", "EU", "2A"),
+            dx_contact("F2DX", "20M", "CW", 227, 291, "NA", "EU", "00"),
+            dx_contact("K1DX", "20M", "CW", 291, 291, "NA", "EU", "8"),
+        ];
+        let ref_dx_totals = score_contacts(ref_dx_rules, Value::Null, &mut ref_dx_contacts);
+        assert_eq!(ref_dx_totals.qso_points, 5);
+        assert_eq!(ref_dx_totals.multipliers, 3);
+        assert_eq!(ref_dx_totals.score, 15);
+
+        let rdxc_rules = store.get("RDXC").expect("RDXC rules should load");
+        let mut rdxc_contacts = vec![
+            dx_contact("RA1RDX", "20M", "CW", 54, 54, "EU", "EU", "SP"),
+            dx_contact("R9RDX", "20M", "CW", 15, 54, "AS", "EU", "AL"),
+            dx_contact("DL1RDX", "20M", "CW", 230, 54, "EU", "EU", "001"),
+            dx_contact("K1RDX", "20M", "CW", 291, 54, "NA", "EU", "002"),
+            dx_contact("MM1RDX/MM", "20M", "CW", 291, 54, "NA", "EU", "003"),
+        ];
+        let rdxc_totals = score_contacts(rdxc_rules, Value::Null, &mut rdxc_contacts);
+        assert_eq!(rdxc_totals.qso_points, 20);
+        assert_eq!(rdxc_totals.multipliers, 6);
+        assert_eq!(rdxc_totals.score, 120);
+
+        let rdxc_dx_rules = store.get("RDXC (DX)").expect("RDXC DX rules should load");
+        let mut rdxc_dx_contacts = vec![
+            dx_contact("RA1DX", "20M", "CW", 54, 291, "EU", "NA", "SP"),
+            dx_contact("R9DX", "20M", "CW", 15, 291, "AS", "NA", "AL"),
+            dx_contact("K1DX", "20M", "CW", 291, 291, "NA", "NA", "001"),
+            dx_contact("VE1DX", "20M", "CW", 1, 291, "NA", "NA", "002"),
+            dx_contact("DL1DX", "20M", "CW", 230, 291, "EU", "NA", "003"),
+        ];
+        let rdxc_dx_totals = score_contacts(rdxc_dx_rules, Value::Null, &mut rdxc_dx_contacts);
+        assert_eq!(rdxc_dx_totals.qso_points, 30);
+        assert_eq!(rdxc_dx_totals.multipliers, 7);
+        assert_eq!(rdxc_dx_totals.score, 210);
+
+        let ari_rules = store.get("ARI-DX").expect("ARI rules should load");
+        let mut ari_contacts = vec![
+            dx_contact("I1ARI", "20M", "CW", 248, 248, "EU", "EU", "AL"),
+            dx_contact("IS0ARI", "20M", "CW", 225, 248, "EU", "EU", "CA"),
+            dx_contact("DL1ARI", "20M", "CW", 230, 248, "EU", "EU", "001"),
+            dx_contact("K1ARI", "20M", "CW", 291, 248, "NA", "EU", "002"),
+        ];
+        let ari_totals = score_contacts(ari_rules, Value::Null, &mut ari_contacts);
+        assert_eq!(ari_totals.qso_points, 24);
+        assert_eq!(ari_totals.multipliers, 4);
+        assert_eq!(ari_totals.score, 96);
+
+        let ari_dx_rules = store.get("ARI-DX (DX)").expect("ARI DX rules should load");
+        let mut ari_dx_contacts = vec![
+            dx_contact("I1DX", "20M", "CW", 248, 291, "EU", "NA", "AL"),
+            dx_contact("K1DX", "20M", "CW", 291, 291, "NA", "NA", "001"),
+            dx_contact("VE1DX", "20M", "CW", 1, 291, "NA", "NA", "002"),
+            dx_contact("DL1DX", "20M", "CW", 230, 291, "EU", "NA", "003"),
+        ];
+        let ari_dx_totals = score_contacts(ari_dx_rules, Value::Null, &mut ari_dx_contacts);
+        assert_eq!(ari_dx_totals.qso_points, 14);
+        assert_eq!(ari_dx_totals.multipliers, 1);
+        assert_eq!(ari_dx_totals.score, 14);
+
+        let euhfc_rules = store.get("EUHFC").expect("EUHFC rules should load");
+        let mut euhfc_contacts = vec![
+            dx_contact("DL1EU", "20M", "CW", 230, 227, "EU", "EU", "82"),
+            dx_contact("F1EU", "20M", "SSB", 227, 227, "EU", "EU", "82"),
+            dx_contact("G1EU", "20M", "CW", 223, 227, "EU", "EU", "17"),
+            dx_contact("K1EU", "20M", "CW", 291, 227, "NA", "EU", "99"),
+        ];
+        let euhfc_totals = score_contacts(euhfc_rules, Value::Null, &mut euhfc_contacts);
+        assert_eq!(euhfc_totals.qso_points, 3);
+        assert_eq!(euhfc_totals.multipliers, 2);
+        assert_eq!(euhfc_totals.score, 6);
+
+        let lz_rules = store.get("LZDX").expect("LZDX rules should load");
+        let mut lz_contacts = vec![
+            dx_contact("LZ1LZ", "20M", "CW", 212, 212, "EU", "EU", "BU"),
+            dx_contact("DL1LZ", "20M", "CW", 230, 212, "EU", "EU", "14"),
+            dx_contact("K1LZ", "20M", "CW", 291, 212, "NA", "EU", "8"),
+        ];
+        let lz_totals = score_contacts(lz_rules, Value::Null, &mut lz_contacts);
+        assert_eq!(lz_totals.qso_points, 14);
+        assert_eq!(lz_totals.multipliers, 5);
+        assert_eq!(lz_totals.score, 70);
+
+        let lz_dx_rules = store.get("LZDX (DX)").expect("LZDX DX rules should load");
+        let mut lz_dx_contacts = vec![
+            dx_contact("LZ1DX", "20M", "CW", 212, 291, "EU", "NA", "BU"),
+            dx_contact("K1DX", "20M", "CW", 291, 291, "NA", "NA", "8"),
+            dx_contact("DL1DX", "20M", "CW", 230, 291, "EU", "NA", "14"),
+        ];
+        let lz_dx_totals = score_contacts(lz_dx_rules, Value::Null, &mut lz_dx_contacts);
+        assert_eq!(lz_dx_totals.qso_points, 14);
+        assert_eq!(lz_dx_totals.multipliers, 3);
+        assert_eq!(lz_dx_totals.score, 42);
+    }
+
+    #[test]
+    fn rac_rules_score_official_stations_and_canadian_multipliers() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+
+        let rac_contact =
+            |id: i64, call: &str, band: &str, mode: &str, dxcc: i64, received: &str| {
+                contact(vec![
+                    ("id", json!(id)),
+                    ("CALL", json!(call)),
+                    ("BAND", json!(band)),
+                    ("MODE", json!(mode)),
+                    ("DXCC", json!(dxcc)),
+                    ("MY_DXCC", json!(1)),
+                    ("RAC_SECT", json!(received)),
+                ])
+            };
+
+        let canada_day = store
+            .get("CANADA-DAY")
+            .expect("Canada Day rules should load");
+        let mut canada_day_contacts = vec![
+            rac_contact(1, "VA3RAC", "20M", "CW", 1, "ON"),
+            rac_contact(2, "VE1ABC", "20M", "CW", 1, "NS"),
+            rac_contact(3, "K1ABC", "20M", "CW", 291, "001"),
+            rac_contact(4, "VE1ABC", "20M", "SSB", 1, "NS"),
+        ];
+        let canada_day_totals = score_contacts(canada_day, Value::Null, &mut canada_day_contacts);
+        assert_eq!(canada_day_totals.qso_points, 42);
+        assert_eq!(canada_day_totals.multipliers, 3);
+        assert_eq!(canada_day_totals.score, 126);
+
+        let mut no_canadian_contacts = vec![rac_contact(5, "K1DX", "20M", "CW", 291, "001")];
+        let no_canadian_totals = score_contacts(canada_day, Value::Null, &mut no_canadian_contacts);
+        assert_eq!(no_canadian_totals.qso_points, 2);
+        assert_eq!(no_canadian_totals.multipliers, 1);
+        assert_eq!(no_canadian_totals.score, 2);
+
+        let canada_winter = store
+            .get("CANADA-WINTER")
+            .expect("Canada Winter rules should load");
+        let mut canada_winter_contacts = vec![
+            rac_contact(6, "VE3WIN", "2M", "CW", 1, "ON"),
+            rac_contact(7, "W1WIN", "2M", "CW", 291, "001"),
+        ];
+        let canada_winter_totals =
+            score_contacts(canada_winter, Value::Null, &mut canada_winter_contacts);
+        assert_eq!(canada_winter_totals.qso_points, 12);
+        assert_eq!(canada_winter_totals.multipliers, 1);
+        assert_eq!(canada_winter_totals.score, 12);
+
+        let module = Arc::new(ContestScoringModule::new(canada_day.clone(), Value::Null));
+        let tracker = IncrementalScoreTracker::new();
+        let mut incremental_contacts = vec![rac_contact(8, "K1INC", "20M", "CW", 291, "001")];
+        tracker.on_log_loaded(8, Arc::clone(&module), &mut incremental_contacts);
+        let incremental_totals = tracker.totals(8).expect("incremental totals should exist");
+        assert_eq!(incremental_totals.multipliers, 1);
+        assert_eq!(incremental_totals.score, 2);
     }
 
     #[test]

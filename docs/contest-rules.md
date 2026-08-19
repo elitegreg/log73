@@ -84,13 +84,17 @@ Supported authored field types are `String`, `RST`, `Numeric`, and `Serial`, opt
 
 ## Scoring and Cabrillo
 
-Scoring settings live under `scoring`: `qso_points`, `dupe_key`, `multipliers`, `bonus_points`, `param_multipliers`, `multiplier_count_bonus_points`, and `qso_count_bonus_points`. Scoring rule lists use stable IDs. Conditions may use direct `values`, `in_set`/`in_sets`, `exclude_values`/`exclude_in_sets`, `matches_field` for a case-insensitive comparison to another QSO field, and callsign suffix filters. References to value sets are expanded before rules reach scoring or the API.
+Scoring settings live under `scoring`: `qso_points`, `minimum_multiplier_count`, `dupe_key`, `multipliers`, `bonus_points`, `param_multipliers`, `multiplier_count_bonus_points`, and `qso_count_bonus_points`. Scoring rule lists use stable IDs. Conditions may use direct `values`, `in_set`/`in_sets`, `exclude_values`/`exclude_in_sets`, `matches_field` or `not_matches_field` for case-insensitive comparisons to another QSO field, and callsign suffix filters. `minimum_multiplier_count` applies a floor to the multiplier factor while preserving the actual worked multiplier set. References to value sets are expanded before rules reach scoring or the API.
+
+`qso_points.time_bonus_points` adds a fixed number of points when the QSO timestamp falls within a UTC time window. Windows may cross midnight; use `start_utc` and `end_utc` in `HH:MM` form. A window with equal endpoints covers the entire UTC day.
 
 Multipliers may set `max_count` to score only the first N distinct values. Rules sharing a `cap_group` share that limit. A `qso_count_bonus_points` rule awards its threshold value for every distinct value in `field` that reaches the threshold; it can be limited to selected log parameter values with `param` and `values`.
 
 `modes` accepts exact ADIF mode names as well as `PHONE` (SSB, FM, or AM) and `DIGITAL` (any non-CW, non-phone mode). `excluded_modes` uses the same matching rules and is applied after the allowed list. This supports contests that permit all digital modes except RTTY.
 
 `qso_points.grid_distance` scores a contact from two Maidenhead locators. It names the station and contacted grid fields and defines `base_points`, `kilometers_per_point`, and `minimum_distance_points`. The scorer uses the centers of the first four locator characters and great-circle distance, then awards `base_points + max(minimum_distance_points, ceil(distance / kilometers_per_point))`.
+
+The scorer also derives reusable fields for rule conditions and multipliers: `GRID_FIELD` is the normalized two-character Maidenhead field, `DOK_AREA` is the first alphabetic character of the received DOK, and `SAC_AREA` is the canonical Scandinavian area for SAC entities. `JARL_CALL_AREA` is the canonical JA/W/VE/VK mainland call area used by the JARL RTTY Contest, while `JARL_ENTITY` is blank for those mainland call areas and retains DXCC entities such as JD1 islands. `WPX_PREFIX` is the normalized contest prefix used by WPX scoring.
 
 Cabrillo configuration uses `fixed_headers` and `export_fields`. All fixed headers and export fields use stable IDs. The Cabrillo `CONTEST` header is the first whitespace-delimited word of the contest rule ID, so a rule such as `SC-QSO-PARTY (In State)` exports `SC-QSO-PARTY`. Category and other log-specific headers belong in `setup_fields` with `cabrillo_header`, so there is only one setup-field list.
 

@@ -1,0 +1,58 @@
+schema: 2
+contests:
+  NCCC-SPRINT:
+    name: NCCC Sprint
+    bands: [160M, 80M, 40M, 20M, 15M]
+    modes: [CW]
+    value_sets:
+      US Multipliers:
+        use: us-states
+      District of Columbia:
+        use: district-of-columbia
+      Canadian Multipliers:
+        use: canadian-provinces
+      North American Countries:
+        use: north-american-countries
+      NCCC Additional Countries:
+        values: [9Y, 9Z, P4, PJ0, PJ1, PJ2, PJ3, PJ4, PJ9]
+    setup_fields:
+      - id: param-name
+        key: NAME
+        label: Operator Name
+        type: String:20
+        required: true
+        regex: ^[A-Za-z]+$
+        preserve_case: true
+      - id: param-qth
+        key: QTH
+        label: State, Province, or Country
+        type: String:5
+        required: true
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, CHECKLOG]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [LOW]}
+    exchange:
+      - {id: serial-sent, label: Serial(s), type: Serial:4, adif: STX, direction: sent}
+      - {id: name-sent, label: Name(s), type: String:20, adif: MY_NAME, direction: sent, fixed: true, source: NAME, regex: '^[A-Za-z]+$'}
+      - {id: qth-sent, label: QTH(s), type: String:5, adif: STX_STRING, direction: sent, fixed: true, source: QTH}
+      - {id: serial-received, label: Serial, type: Serial:4, adif: SRX, direction: received}
+      - {id: name-received, label: Name, type: String:20, adif: NAME, direction: received, regex: '^[A-Za-z]+$'}
+      - {id: qth-received, label: QTH, type: String:5, adif: SRX_STRING, direction: received}
+    scoring:
+      qso_points: {points: 1}
+      dupe_key: [CALL, BAND]
+      multipliers:
+        - {id: mult-location, name: Location, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries, NCCC Additional Countries]}
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}
+        - {id: fixed-category-transmitter, name: CATEGORY-TRANSMITTER, value: ONE}
+        - {id: fixed-category-assisted, name: CATEGORY-ASSISTED, value: NON-ASSISTED}
+    metadata:
+      source: https://www.ncccsprint.com/rules.html
+      notes: >-
+        The NCCC Sprint runs for 30 minutes on Friday at 0230 UTC. It uses the NA Sprint
+        QSY procedure and NAQP multipliers, adds 160 meters and 9Y/9Z, P4, and PJ0-PJ4/PJ9,
+        limits power to 100 watts, and counts multipliers once per band. Weekly changes,
+        the 1 kHz QSY rule, no-skimmer/no-packet rule, and submission procedure remain
+        operator-enforced.

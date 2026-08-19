@@ -1,0 +1,97 @@
+schema: 2
+contests:
+  SAC-CW:
+    name: Scandinavian Activity Contest (CW)
+    bands: [80M, 40M, 20M, 15M, 10M]
+    modes: [CW]
+    value_sets:
+      SAC DXCC:
+        values: ['118', '221', '222', '224', '237', '242', '259', '266', '284']
+    setup_fields:
+      - id: param-serial
+        key: Serial
+        label: Starting Serial
+        type: Numeric:3
+        required: true
+        default: 1
+        regex: '^\d{1,3}$'
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]}
+      - {id: header-category-mode, preset: category-mode, default: CW, valid_values: [CW]}
+      - {id: header-category-band, preset: category-band, default: ALL, valid_values: [ALL, LOW-BAND, 80M, 40M, 20M, 15M, 10M]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-transmitter, preset: category-transmitter, default: ONE, valid_values: [ONE, TWO, UNLIMITED], multi_single_has_mult_transmitter: true}
+      - {id: header-category-overlay, preset: category-overlay, required: false, valid_values: [ROOKIE, CLASSIC, TB-WIRES, WIRE-ONLY]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: serial-sent, label: Serial(s), type: Serial:3, adif: STX, direction: sent, serial_scope: global}
+      - {id: rst-received, preset: rst-received}
+      - {id: serial-received, label: Serial, type: Serial:4, adif: SRX, direction: received}
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        rules:
+          - {id: qso-europe, when_all: [{field: CONT, values: [EU]}, {field: DXCC, exclude_in_sets: [SAC DXCC]}], points: 2}
+          - {id: qso-non-europe, when: {field: DXCC, exclude_in_sets: [SAC DXCC]}, points: 3}
+          - {id: qso-ineligible, points: 0}
+      dupe_key: [CALL, BAND]
+      multipliers:
+        - {id: mult-dxcc, name: DXCC Entity, field: DXCC, key: [DXCC, BAND], exclude_in_sets: [SAC DXCC]}
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}
+      export_fields:
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://www.sactest.net/blog/scandinavian-activity-contest-2026-rules/
+      notes: Scandinavian stations score non-Scandinavian contacts and use DXCC multipliers. Contacts with Scandinavian stations are retained but score zero. Prefix-area normalization groups the published Scandinavian call areas for DX entries.
+  SAC-CW (DX):
+    name: Scandinavian Activity Contest (CW, DX)
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-europe, remove: true}
+          - {id: qso-non-europe, remove: true}
+          - {id: qso-sac-low, when_all: [{field: DXCC, in_sets: [SAC DXCC]}, {field: BAND, values: [80M, 40M]}], points: 3}
+          - {id: qso-sac-high, when_all: [{field: DXCC, in_sets: [SAC DXCC]}, {field: BAND, values: [20M, 15M, 10M]}], points: 1}
+          - {id: qso-ineligible, when: {field: DXCC, exclude_in_sets: [SAC DXCC]}, points: 0}
+      multipliers:
+        - {id: mult-dxcc, remove: true}
+        - {id: mult-sac-area, name: Scandinavian Call Area, field: SAC_AREA, key: [SAC_AREA, BAND], when: {field: DXCC, in_sets: [SAC DXCC]}}
+    metadata:
+      notes: Non-Scandinavian stations score Scandinavian contacts for 3 points on 80/40 and 1 point on 20/15/10. Each Scandinavian country-area is a multiplier per band.
+    extends: SAC-CW
+  SAC-SSB:
+    name: Scandinavian Activity Contest (SSB)
+    modes: [SSB]
+    setup_fields:
+      - {id: header-category-mode, default: SSB, valid_values: [SSB]}
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, value: SSB}
+    extends: SAC-CW
+  SAC-SSB (DX):
+    name: Scandinavian Activity Contest (SSB, DX)
+    modes: [SSB]
+    setup_fields:
+      - {id: header-category-mode, default: SSB, valid_values: [SSB]}
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, value: SSB}
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-europe, remove: true}
+          - {id: qso-non-europe, remove: true}
+          - {id: qso-sac-low, when_all: [{field: DXCC, in_sets: [SAC DXCC]}, {field: BAND, values: [80M, 40M]}], points: 3}
+          - {id: qso-sac-high, when_all: [{field: DXCC, in_sets: [SAC DXCC]}, {field: BAND, values: [20M, 15M, 10M]}], points: 1}
+          - {id: qso-ineligible, when: {field: DXCC, exclude_in_sets: [SAC DXCC]}, points: 0}
+      multipliers:
+        - {id: mult-dxcc, remove: true}
+        - {id: mult-sac-area, name: Scandinavian Call Area, field: SAC_AREA, key: [SAC_AREA, BAND], when: {field: DXCC, in_sets: [SAC DXCC]}}
+    metadata:
+      notes: Non-Scandinavian stations score Scandinavian contacts for 3 points on 80/40 and 1 point on 20/15/10. Each Scandinavian country-area is a multiplier per band.
+    extends: SAC-SSB

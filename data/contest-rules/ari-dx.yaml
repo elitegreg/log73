@@ -1,0 +1,105 @@
+schema: 2
+contests:
+  ARI-DX:
+    name: ARI International DX Contest
+    profiles: [hf-bands]
+    modes: [CW, SSB, RTTY]
+    value_sets:
+      ARI Italian Provinces:
+        values_from_file: ari-provinces.dat
+      ARI Italian DXCC:
+        values: ['225', '248']
+    setup_fields:
+      - id: param-province
+        key: Province
+        label: Italian Province
+        type: String:2
+        required: true
+        in_sets: [ARI Italian Provinces]
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP, SWL, CHECKLOG]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [MIXED, CW, SSB, RTTY]}
+      - {id: header-category-band, preset: category-band, default: ALL, valid_values: [ALL, 160M, 80M, 40M, 20M, 15M, 10M]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [LOW, HIGH]}
+      - {id: header-category-transmitter, preset: category-transmitter, default: ONE, valid_values: [ONE, UNLIMITED], multi_single_has_mult_transmitter: true}
+      - {id: header-category-overlay, preset: category-overlay, required: false, valid_values: [ROOKIE, YOUTH, SEZ-IQ]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - id: province-sent
+        label: Province(s)
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: Province
+        in_sets: [ARI Italian Provinces]
+      - {id: rst-received, preset: rst-received}
+      - {id: serial-received, label: Serial, type: Serial:3, adif: SRX, direction: received}
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-italian, when: {field: DXCC, in_sets: [ARI Italian DXCC]}, points: 10}
+          - {id: qso-foreign-same-continent, when_all: [{field: DXCC, exclude_in_sets: [ARI Italian DXCC]}, {field: CONT, matches_field: MY_CONT}], points: 1}
+          - {id: qso-foreign-different-continent, when: {field: DXCC, exclude_in_sets: [ARI Italian DXCC]}, points: 3}
+          - {id: qso-ineligible, points: 0}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-province, name: Italian Province, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [ARI Italian Provinces], when: {field: DXCC, in_sets: [ARI Italian DXCC]}}
+        - {id: mult-dxcc, name: DXCC Entity, field: DXCC, key: [DXCC, BAND], when: {field: DXCC, exclude_in_sets: [ARI Italian DXCC]}}
+    cabrillo:
+      fixed_headers: []
+      export_fields:
+        - {id: export-location, key: LOCATION, label: ARI Section, type: String:32, required: false}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://www.ari.it/en/contest-hf/ari-international/7975-ari-international-dx-contest-2024.html
+      notes: >-
+        Italian stations send a province and receive a serial; other stations send a serial and
+        receive an Italian province. Italian contacts are worth 10 points, same-continent foreign
+        contacts 1, and different-continent foreign contacts 3. Italian provinces and non-Italian
+        DXCC entities count once per band. RTTY is restricted to 80–10 m by the contest rules.
+  ARI-DX (DX):
+    name: ARI International DX Contest (DX)
+    setup_fields:
+      - {id: param-province, remove: true}
+      - id: param-serial
+        key: Serial
+        label: Starting Serial
+        type: Numeric:3
+        required: true
+        default: 1
+        regex: '^\d{1,3}$'
+        before: header-category-operator
+      - {id: header-category-operator, after: param-serial}
+    exchange:
+      - {id: province-sent, remove: true}
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:3
+        adif: STX
+        direction: sent
+        serial_scope: global
+        after: rst-sent
+      - {id: serial-received, remove: true}
+      - id: province-received
+        label: Italian Province
+        type: String:2
+        adif: SRX_STRING
+        direction: received
+        in_sets: [ARI Italian Provinces]
+        after: rst-received
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-italian, when: {field: DXCC, in_sets: [ARI Italian DXCC]}, points: 10}
+          - {id: qso-foreign-same-continent, when_all: [{field: DXCC, not_matches_field: MY_DXCC}, {field: CONT, matches_field: MY_CONT}], points: 1}
+          - {id: qso-foreign-different-continent, when_all: [{field: DXCC, not_matches_field: MY_DXCC}, {field: CONT, not_matches_field: MY_CONT}], points: 3}
+          - {id: qso-ineligible, points: 0}
+      multipliers:
+        - {id: mult-dxcc, remove: true}
+    metadata:
+      notes: Non-Italian stations score 0 points for their own country, 1 for a different country on the same continent, and 3 for another continent. Only Italian provinces count as multipliers.
+    extends: ARI-DX

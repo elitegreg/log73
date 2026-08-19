@@ -3035,6 +3035,27 @@ mod tests {
             ..multi_log
         };
         assert!(!serial_reservation_required(multi_rules, &one_log, field));
+
+        let iota_rules = store
+            .get("RSGB-IOTA (Island)")
+            .expect("IOTA Island rules load");
+        let iota_field = sent_serial_field(iota_rules, "STX").expect("IOTA serial field exists");
+        for transmitter in ["ONE", "TWO"] {
+            let iota_log = db::Log {
+                id: 2,
+                name: "IOTA Island".to_string(),
+                contest_id: iota_rules.id.clone(),
+                station_callsign: "G3XTT".to_string(),
+                contest_params: json!({
+                    "CATEGORY-OPERATOR": "MULTI-OP",
+                    "CATEGORY-TRANSMITTER": transmitter,
+                }),
+            };
+            assert_eq!(
+                serial_reservation_required(iota_rules, &iota_log, iota_field),
+                transmitter == "TWO"
+            );
+        }
     }
 
     #[test]

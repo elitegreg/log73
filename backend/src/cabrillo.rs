@@ -653,6 +653,179 @@ mod tests {
     }
 
     #[test]
+    fn rac_rules_export_the_required_cabrillo_contest_ids() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+
+        for (contest_id, expected_header) in [
+            ("CANADA-DAY", "CANADA-DAY"),
+            ("CANADA-WINTER", "CANADA-WINTER"),
+        ] {
+            let rules = store.get(contest_id).expect("RAC rules should load");
+            let mut log = test_log();
+            log.contest_id = contest_id.to_string();
+            log.contest_params = json!({
+                "CATEGORY-ASSISTED": "NON-ASSISTED",
+                "CATEGORY-BAND": "ALL",
+                "CATEGORY-MODE": "MIXED",
+                "CATEGORY-OPERATOR": "SINGLE-OP",
+                "CATEGORY-POWER": "HIGH",
+                "CATEGORY-TRANSMITTER": "ONE",
+            });
+            let mut contact = test_contact("K1ABC", "VE3ABC", 1_700_000_000);
+            crate::db::set_contact_adif(&mut contact, "DXCC", json!(1));
+            crate::db::set_contact_adif(&mut contact, "MY_DXCC", json!(1));
+            crate::db::set_contact_adif(&mut contact, "MY_RAC_SECT", json!("ON"));
+            crate::db::set_contact_adif(&mut contact, "RAC_SECT", json!("ON"));
+
+            let text = render_log(rules, &log, &[contact], &json!({}), 12)
+                .unwrap_or_else(|error| panic!("{contest_id}: {error}"));
+            let expected_line = format!("CONTEST: {expected_header}");
+            assert!(text.lines().any(|line| line == expected_line));
+            assert!(text.lines().any(|line| line == "CATEGORY-MODE: MIXED"));
+            assert!(
+                text.lines()
+                    .any(|line| line == "CATEGORY-OPERATOR: SINGLE-OP")
+            );
+        }
+    }
+
+    #[test]
+    fn new_dx_rules_export_the_required_cabrillo_contest_ids() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+
+        for contest_id in ["9A-DX", "UKRAINDX", "WAG", "SAC-CW", "SAC-SSB", "WW-DIGI"] {
+            let rules = store
+                .get(contest_id)
+                .expect("new contest rules should load");
+            let mut log = test_log();
+            log.contest_id = contest_id.to_string();
+            log.contest_params = json!({
+                "County": "BJ",
+                "Oblast": "CH",
+                "DOK": "C25",
+                "Grid": "FN31",
+                "CATEGORY-BAND": "ALL",
+                "CATEGORY-MODE": "MIXED",
+                "CATEGORY-OPERATOR": "SINGLE-OP",
+                "CATEGORY-POWER": "HIGH",
+                "CATEGORY-TRANSMITTER": "ONE",
+            });
+            let mut contact = test_contact("K1ABC", "W1AW", 1_700_000_000);
+            crate::db::set_contact_adif(&mut contact, "STX", json!(1));
+            crate::db::set_contact_adif(&mut contact, "SRX", json!(1));
+            crate::db::set_contact_adif(&mut contact, "GRIDSQUARE", json!("FN20"));
+            let text = render_log(rules, &log, &[contact], &json!({}), 1)
+                .unwrap_or_else(|error| panic!("{contest_id}: {error}"));
+            assert!(
+                text.lines()
+                    .any(|line| line == format!("CONTEST: {contest_id}"))
+            );
+        }
+    }
+
+    #[test]
+    fn jarl_rtty_rules_export_age_and_category_headers() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store.get("JARL-RTTY").expect("JARL RTTY rules should load");
+        let mut log = test_log();
+        log.contest_id = "JARL-RTTY".to_string();
+        log.contest_params = json!({
+            "Age": "25",
+            "CATEGORY-OPERATOR": "SINGLE-OP",
+            "CATEGORY-ASSISTED": "ASSISTED",
+            "CATEGORY-POWER": "HIGH",
+        });
+        let mut contact = test_contact("K1ABC", "JA1ABC", 1_700_000_000);
+        crate::db::set_contact_adif(&mut contact, "MODE", json!("RTTY"));
+        crate::db::set_contact_adif(&mut contact, "RST_SENT", json!(599));
+        crate::db::set_contact_adif(&mut contact, "RST_RCVD", json!(599));
+        crate::db::set_contact_adif(&mut contact, "STX_STRING", json!("25"));
+        crate::db::set_contact_adif(&mut contact, "SRX_STRING", json!("30"));
+        let text = render_log(rules, &log, &[contact], &json!({}), 1)
+            .expect("JARL RTTY Cabrillo should render");
+
+        assert!(text.lines().any(|line| line == "CONTEST: JARL-RTTY"));
+        assert!(text.lines().any(|line| line == "CATEGORY-MODE: RTTY"));
+        assert!(
+            text.lines()
+                .any(|line| line == "CATEGORY-ASSISTED: ASSISTED")
+        );
+        assert!(qso_line(&text).contains(" RY "));
+        assert!(qso_line(&text).ends_with("599 25 JA1ABC 599 30"));
+    }
+
+    #[test]
+    fn iota_rules_export_world_and_island_cabrillo_shapes() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+
+        let world_rules = store
+            .get("RSGB-IOTA (World)")
+            .expect("IOTA World rules should load");
+        let mut world_log = test_log();
+        world_log.contest_id = "RSGB-IOTA (World)".to_string();
+        world_log.contest_params = json!({
+            "CATEGORY-LOCATION": "WORLD",
+            "CATEGORY-OPERATOR": "SINGLE-OP",
+            "CATEGORY-ASSISTED": "NON-ASSISTED",
+            "CATEGORY-MODE": "MIXED",
+            "CATEGORY-TIME": "24-HOURS",
+            "CATEGORY-POWER": "HIGH",
+        });
+        let mut world_contact = test_contact("K1ABC", "EA5IOTA", 1_700_000_000);
+        crate::db::set_contact_adif(&mut world_contact, "STX", json!(1));
+        crate::db::set_contact_adif(&mut world_contact, "SRX", json!(2));
+        crate::db::set_contact_adif(&mut world_contact, "SRX_STRING", json!("EU-005"));
+        let world_text = render_log(world_rules, &world_log, &[world_contact], &json!({}), 1)
+            .expect("IOTA World Cabrillo should render");
+        assert!(world_text.lines().any(|line| line == "CONTEST: RSGB-IOTA"));
+        assert!(
+            !world_text
+                .lines()
+                .any(|line| line.starts_with("IOTA-ISLAND-NAME:"))
+        );
+
+        let island_rules = store
+            .get("RSGB-IOTA (Island)")
+            .expect("IOTA Island rules should load");
+        let mut island_log = test_log();
+        island_log.contest_id = "RSGB-IOTA (Island)".to_string();
+        island_log.contest_params = json!({
+            "IOTA Reference": "EU-005",
+            "IOTA-ISLAND-NAME": "Great Britain",
+            "CATEGORY-LOCATION": "NON-DXPEDITION",
+            "CATEGORY-OPERATOR": "MULTI-OP",
+            "CATEGORY-TRANSMITTER": "ONE",
+            "CATEGORY-ASSISTED": "ASSISTED",
+            "CATEGORY-MODE": "MIXED",
+            "CATEGORY-TIME": "24-HOURS",
+            "CATEGORY-POWER": "HIGH",
+        });
+        let mut island_contact = test_contact("G3XTT", "EA5IOTA", 1_700_000_000);
+        crate::db::set_contact_adif(&mut island_contact, "STX", json!(1));
+        crate::db::set_contact_adif(&mut island_contact, "MY_IOTA_REF", json!("EU-005"));
+        crate::db::set_contact_adif(&mut island_contact, "SRX", json!(2));
+        crate::db::set_contact_adif(&mut island_contact, "SRX_STRING", json!("EU-005"));
+        crate::db::set_contact_adif(&mut island_contact, "APP_LOG73_TX_ID", json!(1));
+        let island_text = render_log(island_rules, &island_log, &[island_contact], &json!({}), 1)
+            .expect("IOTA Island Cabrillo should render");
+        assert!(island_text.lines().any(|line| line == "CONTEST: RSGB-IOTA"));
+        assert!(
+            island_text
+                .lines()
+                .any(|line| line == "IOTA-ISLAND-NAME: Great Britain")
+        );
+        assert!(qso_line(&island_text).ends_with("EU-005 1"));
+    }
+
+    #[test]
     fn ohio_qso_party_exports_the_required_ten_qso_fields() {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir.as_path()])

@@ -1,0 +1,112 @@
+schema: 2
+contests:
+  9A-DX:
+    name: 9A DX Contest
+    profiles: [hf-bands]
+    modes: [CW, SSB]
+    value_sets:
+      9A Counties:
+        values_from_file: 9a-counties.dat
+      9A ITU Zones:
+        values: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45', '46', '47', '48', '49', '50', '51', '52', '53', '54', '55', '56', '57', '58', '59', '60', '61', '62', '63', '64', '65', '66', '67', '68', '69', '70', '71', '72', '73', '74', '75', '76', '77', '78', '79', '80', '81', '82', '83', '84', '85', '86', '87', '88', '89', '90']
+    setup_fields:
+      - id: param-county
+        key: County
+        label: Croatian County
+        type: String:2
+        required: true
+        in_sets: [9A Counties]
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [MIXED, CW, SSB]}
+      - {id: header-category-band, preset: category-band, default: ALL, valid_values: [ALL, SINGLE-BAND, TWO-BAND, 160M, 80M, 40M, 20M, 15M, 10M]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-transmitter, preset: category-transmitter, default: ONE, valid_values: [ONE]}
+      - {id: header-category-overlay, preset: category-overlay, required: false, valid_values: [YOUTH]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - id: county-sent
+        label: County(s)
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: County
+        in_sets: [9A Counties]
+      - {id: rst-received, preset: rst-received}
+      - id: zone-or-county-received
+        label: ITU Zone or Croatian County
+        type: String:2
+        adif: SRX_STRING
+        direction: received
+        in_sets: [9A ITU Zones, 9A Counties]
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        rules:
+          - {id: qso-9a, when: {field: DXCC, values: ['497']}, points: 1}
+          - {id: qso-europe-low, when_all: [{field: CONT, values: [EU]}, {field: BAND, values: [160M, 80M]}], points: 4}
+          - {id: qso-europe-high, when_all: [{field: CONT, values: [EU]}, {field: BAND, values: [40M, 20M, 15M, 10M]}], points: 2}
+          - {id: qso-dx-low, when_all: [{field: CONT, exclude_values: [EU]}, {field: BAND, values: [160M, 80M]}], points: 10}
+          - {id: qso-dx-40m, when_all: [{field: CONT, exclude_values: [EU]}, {field: BAND, values: [40M]}], points: 8}
+          - {id: qso-dx-high, when_all: [{field: CONT, exclude_values: [EU]}, {field: BAND, values: [20M, 15M, 10M]}], points: 6}
+        time_bonus_points:
+          - {id: night-bonus, start_utc: '23:00', end_utc: '05:00', points: 2}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-itu-zone, name: ITU Zone, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], in_sets: [9A ITU Zones]}
+        - {id: mult-dxcc, name: DXCC Entity, field: DXCC, key: [DXCC, BAND, MODE_CLASS]}
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: MIXED}
+      export_fields:
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://www.hamradio.hr/9a-dx-contest/
+      notes: >-
+        Croatian stations send their county and use DXCC plus ITU-zone multipliers;
+        foreign stations send their ITU zone and receive Croatian county multipliers.
+        The published overnight bonus, category eligibility, 10-minute multi-operator
+        rules, and station restrictions are represented where possible and otherwise
+        remain operator-enforced.
+  9A-DX (DX):
+    name: 9A DX Contest (DX)
+    setup_fields:
+      - {id: param-county, remove: true}
+      - id: param-itu-zone
+        key: ITU Zone
+        label: ITU Zone
+        type: String:2
+        required: true
+        in_sets: [9A ITU Zones]
+        before: header-category-operator
+      - {id: header-category-operator, after: param-itu-zone}
+    exchange:
+      - {id: county-sent, remove: true}
+      - id: zone-sent
+        label: Zone(s)
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: ITU Zone
+        in_sets: [9A ITU Zones]
+        after: rst-sent
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-9a, when_all: [{field: DXCC, values: ['497']}, {field: BAND, values: [160M, 80M, 40M]}], points: 10}
+          - {id: qso-9a-high, when_all: [{field: DXCC, values: ['497']}, {field: BAND, values: [20M, 15M, 10M]}], points: 6, before: qso-europe-low}
+          - {id: qso-europe-low, when_all: [{field: CONT, values: [EU]}, {field: BAND, values: [160M, 80M]}], points: 2}
+          - {id: qso-europe-high, when_all: [{field: CONT, values: [EU]}, {field: BAND, values: [40M, 20M, 15M, 10M]}], points: 1}
+          - {id: qso-dx-low, when_all: [{field: CONT, exclude_values: [EU]}, {field: BAND, values: [160M, 80M, 40M]}], points: 6}
+          - {id: qso-dx-high, when_all: [{field: CONT, exclude_values: [EU]}, {field: BAND, values: [20M, 15M, 10M]}], points: 3}
+      multipliers:
+        - {id: mult-dxcc, remove: true}
+        - {id: mult-croatian-county, name: Croatian County, field: SRX_STRING, key: [SRX_STRING, BAND, MODE_CLASS], in_sets: [9A Counties], when: {field: DXCC, values: ['497']}}
+    metadata:
+      notes: Foreign stations send an ITU zone and receive Croatian county abbreviations; Croatian contacts score 10 points on 160/80/40 and 6 points on 20/15/10.
+    extends: 9A-DX

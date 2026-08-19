@@ -1,0 +1,51 @@
+schema: 2
+contests:
+  EUHFC:
+    name: European HF Championship
+    bands: [160M, 80M, 40M, 20M, 15M, 10M]
+    modes: [CW, SSB]
+    setup_fields:
+      - id: param-license-year
+        key: License Year
+        label: First License Year (last two digits)
+        type: String:2
+        required: true
+        regex: '^\d{2}$'
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, SINGLE-OP-UNLIMITED]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [MIXED, CW, SSB]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - id: license-year-sent
+        label: License Year(s)
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: License Year
+        regex: '^\d{2}$'
+      - {id: rst-received, preset: rst-received}
+      - {id: license-year-received, label: License Year, type: String:2, adif: SRX_STRING, direction: received, regex: '^\d{2}$'}
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-european, when_all: [{field: MY_CONT, values: [EU]}, {field: CONT, values: [EU]}], points: 1}
+          - {id: qso-ineligible, points: 0}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-license-year, name: License Year, field: SRX_STRING, key: [SRX_STRING, BAND], when_all: [{field: MY_CONT, values: [EU]}, {field: CONT, values: [EU]}]}
+    cabrillo:
+      fixed_headers: []
+      export_fields:
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://euhf.s5cc.eu/euhfc_rules/
+      notes: >-
+        Only contacts between continental-European stations count. Each valid contact is worth
+        one point and each opposing operator's two-digit first-license-year exchange is a
+        multiplier once per band regardless of mode. The 12-hour, category, change-limit,
+        self-spotting, human-operator, and exact-frequency requirements remain operator-enforced.

@@ -1,0 +1,117 @@
+schema: 2
+contests:
+  REF-CW:
+    name: REF French HF Championship (CW)
+    bands: [80M, 40M, 20M, 15M, 10M]
+    modes: [CW]
+    value_sets:
+      REF French Locations:
+        values_from_file: ref-locations.dat
+      REF French DXCC:
+        values: ['10', '13', '36', '41', '63', '79', '84', '99', '124', '131', '169', '175', '213', '214', '227', '276', '277', '298', '453', '509', '516']
+    setup_fields:
+      - id: param-location
+        key: Location
+        label: French Department or Prefix
+        type: String:2
+        required: true
+        in_sets: [REF French Locations]
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP, MULTI-MULTI, SWL, CHECKLOG]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-transmitter, preset: category-transmitter, default: ONE, valid_values: [ONE, TWO, UNLIMITED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - id: location-sent
+        label: Department or Prefix(s)
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: Location
+        in_sets: [REF French Locations]
+      - {id: rst-received, preset: rst-received}
+      - {id: serial-received, label: Serial, type: Serial:3, adif: SRX, direction: received}
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-maritime-mobile, when: {field: CALL, suffixes: [/MM]}, points: 3}
+          - {id: qso-french-same-continent, when_all: [{field: DXCC, in_sets: [REF French DXCC]}, {field: CONT, matches_field: MY_CONT}], points: 6}
+          - {id: qso-french-different-continent, when: {field: DXCC, in_sets: [REF French DXCC]}, points: 15}
+          - {id: qso-foreign-same-continent, when_all: [{field: DXCC, exclude_in_sets: [REF French DXCC]}, {field: CONT, matches_field: MY_CONT}], points: 1}
+          - {id: qso-foreign-different-continent, when: {field: DXCC, exclude_in_sets: [REF French DXCC]}, points: 2}
+          - {id: qso-ineligible, points: 0}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-french-location, name: French Department or Prefix, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [REF French Locations], when: {field: DXCC, in_sets: [REF French DXCC]}}
+        - {id: mult-dxcc, name: DXCC Entity, field: DXCC, key: [DXCC, BAND], when: {field: DXCC, exclude_in_sets: [REF French DXCC]}, exclude_call_suffixes: [/MM]}
+    cabrillo:
+      fixed_headers: [{id: fixed-category-mode, name: CATEGORY-MODE, value: CW}]
+      export_fields:
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, required: false}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://concours.r-e-f.org/contest/a-propos/
+      notes: >-
+        French stations send a department, 00 for F6REF, or a DOM/TOM prefix and receive a
+        serial. French contacts score 6/15 points by continent; foreign contacts score 1/2.
+        French locations and foreign DXCC entities count once per band. Operating-time,
+        category, and multi-operator ten-minute restrictions remain operator-enforced.
+  REF-CW (DX):
+    name: REF French HF Championship (CW, DX)
+    setup_fields:
+      - {id: param-location, remove: true}
+      - id: param-serial
+        key: Serial
+        label: Starting Serial
+        type: Numeric:3
+        required: true
+        default: 1
+        regex: '^\d{1,3}$'
+        before: header-category-operator
+      - {id: header-category-operator, after: param-serial}
+    exchange:
+      - {id: location-sent, remove: true}
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:3
+        adif: STX
+        direction: sent
+        serial_scope: global
+        after: rst-sent
+      - {id: serial-received, remove: true}
+      - id: location-received
+        label: Department or Prefix
+        type: String:2
+        adif: SRX_STRING
+        direction: received
+        in_sets: [REF French Locations]
+        after: rst-received
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-maritime-mobile, when: {field: CALL, suffixes: [/MM]}, points: 3}
+          - {id: qso-french-same-continent, when_all: [{field: DXCC, in_sets: [REF French DXCC]}, {field: CONT, matches_field: MY_CONT}], points: 1}
+          - {id: qso-french-different-continent, when: {field: DXCC, in_sets: [REF French DXCC]}, points: 3}
+          - {id: qso-foreign-same-continent, points: 0}
+          - {id: qso-foreign-different-continent, points: 0}
+      multipliers:
+        - {id: mult-dxcc, remove: true}
+    metadata:
+      notes: Foreign stations work French stations only and receive French departments, 00, or DOM/TOM prefixes as multipliers once per band.
+    extends: REF-CW
+  REF-SSB:
+    name: REF French HF Championship (SSB)
+    modes: [SSB]
+    cabrillo:
+      fixed_headers: [{id: fixed-category-mode, name: CATEGORY-MODE, value: SSB}]
+    extends: REF-CW
+  REF-SSB (DX):
+    name: REF French HF Championship (SSB, DX)
+    modes: [SSB]
+    cabrillo:
+      fixed_headers: [{id: fixed-category-mode, name: CATEGORY-MODE, value: SSB}]
+    extends: REF-CW (DX)

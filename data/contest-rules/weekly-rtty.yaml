@@ -1,0 +1,64 @@
+schema: 2
+contests:
+  WRT (North America):
+    name: Weekly RTTY Test (North America)
+    bands: [80M, 40M, 20M, 15M, 10M]
+    modes: [RTTY]
+    value_sets:
+      DX:
+        use: dx
+    setup_fields:
+      - id: param-name
+        key: NAME
+        label: Operator Name
+        type: String:20
+        required: true
+        preserve_case: true
+      - id: param-qth
+        key: QTH
+        label: State or Province
+        type: String:5
+        required: true
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, CHECKLOG]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [LOW, QRP]}
+    exchange:
+      - {id: name-sent, label: Name(s), type: String:20, adif: MY_NAME, direction: sent, fixed: true, source: NAME}
+      - {id: qth-sent, label: State/Province(s), type: String:5, adif: STX_STRING, direction: sent, fixed: true, source: QTH}
+      - {id: name-received, label: Name, type: String:20, adif: NAME, direction: received}
+      - {id: qth-received, label: State/Province or Prefix, type: String:8, adif: SRX_STRING, direction: received}
+    scoring:
+      qso_points: {points: 1}
+      dupe_key: [CALL]
+      multipliers:
+        - {id: mult-callsign, name: Callsign, field: CALL, key: [CALL]}
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: RTTY}
+    metadata:
+      source: https://radiosport.world/wrt.html
+      notes: >-
+        WRT is a 30-minute Thursday-night RTTY test at 0145-0215 UTC. North American
+        stations send name and state/province; each callsign is a multiplier once per session.
+        The 100-watt and 5-watt power categories and suggested frequencies are operator-enforced.
+  WRT (DX):
+    name: Weekly RTTY Test (DX)
+    setup_fields:
+      - id: param-qth
+        key: QTH
+        label: Country Prefix
+        type: String:8
+        required: true
+      - id: header-category-power
+        default: LOW
+        valid_values: [LOW, QRP]
+    exchange:
+      - id: qth-sent
+        label: Country Prefix(s)
+        type: String:8
+        source: QTH
+      - id: qth-received
+        label: Country Prefix
+        type: String:8
+    metadata:
+      notes: DX stations send name and country prefix. Each callsign is a multiplier once per session.
+    extends: WRT (North America)

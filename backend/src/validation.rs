@@ -962,11 +962,38 @@ fn contact_matches_condition(contact: &Contact, condition: &ScoringCondition) ->
     if value.is_empty() {
         return false;
     }
-    let mut valid_values = condition.values.iter();
-    valid_values
-        .clone()
-        .next()
-        .is_none_or(|_| valid_values.any(|candidate| candidate.eq_ignore_ascii_case(&value)))
+    if !condition.values.is_empty()
+        && !condition
+            .values
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&value))
+    {
+        return false;
+    }
+    if condition
+        .exclude_values
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(&value))
+    {
+        return false;
+    }
+    if let Some(other_field) = &condition.matches_field {
+        let other_value = json_trimmed_string(contact_adif_value(contact, other_field))
+            .or_else(|| json_trimmed_string(contact_meta_value(contact, other_field)))
+            .unwrap_or_default();
+        if other_value.is_empty() || !value.eq_ignore_ascii_case(&other_value) {
+            return false;
+        }
+    }
+    if let Some(other_field) = &condition.not_matches_field {
+        let other_value = json_trimmed_string(contact_adif_value(contact, other_field))
+            .or_else(|| json_trimmed_string(contact_meta_value(contact, other_field)))
+            .unwrap_or_default();
+        if other_value.is_empty() || value.eq_ignore_ascii_case(&other_value) {
+            return false;
+        }
+    }
+    true
 }
 
 fn validate_typed_field(

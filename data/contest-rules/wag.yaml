@@ -1,0 +1,104 @@
+schema: 2
+contests:
+  WAG:
+    name: Worked All Germany Contest
+    bands: [80M, 40M, 20M, 15M, 10M]
+    modes: [CW, SSB]
+    value_sets:
+      WAG DOK Areas:
+        values: [A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z]
+    setup_fields:
+      - id: param-dok
+        key: DOK
+        label: DOK
+        type: String:4
+        required: true
+        regex: '^(?:NM|[A-Z][A-Z0-9]{0,3})$'
+        help_text: DARC/VFDB DOK, or NM for a non-member German station.
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP, SWL, CHECKLOG]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [MIXED, CW, SSB]}
+      - {id: header-category-band, preset: category-band, default: ALL, valid_values: [ALL, 80M, 40M, 20M, 15M, 10M]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [QRP, LOW, HIGH]}
+      - {id: header-category-transmitter, preset: category-transmitter, default: ONE, valid_values: [ONE]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - id: dok-sent
+        label: DOK(s)
+        type: String:4
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: DOK
+      - {id: rst-received, preset: rst-received}
+      - {id: serial-received, label: Serial, type: Serial:4, adif: SRX, direction: received}
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        geography:
+          country_field: DXCC
+          station_country_field: MY_DXCC
+          continent_field: CONT
+          station_continent_field: MY_CONT
+          same_country: 1
+          different_country_north_america: 3
+          different_country_same_continent: 3
+          different_continent: 5
+          unresolved: 0
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-dxcc, name: DXCC/WAE Country, field: DXCC, key: [DXCC, BAND, MODE_CLASS]}
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: MIXED}
+      export_fields:
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, required: false}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://www.darc.de/en/der-club/referate/conteste/worked-all-germany-contest/en/rules/
+      notes: German stations send DOK or NM and may work all stations; non-German stations send serial numbers and score only German contacts. German DXCC/WAE multipliers and foreign first-letter DOK multipliers count per band and mode.
+  WAG (DX):
+    name: Worked All Germany Contest (DX)
+    setup_fields:
+      - {id: param-dok, remove: true}
+      - id: param-serial
+        key: Serial
+        label: Starting Serial
+        type: Numeric:4
+        required: true
+        default: 1
+        regex: '^\d{1,4}$'
+        before: header-category-operator
+      - {id: header-category-operator, after: param-serial}
+    exchange:
+      - {id: dok-sent, remove: true}
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:4
+        adif: STX
+        direction: sent
+        serial_scope: global
+        after: rst-sent
+      - {id: serial-received, remove: true}
+      - id: dok-received
+        label: DOK
+        type: String:4
+        adif: SRX_STRING
+        direction: received
+        after: rst-received
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        geography: null
+        rules:
+          - {id: qso-germany, when: {field: DXCC, values: ['230']}, points: 3}
+          - {id: qso-ineligible, points: 0}
+      multipliers:
+        - {id: mult-dxcc, remove: true}
+        - {id: mult-dok-area, name: German District, field: DOK_AREA, key: [DOK_AREA, BAND, MODE_CLASS], in_sets: [WAG DOK Areas], when: {field: DXCC, values: ['230']}}
+    metadata:
+      notes: Non-German stations send a serial and receive a German DOK. Only German contacts are eligible for DX entries; the first letter of each DOK is the multiplier.
+    extends: WAG

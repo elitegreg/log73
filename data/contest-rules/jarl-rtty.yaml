@@ -1,0 +1,88 @@
+schema: 2
+contests:
+  JARL-RTTY:
+    name: JARL World Wide RTTY Contest
+    bands: [80M, 40M, 20M, 15M, 10M]
+    modes: [RTTY]
+    setup_fields:
+      - id: param-age
+        key: Age
+        label: Operator or Average Age
+        type: String:2
+        required: true
+        default: '01'
+        regex: '^\d{2}$'
+        help_text: Use 01, 00, or 99 when the age is not sent.
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]
+      - id: header-category-assisted
+        preset: category-assisted
+        default: ASSISTED
+        valid_values: [ASSISTED]
+      - id: header-category-power
+        preset: category-power
+        default: HIGH
+        valid_values: [HIGH, LOW, QRP]
+      - id: header-category-overlay
+        preset: category-overlay
+        required: false
+        valid_values: [YOUTH]
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - id: age-sent
+        label: Age(s)
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: Age
+        regex: '^\d{2}$'
+      - {id: rst-received, preset: rst-received}
+      - id: age-received
+        label: Age
+        type: String:2
+        adif: SRX_STRING
+        direction: received
+        regex: '^\d{2}$'
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-maritime-mobile, when: {field: CALL, suffixes: [/MM]}, points: 2}
+          - {id: qso-same-continent, when: {field: CONT, matches_field: MY_CONT}, points: 2}
+          - {id: qso-different-continent, when: {field: CONT, not_matches_field: MY_CONT}, points: 3}
+      dupe_key: [CALL, BAND]
+      multipliers:
+        - {
+            id: mult-jarl-entity,
+            name: DXCC Entity,
+            field: JARL_ENTITY,
+            key: [JARL_ENTITY, BAND],
+            exclude_call_suffixes: [/MM],
+          }
+        - {
+            id: mult-jarl-call-area,
+            name: JA/W/VE/VK Call Area,
+            field: JARL_CALL_AREA,
+            key: [JARL_CALL_AREA, BAND],
+            exclude_call_suffixes: [/MM],
+          }
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: RTTY}
+      export_fields:
+        - {id: export-location, key: LOCATION, label: Operating Location, type: String:32, required: false}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://www.jarl.org/English/4_Library/A-4-3_Contests/rtty_rules_en.html
+      notes: >-
+        Same-continent contacts score 2 points and different-continent contacts score 3 points;
+        maritime-mobile contacts score 2 points and count neither as entities nor call areas.
+        DXCC entities excluding mainland JA/W/VE/VK and JA/W/VE/VK mainland call areas count once
+        per band. JD1 island entities remain DXCC multipliers. Age, category, station-location,
+        remote-operation, self-spotting, and operating restrictions remain operator-enforced.

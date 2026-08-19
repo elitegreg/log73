@@ -1,6 +1,6 @@
 # Supported contests
 
-This is the human-facing view of the bundled contest rules. Log73 currently resolves 134 rule variants into 63 actual contest families. Variants such as in-state/out-of-state, North America/DX, and mode-specific definitions are grouped into one row here; they remain separate selectable rules in the application when their exchanges or scoring differ.
+This is the human-facing view of the bundled contest rules. Log73 currently resolves 177 rule variants into 87 actual contest families. Variants such as in-state/out-of-state, North America/DX, and mode-specific definitions are grouped into one row here; they remain separate selectable rules in the application when their exchanges or scoring differ.
 
 Modes are the resolved rule modes. `PHONE` represents the generic phone family (SSB, FM, or AM), and `DIGITAL` represents digital modes other than CW and phone. Exact modes such as `SSB`, `DATA`, and `RTTY` are shown when the rule names them explicitly.
 
@@ -85,12 +85,40 @@ Modes are the resolved rule modes. `PHONE` represents the generic phone family (
 
 ## Misc DX contest
 
-| Contest                          | Supported modes |
-| -------------------------------- | --------------- |
-| HA DX Contest                   | CW, SSB         |
-| Oceania DX Contest               | CW, SSB         |
-| CQ Manchester Mineira DX Contest | CW              |
-| SP DX Contest                    | CW, SSB         |
+| Contest                          | Supported modes  |
+| -------------------------------- | ---------------- |
+| EU DX Contest                    | CW, SSB          |
+| HA DX Contest                    | CW, SSB          |
+| Oceania DX Contest               | CW, SSB          |
+| CQ Manchester Mineira DX Contest | CW               |
+| SP DX Contest                    | CW, SSB          |
+| PACC                             | CW, SSB          |
+| All Asian DX Contest             | CW, SSB          |
+| REF French HF Championship       | CW, SSB          |
+| Russian DX Contest               | CW, SSB          |
+| ARI International DX Contest     | CW, SSB, RTTY    |
+| European HF Championship         | CW, SSB          |
+| LZ DX Contest                    | CW, SSB          |
+| 9A DX Contest                    | CW, SSB          |
+| Ukrainian DX Contest             | CW, SSB          |
+| World Wide Digi DX Contest       | FT4, FT8         |
+| JARL World Wide RTTY Contest     | RTTY             |
+| Helvetia Contest                 | CW, SSB, DIGITAL |
+
+## Regional contest
+
+| Contest                       | Supported modes |
+| ----------------------------- | --------------- |
+| RAC Canada Day Contest        | CW, PHONE       |
+| RAC Canada Winter Contest     | CW, PHONE       |
+| Worked All Germany Contest    | CW, SSB         |
+| Scandinavian Activity Contest | CW, SSB         |
+
+## Specialty contest
+
+| Contest      | Supported modes |
+| ------------ | --------------- |
+| IOTA Contest | CW, SSB         |
 
 ## Weekly CW contests
 
@@ -99,6 +127,17 @@ Modes are the resolved rule modes. `PHONE` represents the generic phone family (
 | CWOps CWT               | CW              |
 | K1USN SST               | CW              |
 | MST (Medium Speed Test) | CW              |
+| NCCC Sprint             | CW              |
+
+## Short sprints
+
+| Contest                             | Supported modes    |
+| ----------------------------------- | ------------------ |
+| QCX Challenge                       | CW, PHONE, DIGITAL |
+| Feld Hell Sprint                    | HELL               |
+| Weekly RTTY Test                    | RTTY               |
+| Phone Fray                          | SSB                |
+| Worldwide Sideband Activity Contest | SSB                |
 
 ## Field day contests
 

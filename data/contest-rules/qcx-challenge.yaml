@@ -1,0 +1,63 @@
+schema: 2
+contests:
+  QCX-CHALLENGE:
+    name: QCX Challenge
+    modes: [CW, PHONE, DIGITAL]
+    profiles: [all-contest-bands]
+    value_sets:
+      QCX Rigs:
+        values: [QCX, QCX-MINI, QCX+, QDX, QDX-M, QMX, QSX]
+      Power Classes:
+        values: [QRP, QRO]
+    setup_fields:
+      - id: param-name
+        key: NAME
+        label: Name
+        type: String:20
+        required: true
+        preserve_case: true
+      - id: param-rig
+        key: RIG
+        label: Rig
+        type: String:16
+        required: true
+        help_text: Include the QCX, QCX-mini, QCX+, QDX, QMX, or QSX model when applicable.
+        preserve_case: true
+      - id: param-power
+        key: POWER
+        label: Power Class
+        type: String:4
+        required: true
+        valid_values: [QRP, QRO]
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, CHECKLOG]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [QRP, LOW, HIGH]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: name-sent, label: Name(s), type: String:20, adif: MY_NAME, direction: sent, fixed: true, source: NAME}
+      - {id: rig-sent, label: Rig(s), type: String:16, adif: MY_RIG, direction: sent, fixed: true, source: RIG}
+      - {id: power-sent, label: Power(s), type: String:4, adif: MY_POWER, direction: sent, fixed: true, source: POWER, valid_values: [QRP, QRO]}
+      - {id: rst-received, preset: rst-received}
+      - {id: name-received, label: Name, type: String:20, adif: NAME, direction: received}
+      - {id: rig-received, label: Rig, type: String:16, adif: SRX_RIG, direction: received}
+      - {id: power-received, label: Power, type: String:4, adif: SRX_POWER, direction: received, valid_values: [QRP, QRO]}
+    scoring:
+      qso_points:
+        points: null
+        rules:
+          - {id: qso-qcx-both-qrp, when_all: [{field: SRX_RIG, in_sets: [QCX Rigs]}, {field: MY_POWER, values: [QRP]}, {field: SRX_POWER, values: [QRP]}], points: 5}
+          - {id: qso-qcx-amplifier, when: {field: SRX_RIG, in_sets: [QCX Rigs]}, points: 3}
+          - {id: qso-other-rig, points: 1}
+      dupe_key: [CALL, BAND]
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: MIXED}
+    metadata:
+      source: https://www.qrp-labs.com/party.html
+      notes: >-
+        The monthly QCX Challenge has three separately scored one-hour sessions and allows
+        non-WARC bands, CW, phone, and conversational data modes; FT8/FT4 and other WSJT-X
+        modes are excluded. A non-QCX contact scores 1, a QCX contact with amplification on
+        either side scores 3, and a QCX contact with QRP on both sides scores 5. Rig names and
+        power class are entered in the exchange; model eligibility and the session schedule
+        remain operator-enforced.

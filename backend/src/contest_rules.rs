@@ -209,6 +209,8 @@ pub struct ScoringCondition {
     pub field: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub matches_field: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub not_matches_field: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub values: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -241,12 +243,22 @@ pub struct QsoPoints {
     pub points: Option<i64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rules: Vec<QsoPointRule>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub time_bonus_points: Vec<TimeBonusPointRule>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geography: Option<GeographyQsoPoints>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grid_distance: Option<GridDistanceQsoPoints>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category_band_param: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TimeBonusPointRule {
+    pub id: String,
+    pub start_utc: String,
+    pub end_utc: String,
+    pub points: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -397,6 +409,8 @@ where
 pub struct ScoringRules {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub qso_points: Option<QsoPoints>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub minimum_multiplier_count: i64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dupe_key: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -409,6 +423,10 @@ pub struct ScoringRules {
     pub multiplier_count_bonus_points: Vec<MultiplierCountBonusRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub qso_count_bonus_points: Vec<QsoCountBonusRule>,
+}
+
+fn is_zero(value: &i64) -> bool {
+    *value == 0
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -522,6 +540,7 @@ pub(crate) fn test_scoring_condition(field: &str, values: &[&str]) -> ScoringCon
     ScoringCondition {
         field: field.to_string(),
         matches_field: None,
+        not_matches_field: None,
         values: values.iter().map(|value| (*value).to_string()).collect(),
         exclude_values: Vec::new(),
         suffixes: Vec::new(),
@@ -1483,6 +1502,15 @@ fn validate_contest(contest: &ContestRules) -> Result<(), String> {
     validate_ids(
         contest
             .scoring
+            .qso_points
+            .iter()
+            .flat_map(|points| points.time_bonus_points.iter())
+            .map(|rule| rule.id.as_str()),
+        "QSO time bonus rule",
+    )?;
+    validate_ids(
+        contest
+            .scoring
             .multipliers
             .iter()
             .map(|rule| rule.id.as_str()),
@@ -1555,6 +1583,36 @@ fn validate_contest(contest: &ContestRules) -> Result<(), String> {
             "grid_distance scoring values must be non-negative and use a positive distance step"
                 .to_string(),
         );
+    }
+    for rule in contest
+        .scoring
+        .qso_points
+        .iter()
+        .flat_map(|points| points.time_bonus_points.iter())
+    {
+        for (label, value) in [("start_utc", &rule.start_utc), ("end_utc", &rule.end_utc)] {
+            let Some(minutes) = parse_utc_minute(value) else {
+                return Err(format!(
+                    "QSO time bonus {} has invalid {}: {}",
+                    rule.id, label, value
+                ));
+            };
+            if minutes >= 24 * 60 {
+                return Err(format!(
+                    "QSO time bonus {} has {} outside UTC day: {}",
+                    rule.id, label, value
+                ));
+            }
+        }
+        if rule.points == 0 {
+            return Err(format!(
+                "QSO time bonus {} must award non-zero points",
+                rule.id
+            ));
+        }
+    }
+    if contest.scoring.minimum_multiplier_count < 0 {
+        return Err("minimum_multiplier_count must be non-negative".to_string());
     }
     for multiplier in &contest.scoring.param_multipliers {
         let field = contest
@@ -1636,6 +1694,13 @@ fn validate_contest(contest: &ContestRules) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn parse_utc_minute(value: &str) -> Option<u16> {
+    let (hour, minute) = value.trim().split_once(':')?;
+    let hour = hour.parse::<u16>().ok()?;
+    let minute = minute.parse::<u16>().ok()?;
+    (hour < 24 && minute < 60).then_some(hour * 60 + minute)
 }
 
 fn validate_ids<'a>(ids: impl IntoIterator<Item = &'a str>, kind: &str) -> Result<(), String> {
@@ -2085,7 +2150,7 @@ contests:
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir]).expect("bundled rules load");
 
-        assert_eq!(store.summaries().len(), 134);
+        assert_eq!(store.summaries().len(), 177);
         for id in [
             "ARRL-10",
             "ARRL-SS-CW",
@@ -2101,8 +2166,51 @@ contests:
             "CQMM",
             "OCEANIA-DX-CW",
             "OCEANIA-DX-SSB",
+            "EUDX",
+            "EUDX (DX)",
             "SPDX",
             "SPDX (DX)",
+            "PACC",
+            "PACC (DX)",
+            "AADX-CW",
+            "AADX-SSB",
+            "REF-CW",
+            "REF-CW (DX)",
+            "REF-SSB",
+            "REF-SSB (DX)",
+            "RDXC",
+            "RDXC (DX)",
+            "ARI-DX",
+            "ARI-DX (DX)",
+            "EUHFC",
+            "LZDX",
+            "LZDX (DX)",
+            "CANADA-DAY",
+            "CANADA-WINTER",
+            "9A-DX",
+            "9A-DX (DX)",
+            "UKRAINDX",
+            "UKRAINDX (DX)",
+            "WAG",
+            "WAG (DX)",
+            "SAC-CW",
+            "SAC-CW (DX)",
+            "SAC-SSB",
+            "SAC-SSB (DX)",
+            "WW-DIGI",
+            "RSGB-IOTA (World)",
+            "RSGB-IOTA (Island)",
+            "JARL-RTTY",
+            "NCCC-SPRINT",
+            "WRT (North America)",
+            "WRT (DX)",
+            "QCX-CHALLENGE",
+            "WWSAC",
+            "PHONE-FRAY (North America)",
+            "PHONE-FRAY (DX)",
+            "FELD-HELL",
+            "HELVETIA (Switzerland)",
+            "HELVETIA (DX)",
             "NJ-QSO-PARTY (In State)",
             "TX-QSO-PARTY (In State)",
             "CO-QSO-PARTY (In State)",

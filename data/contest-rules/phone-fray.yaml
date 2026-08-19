@@ -1,0 +1,79 @@
+schema: 2
+contests:
+  PHONE-FRAY (North America):
+    name: Phone Fray (North America)
+    bands: [160M, 80M, 40M, 20M, 15M]
+    modes: [SSB]
+    value_sets:
+      US Multipliers:
+        use: us-states
+      District of Columbia:
+        use: district-of-columbia
+      Canadian Multipliers:
+        use: canadian-provinces
+      North American Countries:
+        use: north-american-countries
+    setup_fields:
+      - id: param-name
+        key: NAME
+        label: Operator Name
+        type: String:20
+        required: true
+        preserve_case: true
+      - id: param-qth
+        key: QTH
+        label: State, Province, or NA Country
+        type: String:5
+        required: true
+        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, CHECKLOG]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [LOW]}
+    exchange:
+      - {id: name-sent, label: Name(s), type: String:20, adif: MY_NAME, direction: sent, fixed: true, source: NAME}
+      - {id: qth-sent, label: State/Province/Country(s), type: String:5, adif: STX_STRING, direction: sent, fixed: true, source: QTH, in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]}
+      - {id: name-received, label: Name, type: String:20, adif: NAME, direction: received}
+      - {id: qth-received, label: State/Province/Country, type: String:5, adif: SRX_STRING, direction: received, in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]}
+    scoring:
+      qso_points: {points: 1}
+      dupe_key: [CALL, BAND]
+      multipliers:
+        - {id: mult-location, name: State/Province/Country, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]}
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: SSB}
+        - {id: fixed-category-transmitter, name: CATEGORY-TRANSMITTER, value: ONE}
+    metadata:
+      source: http://www.perluma.com/Phone_Fray_Contest_Rules.pdf
+      notes: >-
+        Phone Fray is a weekly 30-minute SSB test on 160 through 15 meters. North American
+        stations send name and state/province/country; every QSO is one point. US states,
+        DC, Canadian provinces/territories, and other North American countries are multipliers
+        per band. The 100-watt single-operator limit and Tuesday/Wednesday local schedule are
+        operator-enforced.
+  PHONE-FRAY (DX):
+    name: Phone Fray (DX)
+    setup_fields:
+      - id: param-qth
+        remove: true
+      - id: header-category-power
+        default: LOW
+        valid_values: [LOW]
+    exchange:
+      - id: qth-sent
+        remove: true
+      - id: qth-received
+        label: North American Location
+        type: String:5
+        adif: SRX_STRING
+        direction: received
+        in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]
+    scoring:
+      qso_points:
+        points: null
+        rules:
+          - {id: qso-north-america, when: {field: SRX_STRING, in_sets: [US Multipliers, District of Columbia, Canadian Multipliers, North American Countries]}, points: 1}
+          - {id: qso-ineligible, points: 0}
+    metadata:
+      notes: DX stations send name only and score one point for each North American contact. North American location multipliers count once per band.
+    extends: PHONE-FRAY (North America)

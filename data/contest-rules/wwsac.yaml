@@ -1,0 +1,49 @@
+schema: 2
+contests:
+  WWSAC:
+    name: Worldwide Sideband Activity Contest
+    bands: [160M, 80M, 40M, 20M, 15M, 10M, 6M]
+    modes: [SSB]
+    value_sets:
+      Age Groups:
+        values: [OM, YL, Y, YYL]
+    setup_fields:
+      - id: param-age-group
+        key: AGE_GROUP
+        label: Age Group
+        type: String:3
+        required: true
+        valid_values: [OM, YL, Y, YYL]
+        help_text: Use Y for Youth and YYL for Youth YL.
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, CHECKLOG]}
+      - {id: header-category-assisted, preset: category-assisted, default: ASSISTED, valid_values: [ASSISTED]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [HIGH, LOW, QRP]}
+      - {id: header-category-overlay, preset: category-overlay, required: false, valid_values: [YOUTH, YOUTH-YL, YL]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: age-group-sent, label: Age Group(s), type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: AGE_GROUP, valid_values: [OM, YL, Y, YYL]}
+      - {id: rst-received, preset: rst-received}
+      - {id: age-group-received, label: Age Group, type: String:3, adif: SRX_STRING, direction: received, valid_values: [OM, YL, Y, YYL]}
+    scoring:
+      qso_points:
+        points: null
+        rules:
+          - {id: qso-youth-yl, when: {field: SRX_STRING, values: [YYL]}, points: 15}
+          - {id: qso-youth, when: {field: SRX_STRING, values: [Y]}, points: 10}
+          - {id: qso-yl, when: {field: SRX_STRING, values: [YL]}, points: 5}
+          - {id: qso-om, when: {field: SRX_STRING, values: [OM]}, points: 1}
+          - {id: qso-invalid, points: 0}
+      dupe_key: [CALL, BAND]
+      multipliers:
+        - {id: mult-prefix, name: Callsign Prefix, field: WPX_PREFIX, key: [WPX_PREFIX]}
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: SSB}
+        - {id: fixed-category-transmitter, name: CATEGORY-TRANSMITTER, value: ONE}
+    metadata:
+      source: https://wwsac.com/rules.html
+      notes: >-
+        WWSAC runs Tuesdays at 0100-0159 UTC on SSB from 160 through 6 meters. OM/YL/Youth/
+        Youth YL contacts score 1/5/10/15 points, and normalized WPX callsign prefixes are
+        multipliers. Spotting is allowed, but self-spotting and solicitation are prohibited;
+        age overlays, power limits, and the 24-hour log deadline remain operator-enforced.

@@ -1,0 +1,78 @@
+schema: 2
+contests:
+  HELVETIA (Switzerland):
+    name: Helvetia Contest (Switzerland)
+    bands: [160M, 80M, 40M, 20M, 15M, 10M]
+    modes: [CW, SSB, DIGITAL]
+    value_sets:
+      Swiss Cantons:
+        values: [AG, AI, AR, BE, BL, BS, FR, GE, GL, GR, JU, LU, NE, NW, OW, SG, SH, SO, SZ, TG, TI, UR, VD, VS, ZG, ZH]
+    setup_fields:
+      - id: param-canton
+        key: CANTON
+        label: Swiss Canton
+        type: String:2
+        required: true
+        in_sets: [Swiss Cantons]
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP, SWL, CHECKLOG]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, SSB, MIXED]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [HIGH, LOW, QRP]}
+      - {id: header-category-overlay, preset: category-overlay, required: false, valid_values: [RTC, CLASSIC]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: canton-sent, label: Canton(s), type: String:2, adif: STX_STRING, direction: sent, fixed: true, source: CANTON, in_sets: [Swiss Cantons]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Canton or Serial, type: String:8, adif: SRX_STRING, direction: received, valid_values_or_regex: true, regex: '^\d{3,}$', in_sets: [Swiss Cantons]}
+    scoring:
+      qso_points:
+        points: null
+        rules:
+          - {id: qso-switzerland, when: {field: DXCC, values: ['287']}, points: 10}
+          - {id: qso-same-continent, when: {field: CONT, matches_field: MY_CONT}, points: 1}
+          - {id: qso-other-continent, points: 3}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {id: mult-canton, name: Canton, field: SRX_STRING, key: [SRX_STRING, BAND], in_sets: [Swiss Cantons], when: {field: DXCC, values: ['287']}}
+        - {id: mult-dxcc, name: DXCC Country, field: DXCC, key: [DXCC, BAND]}
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-band, name: CATEGORY-BAND, value: ALL}
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: MIXED}
+        - {id: fixed-category-transmitter, name: CATEGORY-TRANSMITTER, value: ONE}
+    metadata:
+      source: https://uska.ch/wp-content/uploads/2026/03/2026-01-Rules-and-Regulations-for-Helvetia-Contest-issued-March-2026.pdf
+      notes: >-
+        Swiss stations send RS/RST and canton; foreign stations send RS/RST and a running serial
+        of at least three digits. Swiss contacts score 10 points, same-continent contacts 1, and
+        other-continent contacts 3. Cantons and DXCC countries count per band. One contact per
+        band and operating mode is modeled with MODE_CLASS; the digital-mode limit, RTC/Classic
+        categories, power limits, six-hour single-operator rest period, SWL procedure, and
+        Cabrillo RY/DG mapping remain operator-enforced.
+  HELVETIA (DX):
+    name: Helvetia Contest (DX)
+    setup_fields:
+      - id: param-canton
+        remove: true
+      - id: param-serial
+        key: Serial
+        label: Starting Serial
+        type: Numeric:4
+        required: true
+        default: 1
+        regex: '^\d{1,4}$'
+        before: header-category-operator
+    exchange:
+      - id: canton-sent
+        remove: true
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:4
+        adif: STX
+        direction: sent
+        serial_scope: global
+        after: rst-sent
+      - id: exchange-received
+        after: rst-received
+    metadata:
+      notes: Foreign stations send a running serial number; Swiss canton and DXCC multipliers and the published continent-based scoring are unchanged.
+    extends: HELVETIA (Switzerland)
