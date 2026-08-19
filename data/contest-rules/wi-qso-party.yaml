@@ -1,0 +1,59 @@
+schema: 2
+contests:
+  WI-QSO-PARTY (In State):
+    name: Wisconsin QSO Party (In State)
+    bands: [160M, 80M, 40M, 20M, 15M, 10M, 6M, 2M, 1.25M, 70cm]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      Wisconsin Counties: {values_from_file: wisconsin-counties.dat}
+      States: {use: us-states, exclude: [WI]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Wisconsin County, type: String:3, required: true, in_sets: [Wisconsin Counties]}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP]}
+      - {id: header-category-power, preset: category-power, default: HIGH, valid_values: [HIGH, LOW, QRP]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, DIGITAL, MIXED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Wisconsin Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: 'State, Province, or DX', type: String:3, adif: SRX_STRING, direction: received, in_sets: [Wisconsin Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: qso-cw-digital, points: 2}]
+      dupe_key: [CALL, BAND, MODE_CLASS, STX_STRING, SRX_STRING]
+      multipliers:
+        - {id: mult-county, name: Wisconsin County, field: SRX_STRING, key: [SRX_STRING], in_sets: [Wisconsin Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+      qso_count_bonus_points:
+        - {id: mobile-county-bonus, name: Mobile County, field: STX_STRING, param: CATEGORY-STATION, values: [MOBILE], thresholds: {'12': 500}}
+      bonus_points:
+        - {id: bonus-w9fk, name: W9FK, field: CALL, key: [CALL, BAND, MODE_CLASS], values: {W9FK: 100}}
+    metadata:
+      source: https://www.warac.org/wqp/wqp.htm
+      notes: >-
+        Based on the latest available 2026 rules and reference sheet. FT8/FT4 is excluded. The
+        fractional power multipliers and any portable/remote-category eligibility are operator-
+        enforced; the 12-QSO mobile county bonus and W9FK band/mode bonus are supported.
+    profiles: [all-contest-bands]
+  WI-QSO-PARTY:
+    name: Wisconsin QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-operator}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: exchange-received, remove: true}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: rst-received, after: location-sent}
+      - {id: county-received, label: Wisconsin County, type: String:3, adif: SRX_STRING, direction: received, in_sets: [Wisconsin Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+      qso_count_bonus_points:
+        - {id: mobile-county-bonus, remove: true}
+    extends: WI-QSO-PARTY (In State)

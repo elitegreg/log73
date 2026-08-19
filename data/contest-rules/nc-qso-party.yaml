@@ -1,0 +1,67 @@
+schema: 2
+contests:
+  NC-QSO-PARTY (In State):
+    name: North Carolina QSO Party (In State)
+    bands: [80M, 40M, 20M, 15M, 10M, 6M, 2M]
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      North Carolina Counties: {values_from_file: north-carolina-counties.dat}
+      Rarest NC Counties: {values: [CAB, GRM, VAN, MAC, DAV, CUR, PAM, ALL, PER, CAS]}
+      States: {use: us-states, exclude: [NC]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: North Carolina County, type: String:3, required: true, in_sets: [North Carolina Counties]}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP, MOBILE, PORTABLE, EXPEDITION, CHECKLOG]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [HIGH, LOW, QRP]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, MIXED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [North Carolina Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Location, type: String:3, adif: SRX_STRING, direction: received, in_sets: [North Carolina Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 2}
+          - {id: qso-cw, when: {field: MODE_CLASS, values: [CW]}, points: 3}
+          - {id: qso-digital, points: 5}
+      dupe_key: [CALL, BAND, MODE_CLASS, STX_STRING, SRX_STRING]
+      multipliers:
+        - {id: mult-county, name: North Carolina County, field: SRX_STRING, key: [SRX_STRING], in_sets: [North Carolina Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dx, name: DX, field: SRX_STRING, fixed_key: DX, in_sets: [DX]}
+    metadata:
+      source: https://ncqsoparty.org/rules/
+      notes: >-
+        Based on the latest published main-contest rules. FT8/FT4 is excluded because the sponsor
+        treats the Weak Signal Showcase as a separate event and log. The five-county rarest sweep
+        bonus, mobile county rework audit rules, and county-line duplicate expansion are not scored
+        automatically.
+    profiles: [hf-vhf-bands]
+  NC-QSO-PARTY:
+    name: North Carolina QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-operator}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: exchange-received, remove: true}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: rst-received, after: location-sent}
+      - {id: county-received, label: North Carolina County, type: String:3, adif: SRX_STRING, direction: received, in_sets: [North Carolina Counties], after: rst-received}
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-rarest-phone, when_all: [{field: SRX_STRING, in_sets: [Rarest NC Counties]}, {field: MODE_CLASS, values: [PHONE]}], points: 20}
+          - {id: qso-rarest-cw, when_all: [{field: SRX_STRING, in_sets: [Rarest NC Counties]}, {field: MODE_CLASS, values: [CW]}], points: 30}
+          - {id: qso-rarest-digital, when: {field: SRX_STRING, in_sets: [Rarest NC Counties]}, points: 50}
+          - {id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 2}
+          - {id: qso-cw, when: {field: MODE_CLASS, values: [CW]}, points: 3}
+          - {id: qso-digital, points: 5}
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dx, remove: true}
+    extends: NC-QSO-PARTY (In State)

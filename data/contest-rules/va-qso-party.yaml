@@ -1,0 +1,59 @@
+schema: 2
+contests:
+  VA-QSO-PARTY (In State):
+    name: Virginia QSO Party (In State)
+    modes: [CW, PHONE, DIGITAL]
+    value_sets:
+      Virginia Jurisdictions: {values_from_file: virginia-counties-cities.dat}
+      States: {use: us-states, exclude: [VA]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-location, key: Location, label: Virginia County or City, type: String:3, required: true, in_sets: [Virginia Jurisdictions]}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP]}
+      - {id: header-category-station, preset: category-station, default: FIXED, valid_values: [FIXED, MOBILE, EXPEDITION, ROVER]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [HIGH, LOW, QRP]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, DIGITAL, MIXED]}
+    exchange:
+      - {id: serial-sent, label: Serial, type: Serial:6, adif: STX, direction: sent}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [Virginia Jurisdictions]}
+      - {id: serial-received, label: Serial, type: Serial:6, adif: SRX, direction: received}
+      - {id: exchange-received, label: 'State, Province, or DX', type: String:3, adif: SRX_STRING, direction: received, in_sets: [Virginia Jurisdictions, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: qso-cw-digital, points: 2}]
+      dupe_key: [CALL, BAND, MODE_CLASS, STX_STRING, SRX_STRING]
+      multipliers:
+        - {id: mult-jurisdiction, name: Virginia Jurisdiction, field: SRX_STRING, key: [SRX_STRING], in_sets: [Virginia Jurisdictions]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dx, name: DX, field: SRX_STRING, fixed_key: DX, in_sets: [DX]}
+      qso_count_bonus_points:
+        - {id: activation-bonus, name: Activated Virginia Jurisdiction, field: STX_STRING, param: CATEGORY-STATION, values: [MOBILE, EXPEDITION, ROVER], thresholds: {'1': 100}}
+      bonus_points:
+        - {id: bonus-lovers, name: Virginia Is For Lovers, field: CALL, key: [CALL], values: {K4L: 50, K4O: 50, K4V: 50, K4E: 50, K4R: 50, K4S: 50}}
+        - {id: bonus-club, name: ARRL Year of the Club, field: CALL, key: [CALL], values: {W4MYA: 20, W4VA: 20, K4LRG: 20, N4FRS: 20, W4OVH: 20, W4NPS: 20, W4RKC: 20, K4XY: 20}}
+    metadata:
+      source: https://www.qsl.net/sterling/VA_QSO_Party/2026_VQP/2026_VAQP_Rules.htm
+      notes: >-
+        Based on the latest published 2026 rules. FT8/FT4 is not given a special WSJT definition;
+        only ordinary operator-assisted digital contacts are included. Mobile/rover/expedition
+        three-point QSO scoring and the ten-QSO multiplier qualification are not automatically
+        scored; jurisdiction activation bonuses and published 2026 bonus stations are supported.
+    profiles: [all-contest-bands]
+  VA-QSO-PARTY:
+    name: Virginia QSO Party
+    setup_fields:
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-operator}
+    exchange:
+      - {id: exchange-received, remove: true}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX]}
+      - {id: county-received, label: Virginia County or City, type: String:3, adif: SRX_STRING, direction: received, in_sets: [Virginia Jurisdictions]}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dx, remove: true}
+      qso_count_bonus_points:
+        - {id: activation-bonus, remove: true}
+    extends: VA-QSO-PARTY (In State)

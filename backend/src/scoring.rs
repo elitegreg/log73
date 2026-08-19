@@ -2514,6 +2514,39 @@ mod tests {
     }
 
     #[test]
+    fn bundled_new_state_qso_party_rules_score_basic_contacts() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let cases = [
+            ("VT-QSO-PARTY (In State)", "ADD", "BEN", "CW", 3),
+            ("MN-QSO-PARTY (In State)", "AIT", "AIT", "SSB", 2),
+            ("NC-QSO-PARTY (In State)", "ALA", "CAB", "SSB", 2),
+            ("OK-QSO-PARTY (In State)", "ADA", "CAD", "SSB", 2),
+            ("ID-QSO-PARTY (In State)", "ADA", "WA", "CW", 2),
+            ("WI-QSO-PARTY (In State)", "ADA", "ASH", "SSB", 1),
+            ("VA-QSO-PARTY (In State)", "ACC", "ALB", "SSB", 1),
+        ];
+
+        for (contest_id, sent, received, mode, points) in cases {
+            let rules = store
+                .get(contest_id)
+                .expect("new contest rules should load");
+            let mut contacts = vec![contact(vec![
+                ("CALL", json!("W1ABC")),
+                ("BAND", json!("20M")),
+                ("MODE", json!(mode)),
+                ("STX_STRING", json!(sent)),
+                ("SRX_STRING", json!(received)),
+            ])];
+            let totals = score_contacts(rules, Value::Null, &mut contacts);
+            assert_eq!(totals.qso_points, points, "{contest_id}");
+            assert_eq!(totals.multipliers, 1, "{contest_id}");
+            assert_eq!(totals.score, points, "{contest_id}");
+        }
+    }
+
+    #[test]
     fn bundled_tn_qso_party_rules_score_bands_locations_and_bonus_station() {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir.as_path()])

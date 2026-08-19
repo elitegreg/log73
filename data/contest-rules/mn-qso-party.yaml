@@ -1,0 +1,57 @@
+schema: 2
+contests:
+  MN-QSO-PARTY (In State):
+    name: Minnesota QSO Party (In State)
+    bands: [160M, 80M, 40M, 20M, 15M, 10M]
+    modes: [CW, PHONE]
+    value_sets:
+      Minnesota Counties: {values_from_file: minnesota-counties.dat}
+      States: {use: us-states, exclude: [MN]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-name, key: Name, label: First Name, type: String:12, required: true, preserve_case: true}
+      - {id: param-county, key: County, label: Minnesota County, type: String:3, required: true, in_sets: [Minnesota Counties]}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP, MOBILE, ROVER]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [HIGH, LOW, QRP]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, MIXED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: name-sent, label: Name, type: String:12, adif: MY_NAME, direction: sent, fixed: true, source: Name}
+      - {id: county-sent, label: County, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Minnesota Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: name-received, label: Name, type: String:12, adif: NAME, direction: received}
+      - {id: exchange-received, label: Location, type: String:3, adif: SRX_STRING, direction: received, in_sets: [Minnesota Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points: {points: 2}
+      dupe_key: [CALL, BAND, MODE_CLASS, STX_STRING, SRX_STRING]
+      multipliers:
+        - {id: mult-county, name: Minnesota County, field: SRX_STRING, key: [SRX_STRING], in_sets: [Minnesota Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING], in_sets: [Canadian Provinces]}
+        - {id: mult-dx, name: DX, field: SRX_STRING, fixed_key: DX, in_sets: [DX]}
+    metadata:
+      source: https://www.w0aa.org/mnqp-rules/
+      notes: >-
+        Based on MNQP Rev 31, December 31, 2025, the latest published rules. The first-name
+        exchange is stored in STX_STRING/SRX_STRING alongside the location, and county changes
+        are represented by separate sent-county values. Mobile suffix enforcement is operator-enforced.
+    profiles: [hf-bands]
+  MN-QSO-PARTY:
+    name: Minnesota QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-operator}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: name-sent, after: rst-sent}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: name-sent}
+      - {id: name-received, after: location-sent}
+      - {id: exchange-received, remove: true}
+      - {id: county-received, label: Minnesota County, type: String:3, adif: SRX_STRING, direction: received, in_sets: [Minnesota Counties], after: name-received}
+    scoring:
+      multipliers:
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dx, remove: true}
+    extends: MN-QSO-PARTY (In State)

@@ -1,0 +1,60 @@
+schema: 2
+contests:
+  VT-QSO-PARTY (In State):
+    name: Vermont QSO Party (In State)
+    bands: [80M, 40M, 20M, 15M, 10M, 6M, 2M]
+    modes: [CW, PHONE, RTTY]
+    value_sets:
+      Vermont Counties: {values_from_file: vermont-counties.dat}
+      States: {use: us-states, exclude: [VT]}
+      Canadian Provinces: {use: canadian-provinces}
+      DX: {use: dx}
+    setup_fields:
+      - {id: param-county, key: County, label: Vermont County, type: String:3, required: true, in_sets: [Vermont Counties]}
+      - {id: header-category-operator, preset: category-operator, default: SINGLE-OP, valid_values: [SINGLE-OP, MULTI-OP, ROVER]}
+      - {id: header-category-power, preset: category-power, default: LOW, valid_values: [HIGH, LOW, QRP]}
+      - {id: header-category-mode, preset: category-mode, default: MIXED, valid_values: [CW, PHONE, MIXED]}
+    exchange:
+      - {id: rst-sent, preset: rst-sent}
+      - {id: county-sent, label: County, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: County, in_sets: [Vermont Counties]}
+      - {id: rst-received, preset: rst-received}
+      - {id: exchange-received, label: Exchange, type: String:3, adif: SRX_STRING, direction: received, in_sets: [Vermont Counties, States, Canadian Provinces, DX]}
+    scoring:
+      qso_points:
+        rules: [{id: qso-phone, when: {field: MODE_CLASS, values: [PHONE]}, points: 1}, {id: qso-rtty, when: {field: MODE, values: [RTTY]}, points: 2}, {id: qso-cw, points: 3}]
+      dupe_key: [CALL, BAND, MODE_CLASS, STX_STRING, SRX_STRING]
+      multipliers:
+        - {id: mult-county, name: Vermont County, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [Vermont Counties]}
+        - {id: mult-state, name: State, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [States]}
+        - {id: mult-province, name: Canadian Province, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [Canadian Provinces]}
+        - {id: mult-dx, name: DX, field: SRX_STRING, key: [SRX_STRING, MODE_CLASS], in_sets: [DX]}
+        - {id: mult-w1nvt, name: Club Station, field: CALL, key: [CALL, MODE_CLASS], values: [W1NVT]}
+    metadata:
+      source: https://www.ranv.org/vtqso.html
+      notes: >-
+        Based on the latest published 2026 rules. FT8/FT4/WSJT-X contacts are excluded from this
+        main definition because the sponsor accepts them as a separate ADIF upload. The W1AW/1
+        per-contact bonus, fractional low-power multiplier, and county-line duplicate handling are
+        not scored automatically.
+    profiles: [hf-vhf-bands]
+  VT-QSO-PARTY:
+    name: Vermont QSO Party
+    setup_fields:
+      - {id: param-county, remove: true}
+      - {id: param-location, key: Location, label: 'State, Province, or DX', type: String:3, required: true, in_sets: [States, Canadian Provinces, DX], before: header-category-operator}
+      - {id: header-category-operator, after: param-location, valid_values: [SINGLE-OP]}
+    exchange:
+      - {id: county-sent, remove: true}
+      - {id: exchange-received, remove: true}
+      - {id: location-sent, label: Location, type: String:3, adif: STX_STRING, direction: sent, fixed: true, source: Location, in_sets: [States, Canadian Provinces, DX], after: rst-sent}
+      - {id: rst-received, after: location-sent}
+      - {id: county-received, label: Vermont County, type: String:3, adif: SRX_STRING, direction: received, in_sets: [Vermont Counties], after: rst-received}
+    scoring:
+      multipliers:
+        - {id: mult-county, remove: true}
+        - {id: mult-state, remove: true}
+        - {id: mult-province, remove: true}
+        - {id: mult-dx, remove: true}
+    metadata:
+      notes: Outside-Vermont stations score Vermont counties and the W1NVT club multiplier only.
+    extends: VT-QSO-PARTY (In State)
