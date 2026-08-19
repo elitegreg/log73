@@ -1,0 +1,167 @@
+schema: 2
+contests:
+  HA-DX:
+    name: HA DX Contest
+    modes: [CW, SSB]
+    profiles: [hf-bands]
+    value_sets:
+      Hungarian Counties:
+        values: [BA, BE, BN, BO, BP, CS, FE, GY, HB, HE, SZ, KO, NG, PE, SO, SA, TO, VA, VE, ZA]
+    setup_fields:
+      - id: param-county
+        key: County
+        label: Hungarian County
+        type: String:2
+        required: true
+        in_sets: [Hungarian Counties]
+      - id: header-category-operator
+        preset: category-operator
+        type: String:24
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP, CHECKLOG]
+      - id: header-category-assisted
+        preset: category-assisted
+        default: ASSISTED
+        valid_values: [ASSISTED, NON-ASSISTED]
+      - id: header-category-band
+        preset: category-band
+        default: ALL
+        valid_values: [ALL, SO3BAND, 160M, 80M, 40M, 20M, 15M, 10M]
+      - id: header-category-power
+        preset: category-power
+        default: HIGH
+        valid_values: [QRP, LOW, HIGH]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE]
+      - id: header-category-overlay
+        preset: category-overlay
+        required: false
+        valid_values: [YOUTH]
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: county-sent
+        label: County(s)
+        type: String:2
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        in_sets: [Hungarian Counties]
+        source: County
+      - id: rst-received
+        preset: rst-received
+      - id: serial-or-county-received
+        label: Serial or County
+        type: String:4
+        adif: SRX_STRING
+        direction: received
+        regex: '^\\d{1,4}$'
+        valid_values_or_regex: true
+        in_sets: [Hungarian Counties]
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        rules:
+          - {id: qso-maritime-mobile, when: {field: CALL, suffixes: [/AM, /MM]}, points: 2}
+          - {id: qso-hungary, when: {field: DXCC, values: ['239']}, points: 10}
+          - {id: qso-same-continent, when: {field: CONT, matches_field: MY_CONT}, points: 2}
+          - {id: qso-different-continent, points: 5}
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {
+            id: mult-dxcc-wae,
+            name: DXCC/WAE Country,
+            field: APP_LOG73_DXCC_PFX,
+            key: [APP_LOG73_DXCC_PFX, BAND],
+            exclude_values: [HA],
+            exclude_call_suffixes: [/AM, /MM],
+          }
+        - {
+            id: mult-hungarian-county,
+            name: Hungarian County,
+            field: SRX_STRING,
+            key: [SRX_STRING, BAND],
+            in_sets: [Hungarian Counties],
+            when: {field: DXCC, values: ['239']},
+            exclude_call_suffixes: [/AM, /MM],
+          }
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: MIXED}
+      export_fields:
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, required: false}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://ha-dx.com/en/contest-rules
+      notes: >-
+        CW and SSB are permitted on 160, 80, 40, 20, 15, and 10 meters. HA stations send a
+        Hungarian county; non-HA stations send a serial number. Contacts with Hungarian stations
+        are worth 10 points, same-continent contacts 2 points, and other-continent contacts 5
+        points. Maritime-mobile and aeronautical-mobile contacts are worth 2 points and do not
+        count as multipliers. DXCC/WAE countries and Hungarian counties count once per band;
+        category, SO3BAND selection, operating-time, and multi-operator restrictions remain
+        operator-enforced.
+  HA-DX (DX):
+    name: HA DX Contest (DX)
+    setup_fields:
+      - id: param-county
+        remove: true
+      - id: param-serial
+        key: Serial
+        label: Starting Serial
+        type: Numeric:4
+        required: true
+        default: 1
+        regex: '^\\d{1,4}$'
+        before: header-category-operator
+      - id: header-category-operator
+        after: param-serial
+    exchange:
+      - id: county-sent
+        remove: true
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:4
+        adif: STX
+        direction: sent
+        serial_scope: global
+        after: rst-sent
+      - id: rst-received
+        after: serial-sent
+    metadata:
+      notes: Non-HA stations send a serial number; HA stations send a Hungarian county.
+    extends: HA-DX
+  HA-DX-CW:
+    name: HA DX Contest (CW)
+    modes: [CW]
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}
+    extends: HA-DX
+  HA-DX-CW (DX):
+    name: HA DX Contest (CW, DX)
+    modes: [CW]
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}
+    extends: HA-DX (DX)
+  HA-DX-SSB:
+    name: HA DX Contest (SSB)
+    modes: [SSB]
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: SSB}
+    extends: HA-DX
+  HA-DX-SSB (DX):
+    name: HA DX Contest (SSB, DX)
+    modes: [SSB]
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: SSB}
+    extends: HA-DX (DX)

@@ -2085,7 +2085,7 @@ contests:
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         let store = ContestRulesStore::load_dirs([rules_dir]).expect("bundled rules load");
 
-        assert_eq!(store.summaries().len(), 126);
+        assert_eq!(store.summaries().len(), 134);
         for id in [
             "ARRL-10",
             "ARRL-SS-CW",
@@ -2101,6 +2101,8 @@ contests:
             "CQMM",
             "OCEANIA-DX-CW",
             "OCEANIA-DX-SSB",
+            "SPDX",
+            "SPDX (DX)",
             "NJ-QSO-PARTY (In State)",
             "TX-QSO-PARTY (In State)",
             "CO-QSO-PARTY (In State)",

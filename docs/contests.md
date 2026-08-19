@@ -1,6 +1,6 @@
 # Supported contests
 
-This is the human-facing view of the bundled contest rules. Log73 currently resolves 126 rule variants into 61 actual contest families. Variants such as in-state/out-of-state, North America/DX, and mode-specific definitions are grouped into one row here; they remain separate selectable rules in the application when their exchanges or scoring differ.
+This is the human-facing view of the bundled contest rules. Log73 currently resolves 134 rule variants into 63 actual contest families. Variants such as in-state/out-of-state, North America/DX, and mode-specific definitions are grouped into one row here; they remain separate selectable rules in the application when their exchanges or scoring differ.
 
 Modes are the resolved rule modes. `PHONE` represents the generic phone family (SSB, FM, or AM), and `DIGITAL` represents digital modes other than CW and phone. Exact modes such as `SSB`, `DATA`, and `RTTY` are shown when the rule names them explicitly.
 
@@ -87,8 +87,10 @@ Modes are the resolved rule modes. `PHONE` represents the generic phone family (
 
 | Contest                          | Supported modes |
 | -------------------------------- | --------------- |
+| HA DX Contest                   | CW, SSB         |
 | Oceania DX Contest               | CW, SSB         |
 | CQ Manchester Mineira DX Contest | CW              |
+| SP DX Contest                    | CW, SSB         |
 
 ## Weekly CW contests
 

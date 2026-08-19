@@ -1,0 +1,145 @@
+schema: 2
+contests:
+  SPDX:
+    name: SP DX Contest
+    bands: [160M, 80M, 40M, 20M, 15M, 10M]
+    modes: [CW, SSB]
+    value_sets:
+      Polish Provinces:
+        values: [B, C, D, F, G, J, K, L, M, O, P, R, S, U, W, Z]
+    setup_fields:
+      - id: param-province
+        key: Province
+        label: Polish Province
+        type: String:1
+        required: true
+        in_sets: [Polish Provinces]
+      - id: header-category-operator
+        preset: category-operator
+        type: String:24
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP, SWL, CHECKLOG]
+      - id: header-category-mode
+        preset: category-mode
+        default: MIXED
+        valid_values: [MIXED, CW, SSB]
+      - id: header-category-band
+        preset: category-band
+        type: String:8
+        default: ALL
+        valid_values: [ALL, SOTB, 160M, 80M, 40M, 20M, 15M, 10M]
+      - id: header-category-power
+        preset: category-power
+        default: HIGH
+        valid_values: [HIGH, LOW, QRP]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE]
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: province-sent
+        label: Province(s)
+        type: String:1
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        in_sets: [Polish Provinces]
+        source: Province
+      - id: rst-received
+        preset: rst-received
+      - id: serial-received
+        label: Serial
+        type: Serial:4
+        adif: SRX
+        direction: received
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        geography:
+          country_field: APP_LOG73_DXCC_PFX
+          station_country_field: APP_LOG73_MY_DXCC_PFX
+          continent_field: CONT
+          station_continent_field: MY_CONT
+          same_country: 0
+          different_country_north_america: 1
+          different_country_same_continent: 1
+          different_continent: 3
+          unresolved: 0
+      dupe_key: [CALL, BAND, MODE_CLASS]
+      multipliers:
+        - {
+            id: mult-dxcc,
+            name: DXCC Entity,
+            field: DXCC,
+            key: [DXCC, BAND],
+            exclude_values: ['269'],
+            exclude_call_suffixes: [/MM],
+          }
+    cabrillo:
+      export_fields:
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://spdxcontest.pzk.org.pl/2026/rules.php
+      notes: >-
+        Polish stations send a one-letter province designator and receive serial numbers. Polish
+        stations score 0 points for Polish contacts, 1 point for European contacts, and 3 points
+        for contacts outside Europe. DXCC entities other than Poland count once per band; mixed
+        mode, SOTB band selection, duplicate contacts that provide a new multiplier, SWL handling,
+        and category restrictions remain operator-enforced.
+  SPDX (DX):
+    name: SP DX Contest (DX)
+    setup_fields:
+      - id: param-province
+        remove: true
+      - id: param-serial
+        key: Serial
+        label: Starting Serial
+        type: Numeric:4
+        required: true
+        default: 1
+        regex: '^\\d{1,4}$'
+        before: header-category-operator
+      - id: header-category-operator
+        after: param-serial
+    exchange:
+      - id: province-sent
+        remove: true
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:4
+        adif: STX
+        direction: sent
+        serial_scope: global
+        after: rst-sent
+      - id: serial-received
+        remove: true
+      - id: province-received
+        label: Province
+        type: String:1
+        adif: SRX_STRING
+        direction: received
+        in_sets: [Polish Provinces]
+        after: rst-received
+    scoring:
+      qso_points:
+        rules:
+          - {id: qso-polish, when: {field: DXCC, values: ['269']}, points: 3}
+          - {id: qso-non-polish, points: 0}
+      multipliers:
+        - {
+            id: mult-polish-province,
+            name: Polish Province,
+            field: SRX_STRING,
+            key: [SRX_STRING, BAND],
+            in_sets: [Polish Provinces],
+            when: {field: DXCC, values: ['269']},
+          }
+    metadata:
+      notes: Foreign stations send serial numbers beginning at 001 and receive Polish province
+        designators. Foreign stations score 3 points only for contacts with Polish stations.
+    extends: SPDX
