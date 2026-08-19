@@ -1,0 +1,105 @@
+schema: 2
+contests:
+  CQMM:
+    name: CQ Manchester Mineira DX Contest
+    bands: [80M, 40M, 20M, 15M, 10M]
+    modes: [CW]
+    setup_fields:
+      - id: param-exchange
+        key: Exchange
+        label: CQMM Exchange
+        type: String:3
+        required: true
+        regex: '^(?:AF|AS|EU|NA|OC|SA)(?:M|Q|Y|C)?$'
+        help_text: 'Continent, optionally followed by M (CWJF member), Q (QRP), Y (YL), or C (multi-op/club/group).'
+      - id: header-category-operator
+        preset: category-operator
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP]
+      - id: header-category-band
+        preset: category-band
+        default: ALL
+        valid_values: [ALL, 80M, 40M, 20M, 15M, 10M]
+      - id: header-category-power
+        preset: category-power
+        default: HIGH
+        valid_values: [HIGH, LOW, QRP]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE]
+      - id: header-category-overlay
+        preset: category-overlay
+        type: String:16
+        required: false
+        valid_values: [YL]
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: exchange-sent
+        label: Exchange(s)
+        type: String:3
+        adif: STX_STRING
+        direction: sent
+        fixed: true
+        source: Exchange
+        regex: '^(?:AF|AS|EU|NA|OC|SA)(?:M|Q|Y|C)?$'
+      - id: rst-received
+        preset: rst-received
+      - id: exchange-received
+        label: Exchange
+        type: String:3
+        adif: SRX_STRING
+        direction: received
+        regex: '^(?:AF|AS|EU|NA|OC|SA)(?:M|Q|Y|C)?$'
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        rules:
+          - {id: qso-special-exchange, when: {field: SRX_STRING, suffixes: [M, Q, Y]}, points: 10}
+          - {id: qso-maritime-mobile, when: {field: CALL, suffixes: [/MM]}, points: 3}
+          - {id: qso-same-country, when: {field: APP_LOG73_DXCC_PFX, matches_field: APP_LOG73_MY_DXCC_PFX}, points: 1}
+          - {id: qso-same-continent-high-band, when_all: [{field: CONT, matches_field: MY_CONT}, {field: BAND, values: [40M, 80M]}], points: 4}
+          - {id: qso-same-continent-low-band, when_all: [{field: CONT, matches_field: MY_CONT}, {field: BAND, values: [10M, 15M, 20M]}], points: 2}
+          - {id: qso-different-continent-high-band, when: {field: BAND, values: [40M, 80M]}, points: 6}
+          - {id: qso-different-continent-low-band, points: 3}
+      dupe_key: [CALL, BAND]
+      multipliers:
+        - {
+            id: mult-south-american-prefix,
+            name: South American Prefix,
+            field: WPX_PREFIX,
+            key: [WPX_PREFIX, BAND],
+            when: {field: CONT, values: [SA]},
+            exclude_call_suffixes: [/MM],
+          }
+        - {
+            id: mult-dxcc-entity,
+            name: DXCC Entity,
+            field: APP_LOG73_DXCC_PFX,
+            key: [APP_LOG73_DXCC_PFX],
+            exclude_call_suffixes: [/MM],
+          }
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}
+      export_fields:
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, required: false}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-address-city, key: ADDRESS-CITY, label: Address City, type: String:45, required: false, preserve_case: true}
+        - {id: export-address-state-province, key: ADDRESS-STATE-PROVINCE, label: Address State/Province, type: String:45, required: false, preserve_case: true}
+        - {id: export-address-postalcode, key: ADDRESS-POSTALCODE, label: Address Postal Code, type: String:16, required: false, preserve_case: true}
+        - {id: export-address-country, key: ADDRESS-COUNTRY, label: Address Country, type: String:45, required: false, preserve_case: true}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://www.cqmmdx.com/rules
+      notes: >-
+        CW only on 80, 40, 20, 15, and 10 meters. CQMM exchanges are a continent abbreviation
+        with an optional M, Q, Y, or C code. QSO points, South American prefix multipliers,
+        and DXCC multipliers follow the contest rules; operating restrictions and category
+        eligibility remain operator-enforced.
+    profiles:
+      - cw-mode

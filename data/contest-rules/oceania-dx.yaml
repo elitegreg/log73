@@ -1,0 +1,107 @@
+schema: 2
+contests:
+  OCEANIA-DX-CW:
+    name: Oceania DX Contest (CW)
+    setup_fields:
+      - id: header-category-operator
+        preset: category-operator
+        type: String:24
+        default: SINGLE-OP
+        valid_values: [SINGLE-OP, MULTI-OP, SWL, CHECKLOG]
+      - id: header-category-band
+        preset: category-band
+        default: ALL
+        valid_values: [ALL, 160M, 80M, 40M, 20M, 15M, 10M]
+      - id: header-category-power
+        preset: category-power
+        default: HIGH
+        valid_values: [QRP, LOW, HIGH]
+      - id: header-category-transmitter
+        preset: category-transmitter
+        default: ONE
+        valid_values: [ONE, TWO, UNLIMITED]
+        multi_single_has_mult_transmitter: true
+    exchange:
+      - id: rst-sent
+        preset: rst-sent
+      - id: serial-sent
+        label: Serial(s)
+        type: Serial:6
+        adif: STX
+        direction: sent
+        serial_scope: band
+      - id: rst-received
+        preset: rst-received
+      - id: serial-received
+        label: Serial
+        type: Serial:6
+        adif: SRX
+        direction: received
+    scoring:
+      qso_points:
+        category_band_param: CATEGORY-BAND
+        rules:
+          - {id: qso-oc-station-160m, when_all: [{field: MY_CONT, values: [OC]}, {field: BAND, values: [160M]}], points: 20}
+          - {id: qso-oc-station-80m, when_all: [{field: MY_CONT, values: [OC]}, {field: BAND, values: [80M]}], points: 10}
+          - {id: qso-oc-station-40m, when_all: [{field: MY_CONT, values: [OC]}, {field: BAND, values: [40M]}], points: 5}
+          - {id: qso-oc-station-20m, when_all: [{field: MY_CONT, values: [OC]}, {field: BAND, values: [20M]}], points: 1}
+          - {id: qso-oc-station-15m, when_all: [{field: MY_CONT, values: [OC]}, {field: BAND, values: [15M]}], points: 2}
+          - {id: qso-oc-station-10m, when_all: [{field: MY_CONT, values: [OC]}, {field: BAND, values: [10M]}], points: 3}
+          - {id: qso-oc-contact-160m, when_all: [{field: CONT, values: [OC]}, {field: BAND, values: [160M]}], points: 20}
+          - {id: qso-oc-contact-80m, when_all: [{field: CONT, values: [OC]}, {field: BAND, values: [80M]}], points: 10}
+          - {id: qso-oc-contact-40m, when_all: [{field: CONT, values: [OC]}, {field: BAND, values: [40M]}], points: 5}
+          - {id: qso-oc-contact-20m, when_all: [{field: CONT, values: [OC]}, {field: BAND, values: [20M]}], points: 1}
+          - {id: qso-oc-contact-15m, when_all: [{field: CONT, values: [OC]}, {field: BAND, values: [15M]}], points: 2}
+          - {id: qso-oc-contact-10m, when_all: [{field: CONT, values: [OC]}, {field: BAND, values: [10M]}], points: 3}
+          - {id: qso-ineligible, points: 0}
+      dupe_key: [CALL, BAND]
+      multipliers:
+        - {
+            id: mult-prefix-oc-station,
+            name: Prefix,
+            field: WPX_PREFIX,
+            key: [WPX_PREFIX, BAND],
+            when: {field: MY_CONT, values: [OC]},
+            exclude_call_suffixes: [/MM, /M, /A, /E, /J, /P],
+          }
+        - {
+            id: mult-prefix-oc-contact,
+            name: Prefix,
+            field: WPX_PREFIX,
+            key: [WPX_PREFIX, BAND],
+            when: {field: CONT, values: [OC]},
+            exclude_call_suffixes: [/MM, /M, /A, /E, /J, /P],
+          }
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: CW}
+      export_fields:
+        - {id: export-location, key: LOCATION, label: Location, type: String:32, required: false}
+        - {id: export-club, preset: export-club-optional}
+        - {id: export-email, preset: export-email-optional}
+        - {id: export-name, preset: export-name-optional}
+        - {id: export-address, preset: export-address-optional}
+        - {id: export-address-city, key: ADDRESS-CITY, label: Address City, type: String:45, required: false, preserve_case: true}
+        - {id: export-address-state-province, key: ADDRESS-STATE-PROVINCE, label: Address State/Province, type: String:45, required: false, preserve_case: true}
+        - {id: export-address-postalcode, key: ADDRESS-POSTALCODE, label: Address Postal Code, type: String:16, required: false, preserve_case: true}
+        - {id: export-address-country, key: ADDRESS-COUNTRY, label: Address Country, type: String:45, required: false, preserve_case: true}
+        - {id: export-soapbox, preset: export-soapbox-optional}
+    metadata:
+      source: https://www.oceaniadxcontest.com/rules
+      notes: >-
+        CW only on 160, 80, 40, 20, 15, and 10 meters. Oceania stations may work all stations;
+        non-Oceania stations receive points and multiplier credit only for Oceania contacts.
+        QSO points are 20/10/5/1/2/3 from 160 through 10 meters. Prefixes are WPX-style and
+        count once per band; maritime-mobile and other excluded suffixes do not count as prefixes.
+        Single-band logs may include contacts from other bands, but only the selected band scores.
+        Operating, SWL, category, and band-change restrictions remain operator-enforced.
+    profiles:
+      - hf-bands
+      - cw-mode
+  OCEANIA-DX-SSB:
+    name: Oceania DX Contest (SSB)
+    modes: [SSB]
+    cabrillo:
+      fixed_headers:
+        - {id: fixed-category-mode, name: CATEGORY-MODE, value: SSB}
+    extends: OCEANIA-DX-CW
