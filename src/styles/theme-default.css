@@ -25,6 +25,7 @@ body.theme-default .band-map-title-bar {
 }
 body.theme-default .radio-controls,
 body.theme-default .status-bar,
+body.theme-default .qso-rate-table,
 body.theme-default .log-table th {
   background-color: #c0c0c0;
   color: #000000;

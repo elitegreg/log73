@@ -23,6 +23,7 @@ body.theme-classic-terminal .log-title-bar,
 body.theme-classic-terminal .band-map-title-bar,
 body.theme-classic-terminal .radio-controls,
 body.theme-classic-terminal .status-bar,
+body.theme-classic-terminal .qso-rate-table,
 body.theme-classic-terminal .log-table th {
   background-color: #001b08;
   color: #33ff66;

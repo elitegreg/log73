@@ -28,6 +28,7 @@ import { useLoggerContext } from './loggerScreen/useLoggerContext';
 import { useLoggerImage } from './loggerScreen/useLoggerImage';
 import { useOperationalErrorReporter } from './loggerScreen/useOperationalErrorReporter';
 import { useRadioSocket } from './loggerScreen/useRadioSocket';
+import { useQsoStats } from './loggerScreen/useQsoStats';
 import { useSerialAllocator } from './loggerScreen/useSerialAllocator';
 import { appendPendingContact } from './loggerScreen/contactsOutboxState';
 import { createSessionId, getSessionId } from './loggerScreenHelpers';
@@ -154,6 +155,17 @@ function LoggerScreen() {
     notifyOperationalError,
     notifyOfflineCachingDegraded,
   });
+
+  const { overallStats, currentOperatorStats, refreshStats } = useQsoStats({
+    numericLogId,
+    operatorCallsign,
+    backendSocketStatus,
+    notifyOperationalError,
+  });
+
+  useEffect(() => {
+    void refreshStats();
+  }, [allContacts, refreshStats]);
 
   const {
     serialAllocationStatus,
@@ -430,6 +442,8 @@ function LoggerScreen() {
               onRescore={handleRescore}
               isRescoreLoading={false}
               scoreSummary={scoreSummary}
+              overallQsoStats={overallStats}
+              operatorQsoStats={currentOperatorStats}
               serialAllocation={serialAllocationStatus}
               onSerialContactLogged={handleSerialContactLogged}
               onExit={exitLogger}

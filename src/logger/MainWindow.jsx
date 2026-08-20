@@ -114,6 +114,8 @@ function MainWindow({
   onRescore,
   isRescoreLoading,
   scoreSummary,
+  overallQsoStats,
+  operatorQsoStats,
   serialAllocation,
   onSerialContactLogged,
   onExit,
@@ -1234,6 +1236,8 @@ function MainWindow({
         stationCallsign={stationCallsign}
         operatorCallsign={operatorCallsign}
         scoreSummary={scoreSummary}
+        overallQsoStats={overallQsoStats}
+        operatorQsoStats={operatorQsoStats}
       />
     </div>
   );

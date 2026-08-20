@@ -25,6 +25,7 @@ body.theme-clean-light-desktop .band-map-title-bar {
 }
 body.theme-clean-light-desktop .radio-controls,
 body.theme-clean-light-desktop .status-bar,
+body.theme-clean-light-desktop .qso-rate-table,
 body.theme-clean-light-desktop .log-table th {
   background-color: #cbd5e1;
   color: #1f2937;

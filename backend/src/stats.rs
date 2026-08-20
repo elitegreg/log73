@@ -9,21 +9,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const LAST_10_CONTACTS: usize = 10;
 const LAST_100_CONTACTS: usize = 100;
-const LAST_30_MINUTES_SECONDS: i64 = 30 * 60;
-const LAST_60_MINUTES_SECONDS: i64 = 60 * 60;
+const HOUR_SECONDS: i64 = 60 * 60;
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct RateStat {
     pub qso_count: usize,
-    pub rate_per_hour: f64,
+    pub rate_per_hour: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct LogWindowStats {
     pub last_10_contacts: RateStat,
     pub last_100_contacts: RateStat,
-    pub last_30_minutes: RateStat,
-    pub last_60_minutes: RateStat,
+    pub moving_hour: RateStat,
+    pub clock_hour: RateStat,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -205,11 +204,13 @@ fn stats_entry_cmp(left: &StatsEntry, right: &StatsEntry) -> Ordering {
 }
 
 fn window_stats(entries: &[StatsEntry], now: i64) -> LogWindowStats {
+    let eligible_end = entries.partition_point(|entry| entry.epoch <= now);
+    let eligible_entries = &entries[..eligible_end];
     LogWindowStats {
-        last_10_contacts: contact_window_rate(entries, LAST_10_CONTACTS),
-        last_100_contacts: contact_window_rate(entries, LAST_100_CONTACTS),
-        last_30_minutes: time_window_rate(entries, now, LAST_30_MINUTES_SECONDS),
-        last_60_minutes: time_window_rate(entries, now, LAST_60_MINUTES_SECONDS),
+        last_10_contacts: contact_window_rate(eligible_entries, LAST_10_CONTACTS),
+        last_100_contacts: contact_window_rate(eligible_entries, LAST_100_CONTACTS),
+        moving_hour: moving_hour_rate(eligible_entries, now),
+        clock_hour: clock_hour_rate(eligible_entries, now),
     }
 }
 
@@ -218,36 +219,50 @@ fn contact_window_rate(entries: &[StatsEntry], size: usize) -> RateStat {
     if count == 0 {
         return RateStat {
             qso_count: 0,
-            rate_per_hour: 0.0,
+            rate_per_hour: None,
         };
     }
     if count == 1 {
         return RateStat {
             qso_count: 1,
-            rate_per_hour: 0.0,
+            rate_per_hour: None,
         };
     }
 
     let window = &entries[entries.len() - count..];
-    let span_seconds = (window.last().map(|entry| entry.epoch).unwrap_or(0)
-        - window.first().map(|entry| entry.epoch).unwrap_or(0))
-    .max(1);
+    let span_seconds = window.last().map(|entry| entry.epoch).unwrap_or(0)
+        - window.first().map(|entry| entry.epoch).unwrap_or(0);
 
     RateStat {
         qso_count: count,
-        rate_per_hour: count as f64 * 3600.0 / span_seconds as f64,
+        rate_per_hour: (span_seconds > 0)
+            .then(|| (count - 1) as f64 * HOUR_SECONDS as f64 / span_seconds as f64),
     }
 }
 
-fn time_window_rate(entries: &[StatsEntry], now: i64, window_seconds: i64) -> RateStat {
-    let threshold = now - window_seconds;
-    let count = entries
+fn entries_in_time_window(entries: &[StatsEntry], start: i64, end: i64) -> usize {
+    entries
         .iter()
-        .filter(|entry| entry.epoch >= threshold && entry.epoch <= now)
-        .count();
+        .filter(|entry| entry.epoch >= start && entry.epoch <= end)
+        .count()
+}
+
+fn moving_hour_rate(entries: &[StatsEntry], now: i64) -> RateStat {
+    let count = entries_in_time_window(entries, now - HOUR_SECONDS, now);
     RateStat {
         qso_count: count,
-        rate_per_hour: count as f64 * 3600.0 / window_seconds as f64,
+        rate_per_hour: Some(count as f64),
+    }
+}
+
+fn clock_hour_rate(entries: &[StatsEntry], now: i64) -> RateStat {
+    let elapsed_seconds = now.rem_euclid(HOUR_SECONDS);
+    let start = now - elapsed_seconds;
+    let count = entries_in_time_window(entries, start, now);
+    RateStat {
+        qso_count: count,
+        rate_per_hour: (elapsed_seconds > 0)
+            .then(|| count as f64 * HOUR_SECONDS as f64 / elapsed_seconds as f64),
     }
 }
 
@@ -298,17 +313,17 @@ mod tests {
         let snapshot = tracker.snapshot(7).expect("stats should exist");
         assert_eq!(snapshot.overall.last_10_contacts.qso_count, 4);
         assert_eq!(snapshot.overall.last_100_contacts.qso_count, 4);
-        assert_eq!(snapshot.overall.last_30_minutes.qso_count, 2);
-        assert_eq!(snapshot.overall.last_60_minutes.qso_count, 4);
-        assert!(snapshot.overall.last_10_contacts.rate_per_hour > 0.0);
+        assert_eq!(snapshot.overall.moving_hour.qso_count, 4);
+        assert_eq!(snapshot.overall.clock_hour.qso_count, 1);
+        assert!(snapshot.overall.last_10_contacts.rate_per_hour.unwrap() > 0.0);
 
         let k1aaa = snapshot.by_operator.get("K1AAA").expect("operator exists");
         assert_eq!(k1aaa.last_10_contacts.qso_count, 3);
-        assert_eq!(k1aaa.last_30_minutes.qso_count, 1);
+        assert_eq!(k1aaa.clock_hour.qso_count, 1);
 
         let n1bbb = snapshot.by_operator.get("N1BBB").expect("operator exists");
         assert_eq!(n1bbb.last_10_contacts.qso_count, 1);
-        assert_eq!(n1bbb.last_10_contacts.rate_per_hour, 0.0);
+        assert_eq!(n1bbb.last_10_contacts.rate_per_hour, None);
     }
 
     #[test]
@@ -327,7 +342,7 @@ mod tests {
         assert!(!snapshot.by_operator.contains_key("K1AAA"));
         let n1bbb = snapshot.by_operator.get("N1BBB").expect("operator exists");
         assert_eq!(n1bbb.last_10_contacts.qso_count, 1);
-        assert_eq!(snapshot.overall.last_30_minutes.qso_count, 1);
+        assert_eq!(snapshot.overall.moving_hour.qso_count, 1);
     }
 
     #[test]
@@ -342,5 +357,98 @@ mod tests {
         let snapshot = tracker.snapshot(9).expect("stats should exist");
         assert_eq!(snapshot.overall.last_10_contacts.qso_count, 1);
         assert_eq!(snapshot.by_operator["K1AAA"].last_10_contacts.qso_count, 1);
+    }
+
+    #[test]
+    fn contact_window_rate_uses_inter_contact_intervals() {
+        let entries = (0..10)
+            .map(|index| StatsEntry {
+                id: index,
+                epoch: index * 60,
+                operator: "K1AAA".to_string(),
+            })
+            .collect::<Vec<_>>();
+
+        let rate = contact_window_rate(&entries, LAST_10_CONTACTS);
+        assert_eq!(rate.qso_count, 10);
+        assert_eq!(rate.rate_per_hour, Some(60.0));
+    }
+
+    #[test]
+    fn contact_window_rate_is_unavailable_without_a_positive_span() {
+        let one = vec![StatsEntry {
+            id: 1,
+            epoch: 100,
+            operator: "K1AAA".to_string(),
+        }];
+        let simultaneous = vec![
+            one[0].clone(),
+            StatsEntry {
+                id: 2,
+                ..one[0].clone()
+            },
+        ];
+
+        assert_eq!(
+            contact_window_rate(&[], LAST_10_CONTACTS).rate_per_hour,
+            None
+        );
+        assert_eq!(
+            contact_window_rate(&one, LAST_10_CONTACTS).rate_per_hour,
+            None
+        );
+        assert_eq!(
+            contact_window_rate(&simultaneous, LAST_10_CONTACTS).rate_per_hour,
+            None
+        );
+    }
+
+    #[test]
+    fn moving_and_clock_hours_use_utc_time_boundaries() {
+        let now = 13 * HOUR_SECONDS + 28 * 60;
+        let entries = vec![
+            StatsEntry {
+                id: 1,
+                epoch: now - HOUR_SECONDS,
+                operator: String::new(),
+            },
+            StatsEntry {
+                id: 2,
+                epoch: 13 * HOUR_SECONDS,
+                operator: String::new(),
+            },
+            StatsEntry {
+                id: 3,
+                epoch: now,
+                operator: String::new(),
+            },
+            StatsEntry {
+                id: 4,
+                epoch: now + 1,
+                operator: String::new(),
+            },
+        ];
+
+        assert_eq!(moving_hour_rate(&entries, now).qso_count, 3);
+        let clock = clock_hour_rate(&entries, now);
+        assert_eq!(clock.qso_count, 2);
+        assert_eq!(clock.rate_per_hour, Some(2.0 * 60.0 / 28.0));
+    }
+
+    #[test]
+    fn snapshot_excludes_future_contacts_from_every_window() {
+        let tracker = test_tracker(10_000);
+        let mut contacts = vec![
+            contact(1, 9_900, "K1AAA"),
+            contact(2, 9_950, "K1AAA"),
+            contact(3, 10_001, "K1AAA"),
+        ];
+        tracker.on_log_loaded(11, module(), &mut contacts);
+
+        let snapshot = tracker.snapshot(11).expect("stats should exist");
+        assert_eq!(snapshot.overall.last_10_contacts.qso_count, 2);
+        assert_eq!(snapshot.overall.last_100_contacts.qso_count, 2);
+        assert_eq!(snapshot.overall.moving_hour.qso_count, 2);
+        assert_eq!(snapshot.overall.clock_hour.qso_count, 2);
     }
 }

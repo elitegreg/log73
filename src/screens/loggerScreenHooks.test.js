@@ -32,6 +32,64 @@ import {
   serialStateFromBackend,
   unavailableSerialMessage,
 } from './loggerScreen/serialAllocatorState.js';
+import {
+  backendIsMarkedOffline,
+  formatQsoRate,
+  operatorStats,
+  reportQsoStatsFailure,
+} from './loggerScreen/qsoStatsState.js';
+
+test('QSO stats helpers select operators and format unavailable rates', () => {
+  const stats = {
+    by_operator: {
+      K1AAA: { moving_hour: { rate_per_hour: 42.6 } },
+    },
+  };
+
+  assert.equal(operatorStats(stats, ' k1aaa '), stats.by_operator.K1AAA);
+  assert.equal(operatorStats(stats, ''), null);
+  assert.equal(formatQsoRate({ rate_per_hour: 42.6 }), '43');
+  assert.equal(formatQsoRate({ rate_per_hour: null }), '—');
+  assert.equal(formatQsoRate(null), '—');
+  assert.equal(backendIsMarkedOffline('disconnected'), true);
+  assert.equal(backendIsMarkedOffline('connecting'), true);
+  assert.equal(backendIsMarkedOffline('connected'), false);
+});
+
+test('offline QSO stats failures log without showing another error', () => {
+  const logged = [];
+  const notified = [];
+  const error = new Error('backend unavailable');
+  reportQsoStatsFailure({
+    error,
+    backendSocketStatus: 'disconnected',
+    notifyOperationalError: (...args) => notified.push(args),
+    logId: 7,
+    logger: { error: (...args) => logged.push(args) },
+  });
+
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0][1], error);
+  assert.deepEqual(notified, []);
+});
+
+test('online QSO stats failures are logged and visibly reported', () => {
+  const logged = [];
+  const notified = [];
+  const error = new Error('stats failed');
+  reportQsoStatsFailure({
+    error,
+    backendSocketStatus: 'connected',
+    notifyOperationalError: (...args) => notified.push(args),
+    logId: 9,
+    logger: { error: (...args) => logged.push(args) },
+  });
+
+  assert.equal(logged.length, 1);
+  assert.deepEqual(notified, [
+    ['loadQsoStats', 'Unable to load QSO rates.', error, { logId: 9 }],
+  ]);
+});
 
 test('websocket debug helpers format labels and clamp detail length', () => {
   assert.equal(websocketReadyStateLabel(0), 'connecting');

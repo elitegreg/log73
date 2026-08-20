@@ -25,6 +25,7 @@ body.theme-modern-dark-radio .band-map-title-bar {
 }
 body.theme-modern-dark-radio .radio-controls,
 body.theme-modern-dark-radio .status-bar,
+body.theme-modern-dark-radio .qso-rate-table,
 body.theme-modern-dark-radio .log-table th {
   background-color: #374151;
   color: #f9fafb;

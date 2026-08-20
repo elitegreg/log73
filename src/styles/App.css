@@ -296,6 +296,31 @@
   border-top: 1px solid #808080;
 }
 
+.qso-rate-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background-color: #d3d3d3;
+  border-top: 1px solid #808080;
+  font-variant-numeric: tabular-nums;
+}
+
+.qso-rate-table th,
+.qso-rate-table td {
+  padding: 1px 6px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.qso-rate-table th:first-child {
+  width: 28%;
+  text-align: left;
+}
+
+.qso-rate-table thead th {
+  font-size: 11px;
+}
+
 .logger-workspace {
   display: flex;
   align-items: flex-start;

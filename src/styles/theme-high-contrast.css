@@ -26,6 +26,7 @@ body.theme-high-contrast .band-map-title-bar {
 }
 body.theme-high-contrast .radio-controls,
 body.theme-high-contrast .status-bar,
+body.theme-high-contrast .qso-rate-table,
 body.theme-high-contrast .log-table th {
   background-color: #1e293b;
   color: #ffffff;
