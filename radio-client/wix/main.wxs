@@ -86,7 +86,7 @@
 
         <Directory Id='TARGETDIR' Name='SourceDir'>
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
-                <Directory Id='APPLICATIONFOLDER' Name='log73-radio-client'>
+                <Directory Id='APPLICATIONFOLDER' Name='log73'>
                     
                     <!--
                       Enabling the license sidecar file in the installer is a four step process:
@@ -130,12 +130,33 @@
                     </Directory>
                 </Directory>
             </Directory>
+            <Directory Id='ProgramMenuFolder'>
+                <Directory Id='Log73RadioClientStartMenuFolder' Name='log73'>
+                    <Component Id='RadioClientStartMenuShortcut' Guid='B1F75340-6F27-494A-8B16-146AF32D304E'>
+                        <Shortcut
+                            Id='RadioClientShortcut'
+                            Name='log73-radio-client'
+                            Description='Standalone Log73 client-side radio controller'
+                            Target='[Bin]log73-radio-client.exe'
+                            WorkingDirectory='Bin'
+                            Icon='ProductIcon'/>
+                        <RemoveFolder Id='RemoveLog73RadioClientStartMenuFolder' On='uninstall'/>
+                        <RegistryValue
+                            Root='HKLM'
+                            Key='Software\Log73\log73-radio-client'
+                            Name='StartMenuShortcut'
+                            Type='integer'
+                            Value='1'
+                            KeyPath='yes'/>
+                    </Component>
+                </Directory>
+            </Directory>
         </Directory>
 
         <Feature
             Id='Binaries'
             Title='Application'
-            Description='Installs all binaries and the license.'
+            Description='Installs the standalone log73-radio-client application.'
             Level='1'
             ConfigurableDirectory='APPLICATIONFOLDER'
             AllowAdvertise='no'
@@ -149,6 +170,7 @@
             <!--<ComponentRef Id='License'/>-->
 
             <ComponentRef Id='binary0'/>
+            <ComponentRef Id='RadioClientStartMenuShortcut'/>
 
             <Feature
                 Id='Environment'
@@ -169,8 +191,8 @@
           The product icon is the graphic that appears in the Add/Remove
           Programs control panel for the application.
         -->
-        <!--<Icon Id='ProductICO' SourceFile='wix\Product.ico'/>-->
-        <!--<Property Id='ARPPRODUCTICON' Value='ProductICO' />-->
+        <Icon Id='ProductIcon' SourceFile='..\..\static\app.ico'/>
+        <Property Id='ARPPRODUCTICON' Value='ProductIcon'/>
 
         <Property Id='ARPHELPLINK' Value='https://github.com/elitegreg/log73'/>
         

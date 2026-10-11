@@ -1,0 +1,62 @@
+[package]
+name = "log73-launcher"
+version = "0.2.0"
+edition = "2024"
+repository = "https://github.com/elitegreg/log73"
+authors = ["Greg Mitchell <greg@ng4m.dev>"]
+description = "Log73 amateur radio contest logger"
+
+[package.metadata.dist]
+dist = true
+include = ["../data"]
+
+[package.metadata.wix]
+upgrade-guid = "AB4F82E7-85DA-4C2E-899F-C1548A9F075E"
+path-guid = "0A5E09FE-291F-4E99-AB3A-6F963DC408BC"
+license = false
+eula = false
+
+[[bin]]
+name = "log73-backend"
+path = "../backend/src/main.rs"
+
+[[bin]]
+name = "log73-launcher"
+path = "../launcher/src/main.rs"
+
+[dependencies]
+argon2 = "0.5"
+axum = { version = "0.8", features = ["ws"] }
+backon = "1.6.0"
+base64 = "0.22.1"
+clap = { version = "4.6.1", features = ["derive"] }
+csv = "1"
+dxcllistener = { git = "https://github.com/elitegreg/dxcllistener.git" }
+dxclparser = "1.0.1"
+futures-util = "0.3"
+iced = { version = "0.13", default-features = false, features = ["tiny-skia", "tokio", "image", "fira-sans"] }
+log73-paths = { path = "../paths" }
+mime_guess = "2.0.5"
+open = "5"
+radif = "0.4.0"
+radio-io = { path = "../radio-io" }
+rand_core = { version = "0.6", features = ["getrandom"] }
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+rust-embed = "8.11.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+shared_child = "1"
+tokio = { version = "1", features = ["macros", "net", "rt", "rt-multi-thread", "signal", "sync", "time", "test-util"] }
+toml = "0.8"
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+url = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal", "process"] }

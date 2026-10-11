@@ -140,7 +140,7 @@ Runtime path defaults:
 - Linux config: `~/.config/log73/`
 - Linux data: `~/.local/share/log73/`
 - Linux contest rules: `~/.local/share/log73/contest-rules/`
-- Linux application root/app dir: `/opt/log73/` (`bin/log73-backend` under that root)
+- Linux launcher application root/app dir: `/opt/log73/` (`bin/log73-backend` under that root)
 - macOS and Windows use their platform-specific Log73 config/data/app directories.
 
 Run the production backend from a source checkout:
@@ -175,7 +175,8 @@ make radio-client-build
 ./target/debug/log73-radio-client
 ```
 
-Release packages install it as `/opt/log73/bin/log73-radio-client` and provide
+The standalone Linux package installs it as
+`/opt/log73/bin/log73-radio-client` and provides
 a separate **log73-radio-client** desktop entry. The client binds its local
 WebSocket only to `127.0.0.1` on an ephemeral port, then registers that URL
 with the configured backend. `127.0.0.1` therefore means the computer running
@@ -227,12 +228,21 @@ another operator.
 ## Release packages
 
 Release packaging is configured with `cargo-dist` in `dist-workspace.toml`.
-Tag pushes such as `v0.1.0` run `.github/workflows/release.yml`, building:
+Tag pushes such as `v0.1.0` run `.github/workflows/release.yml`. Each release
+publishes two independent applications on every platform:
+
+- `log73-launcher`, which includes `log73-backend` and `data`
+- `log73-radio-client`, which contains only the standalone radio client
 
 - Windows `.msi` installers from cargo-dist
-- macOS `.pkg` installers from cargo-dist
+- macOS `.pkg` installers containing `log73-launcher.app` and
+  `log73-radio-client.app` separately
 - Linux `.deb` and `.rpm` packages with nFPM, using cargo-dist-built binaries
-- cargo-dist archive artifacts for all configured targets
+- cargo-dist archive artifacts for both applications and all configured targets
+
+The launcher packages install `data` alongside their executable directory.
+Application documentation is embedded in `log73-backend`. The radio client
+packages have no launcher, backend, or shared-data dependency.
 
 The release workflow builds frontend assets first so `log73-backend` embeds the current `dist/` output.
 
@@ -249,7 +259,8 @@ Linux native packages can be built with:
 make deb
 ```
 
-This uses `DEB_TARGET=x86_64-unknown-linux-gnu` and the backend crate version by default. Override them when needed:
+This uses `DEB_TARGET=x86_64-unknown-linux-gnu` and the `log73-launcher`
+package version by default. Override them when needed:
 
 ```bash
 make deb DEB_TARGET=aarch64-unknown-linux-gnu VERSION=0.1.0

@@ -1,11 +1,12 @@
 DEB_TARGET ?= x86_64-unknown-linux-gnu
-VERSION ?= $(shell awk -F '"' '/^version =/ { print $$2; exit }' backend/Cargo.toml)
+VERSION ?= $(shell awk -F '"' '/^version =/ { print $$2; exit }' bundle/Cargo.toml)
 DIST ?= $(shell command -v dist 2>/dev/null || printf '%s' "$$HOME/.cargo/bin/dist")
 NFPM ?= $(shell command -v nfpm 2>/dev/null || { command -v go >/dev/null 2>&1 && printf '%s' "$$(go env GOPATH)/bin/nfpm"; } || printf '%s' nfpm)
 
-.PHONY: all release deb package-smoke verify-radio-client help \
+.PHONY: all release deb package-smoke launcher-package-smoke radio-client-package-smoke verify-radio-client wix-assets-check help \
 	backend launcher frontend \
 	radio-client \
+	bundle-build bundle-release \
 	backend-build backend-release backend-test backend-fmt backend-lint \
 	launcher-build launcher-test launcher-fmt launcher-lint launcher-run \
 	frontend-build frontend-release frontend-test frontend-fmt frontend-lint \
@@ -13,9 +14,9 @@ NFPM ?= $(shell command -v nfpm 2>/dev/null || { command -v go >/dev/null 2>&1 &
 
 all: backend-build launcher-build frontend-build radio-client-build
 
-ci: backend-lint frontend-lint backend-test frontend-test frontend-build radio-client-test radio-client-build
+ci: wix-assets-check backend-lint frontend-lint backend-test frontend-test frontend-build radio-client-test radio-client-build bundle-build
 
-release: backend-release launcher-build frontend-release radio-client-build
+release: bundle-release
 
 deb:
 	@if ! command -v "$(DIST)" >/dev/null 2>&1 && [ ! -x "$(DIST)" ]; then \
@@ -26,21 +27,33 @@ deb:
 	"$(DIST)" build --artifacts=local --target="$(DEB_TARGET)" --allow-dirty
 	NFPM="$(NFPM)" scripts/build_native_linux_packages.sh "$(DEB_TARGET)" "$(VERSION)"
 
-package-smoke:
+package-smoke: launcher-package-smoke radio-client-package-smoke
+
+launcher-package-smoke: bundle-build
+	@tmp_dir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$tmp_dir"' EXIT; \
+	install -d "$$tmp_dir/opt/log73/bin" "$$tmp_dir/opt/log73/data" "$$tmp_dir/usr/share/applications" "$$tmp_dir/usr/share/icons/hicolor/512x512/apps"; \
+	install -m 0755 target/debug/log73-backend "$$tmp_dir/opt/log73/bin/log73-backend"; \
+	install -m 0755 target/debug/log73-launcher "$$tmp_dir/opt/log73/bin/log73-launcher"; \
+	cp -R data/. "$$tmp_dir/opt/log73/data/"; \
+	install -m 0644 static/log73-icon-512.png "$$tmp_dir/usr/share/icons/hicolor/512x512/apps/log73-launcher.png"; \
+	printf '%s\n' '[Desktop Entry]' 'Name=log73-launcher' 'Exec=/opt/log73/bin/log73-launcher' > "$$tmp_dir/usr/share/applications/log73-launcher.desktop"; \
+	scripts/check_native_package_contents.sh launcher "$$tmp_dir"
+
+radio-client-package-smoke: radio-client-build
 	@tmp_dir="$$(mktemp -d)"; \
 	trap 'rm -rf "$$tmp_dir"' EXIT; \
 	install -d "$$tmp_dir/opt/log73/bin" "$$tmp_dir/usr/share/applications" "$$tmp_dir/usr/share/icons/hicolor/512x512/apps"; \
-	install -m 0755 target/debug/log73-backend "$$tmp_dir/opt/log73/bin/log73-backend"; \
-	install -m 0755 target/debug/log73-launcher "$$tmp_dir/opt/log73/bin/log73-launcher"; \
 	install -m 0755 target/debug/log73-radio-client "$$tmp_dir/opt/log73/bin/log73-radio-client"; \
-	install -m 0644 static/log73-icon-512.png "$$tmp_dir/usr/share/icons/hicolor/512x512/apps/log73.png"; \
 	install -m 0644 static/log73-icon-512.png "$$tmp_dir/usr/share/icons/hicolor/512x512/apps/log73-radio-client.png"; \
-	printf '%s\n' '[Desktop Entry]' 'Name=log73-launcher' 'Exec=/opt/log73/bin/log73-launcher' > "$$tmp_dir/usr/share/applications/log73.desktop"; \
 	printf '%s\n' '[Desktop Entry]' 'Name=log73-radio-client' 'Exec=/opt/log73/bin/log73-radio-client' > "$$tmp_dir/usr/share/applications/log73-radio-client.desktop"; \
-	scripts/check_native_package_contents.sh "$$tmp_dir"
+	scripts/check_native_package_contents.sh radio-client "$$tmp_dir"
 
 verify-radio-client:
 	scripts/verify_radio_client.sh
+
+wix-assets-check:
+	node scripts/generate_wix_assets.mjs --check
 
 help:
 	mkdir -p docs/help
@@ -55,6 +68,12 @@ launcher: launcher-fmt launcher-lint launcher-test launcher-build
 frontend: frontend-fmt frontend-lint frontend-test frontend-build
 
 radio-client: radio-client-fmt radio-client-lint radio-client-test radio-client-build
+
+bundle-build:
+	cargo build -p log73-launcher --bins
+
+bundle-release: frontend-release
+	cargo build --release -p log73-launcher --bins
 
 backend-build:
 	cargo build -p log73-backend

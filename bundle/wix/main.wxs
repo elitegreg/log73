@@ -1,0 +1,122 @@
+<?xml version='1.0' encoding='windows-1252'?>
+<?if $(sys.BUILDARCH) = x64 or $(sys.BUILDARCH) = arm64 ?>
+  <?define PlatformProgramFilesFolder = "ProgramFiles64Folder" ?>
+<?else ?>
+  <?define PlatformProgramFilesFolder = "ProgramFilesFolder" ?>
+<?endif ?>
+<Wix xmlns='http://schemas.microsoft.com/wix/2006/wi'>
+  <Product
+      Id='*'
+      Name='log73-launcher'
+      UpgradeCode='AB4F82E7-85DA-4C2E-899F-C1548A9F075E'
+      Manufacturer='Greg Mitchell'
+      Language='1033'
+      Codepage='1252'
+      Version='$(var.Version)'>
+    <Package
+        Id='*'
+        Keywords='Installer'
+        Manufacturer='Greg Mitchell'
+        InstallerVersion='450'
+        Languages='1033'
+        Compressed='yes'
+        InstallScope='perMachine'
+        SummaryCodepage='1252'/>
+
+    <MajorUpgrade
+        Schedule='afterInstallInitialize'
+        DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
+    <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
+    <Property Id='DiskPrompt' Value='log73-launcher Installation'/>
+
+    <Directory Id='TARGETDIR' Name='SourceDir'>
+      <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>
+        <Directory Id='APPLICATIONFOLDER' Name='log73'>
+          <Directory Id='Bin' Name='bin'>
+            <Component Id='Path' Guid='0A5E09FE-291F-4E99-AB3A-6F963DC408BC' KeyPath='yes'>
+              <Environment
+                  Id='PATH'
+                  Name='PATH'
+                  Value='[Bin]'
+                  Permanent='no'
+                  Part='last'
+                  Action='set'
+                  System='yes'/>
+            </Component>
+            <Component Id='Backend' Guid='79A8307A-4D4B-4646-BAB0-8FFB1B66C18E'>
+              <File
+                  Id='BackendExe'
+                  Name='log73-backend.exe'
+                  DiskId='1'
+                  Source='$(var.CargoTargetBinDir)\log73-backend.exe'
+                  KeyPath='yes'/>
+            </Component>
+            <Component Id='Launcher' Guid='785874D8-D151-4BCA-9B99-30E43C28843C'>
+              <File
+                  Id='LauncherExe'
+                  Name='log73-launcher.exe'
+                  DiskId='1'
+                  Source='$(var.CargoTargetBinDir)\log73-launcher.exe'
+                  KeyPath='yes'/>
+            </Component>
+          </Directory>
+        </Directory>
+      </Directory>
+      <Directory Id='ProgramMenuFolder'>
+        <Directory Id='Log73StartMenuFolder' Name='log73'>
+          <Component Id='LauncherStartMenuShortcut' Guid='E829D3B3-5351-42E4-8D5F-85872EB4D8C1'>
+            <Shortcut
+                Id='LauncherShortcut'
+                Name='log73-launcher'
+                Description='Log73 amateur radio contest logger'
+                Target='[Bin]log73-launcher.exe'
+                WorkingDirectory='Bin'
+                Icon='ProductIcon'/>
+            <RemoveFolder Id='RemoveLog73StartMenuFolder' On='uninstall'/>
+            <RegistryValue
+                Root='HKLM'
+                Key='Software\Log73\log73-launcher'
+                Name='StartMenuShortcut'
+                Type='integer'
+                Value='1'
+                KeyPath='yes'/>
+          </Component>
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <Feature
+        Id='Binaries'
+        Title='Application'
+        Description='Installs log73-launcher, log73-backend, and data.'
+        Level='1'
+        ConfigurableDirectory='APPLICATIONFOLDER'
+        AllowAdvertise='no'
+        Display='expand'
+        Absent='disallow'>
+      <ComponentRef Id='Backend'/>
+      <ComponentRef Id='Launcher'/>
+      <ComponentRef Id='LauncherStartMenuShortcut'/>
+      <ComponentGroupRef Id='PackageAssets'/>
+      <Feature
+          Id='Environment'
+          Title='PATH Environment Variable'
+          Description='Add the install location to the PATH system environment variable.'
+          Level='1'
+          Absent='allow'>
+        <ComponentRef Id='Path'/>
+      </Feature>
+    </Feature>
+
+    <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
+    <Icon Id='ProductIcon' SourceFile='..\..\static\app.ico'/>
+    <Property Id='ARPPRODUCTICON' Value='ProductIcon'/>
+    <Property Id='ARPHELPLINK' Value='https://github.com/elitegreg/log73'/>
+    <UI>
+      <UIRef Id='WixUI_FeatureTree'/>
+      <Publish Dialog='WelcomeDlg' Control='Next' Event='NewDialog' Value='CustomizeDlg'>1</Publish>
+      <Publish Dialog='CustomizeDlg' Control='Back' Event='NewDialog' Value='WelcomeDlg'>1</Publish>
+    </UI>
+  </Product>
+  <?include assets.wxi ?>
+</Wix>

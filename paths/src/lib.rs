@@ -15,7 +15,12 @@ pub fn data_dir() -> PathBuf {
 }
 
 pub fn installed_data_dir(app_root: impl AsRef<Path>) -> PathBuf {
-    app_root.as_ref().join("data")
+    let app_root = app_root.as_ref();
+    if is_macos_app_bundle(app_root) {
+        app_root.join("Contents").join("Resources").join("data")
+    } else {
+        app_root.join("data")
+    }
 }
 
 pub fn contest_rules_dir(data_dir: impl AsRef<Path>) -> PathBuf {
@@ -46,9 +51,22 @@ pub fn app_root() -> PathBuf {
 }
 
 pub fn app_root_from_executable(executable: impl AsRef<Path>) -> Option<PathBuf> {
-    let bin_dir = executable.as_ref().parent()?;
-    if bin_dir.file_name().and_then(|name| name.to_str()) == Some("bin") {
-        return bin_dir.parent().map(Path::to_path_buf);
+    let executable_dir = executable.as_ref().parent()?;
+    if executable_dir.file_name().and_then(|name| name.to_str()) == Some("bin") {
+        return executable_dir.parent().map(Path::to_path_buf);
+    }
+
+    if matches!(
+        executable_dir.file_name().and_then(|name| name.to_str()),
+        Some("MacOS" | "Helpers")
+    ) {
+        let contents_dir = executable_dir.parent()?;
+        if contents_dir.file_name().and_then(|name| name.to_str()) == Some("Contents") {
+            let bundle_dir = contents_dir.parent()?;
+            if is_macos_app_bundle(bundle_dir) {
+                return Some(bundle_dir.to_path_buf());
+            }
+        }
     }
 
     None
@@ -61,7 +79,19 @@ pub fn backend_path(app_root: impl AsRef<Path>) -> PathBuf {
         "log73-backend"
     };
 
-    app_root.as_ref().join("bin").join(executable_name)
+    let app_root = app_root.as_ref();
+    if is_macos_app_bundle(app_root) {
+        app_root
+            .join("Contents")
+            .join("Helpers")
+            .join(executable_name)
+    } else {
+        app_root.join("bin").join(executable_name)
+    }
+}
+
+fn is_macos_app_bundle(path: &Path) -> bool {
+    path.extension().and_then(|extension| extension.to_str()) == Some("app")
 }
 
 fn fallback_config_dir() -> PathBuf {
@@ -138,7 +168,7 @@ fn default_app_root() -> PathBuf {
 
     #[cfg(target_os = "macos")]
     {
-        PathBuf::from("/Applications/log73")
+        PathBuf::from("/Applications/log73-launcher.app")
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -175,6 +205,27 @@ mod tests {
     }
 
     #[test]
+    fn app_root_is_macos_bundle_parent() {
+        let executable = Path::new("log73-launcher.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("log73-launcher");
+        assert_eq!(
+            app_root_from_executable(executable),
+            Some(PathBuf::from("log73-launcher.app"))
+        );
+
+        let helper = Path::new("log73-launcher.app")
+            .join("Contents")
+            .join("Helpers")
+            .join("log73-backend");
+        assert_eq!(
+            app_root_from_executable(helper),
+            Some(PathBuf::from("log73-launcher.app"))
+        );
+    }
+
+    #[test]
     fn derived_paths_live_under_data_dir() {
         let data_dir = Path::new("log73-data");
         assert_eq!(
@@ -196,6 +247,23 @@ mod tests {
         assert_eq!(
             installed_data_dir(Path::new("app-root")),
             Path::new("app-root").join("data")
+        );
+
+        let bundle_root = Path::new("log73-launcher.app");
+        assert_eq!(
+            installed_data_dir(bundle_root),
+            bundle_root.join("Contents").join("Resources").join("data")
+        );
+        assert_eq!(
+            backend_path(bundle_root),
+            bundle_root
+                .join("Contents")
+                .join("Helpers")
+                .join(if cfg!(windows) {
+                    "log73-backend.exe"
+                } else {
+                    "log73-backend"
+                })
         );
     }
 }

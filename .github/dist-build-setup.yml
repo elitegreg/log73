@@ -9,6 +9,9 @@
     node-version: 24
     cache: pnpm
 
+- name: Check WiX asset manifest
+  run: node scripts/generate_wix_assets.mjs --check
+
 - name: Install frontend dependencies
   run: pnpm install --frozen-lockfile
 

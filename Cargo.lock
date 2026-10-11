@@ -2683,6 +2683,45 @@ dependencies = [
 ]
 
 [[package]]
+name = "log73-launcher"
+version = "0.2.0"
+dependencies = [
+ "argon2",
+ "axum",
+ "backon",
+ "base64",
+ "clap",
+ "csv",
+ "dxcllistener",
+ "dxclparser",
+ "futures-util",
+ "iced",
+ "log73-paths",
+ "mime_guess",
+ "nix 0.29.0",
+ "open",
+ "radif",
+ "radio-io",
+ "rand_core 0.6.4",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "rust-embed",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "shared_child",
+ "tokio",
+ "toml 0.8.23",
+ "tower-http",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "log73-paths"
 version = "0.1.0"
 dependencies = [

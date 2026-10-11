@@ -157,6 +157,19 @@ jobs:
           # Actually do builds and make zips and whatnot
           dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
           echo "dist ran successfully"
+      - name: Build macOS application packages
+        if: runner.os == 'macOS'
+        env:
+          TARGET: ${{ join(matrix.targets, '') }}
+        run: |
+          scripts/build_macos_packages.sh "$TARGET" "$(awk -F '\"' '/^version =/ { print $2; exit }' bundle/Cargo.toml)"
+      - name: Build Linux native packages
+        if: runner.os == 'Linux'
+        env:
+          TARGET: ${{ join(matrix.targets, '') }}
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.1
+          NFPM="$(go env GOPATH)/bin/nfpm" scripts/build_native_linux_packages.sh "$TARGET" "$(awk -F '\"' '/^version =/ { print $2; exit }' bundle/Cargo.toml)"
       - id: cargo-dist
         name: Post-build
         # We force bash here just because github makes it really hard to get values up
@@ -176,6 +189,9 @@ jobs:
           name: artifacts-build-local-${{ join(matrix.targets, '_') }}
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
+            target/macos-packages/*.pkg
+            target/native-packages/*.deb
+            target/native-packages/*.rpm
             ${{ env.BUILD_MANIFEST_NAME }}
 
   # Build and package all the platform-agnostic(ish) things
