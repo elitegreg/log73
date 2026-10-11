@@ -2479,24 +2479,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "launcher"
-version = "0.3.0-rc1"
-dependencies = [
- "iced",
- "log73-paths",
- "nix 0.29.0",
- "open",
- "reqwest",
- "serde",
- "shared_child",
- "tokio",
- "toml 0.8.23",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2650,41 +2632,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
-name = "log73-backend"
-version = "0.3.0-rc1"
-dependencies = [
- "argon2",
- "axum",
- "backon",
- "base64",
- "clap",
- "csv",
- "dxcllistener",
- "dxclparser",
- "futures-util",
- "log73-paths",
- "mime_guess",
- "radif",
- "radio-io",
- "rand_core 0.6.4",
- "regex",
- "rusqlite",
- "rust-embed",
- "serde",
- "serde_json",
- "serde_yaml",
- "tokio",
- "tower-http",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "url",
- "uuid",
-]
-
-[[package]]
 name = "log73-launcher"
-version = "0.3.0-rc1"
+version = "0.3.0-rc.1"
 dependencies = [
  "argon2",
  "axum",
@@ -2730,7 +2679,7 @@ dependencies = [
 
 [[package]]
 name = "log73-radio-client"
-version = "0.3.0-rc1"
+version = "0.3.0-rc.1"
 dependencies = [
  "axum",
  "clap",
@@ -3942,7 +3891,7 @@ dependencies = [
 
 [[package]]
 name = "radio-io"
-version = "0.3.0-rc1"
+version = "0.3.0-rc.1"
 dependencies = [
  "axum",
  "backon",

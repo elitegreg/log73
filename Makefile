@@ -76,35 +76,35 @@ bundle-release: frontend-release
 	cargo build --release -p log73-launcher --bins
 
 backend-build:
-	cargo build -p log73-backend
+	cargo build -p log73-launcher --bin log73-backend
 
 backend-release: frontend-release
-	cargo build --release -p log73-backend
+	cargo build --release -p log73-launcher --bin log73-backend
 
 backend-test:
-	cargo test -p log73-backend -p radio-io
+	cargo test -p log73-launcher --bin log73-backend -p radio-io
 
 backend-fmt:
-	cargo fmt -p log73-backend
+	cargo fmt -p log73-launcher
 
 backend-lint:
 	cargo fmt --all -- --check
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
 launcher-build:
-	cargo build -p launcher
+	cargo build -p log73-launcher --bin log73-launcher
 
 launcher-test:
-	cargo test -p launcher
+	cargo test -p log73-launcher --bin log73-launcher
 
 launcher-fmt:
-	cargo fmt -p launcher
+	cargo fmt -p log73-launcher
 
 launcher-lint:
-	cargo clippy -p launcher --all-targets --all-features
+	cargo clippy -p log73-launcher --all-targets --all-features
 
 launcher-run:
-	cargo run -p launcher
+	cargo run -p log73-launcher --bin log73-launcher
 
 frontend-build:
 	pnpm run build
