@@ -39,7 +39,7 @@ function renderDirectory(root, entries, ancestorPath, indent, components) {
 
     const relativePath = entryPath.join('/');
     const componentId = id('AssetComponent', relativePath);
-    const source = ['..', '..', ...entryPath].join('\\');
+    const source = ['..', ...entryPath].join('\\');
     components.push(componentId);
     lines.push(
       `${indent}  <Component Id='${componentId}' Guid='*'>`,
