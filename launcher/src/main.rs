@@ -44,7 +44,7 @@ const LINUX_EDGE_COMMANDS: &[&str] = &[
 fn main() -> iced::Result {
     let _log_guard = init_tracing().expect("failed to initialize launcher logging");
 
-    application("Log73 Launcher", update, view)
+    application("log73-launcher", update, view)
         .theme(|_| Theme::Light)
         .style(|_, _| iced::application::Appearance {
             background_color: iced::Color::WHITE,
@@ -1210,7 +1210,7 @@ fn view_main(state: &Launcher) -> Element<'_, Message> {
         .height(Length::Fixed(LAUNCHER_MAIN_ICON_SIZE));
 
     let controls = column![
-        text("Log73 Launcher").size(LAUNCHER_TITLE_TEXT_SIZE),
+        text("log73-launcher").size(LAUNCHER_TITLE_TEXT_SIZE),
         row![updates_button, settings_button].spacing(12),
         row![
             start_button,

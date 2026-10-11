@@ -355,7 +355,7 @@ impl ConfigureScreen {
             .or(self.connection_message.as_ref());
 
         let mut content = column![
-            text("Configure Radio Client").size(30),
+            text("Configure log73-radio-client").size(30),
             section(
                 "Backend",
                 column![

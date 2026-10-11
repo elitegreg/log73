@@ -22,8 +22,9 @@
     }
     .display.math{display: block; text-align: center; margin: 0.5rem auto;}
     /* CSS for syntax highlighting */
+    html { -webkit-text-size-adjust: 100%; }
     pre > code.sourceCode { white-space: pre; position: relative; }
-    pre > code.sourceCode > span { line-height: 1.25; }
+    pre > code.sourceCode > span { display: inline-block; line-height: 1.25; }
     pre > code.sourceCode > span:empty { height: 1.2em; }
     .sourceCode { overflow: visible; }
     code.sourceCode > span { color: inherit; text-decoration: inherit; }
@@ -109,8 +110,8 @@ station/site.</li>
 <li>The backend stores logs and QSOs in SQLite.</li>
 <li>The backend manages server-side CAT radio control and CW
 keying.</li>
-<li>A Radio Client can own client-side CAT, CW, voice audio, and WSJT-X
-hardware.</li>
+<li><code>log73-radio-client</code> can own client-side CAT, CW, voice
+audio, and WSJT-X hardware.</li>
 </ul>
 <p>Core operating capabilities include:</p>
 <ul>
@@ -168,39 +169,39 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="
 <col style="width: 40%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Option</th>
 <th>Meaning</th>
 <th>Default</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>--bind &lt;BIND&gt;</code></td>
 <td>Bind address/port for browser/API/websocket</td>
 <td><code>127.0.0.1:7300</code></td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>--log-level &lt;LOG_LEVEL&gt;</code></td>
 <td>Backend log verbosity</td>
 <td><code>info</code></td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>--log-file &lt;LOG_FILE&gt;</code></td>
 <td>Optional file log output</td>
 <td>none</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>--config-dir &lt;CONFIG_DIR&gt;</code></td>
 <td>Override config directory</td>
 <td>platform default</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>--data-dir &lt;DATA_DIR&gt;</code></td>
 <td>Override data directory (includes DB/files)</td>
 <td>platform default</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>--app-dir &lt;APP_DIR&gt;</code></td>
 <td>Override app root</td>
 <td>platform default (<code>/opt/log73</code> on Linux layouts)</td>
@@ -236,8 +237,8 @@ credentials.</p>
 in Configure Log73. Treat it as a shared trusted-station gate, not
 individual role-based auth.</p>
 <hr />
-<h2 id="client-side-radios-and-the-log73-radio-client">5) Client-side
-radios and the Log73 Radio Client</h2>
+<h2 id="client-side-radios-and-log73-radio-client">5) Client-side radios
+and <code>log73-radio-client</code></h2>
 <p>Choose a server-side radio when the hardware is attached to the
 backend computer. Choose a client-side radio when the operator computer
 owns the radio, serial ports, audio devices, or WSJT-X process.
@@ -245,7 +246,7 @@ Client-side radios register automatically; they are not created or
 edited in the browser.</p>
 <h3 id="installing-and-starting-the-client">Installing and starting the
 client</h3>
-<p>Release packages provide a <strong>Log73 Radio Client</strong>
+<p>Release packages provide a <strong>log73-radio-client</strong>
 desktop entry and install the executable beside the normal Log73
 binaries. From a source checkout:</p>
 <div class="sourceCode" id="cb4"><pre
@@ -255,8 +256,8 @@ class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="
 <code>ws://127.0.0.1:&lt;ephemeral-port&gt;/radiows</code>. It never
 binds the local control listener to <code>0.0.0.0</code>. The returned
 loopback URL is registered with the backend and is later used by the
-browser. <code>127.0.0.1</code> always means the browser/Radio Client
-computer.</p>
+browser. <code>127.0.0.1</code> always means the
+browser/<code>log73-radio-client</code> computer.</p>
 <p>Configure the backend URL and optional Basic Auth username/password
 in the client’s Configure screen. The client keeps its local host alive
 while the backend is unavailable and retries registration. The
@@ -273,8 +274,8 @@ intentionally slow.</li>
 client identity; the client will register again.</li>
 <li><strong>CAT offline</strong>: the local host is running but the
 configured radio transport is not connected.</li>
-<li><strong>Client offline</strong>: the backend lease expired or the
-Radio Client is stopped.</li>
+<li><strong>Client offline</strong>: the backend lease expired or
+<code>log73-radio-client</code> is stopped.</li>
 </ul>
 <p>Client settings default to <code>log73-radio-client.json</code> in
 the platform config directory. Voice files live under
@@ -287,14 +288,15 @@ reload.</p>
 <code>[CLIENT-SIDE · ONLINE]</code>, and
 <code>[CLIENT-SIDE · OFFLINE]</code>. The selected-radio help text
 explains which computer owns the hardware. Open is disabled for an
-offline client radio; start the Radio Client on that computer first.
-Client-radio Edit is labelled <strong>Configure in Radio
-Client</strong>. An offline client snapshot may be deleted after
-confirmation and will reappear when the client registers again.</p>
+offline client radio; start <code>log73-radio-client</code> on that
+computer first. Client-radio Edit is labelled <strong>Configure in
+log73-radio-client</strong>. An offline client snapshot may be deleted
+after confirmation and will reappear when the client registers
+again.</p>
 <p>If a browser selects a client radio registered by another operator
 computer, the local loopback WebSocket cannot connect. Return to Open
-Log and select the correct client radio or run the Radio Client on the
-current computer.</p>
+Log and select the correct client radio or run
+<code>log73-radio-client</code> on the current computer.</p>
 <h3 id="client-side-wsjt-x">Client-side WSJT-X</h3>
 <p>Enable WSJT-X in the radio configuration, open the logger in DATA
 mode, and enable its <strong>WSJT-X</strong> target checkbox. The UDP
@@ -303,11 +305,11 @@ the radio is in DATA mode, and this logger is the active target. A later
 logger does not steal the target unless the operator explicitly claims
 it.</p>
 <p>WSJT-X sends UDP to the configured client bind address and port. The
-Radio Client’s radio-io host forwards the complete Logged ADIF record
-over the radio WebSocket to the targeted browser. The browser preserves
-all ADIF fields, combines <code>QSO_DATE</code> and <code>TIME_ON</code>
-into <code>QSO_DATE_TIME_ON</code>, adds only missing
-operator/transmitter context, and submits the result through the
+<code>log73-radio-client</code> radio-io host forwards the complete
+Logged ADIF record over the radio WebSocket to the targeted browser. The
+browser preserves all ADIF fields, combines <code>QSO_DATE</code> and
+<code>TIME_ON</code> into <code>QSO_DATE_TIME_ON</code>, adds only
+missing operator/transmitter context, and submits the result through the
 ordinary pending contact outbox/API. There is no WSJT-X-specific HTTP
 endpoint.</p>
 <p>The first release intentionally has no HTTPS/mixed-content support,
@@ -559,73 +561,73 @@ special input behaviors (complete)</h2>
 <col style="width: 76%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Hotkey</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+O</code></td>
 <td>Prompt/change operator callsign</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>F1</code>..<code>F12</code></td>
 <td>Send message in active Run/S&amp;P bank</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Esc</code></td>
 <td>Stop sending / clear queue (or close text dialog)</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>PageUp</code></td>
 <td>CW WPM +1</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>PageDown</code></td>
 <td>CW WPM -1</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+K</code></td>
 <td>Open text dialog for CW or targeted FLDigi DATA/RTTY</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+PageUp</code></td>
 <td>Shift band up</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Alt+PageDown</code></td>
 <td>Shift band down</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>ArrowUp</code></td>
 <td>Tune frequency up by configured increment</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>ArrowDown</code></td>
 <td>Tune frequency down by configured increment</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Ctrl+ArrowDown</code></td>
 <td>Jump to next band-map spot above VFO</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+ArrowUp</code></td>
 <td>Jump to next band-map spot below VFO</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+M</code></td>
 <td>Mark current frequency</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Alt+O</code></td>
 <td>Store current spot</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Alt+Q</code></td>
 <td>Jump to last stored CQ frequency</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Ctrl+P</code></td>
 <td>Spot It</td>
 </tr>
@@ -657,7 +659,11 @@ behavior).</li>
 </ul>
 <p>In DATA/RTTY, function-key messages use the digital message bank and
 transmit through FLDigi when it is configured for that mode and this
-logger is the selected Digital I/O target.</p>
+logger is the selected Digital I/O target. Message buttons remain
+highlighted until FLDigi reports that their text has finished
+transmitting. Stop Sending or <code>Esc</code> aborts the active
+transmission, clears queued FLDigi transmit text, and returns FLDigi to
+receive.</p>
 <h3 id="send-text-dialog-ctrlk">Send Text dialog
 (<code>Ctrl+K</code>)</h3>
 <p>The dialog sends through the CW keyer in CW/CW-R or through FLDigi in
@@ -665,25 +671,25 @@ eligible DATA/RTTY operation. CW words are uppercased; FLDigi text
 preserves the entered letter case.</p>
 <table>
 <thead>
-<tr class="header">
+<tr>
 <th>Key</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td><code>Space</code></td>
 <td>Send current word with trailing space</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Enter</code></td>
 <td>Send current word and close dialog</td>
 </tr>
-<tr class="odd">
+<tr>
 <td><code>Esc</code></td>
 <td>Close dialog</td>
 </tr>
-<tr class="even">
+<tr>
 <td><code>Backspace</code> on empty input</td>
 <td>Ignored</td>
 </tr>
@@ -700,30 +706,30 @@ state.</p>
 <col style="width: 59%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Condition</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td>Empty callsign</td>
 <td>Send <code>F1</code></td>
 </tr>
-<tr class="even">
+<tr>
 <td>Callsign present, exchange incomplete (first attempt)</td>
 <td>Send <code>F5</code>, then <code>F2</code></td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Callsign present, exchange incomplete (repeat attempt)</td>
 <td>Send <code>F8</code></td>
 </tr>
-<tr class="even">
+<tr>
 <td>Callsign + valid exchange + exchange already sent for that
 callsign</td>
 <td>Send <code>F3</code>, then log</td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Callsign corrected after sending exchange (CW only)</td>
 <td>Before <code>F3</code>, send corrected suffix if only suffix
 changed; otherwise send full corrected callsign</td>
@@ -737,25 +743,25 @@ changed; otherwise send full corrected callsign</td>
 <col style="width: 28%" />
 </colgroup>
 <thead>
-<tr class="header">
+<tr>
 <th>Condition</th>
 <th>Action</th>
 </tr>
 </thead>
 <tbody>
-<tr class="odd">
+<tr>
 <td>Empty callsign</td>
 <td>Send <code>F4</code></td>
 </tr>
-<tr class="even">
+<tr>
 <td>Callsign present, exchange incomplete</td>
 <td>Send <code>F4</code></td>
 </tr>
-<tr class="odd">
+<tr>
 <td>Callsign + valid exchange, exchange not yet sent</td>
 <td>Send <code>F2</code>, then log</td>
 </tr>
-<tr class="even">
+<tr>
 <td>Callsign + valid exchange, exchange already sent</td>
 <td>Log directly</td>
 </tr>

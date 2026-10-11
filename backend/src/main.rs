@@ -2177,7 +2177,7 @@ async fn update_radio(
         .ok_or_else(|| ApiError::not_found("not found"))?;
     if record.control_location == db::RadioControlLocation::Client {
         return Err(ApiError::conflict(
-            "Configure this radio in Log73 Radio Client.",
+            "Configure this radio in log73-radio-client.",
         ));
     }
 
@@ -2287,7 +2287,7 @@ async fn delete_radio(
     if record.control_location == db::RadioControlLocation::Client {
         if app_state.client_radios.is_online(id).await {
             return Err(ApiError::conflict(
-                "This client-side radio is online. Stop Log73 Radio Client before deleting it.",
+                "This client-side radio is online. Stop log73-radio-client before deleting it.",
             ));
         }
         let deleted = app_state

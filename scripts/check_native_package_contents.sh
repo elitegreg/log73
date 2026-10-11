@@ -26,9 +26,9 @@ for relative_path in "${required_files[@]}"; do
 done
 
 [[ -x "${root}/opt/log73/bin/log73-radio-client" ]] || {
-  echo "Radio Client package binary is not executable" >&2
+  echo "log73-radio-client package binary is not executable" >&2
   exit 1
 }
-grep -Fq 'Name=Log73 Radio Client' "${root}/usr/share/applications/log73-radio-client.desktop"
+grep -Fq 'Name=log73-radio-client' "${root}/usr/share/applications/log73-radio-client.desktop"
 grep -Fq 'Exec=/opt/log73/bin/log73-radio-client' "${root}/usr/share/applications/log73-radio-client.desktop"
 echo "native package contents are complete"

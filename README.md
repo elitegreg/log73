@@ -1,6 +1,6 @@
 # Log73
 
-Log73 is an amateur radio contest logger prototype. It uses a React/Rsbuild browser frontend, a Rust/Axum backend, and a Rust desktop launcher.
+Log73 is an amateur radio contest logger prototype. It uses a React/Rsbuild browser frontend, a Rust/Axum backend, and the Rust desktop app `log73-launcher`.
 
 The current architecture supports multiple logs, multiple radios, browser clients, SQLite storage, and lazy CAT connections created through `radio-cat-rs`.
 
@@ -13,7 +13,7 @@ Browser UI
         -> radio-cat-rs transports and keyers
         -> radios and WSJT-X
 
-Desktop launcher UI
+`log73-launcher` UI
   -> starts/stops Rust backend process
 ```
 
@@ -41,7 +41,7 @@ Log73 is under active development. Contest definitions are loaded from YAML rule
 - Realtime radio state updates over websocket.
 - SQLite-backed QSO storage.
 - Offline/pending contact cache in browser local storage.
-- Optional client-side radio control through the separate Log73 Radio Client desktop app.
+- Optional client-side radio control through the separate `log73-radio-client` desktop app.
 
 ## Authentication
 
@@ -156,7 +156,7 @@ Production logging options are the same:
 ./target/release/log73-backend --data-dir ./data --bind 0.0.0.0:7300 --log-level info --log-file log73.log
 ```
 
-Run the launcher:
+Run `log73-launcher`:
 
 ```bash
 cargo run -p launcher
@@ -168,7 +168,7 @@ Use a server-side radio when the radio hardware and CAT connection are on the
 same computer as `log73-backend`. Use a client-side radio when the operator's
 radio, serial ports, audio devices, or WSJT-X instance are on another computer.
 
-Build and launch the Radio Client from a source checkout:
+Build and launch `log73-radio-client` from a source checkout:
 
 ```bash
 make radio-client-build
@@ -176,10 +176,10 @@ make radio-client-build
 ```
 
 Release packages install it as `/opt/log73/bin/log73-radio-client` and provide
-a separate **Log73 Radio Client** desktop entry. The client binds its local
+a separate **log73-radio-client** desktop entry. The client binds its local
 WebSocket only to `127.0.0.1` on an ephemeral port, then registers that URL
 with the configured backend. `127.0.0.1` therefore means the computer running
-the browser and Radio Client, not necessarily the backend computer.
+the browser and `log73-radio-client`, not necessarily the backend computer.
 
 The client configuration is stored in `log73-radio-client.json` in the
 platform config directory. Its data directory contains `voicekeyer/` and the
@@ -200,7 +200,7 @@ Open Log screen; an offline client-side radio cannot be opened until the
 client is started again.
 
 Client-side radios are labelled **CLIENT-SIDE** in radio selection and logger
-context. Configure them in the Radio Client; the browser's Edit action is
+context. Configure them in `log73-radio-client`; the browser's Edit action is
 read-only for these rows. Server-side radios remain configured in the browser.
 
 Voice files are safe relative `.wav` files under `voicekeyer/`. They are
@@ -219,8 +219,8 @@ client computer's configured bind address and port. Logged ADIF is delivered
 over the radio WebSocket to the targeted browser, converted into the normal
 pending contact outbox, and submitted through the ordinary contacts API.
 
-If the browser is on a different computer from the Radio Client, the local
-loopback connection will fail. The logger reports that the Radio Client may
+If the browser is on a different computer from `log73-radio-client`, the local
+loopback connection will fail. The logger reports that `log73-radio-client` may
 not be running on this computer or that the selected client radio belongs to
 another operator.
 
@@ -255,16 +255,16 @@ This uses `DEB_TARGET=x86_64-unknown-linux-gnu` and the backend crate version by
 make deb DEB_TARGET=aarch64-unknown-linux-gnu VERSION=0.1.0
 ```
 
-Launcher main screen controls:
+`log73-launcher` main screen controls:
 
 - Start/Stop backend process controls with status
 - Open log file in the OS default editor/viewer
 - Open app in the default browser
 - Open app in browser app mode (`--app`) with `1200x800` initial size
 - Updates screen to download latest `cty.csv` and `MASTER.SCP` into the data directory
-- Menu button to open launcher settings
+- Menu button to open `log73-launcher` settings
 
-Launcher settings screen controls:
+`log73-launcher` settings screen controls:
 
 - Backend binary path (editable)
 - Config directory, data directory, and app directory
@@ -274,7 +274,7 @@ Launcher settings screen controls:
 - App-mode browser choice: `chrome` / `chromium` / `edge`
 - Set defaults button
 
-Launcher settings are persisted in the Log73 platform config directory. Browser app mode uses a per-browser `--user-data-dir`; by default this is under the Log73 config directory (for example `~/.config/log73/chrome/` on Linux). On Linux, snap-managed browsers use a snap-compatible profile directory under `~/snap/<package>/common/` (for example `~/snap/chromium/common/log73-profile-chromium`). Stop uses graceful termination first (where supported) and falls back to force-stop after a timeout. Launcher diagnostics are written to `log73-launcher.log` in the platform data directory, beside the default `log73-backend.log`.
+`log73-launcher` settings are persisted in the Log73 platform config directory. Browser app mode uses a per-browser `--user-data-dir`; by default this is under the Log73 config directory (for example `~/.config/log73/chrome/` on Linux). On Linux, snap-managed browsers use a snap-compatible profile directory under `~/snap/<package>/common/` (for example `~/snap/chromium/common/log73-profile-chromium`). Stop uses graceful termination first (where supported) and falls back to force-stop after a timeout. `log73-launcher` diagnostics are written to `log73-launcher.log` in the platform data directory, beside the default `log73-backend.log`.
 
 ## Development checks
 

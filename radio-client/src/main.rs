@@ -25,7 +25,10 @@ const WINDOW_WIDTH: f32 = 640.0;
 const EVENT_LOG_CAPACITY: usize = 1_000;
 
 #[derive(Debug, Parser)]
-#[command(version, about = "Log73 client-side radio controller")]
+#[command(
+    version,
+    about = "log73-radio-client, the Log73 client-side radio controller"
+)]
 struct Cli {
     #[arg(long)]
     log_level: Option<String>,
@@ -121,10 +124,10 @@ fn main() -> iced::Result {
         data_dir = %paths.data_dir.display(),
         app_dir = %paths.app_dir.display(),
         settings = %settings.diagnostic_summary(),
-        "starting Log73 Radio Client"
+        "starting log73-radio-client"
     );
 
-    application("Log73 Radio Client", update, view)
+    application("log73-radio-client", update, view)
         .theme(|_| Theme::Light)
         .style(|_, _| iced::application::Appearance {
             background_color: iced::Color::WHITE,
@@ -223,7 +226,7 @@ impl RadioClient {
             lifecycle,
             host: None,
             backend_status: None,
-            events: VecDeque::from([EventEntry::new("Radio Client is ready.")]),
+            events: VecDeque::from([EventEntry::new("log73-radio-client is ready.")]),
             log_filter,
             log_level_override,
             pending_close_window: None,
@@ -364,7 +367,7 @@ fn update(state: &mut RadioClient, message: Message) -> Task<Message> {
                     state.settings = *settings;
                     state.configure = None;
                     state.lifecycle = LifecycleState::initial(&state.settings);
-                    state.push_event("Saved Radio Client settings.");
+                    state.push_event("Saved log73-radio-client settings.");
                     Task::none()
                 }
                 configure::Outcome::Cancelled => {
@@ -550,7 +553,7 @@ fn view(state: &RadioClient) -> Element<'_, Message> {
     let header = row![
         Image::new(state.icon.clone()).width(96).height(96),
         column![
-            text("Log73 Radio Client").size(32),
+            text("log73-radio-client").size(32),
             text(state.lifecycle.label()).size(22),
             row![
                 button("Configure")

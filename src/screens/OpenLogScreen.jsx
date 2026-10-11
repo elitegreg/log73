@@ -161,7 +161,7 @@ function OpenLogScreen() {
     if (
       isOfflineClientRadio(selectedRadio) &&
       !window.confirm(
-        'Delete this offline client-side radio snapshot? Starting its configured Log73 Radio Client again will register it again.',
+        'Delete this offline client-side radio snapshot? Starting its configured log73-radio-client again will register it again.',
       )
     ) {
       return;
@@ -347,7 +347,7 @@ function OpenLogScreen() {
               }
               title={
                 isClientRadio(selectedRadio)
-                  ? 'Configure in Radio Client'
+                  ? 'Configure in log73-radio-client'
                   : undefined
               }
               onClick={(event) => {
@@ -356,7 +356,7 @@ function OpenLogScreen() {
               }}
             >
               {isClientRadio(selectedRadio)
-                ? 'Configure in Radio Client'
+                ? 'Configure in log73-radio-client'
                 : 'Edit'}
             </Link>
             <button
@@ -370,7 +370,7 @@ function OpenLogScreen() {
               title={
                 isClientRadio(selectedRadio) &&
                 !isOfflineClientRadio(selectedRadio)
-                  ? 'Stop Log73 Radio Client before deleting its snapshot.'
+                  ? 'Stop log73-radio-client before deleting its snapshot.'
                   : undefined
               }
             >

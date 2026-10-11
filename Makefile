@@ -35,8 +35,8 @@ package-smoke:
 	install -m 0755 target/debug/log73-radio-client "$$tmp_dir/opt/log73/bin/log73-radio-client"; \
 	install -m 0644 static/log73-icon-512.png "$$tmp_dir/usr/share/icons/hicolor/512x512/apps/log73.png"; \
 	install -m 0644 static/log73-icon-512.png "$$tmp_dir/usr/share/icons/hicolor/512x512/apps/log73-radio-client.png"; \
-	printf '%s\n' '[Desktop Entry]' 'Name=Log73' 'Exec=/opt/log73/bin/log73-launcher' > "$$tmp_dir/usr/share/applications/log73.desktop"; \
-	printf '%s\n' '[Desktop Entry]' 'Name=Log73 Radio Client' 'Exec=/opt/log73/bin/log73-radio-client' > "$$tmp_dir/usr/share/applications/log73-radio-client.desktop"; \
+	printf '%s\n' '[Desktop Entry]' 'Name=log73-launcher' 'Exec=/opt/log73/bin/log73-launcher' > "$$tmp_dir/usr/share/applications/log73.desktop"; \
+	printf '%s\n' '[Desktop Entry]' 'Name=log73-radio-client' 'Exec=/opt/log73/bin/log73-radio-client' > "$$tmp_dir/usr/share/applications/log73-radio-client.desktop"; \
 	scripts/check_native_package_contents.sh "$$tmp_dir"
 
 verify-radio-client:

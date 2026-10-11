@@ -71,7 +71,7 @@ install -m 0644 static/log73-icon-512.png \
 cat > "${package_root}/usr/share/applications/log73.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
-Name=Log73
+Name=log73-launcher
 Comment=Amateur radio contest logger
 Exec=/opt/log73/bin/log73-launcher
 Icon=log73
@@ -82,8 +82,8 @@ DESKTOP
 cat > "${package_root}/usr/share/applications/log73-radio-client.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
-Name=Log73 Radio Client
-Comment=Client-side Log73 radio controller
+Name=log73-radio-client
+Comment=Client-side radio controller for Log73
 Exec=/opt/log73/bin/log73-radio-client
 Icon=log73-radio-client
 Terminal=false

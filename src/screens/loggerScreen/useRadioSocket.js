@@ -394,7 +394,7 @@ export function useRadioSocket({
         if (isClientRadio && radioSocketRef.current === socket) {
           notifyOperationalError(
             'clientRadioSocketConnect',
-            'Radio Client is not running on this computer or this is another operator’s client-side radio.',
+            'log73-radio-client is not running on this computer or this is another operator’s client-side radio.',
             null,
             { logId: numericLogId, radioId: numericRadioId },
           );

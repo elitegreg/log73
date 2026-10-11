@@ -60,7 +60,7 @@
 
     <Product
         Id='*'
-        Name='launcher'
+        Name='log73-launcher'
         UpgradeCode='DD4A9B3C-6467-46CD-B571-A7C4E1423FE0'
         Manufacturer='Greg Mitchell'
         Language='1033'
@@ -82,7 +82,7 @@
             DowngradeErrorMessage='A newer version of [ProductName] is already installed. Setup will now exit.'/>
 
         <Media Id='1' Cabinet='media1.cab' EmbedCab='yes' DiskPrompt='CD-ROM #1'/>
-        <Property Id='DiskPrompt' Value='launcher Installation'/>
+        <Property Id='DiskPrompt' Value='log73-launcher Installation'/>
 
         <Directory Id='TARGETDIR' Name='SourceDir'>
             <Directory Id='$(var.PlatformProgramFilesFolder)' Name='PFiles'>

@@ -18,7 +18,7 @@ In practical terms:
 - Operators connect to it from one or more browsers.
 - The backend stores logs and QSOs in SQLite.
 - The backend manages server-side CAT radio control and CW keying.
-- A Radio Client can own client-side CAT, CW, voice audio, and WSJT-X hardware.
+- `log73-radio-client` can own client-side CAT, CW, voice audio, and WSJT-X hardware.
 
 Core operating capabilities include:
 
@@ -113,7 +113,7 @@ Treat it as a shared trusted-station gate, not individual role-based auth.
 
 ---
 
-## 5) Client-side radios and the Log73 Radio Client
+## 5) Client-side radios and `log73-radio-client`
 
 Choose a server-side radio when the hardware is attached to the backend
 computer. Choose a client-side radio when the operator computer owns the
@@ -122,7 +122,7 @@ register automatically; they are not created or edited in the browser.
 
 ### Installing and starting the client
 
-Release packages provide a **Log73 Radio Client** desktop entry and install
+Release packages provide a **log73-radio-client** desktop entry and install
 the executable beside the normal Log73 binaries. From a source checkout:
 
 ```bash
@@ -133,7 +133,7 @@ make radio-client-build
 The client binds only to `ws://127.0.0.1:<ephemeral-port>/radiows`. It never
 binds the local control listener to `0.0.0.0`. The returned loopback URL is
 registered with the backend and is later used by the browser. `127.0.0.1`
-always means the browser/Radio Client computer.
+always means the browser/`log73-radio-client` computer.
 
 Configure the backend URL and optional Basic Auth username/password in the
 client's Configure screen. The client keeps its local host alive while the
@@ -148,7 +148,7 @@ these meanings:
   the client will register again.
 - **CAT offline**: the local host is running but the configured radio
   transport is not connected.
-- **Client offline**: the backend lease expired or the Radio Client is stopped.
+- **Client offline**: the backend lease expired or `log73-radio-client` is stopped.
 
 Client settings default to `log73-radio-client.json` in the platform config
 directory. Voice files live under `voicekeyer/` in the client data directory;
@@ -160,13 +160,13 @@ changing voice files or voice-message configuration, then Start to reload.
 The radio list explicitly labels `[SERVER-SIDE]`, `[CLIENT-SIDE · ONLINE]`,
 and `[CLIENT-SIDE · OFFLINE]`. The selected-radio help text explains which
 computer owns the hardware. Open is disabled for an offline client radio;
-start the Radio Client on that computer first. Client-radio Edit is labelled
-**Configure in Radio Client**. An offline client snapshot may be deleted
+start `log73-radio-client` on that computer first. Client-radio Edit is labelled
+**Configure in log73-radio-client**. An offline client snapshot may be deleted
 after confirmation and will reappear when the client registers again.
 
 If a browser selects a client radio registered by another operator computer,
 the local loopback WebSocket cannot connect. Return to Open Log and select the
-correct client radio or run the Radio Client on the current computer.
+correct client radio or run `log73-radio-client` on the current computer.
 
 ### Client-side WSJT-X
 
@@ -176,8 +176,8 @@ three conditions hold: WSJT-X is enabled, the radio is in DATA mode, and this
 logger is the active target. A later logger does not steal the target unless
 the operator explicitly claims it.
 
-WSJT-X sends UDP to the configured client bind address and port. The Radio
-Client's radio-io host forwards the complete Logged ADIF record over the radio
+WSJT-X sends UDP to the configured client bind address and port. The
+`log73-radio-client` radio-io host forwards the complete Logged ADIF record over the radio
 WebSocket to the targeted browser. The browser preserves all ADIF fields,
 combines `QSO_DATE` and `TIME_ON` into `QSO_DATE_TIME_ON`, adds only missing
 operator/transmitter context, and submits the result through the ordinary

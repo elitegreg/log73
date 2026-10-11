@@ -100,7 +100,7 @@ pub fn load_or_create(path: &Path) -> Result<RadioClientSettings, String> {
             Ok(settings)
         }
         Err(error) => Err(format!(
-            "failed to read Radio Client settings at {}: {error}",
+            "failed to read log73-radio-client settings at {}: {error}",
             path.display()
         )),
     }
@@ -108,29 +108,30 @@ pub fn load_or_create(path: &Path) -> Result<RadioClientSettings, String> {
 
 fn load_from_str(contents: &str) -> Result<RadioClientSettings, String> {
     let value: serde_json::Value = serde_json::from_str(contents)
-        .map_err(|error| format!("invalid Radio Client settings JSON: {error}"))?;
+        .map_err(|error| format!("invalid log73-radio-client settings JSON: {error}"))?;
     let schema_version = value
         .get("schema_version")
         .and_then(serde_json::Value::as_u64)
-        .ok_or_else(|| "Radio Client settings are missing schema_version".to_string())?;
+        .ok_or_else(|| "log73-radio-client settings are missing schema_version".to_string())?;
     if schema_version != u64::from(SETTINGS_SCHEMA_VERSION) {
         return Err(format!(
-            "unsupported Radio Client settings schema version {schema_version}; this version supports schema version {SETTINGS_SCHEMA_VERSION}"
+            "unsupported log73-radio-client settings schema version {schema_version}; this version supports schema version {SETTINGS_SCHEMA_VERSION}"
         ));
     }
-    serde_json::from_value(value).map_err(|error| format!("invalid Radio Client settings: {error}"))
+    serde_json::from_value(value)
+        .map_err(|error| format!("invalid log73-radio-client settings: {error}"))
 }
 
 pub fn save_atomic(path: &Path, settings: &RadioClientSettings) -> Result<(), String> {
     let parent = path.parent().ok_or_else(|| {
         format!(
-            "Radio Client settings path has no parent: {}",
+            "log73-radio-client settings path has no parent: {}",
             path.display()
         )
     })?;
     fs::create_dir_all(parent).map_err(|error| {
         format!(
-            "failed to create Radio Client config directory {}: {error}",
+            "failed to create log73-radio-client config directory {}: {error}",
             parent.display()
         )
     })?;
@@ -163,12 +164,12 @@ fn write_and_replace(
         .open(temporary)
         .map_err(|error| format!("failed to create temporary settings file: {error}"))?;
     let mut serialized = serde_json::to_vec_pretty(settings)
-        .map_err(|error| format!("failed to serialize Radio Client settings: {error}"))?;
+        .map_err(|error| format!("failed to serialize log73-radio-client settings: {error}"))?;
     serialized.push(b'\n');
     file.write_all(&serialized)
-        .map_err(|error| format!("failed to write Radio Client settings: {error}"))?;
+        .map_err(|error| format!("failed to write log73-radio-client settings: {error}"))?;
     file.sync_all()
-        .map_err(|error| format!("failed to flush Radio Client settings: {error}"))?;
+        .map_err(|error| format!("failed to flush log73-radio-client settings: {error}"))?;
     drop(file);
     replace_file(temporary, destination)
 }
@@ -176,7 +177,7 @@ fn write_and_replace(
 #[cfg(not(windows))]
 fn replace_file(temporary: &Path, destination: &Path) -> Result<(), String> {
     fs::rename(temporary, destination)
-        .map_err(|error| format!("failed to replace Radio Client settings: {error}"))
+        .map_err(|error| format!("failed to replace log73-radio-client settings: {error}"))
 }
 
 #[cfg(windows)]
@@ -205,7 +206,7 @@ fn replace_file(temporary: &Path, destination: &Path) -> Result<(), String> {
     };
     if replaced == 0 {
         return Err(format!(
-            "failed to replace Radio Client settings: {}",
+            "failed to replace log73-radio-client settings: {}",
             std::io::Error::last_os_error()
         ));
     }
