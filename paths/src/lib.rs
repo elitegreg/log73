@@ -30,6 +30,10 @@ pub fn log_file_path(data_dir: impl AsRef<Path>) -> PathBuf {
     data_dir.as_ref().join("log73-backend.log")
 }
 
+pub fn launcher_log_file_path(data_dir: impl AsRef<Path>) -> PathBuf {
+    data_dir.as_ref().join("log73-launcher.log")
+}
+
 pub fn radio_client_log_file_path(data_dir: impl AsRef<Path>) -> PathBuf {
     data_dir.as_ref().join("log73-radio-client.log")
 }
@@ -180,6 +184,10 @@ mod tests {
         assert_eq!(
             database_path(data_dir),
             Path::new("log73-data").join("log73.db")
+        );
+        assert_eq!(
+            launcher_log_file_path(data_dir),
+            Path::new("log73-data").join("log73-launcher.log")
         );
         assert_eq!(
             radio_client_log_file_path(data_dir),

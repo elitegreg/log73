@@ -274,7 +274,7 @@ Launcher settings screen controls:
 - App-mode browser choice: `chrome` / `chromium` / `edge`
 - Set defaults button
 
-Launcher settings are persisted in the Log73 platform config directory. Browser app mode uses a per-browser `--user-data-dir`; by default this is under the Log73 config directory (for example `~/.config/log73/chrome/` on Linux). On Linux, snap-managed browsers use a snap-compatible profile directory under `~/snap/<package>/common/` (for example `~/snap/chromium/common/log73-profile-chromium`). Stop uses graceful termination first (where supported) and falls back to force-stop after a timeout. Backend stdout/stderr are forwarded to the launcher console for debugging startup/runtime errors.
+Launcher settings are persisted in the Log73 platform config directory. Browser app mode uses a per-browser `--user-data-dir`; by default this is under the Log73 config directory (for example `~/.config/log73/chrome/` on Linux). On Linux, snap-managed browsers use a snap-compatible profile directory under `~/snap/<package>/common/` (for example `~/snap/chromium/common/log73-profile-chromium`). Stop uses graceful termination first (where supported) and falls back to force-stop after a timeout. Launcher diagnostics are written to `log73-launcher.log` in the platform data directory, beside the default `log73-backend.log`.
 
 ## Development checks
 

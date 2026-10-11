@@ -1,3 +1,5 @@
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 use iced::widget::image::Handle as ImageHandle;
 use iced::widget::{
     Image, button, column, container, opaque, pick_list, row, scrollable, stack, text, text_input,
@@ -7,10 +9,13 @@ use serde::{Deserialize, Serialize};
 use shared_child::SharedChild;
 use std::fmt;
 use std::fs;
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tracing::{error, info, warn};
+use tracing_subscriber::{EnvFilter, fmt as tracing_fmt, prelude::*};
 
 const DEFAULT_PORT: &str = "7300";
 const APP_WINDOW_SIZE: &str = "1600,900";
@@ -37,6 +42,8 @@ const LINUX_EDGE_COMMANDS: &[&str] = &[
 ];
 
 fn main() -> iced::Result {
+    let _log_guard = init_tracing().expect("failed to initialize launcher logging");
+
     application("Log73 Launcher", update, view)
         .theme(|_| Theme::Light)
         .style(|_, _| iced::application::Appearance {
@@ -53,11 +60,35 @@ fn main() -> iced::Result {
         .run_with(|| (Launcher::default(), Task::none()))
 }
 
+fn init_tracing() -> std::io::Result<tracing_appender::non_blocking::WorkerGuard> {
+    let log_path = log73_paths::launcher_log_file_path(log73_paths::data_dir());
+    if let Some(parent) = log_path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)?;
+    }
+
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)?;
+    let (writer, guard) = tracing_appender::non_blocking(file);
+    let file_layer = tracing_fmt::layer().with_writer(writer).with_ansi(false);
+
+    tracing_subscriber::registry()
+        .with(EnvFilter::new("info"))
+        .with(file_layer)
+        .init();
+
+    Ok(guard)
+}
+
 fn launcher_window_icon() -> Option<window::Icon> {
     match window::icon::from_file_data(LAUNCHER_ICON_PNG, None) {
         Ok(icon) => Some(icon),
         Err(error) => {
-            eprintln!("log73-launcher: failed to decode launcher window icon: {error}");
+            error!(%error, "failed to decode launcher window icon");
             None
         }
     }
@@ -539,7 +570,7 @@ fn update(state: &mut Launcher, message: Message) -> Task<Message> {
             Task::none()
         }
         Message::WindowCloseRequested(window_id) => {
-            eprintln!("log73-launcher: window close requested");
+            info!("window close requested");
             if state.download_in_progress.is_some() {
                 state.status = "Download in progress; please wait before closing.".to_string();
                 return Task::none();
@@ -550,17 +581,15 @@ fn update(state: &mut Launcher, message: Message) -> Task<Message> {
 
             if state.child.is_some() || state.stop_in_progress {
                 if state.child.is_some() && !state.stop_in_progress {
-                    eprintln!(
-                        "log73-launcher: backend running; stopping backend before closing launcher"
-                    );
+                    info!("backend running; stopping backend before closing launcher");
                     state.status = "Stopping backend before exit...".to_string();
                     return stop_backend(state);
                 }
 
-                eprintln!("log73-launcher: backend stop already in progress; waiting before close");
+                info!("backend stop already in progress; waiting before close");
                 Task::none()
             } else {
-                eprintln!("log73-launcher: backend not running; closing launcher now");
+                info!("backend not running; closing launcher now");
                 window::close(window_id)
             }
         }
@@ -642,19 +671,15 @@ fn start_backend(state: &mut Launcher) -> Task<Message> {
         command.arg("--log-file").arg(log_file_path);
     }
 
-    eprintln!(
-        "log73-launcher: starting backend path={} bind={} config_dir={} data_dir={} app_dir={} log_level={} log_file={}",
-        backend_binary_path.display(),
+    info!(
+        backend_path = %backend_binary_path.display(),
         bind_address,
-        config_dir.display(),
-        data_dir.display(),
-        app_dir.display(),
-        state.settings.log_level,
-        if log_file_path.is_empty() {
-            "<stdout only>"
-        } else {
-            log_file_path
-        }
+        config_dir = %config_dir.display(),
+        data_dir = %data_dir.display(),
+        app_dir = %app_dir.display(),
+        log_level = %state.settings.log_level,
+        log_file = if log_file_path.is_empty() { "<stdout only>" } else { log_file_path },
+        "starting backend"
     );
 
     match SharedChild::spawn(&mut command) {
@@ -726,13 +751,13 @@ fn handle_backend_exit(state: &mut Launcher, event: ProcessExit) -> Task<Message
     state.status = match event.result {
         ExitResult::Success => "Backend exited normally.".to_string(),
         ExitResult::Failure(exit_status) => {
-            format!("Backend exited with status {exit_status}. See launcher console for details.")
+            format!("Backend exited with status {exit_status}. See the log files for details.")
         }
         ExitResult::Error(error) => format!("Failed to read backend exit status: {error}"),
     };
 
     if let Some(window_id) = state.pending_close_window.take() {
-        eprintln!("log73-launcher: backend stopped; closing launcher window");
+        info!("backend stopped; closing launcher window");
         return window::close(window_id);
     }
 
@@ -774,11 +799,11 @@ async fn download_data_file_inner(
     let destination = data_dir.join(kind.file_name());
     let temporary = data_dir.join(format!(".{}.download", kind.file_name()));
 
-    eprintln!(
-        "log73-launcher: downloading {} from {} to {}",
-        kind.label(),
-        kind.url(),
-        destination.display()
+    info!(
+        download = kind.label(),
+        url = kind.url(),
+        destination = %destination.display(),
+        "downloading data file"
     );
 
     let client = reqwest::Client::builder()
@@ -852,7 +877,7 @@ fn open_log_file(settings: &LauncherSettings) -> Result<String, String> {
         return Err(format!("log file does not exist: {}", log_file.display()));
     }
 
-    eprintln!("log73-launcher: opening log file {}", log_file.display());
+    info!(log_file = %log_file.display(), "opening log file");
     open::that(&log_file).map_err(|error| error.to_string())?;
     Ok(format!("Opened log file: {}", log_file.display()))
 }
@@ -890,7 +915,7 @@ fn remove_file(path: PathBuf, label: &str) -> Result<String, String> {
 
 fn open_default_browser(settings: &LauncherSettings) -> Result<String, String> {
     let url = app_url(settings)?;
-    eprintln!("log73-launcher: opening default browser for {url}");
+    info!(%url, "opening default browser");
     open::that(&url).map_err(|error| error.to_string())?;
     Ok(format!("Opened app in default browser: {url}"))
 }
@@ -898,10 +923,7 @@ fn open_default_browser(settings: &LauncherSettings) -> Result<String, String> {
 fn open_browser_app_mode(settings: &LauncherSettings) -> Result<String, String> {
     let url = app_url(settings)?;
 
-    eprintln!(
-        "log73-launcher: opening {} app mode for {}",
-        settings.app_browser, url
-    );
+    info!(browser = %settings.app_browser, %url, "opening browser app mode");
 
     let _ = launch_app_mode(settings.app_browser, &url)?;
     Ok(format!("Opened app mode in {}.", settings.app_browser))
@@ -970,15 +992,15 @@ fn launch_app_mode(browser: AppBrowser, url: &str) -> Result<PathBuf, String> {
             let profile_dir = linux_user_data_dir_for_command(browser, command_name);
             if let Err(error) = fs::create_dir_all(&profile_dir) {
                 let detail = format!("{} profile dir create failed: {}", command_name, error);
-                eprintln!("log73-launcher: {detail}");
+                warn!(%detail);
                 errors.push(detail);
                 continue;
             }
 
             let user_data_arg = format!("--user-data-dir={}", profile_dir.to_string_lossy());
-            eprintln!(
-                "log73-launcher: trying linux app-mode command={} {} {} {}",
-                command_name, new_window_arg, app_arg, size_arg
+            info!(
+                command_name,
+                new_window_arg, app_arg, size_arg, "trying Linux browser app mode"
             );
 
             let spawn_result = Command::new(command_name)
@@ -1000,22 +1022,15 @@ fn launch_app_mode(browser: AppBrowser, url: &str) -> Result<PathBuf, String> {
                                 "{} exited immediately with status {}",
                                 command_name, status
                             );
-                            eprintln!("log73-launcher: {detail}");
+                            warn!(%detail);
                             errors.push(detail);
                         }
                         Ok(Some(status)) => {
-                            eprintln!(
-                                "log73-launcher: {} launched and exited quickly with status {}",
-                                command_name, status
-                            );
+                            info!(command_name, %status, "browser app mode launched and exited quickly");
                             return Ok(profile_dir);
                         }
                         Ok(None) => {
-                            eprintln!(
-                                "log73-launcher: launched app mode with {} (pid={})",
-                                command_name,
-                                child.id()
-                            );
+                            info!(command_name, pid = child.id(), "browser app mode launched");
                             return Ok(profile_dir);
                         }
                         Err(error) => {
@@ -1023,14 +1038,14 @@ fn launch_app_mode(browser: AppBrowser, url: &str) -> Result<PathBuf, String> {
                                 "{} launched but status check failed: {}",
                                 command_name, error
                             );
-                            eprintln!("log73-launcher: {detail}");
+                            warn!(%detail);
                             errors.push(detail);
                         }
                     }
                 }
                 Err(error) => {
                     let detail = format!("{} spawn failed: {}", command_name, error);
-                    eprintln!("log73-launcher: {detail}");
+                    warn!(%detail);
                     errors.push(detail);
                 }
             }
@@ -1607,7 +1622,7 @@ fn load_settings_or_default_from_path(path: &Path) -> LauncherSettings {
             loaded
         }
         Err(error) => {
-            eprintln!("failed to parse launcher settings: {error}");
+            warn!(%error, "failed to parse launcher settings");
             settings
         }
     }
@@ -1624,7 +1639,7 @@ fn persist_settings_if_dirty_to_path(state: &mut Launcher, path: &Path) {
 
     match save_settings_to_path(&state.settings, path) {
         Ok(()) => state.settings_dirty = false,
-        Err(error) => eprintln!("failed to save launcher settings: {error}"),
+        Err(error) => error!(%error, "failed to save launcher settings"),
     }
 }
 
