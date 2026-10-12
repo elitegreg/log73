@@ -3,7 +3,7 @@ VERSION ?= $(shell awk -F '"' '/^version =/ { print $$2; exit }' bundle/Cargo.to
 DIST ?= $(shell command -v dist 2>/dev/null || printf '%s' "$$HOME/.cargo/bin/dist")
 NFPM ?= $(shell command -v nfpm 2>/dev/null || { command -v go >/dev/null 2>&1 && printf '%s' "$$(go env GOPATH)/bin/nfpm"; } || printf '%s' nfpm)
 
-.PHONY: all release deb package-smoke launcher-package-smoke radio-client-package-smoke verify-radio-client wix-assets-check help \
+.PHONY: all release deb package-smoke launcher-package-smoke radio-client-package-smoke verify-radio-client wix-assets-check check-linux-native-prereqs help \
 	backend launcher frontend \
 	radio-client \
 	bundle-build bundle-release \
@@ -55,6 +55,9 @@ verify-radio-client:
 wix-assets-check:
 	node scripts/generate_wix_assets.mjs --check
 
+check-linux-native-prereqs:
+	scripts/check_linux_native_prereqs.sh
+
 help:
 	mkdir -p docs/help
 	pandoc docs/index.md -s -c docs/help.css --lua-filter=docs/replace-links.lua -o docs/help/index.html
@@ -69,25 +72,25 @@ frontend: frontend-fmt frontend-lint frontend-test frontend-build
 
 radio-client: radio-client-fmt radio-client-lint radio-client-test radio-client-build
 
-bundle-build:
+bundle-build: check-linux-native-prereqs
 	cargo build -p log73-launcher --bins
 
 bundle-release: frontend-release
 	cargo build --release -p log73-launcher --bins
 
-backend-build:
+backend-build: check-linux-native-prereqs
 	cargo build -p log73-launcher --bin log73-backend
 
 backend-release: frontend-release
 	cargo build --release -p log73-launcher --bin log73-backend
 
-backend-test:
+backend-test: check-linux-native-prereqs
 	cargo test -p log73-launcher --bin log73-backend -p radio-io
 
 backend-fmt:
 	cargo fmt -p log73-launcher
 
-backend-lint:
+backend-lint: check-linux-native-prereqs
 	cargo fmt --all -- --check
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
@@ -121,10 +124,10 @@ frontend-fmt:
 frontend-lint:
 	pnpm run lint
 
-radio-client-build:
+radio-client-build: check-linux-native-prereqs
 	cargo build -p log73-radio-client
 
-radio-client-test:
+radio-client-test: check-linux-native-prereqs
 	cargo test -p log73-radio-client
 
 radio-client-fmt:

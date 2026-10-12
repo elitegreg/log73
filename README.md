@@ -65,6 +65,27 @@ The browser prompt and Radio Client's configured credentials work as before.
 - Rust toolchain
 - A CAT-capable radio or CAT TCP endpoint supported by `radio-cat-rs`
 
+### Linux native build prerequisites
+
+Building the backend or radio client on Linux needs system development
+packages for serial-port enumeration (`libudev`), audio output (`alsa`), and
+PipeWire. These match the packages installed in CI
+(`.github/workflows/backend-test.yml` and `radio-client.yml`):
+
+```bash
+sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config libasound-dev libpipewire-0.3-dev
+```
+
+`make` runs `scripts/check_linux_native_prereqs.sh` before native build and
+test targets. It probes compile-time metadata with `pkg-config`, so a
+runtime-only library (for example `libudev.so.1` without `libudev-dev`) is
+still reported as missing. On other distributions, install the packages that
+provide the `pkg-config` modules `libudev`, `alsa`, and `libpipewire-0.3`.
+
+On a fresh checkout, build the frontend assets before the backend: the
+backend embeds `dist/` at compile time (`backend/src/static_assets.rs`), so
+run `pnpm run build` (after `pnpm install`) before `cargo build`.
+
 The backend does **not** start or supervise external CAT daemons.
 
 Current `radio-cat-rs` support is driver/profile-driven and model-dependent. For Elecraft K4 CAT, use driver `elecraft-k4` over either TCP or serial transport. The default create-radio selection is the in-memory `dummy` driver with no transport.
