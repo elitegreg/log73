@@ -74,7 +74,7 @@
                 Icon='ProductIcon'/>
             <RemoveFolder Id='RemoveLog73StartMenuFolder' On='uninstall'/>
             <RegistryValue
-                Root='HKLM'
+                Root='HKCU'
                 Key='Software\Log73\log73-launcher'
                 Name='StartMenuShortcut'
                 Type='integer'
