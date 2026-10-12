@@ -3,15 +3,19 @@ use std::path::{Path, PathBuf};
 const APP_NAME: &str = "log73";
 
 pub fn config_dir() -> PathBuf {
-    directories::ProjectDirs::from("com", "log73", APP_NAME)
+    project_dirs()
         .map(|dirs| dirs.config_dir().to_path_buf())
-        .unwrap_or_else(|| fallback_config_dir().join(APP_NAME))
+        .unwrap_or_else(fallback_project_config_dir)
 }
 
 pub fn data_dir() -> PathBuf {
-    directories::ProjectDirs::from("com", "log73", APP_NAME)
+    project_dirs()
         .map(|dirs| dirs.data_dir().to_path_buf())
-        .unwrap_or_else(|| fallback_data_dir().join(APP_NAME))
+        .unwrap_or_else(fallback_project_data_dir)
+}
+
+fn project_dirs() -> Option<directories::ProjectDirs> {
+    directories::ProjectDirs::from("com", "", APP_NAME)
 }
 
 pub fn installed_data_dir(app_root: impl AsRef<Path>) -> PathBuf {
@@ -122,6 +126,20 @@ fn fallback_config_dir() -> PathBuf {
     }
 }
 
+fn fallback_project_config_dir() -> PathBuf {
+    let project_dir = fallback_config_dir().join(APP_NAME);
+
+    #[cfg(target_os = "windows")]
+    {
+        project_dir.join("config")
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        project_dir
+    }
+}
+
 fn fallback_data_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
@@ -147,6 +165,20 @@ fn fallback_data_dir() -> PathBuf {
     #[cfg(not(any(unix, target_os = "windows")))]
     {
         fallback_home_dir().join(".local").join("share")
+    }
+}
+
+fn fallback_project_data_dir() -> PathBuf {
+    let project_dir = fallback_data_dir().join(APP_NAME);
+
+    #[cfg(target_os = "windows")]
+    {
+        project_dir.join("data")
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        project_dir
     }
 }
 
@@ -193,6 +225,19 @@ mod tests {
             app_root_from_executable(executable),
             Some(PathBuf::from("app-root"))
         );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_project_path_contains_app_name_once() {
+        let dirs = project_dirs().expect("Windows project directories are available");
+
+        assert_eq!(dirs.project_path(), Path::new(APP_NAME));
+        assert!(
+            dirs.config_dir()
+                .ends_with(Path::new(APP_NAME).join("config"))
+        );
+        assert!(dirs.data_dir().ends_with(Path::new(APP_NAME).join("data")));
     }
 
     #[test]

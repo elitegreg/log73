@@ -141,7 +141,10 @@ Runtime path defaults:
 - Linux data: `~/.local/share/log73/`
 - Linux contest rules: `~/.local/share/log73/contest-rules/`
 - Linux launcher application root/app dir: `/opt/log73/` (`bin/log73-backend` under that root)
-- macOS and Windows use their platform-specific Log73 config/data/app directories.
+- Windows config: `%APPDATA%\log73\config\`
+- Windows data: `%APPDATA%\log73\data\`
+- Windows launcher application root/app dir: `%ProgramFiles%\log73\`
+- macOS uses its platform-specific Log73 config/data/app directories.
 
 Run the production backend from a source checkout:
 

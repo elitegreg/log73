@@ -1,6 +1,6 @@
 [package]
 name = "radio-io"
-version = "0.3.0-rc.1"
+version = "0.3.0-rc.2"
 edition = "2024"
 repository = "https://github.com/elitegreg/log73"
 authors = ["Greg Mitchell <greg@ng4m.dev>"]

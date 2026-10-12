@@ -649,6 +649,13 @@ fn start_backend(state: &mut Launcher) -> Task<Message> {
 
     let bind_address = format!("{}:{port}", state.settings.bind_mode.bind_ip());
     let backend_binary_path = PathBuf::from(backend_path);
+    if !backend_binary_path.is_file() {
+        state.status = format!(
+            "Backend executable not found: {}",
+            backend_binary_path.display()
+        );
+        return Task::none();
+    }
 
     let mut command = Command::new(&backend_binary_path);
     command

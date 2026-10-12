@@ -2633,7 +2633,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "log73-launcher"
-version = "0.3.0-rc.1"
+version = "0.3.0-rc.2"
 dependencies = [
  "argon2",
  "axum",
@@ -2679,7 +2679,7 @@ dependencies = [
 
 [[package]]
 name = "log73-radio-client"
-version = "0.3.0-rc.1"
+version = "0.3.0-rc.2"
 dependencies = [
  "axum",
  "clap",
@@ -3891,7 +3891,7 @@ dependencies = [
 
 [[package]]
 name = "radio-io"
-version = "0.3.0-rc.1"
+version = "0.3.0-rc.2"
 dependencies = [
  "axum",
  "backon",
