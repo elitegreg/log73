@@ -4,468 +4,468 @@
   <DirectoryRef Id='APPLICATIONFOLDER'>
     <Directory Id='AssetDirectory3a6eb0790f39ac87' Name='data'>
       <Component Id='AssetComponent31a60a75e0869710' Guid='*'>
-        <File Id='AssetFile31a60a75e0869710' Name='bands_1.csv' Source='..\data\bands_1.csv' KeyPath='yes'/>
+        <File Id='AssetFile31a60a75e0869710' Name='bands_1.csv' Source='$(var.CargoTargetBinDir)\..\..\..\data\bands_1.csv' KeyPath='yes'/>
       </Component>
       <Component Id='AssetComponent78e7d15a1c3d9555' Guid='*'>
-        <File Id='AssetFile78e7d15a1c3d9555' Name='bands_2.csv' Source='..\data\bands_2.csv' KeyPath='yes'/>
+        <File Id='AssetFile78e7d15a1c3d9555' Name='bands_2.csv' Source='$(var.CargoTargetBinDir)\..\..\..\data\bands_2.csv' KeyPath='yes'/>
       </Component>
       <Component Id='AssetComponent7073cc0265a2f5db' Guid='*'>
-        <File Id='AssetFile7073cc0265a2f5db' Name='bands_3.csv' Source='..\data\bands_3.csv' KeyPath='yes'/>
+        <File Id='AssetFile7073cc0265a2f5db' Name='bands_3.csv' Source='$(var.CargoTargetBinDir)\..\..\..\data\bands_3.csv' KeyPath='yes'/>
       </Component>
       <Directory Id='AssetDirectoryf53286b0c7b6cbad' Name='contest-rules'>
         <Component Id='AssetComponent204c9db9cbd0f81f' Guid='*'>
-          <File Id='AssetFile204c9db9cbd0f81f' Name='_cabrillo.yaml' Source='..\data\contest-rules\_cabrillo.yaml' KeyPath='yes'/>
+          <File Id='AssetFile204c9db9cbd0f81f' Name='_cabrillo.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\_cabrillo.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent78b34f5776cd995d' Guid='*'>
-          <File Id='AssetFile78b34f5776cd995d' Name='_fields.yaml' Source='..\data\contest-rules\_fields.yaml' KeyPath='yes'/>
+          <File Id='AssetFile78b34f5776cd995d' Name='_fields.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\_fields.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent33d855791f4c8363' Guid='*'>
-          <File Id='AssetFile33d855791f4c8363' Name='_profiles.yaml' Source='..\data\contest-rules\_profiles.yaml' KeyPath='yes'/>
+          <File Id='AssetFile33d855791f4c8363' Name='_profiles.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\_profiles.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentf166838b2213e4d0' Guid='*'>
-          <File Id='AssetFilef166838b2213e4d0' Name='_value-sets.yaml' Source='..\data\contest-rules\_value-sets.yaml' KeyPath='yes'/>
+          <File Id='AssetFilef166838b2213e4d0' Name='_value-sets.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\_value-sets.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentd8dfce5a7ffcb2f6' Guid='*'>
-          <File Id='AssetFiled8dfce5a7ffcb2f6' Name='7qp-counties.dat' Source='..\data\contest-rules\7qp-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFiled8dfce5a7ffcb2f6' Name='7qp-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\7qp-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent148e73b9ffa055f4' Guid='*'>
-          <File Id='AssetFile148e73b9ffa055f4' Name='7qp.yaml' Source='..\data\contest-rules\7qp.yaml' KeyPath='yes'/>
+          <File Id='AssetFile148e73b9ffa055f4' Name='7qp.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\7qp.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent4103b7355bd87955' Guid='*'>
-          <File Id='AssetFile4103b7355bd87955' Name='9a-counties.dat' Source='..\data\contest-rules\9a-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile4103b7355bd87955' Name='9a-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\9a-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent26e5bc84e25ddfc6' Guid='*'>
-          <File Id='AssetFile26e5bc84e25ddfc6' Name='9a-dx.yaml' Source='..\data\contest-rules\9a-dx.yaml' KeyPath='yes'/>
+          <File Id='AssetFile26e5bc84e25ddfc6' Name='9a-dx.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\9a-dx.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent22914f60cbdd725a' Guid='*'>
-          <File Id='AssetFile22914f60cbdd725a' Name='al-qso-party.yaml' Source='..\data\contest-rules\al-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile22914f60cbdd725a' Name='al-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\al-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent4a5f42f7c5f33ca5' Guid='*'>
-          <File Id='AssetFile4a5f42f7c5f33ca5' Name='alabama-counties.dat' Source='..\data\contest-rules\alabama-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile4a5f42f7c5f33ca5' Name='alabama-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\alabama-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponenta263b98588c402c6' Guid='*'>
-          <File Id='AssetFilea263b98588c402c6' Name='all-asian-dx.yaml' Source='..\data\contest-rules\all-asian-dx.yaml' KeyPath='yes'/>
+          <File Id='AssetFilea263b98588c402c6' Name='all-asian-dx.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\all-asian-dx.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent85b58e5fcba2a59b' Guid='*'>
-          <File Id='AssetFile85b58e5fcba2a59b' Name='ar-qso-party.yaml' Source='..\data\contest-rules\ar-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile85b58e5fcba2a59b' Name='ar-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ar-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent49faae245fde2dba' Guid='*'>
-          <File Id='AssetFile49faae245fde2dba' Name='ari-dx.yaml' Source='..\data\contest-rules\ari-dx.yaml' KeyPath='yes'/>
+          <File Id='AssetFile49faae245fde2dba' Name='ari-dx.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ari-dx.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentab0df99b8e180e9d' Guid='*'>
-          <File Id='AssetFileab0df99b8e180e9d' Name='ari-provinces.dat' Source='..\data\contest-rules\ari-provinces.dat' KeyPath='yes'/>
+          <File Id='AssetFileab0df99b8e180e9d' Name='ari-provinces.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ari-provinces.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponenta0e5cfcdf4476905' Guid='*'>
-          <File Id='AssetFilea0e5cfcdf4476905' Name='arizona-counties.dat' Source='..\data\contest-rules\arizona-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFilea0e5cfcdf4476905' Name='arizona-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arizona-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent4b5fb14a64af7467' Guid='*'>
-          <File Id='AssetFile4b5fb14a64af7467' Name='arkansas-counties.dat' Source='..\data\contest-rules\arkansas-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile4b5fb14a64af7467' Name='arkansas-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arkansas-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentfa6f439fc107da99' Guid='*'>
-          <File Id='AssetFilefa6f439fc107da99' Name='arrl_sections.dat' Source='..\data\contest-rules\arrl_sections.dat' KeyPath='yes'/>
+          <File Id='AssetFilefa6f439fc107da99' Name='arrl_sections.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arrl_sections.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent9e6cbefb99301d99' Guid='*'>
-          <File Id='AssetFile9e6cbefb99301d99' Name='arrl-10-canadian-multipliers.dat' Source='..\data\contest-rules\arrl-10-canadian-multipliers.dat' KeyPath='yes'/>
+          <File Id='AssetFile9e6cbefb99301d99' Name='arrl-10-canadian-multipliers.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arrl-10-canadian-multipliers.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentf63921337ae20e15' Guid='*'>
-          <File Id='AssetFilef63921337ae20e15' Name='arrl-10-mexican-multipliers.dat' Source='..\data\contest-rules\arrl-10-mexican-multipliers.dat' KeyPath='yes'/>
+          <File Id='AssetFilef63921337ae20e15' Name='arrl-10-mexican-multipliers.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arrl-10-mexican-multipliers.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent582d6efb7ee3b576' Guid='*'>
-          <File Id='AssetFile582d6efb7ee3b576' Name='arrl-10.yaml' Source='..\data\contest-rules\arrl-10.yaml' KeyPath='yes'/>
+          <File Id='AssetFile582d6efb7ee3b576' Name='arrl-10.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arrl-10.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent0ee7ee1e9448939e' Guid='*'>
-          <File Id='AssetFile0ee7ee1e9448939e' Name='arrl-160-w-ve-dxcc.dat' Source='..\data\contest-rules\arrl-160-w-ve-dxcc.dat' KeyPath='yes'/>
+          <File Id='AssetFile0ee7ee1e9448939e' Name='arrl-160-w-ve-dxcc.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arrl-160-w-ve-dxcc.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent1555079916260f55' Guid='*'>
-          <File Id='AssetFile1555079916260f55' Name='arrl-160.yaml' Source='..\data\contest-rules\arrl-160.yaml' KeyPath='yes'/>
+          <File Id='AssetFile1555079916260f55' Name='arrl-160.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arrl-160.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent07ae705c05e706e0' Guid='*'>
-          <File Id='AssetFile07ae705c05e706e0' Name='arrl-digital.yaml' Source='..\data\contest-rules\arrl-digital.yaml' KeyPath='yes'/>
+          <File Id='AssetFile07ae705c05e706e0' Name='arrl-digital.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arrl-digital.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent292ec451d94fbd79' Guid='*'>
-          <File Id='AssetFile292ec451d94fbd79' Name='arrl-dx.yaml' Source='..\data\contest-rules\arrl-dx.yaml' KeyPath='yes'/>
+          <File Id='AssetFile292ec451d94fbd79' Name='arrl-dx.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arrl-dx.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent76f34d17a2f613f7' Guid='*'>
-          <File Id='AssetFile76f34d17a2f613f7' Name='arrl-field-day.yaml' Source='..\data\contest-rules\arrl-field-day.yaml' KeyPath='yes'/>
+          <File Id='AssetFile76f34d17a2f613f7' Name='arrl-field-day.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arrl-field-day.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent216e26deaf0a48c8' Guid='*'>
-          <File Id='AssetFile216e26deaf0a48c8' Name='arrl-rtty.yaml' Source='..\data\contest-rules\arrl-rtty.yaml' KeyPath='yes'/>
+          <File Id='AssetFile216e26deaf0a48c8' Name='arrl-rtty.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arrl-rtty.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent02817c870342bf0b' Guid='*'>
-          <File Id='AssetFile02817c870342bf0b' Name='arrl-ss.yaml' Source='..\data\contest-rules\arrl-ss.yaml' KeyPath='yes'/>
+          <File Id='AssetFile02817c870342bf0b' Name='arrl-ss.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\arrl-ss.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent8e029ef0ebe8c2ab' Guid='*'>
-          <File Id='AssetFile8e029ef0ebe8c2ab' Name='az-qso-party.yaml' Source='..\data\contest-rules\az-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile8e029ef0ebe8c2ab' Name='az-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\az-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent7eab4dc74e62db46' Guid='*'>
-          <File Id='AssetFile7eab4dc74e62db46' Name='ca-qso-party.yaml' Source='..\data\contest-rules\ca-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile7eab4dc74e62db46' Name='ca-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ca-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentd09989f5b5ae8fff' Guid='*'>
-          <File Id='AssetFiled09989f5b5ae8fff' Name='california-counties.dat' Source='..\data\contest-rules\california-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFiled09989f5b5ae8fff' Name='california-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\california-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent24f462ba5445167f' Guid='*'>
-          <File Id='AssetFile24f462ba5445167f' Name='canadian_provinces.dat' Source='..\data\contest-rules\canadian_provinces.dat' KeyPath='yes'/>
+          <File Id='AssetFile24f462ba5445167f' Name='canadian_provinces.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\canadian_provinces.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentcfc0fd2f21bce0e4' Guid='*'>
-          <File Id='AssetFilecfc0fd2f21bce0e4' Name='co-qso-party.yaml' Source='..\data\contest-rules\co-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFilecfc0fd2f21bce0e4' Name='co-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\co-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent0cd06955936a499d' Guid='*'>
-          <File Id='AssetFile0cd06955936a499d' Name='colorado-counties.dat' Source='..\data\contest-rules\colorado-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile0cd06955936a499d' Name='colorado-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\colorado-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent42ca5e0711841b45' Guid='*'>
-          <File Id='AssetFile42ca5e0711841b45' Name='cq-160.yaml' Source='..\data\contest-rules\cq-160.yaml' KeyPath='yes'/>
+          <File Id='AssetFile42ca5e0711841b45' Name='cq-160.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\cq-160.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentc5c6befa64634b10' Guid='*'>
-          <File Id='AssetFilec5c6befa64634b10' Name='cqmm.yaml' Source='..\data\contest-rules\cqmm.yaml' KeyPath='yes'/>
+          <File Id='AssetFilec5c6befa64634b10' Name='cqmm.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\cqmm.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent798a4dc5cd26c97a' Guid='*'>
-          <File Id='AssetFile798a4dc5cd26c97a' Name='cqwpx.yaml' Source='..\data\contest-rules\cqwpx.yaml' KeyPath='yes'/>
+          <File Id='AssetFile798a4dc5cd26c97a' Name='cqwpx.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\cqwpx.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent7bf2023bd72918ac' Guid='*'>
-          <File Id='AssetFile7bf2023bd72918ac' Name='cqww.yaml' Source='..\data\contest-rules\cqww.yaml' KeyPath='yes'/>
+          <File Id='AssetFile7bf2023bd72918ac' Name='cqww.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\cqww.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentbe50ecb8488bc3ea' Guid='*'>
-          <File Id='AssetFilebe50ecb8488bc3ea' Name='cw-weeklies.yaml' Source='..\data\contest-rules\cw-weeklies.yaml' KeyPath='yes'/>
+          <File Id='AssetFilebe50ecb8488bc3ea' Name='cw-weeklies.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\cw-weeklies.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent367610ca8ee5d1a7' Guid='*'>
-          <File Id='AssetFile367610ca8ee5d1a7' Name='de-qso-party.yaml' Source='..\data\contest-rules\de-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile367610ca8ee5d1a7' Name='de-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\de-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent848beb0db2bb3f2a' Guid='*'>
-          <File Id='AssetFile848beb0db2bb3f2a' Name='delaware-counties.dat' Source='..\data\contest-rules\delaware-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile848beb0db2bb3f2a' Name='delaware-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\delaware-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponenta6546dd69653b816' Guid='*'>
-          <File Id='AssetFilea6546dd69653b816' Name='eu-dx-regions.dat' Source='..\data\contest-rules\eu-dx-regions.dat' KeyPath='yes'/>
+          <File Id='AssetFilea6546dd69653b816' Name='eu-dx-regions.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\eu-dx-regions.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent10687290f88b373b' Guid='*'>
-          <File Id='AssetFile10687290f88b373b' Name='eu-dx.yaml' Source='..\data\contest-rules\eu-dx.yaml' KeyPath='yes'/>
+          <File Id='AssetFile10687290f88b373b' Name='eu-dx.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\eu-dx.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent6697f302464d3cb3' Guid='*'>
-          <File Id='AssetFile6697f302464d3cb3' Name='european-hf.yaml' Source='..\data\contest-rules\european-hf.yaml' KeyPath='yes'/>
+          <File Id='AssetFile6697f302464d3cb3' Name='european-hf.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\european-hf.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent9549a938fbf60957' Guid='*'>
-          <File Id='AssetFile9549a938fbf60957' Name='feld-hell.yaml' Source='..\data\contest-rules\feld-hell.yaml' KeyPath='yes'/>
+          <File Id='AssetFile9549a938fbf60957' Name='feld-hell.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\feld-hell.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent40bd259960182c82' Guid='*'>
-          <File Id='AssetFile40bd259960182c82' Name='fl-qso-party.yaml' Source='..\data\contest-rules\fl-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile40bd259960182c82' Name='fl-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\fl-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentb192de61d041558e' Guid='*'>
-          <File Id='AssetFileb192de61d041558e' Name='florida-counties.dat' Source='..\data\contest-rules\florida-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFileb192de61d041558e' Name='florida-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\florida-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponenta0b6f74db5bc6c2f' Guid='*'>
-          <File Id='AssetFilea0b6f74db5bc6c2f' Name='ga-qso-party.yaml' Source='..\data\contest-rules\ga-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFilea0b6f74db5bc6c2f' Name='ga-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ga-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent79dfcf74592df099' Guid='*'>
-          <File Id='AssetFile79dfcf74592df099' Name='georgia-counties.dat' Source='..\data\contest-rules\georgia-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile79dfcf74592df099' Name='georgia-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\georgia-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent41efc3fb193306ed' Guid='*'>
-          <File Id='AssetFile41efc3fb193306ed' Name='ha-dx.yaml' Source='..\data\contest-rules\ha-dx.yaml' KeyPath='yes'/>
+          <File Id='AssetFile41efc3fb193306ed' Name='ha-dx.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ha-dx.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent31a4819605b5f6d2' Guid='*'>
-          <File Id='AssetFile31a4819605b5f6d2' Name='hawaii-districts.dat' Source='..\data\contest-rules\hawaii-districts.dat' KeyPath='yes'/>
+          <File Id='AssetFile31a4819605b5f6d2' Name='hawaii-districts.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\hawaii-districts.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent03d5da13220cdd05' Guid='*'>
-          <File Id='AssetFile03d5da13220cdd05' Name='helvetia.yaml' Source='..\data\contest-rules\helvetia.yaml' KeyPath='yes'/>
+          <File Id='AssetFile03d5da13220cdd05' Name='helvetia.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\helvetia.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentdea853d2a9478854' Guid='*'>
-          <File Id='AssetFiledea853d2a9478854' Name='hi-qso-party.yaml' Source='..\data\contest-rules\hi-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFiledea853d2a9478854' Name='hi-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\hi-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentd3e5d004773da1b1' Guid='*'>
-          <File Id='AssetFiled3e5d004773da1b1' Name='ia-qso-party.yaml' Source='..\data\contest-rules\ia-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFiled3e5d004773da1b1' Name='ia-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ia-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentf8ea0e57bde4cec5' Guid='*'>
-          <File Id='AssetFilef8ea0e57bde4cec5' Name='iaru-hf.yaml' Source='..\data\contest-rules\iaru-hf.yaml' KeyPath='yes'/>
+          <File Id='AssetFilef8ea0e57bde4cec5' Name='iaru-hf.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\iaru-hf.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent6a3c22c252dff109' Guid='*'>
-          <File Id='AssetFile6a3c22c252dff109' Name='iaru-hq-societies.dat' Source='..\data\contest-rules\iaru-hq-societies.dat' KeyPath='yes'/>
+          <File Id='AssetFile6a3c22c252dff109' Name='iaru-hq-societies.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\iaru-hq-societies.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent3f9322c235a3bac0' Guid='*'>
-          <File Id='AssetFile3f9322c235a3bac0' Name='id-qso-party.yaml' Source='..\data\contest-rules\id-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile3f9322c235a3bac0' Name='id-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\id-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent68ab31bbbb5999be' Guid='*'>
-          <File Id='AssetFile68ab31bbbb5999be' Name='idaho-counties.dat' Source='..\data\contest-rules\idaho-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile68ab31bbbb5999be' Name='idaho-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\idaho-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentedda02c471a5037a' Guid='*'>
-          <File Id='AssetFileedda02c471a5037a' Name='il-qso-party.yaml' Source='..\data\contest-rules\il-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFileedda02c471a5037a' Name='il-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\il-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent7ea3aaf3c961ad88' Guid='*'>
-          <File Id='AssetFile7ea3aaf3c961ad88' Name='illinois-counties.dat' Source='..\data\contest-rules\illinois-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile7ea3aaf3c961ad88' Name='illinois-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\illinois-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent0395630b1710a905' Guid='*'>
-          <File Id='AssetFile0395630b1710a905' Name='in-qso-party.yaml' Source='..\data\contest-rules\in-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile0395630b1710a905' Name='in-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\in-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentea5c9e6375a4afb5' Guid='*'>
-          <File Id='AssetFileea5c9e6375a4afb5' Name='indiana-counties.dat' Source='..\data\contest-rules\indiana-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFileea5c9e6375a4afb5' Name='indiana-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\indiana-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent0c51bc6e34a56e46' Guid='*'>
-          <File Id='AssetFile0c51bc6e34a56e46' Name='iota.yaml' Source='..\data\contest-rules\iota.yaml' KeyPath='yes'/>
+          <File Id='AssetFile0c51bc6e34a56e46' Name='iota.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\iota.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponente0a4663a1df33c2c' Guid='*'>
-          <File Id='AssetFilee0a4663a1df33c2c' Name='iowa-counties.dat' Source='..\data\contest-rules\iowa-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFilee0a4663a1df33c2c' Name='iowa-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\iowa-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent78c46dc83f9abc24' Guid='*'>
-          <File Id='AssetFile78c46dc83f9abc24' Name='jarl-rtty.yaml' Source='..\data\contest-rules\jarl-rtty.yaml' KeyPath='yes'/>
+          <File Id='AssetFile78c46dc83f9abc24' Name='jarl-rtty.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\jarl-rtty.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent486433d45050f0e4' Guid='*'>
-          <File Id='AssetFile486433d45050f0e4' Name='kansas-counties.dat' Source='..\data\contest-rules\kansas-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile486433d45050f0e4' Name='kansas-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\kansas-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent5e94fd20fb40cb15' Guid='*'>
-          <File Id='AssetFile5e94fd20fb40cb15' Name='kentucky-counties.dat' Source='..\data\contest-rules\kentucky-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile5e94fd20fb40cb15' Name='kentucky-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\kentucky-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent72a301bdc0c93bc7' Guid='*'>
-          <File Id='AssetFile72a301bdc0c93bc7' Name='ks-qso-party.yaml' Source='..\data\contest-rules\ks-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile72a301bdc0c93bc7' Name='ks-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ks-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentacf69a9956532798' Guid='*'>
-          <File Id='AssetFileacf69a9956532798' Name='ky-qso-party.yaml' Source='..\data\contest-rules\ky-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFileacf69a9956532798' Name='ky-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ky-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent08d0db9f11f098ab' Guid='*'>
-          <File Id='AssetFile08d0db9f11f098ab' Name='la-qso-party.yaml' Source='..\data\contest-rules\la-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile08d0db9f11f098ab' Name='la-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\la-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentc1b7f7ce726a5bc0' Guid='*'>
-          <File Id='AssetFilec1b7f7ce726a5bc0' Name='louisiana-parishes.dat' Source='..\data\contest-rules\louisiana-parishes.dat' KeyPath='yes'/>
+          <File Id='AssetFilec1b7f7ce726a5bc0' Name='louisiana-parishes.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\louisiana-parishes.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent7825b8130b08edd4' Guid='*'>
-          <File Id='AssetFile7825b8130b08edd4' Name='lz-districts.dat' Source='..\data\contest-rules\lz-districts.dat' KeyPath='yes'/>
+          <File Id='AssetFile7825b8130b08edd4' Name='lz-districts.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\lz-districts.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent6ed840f1945f63f5' Guid='*'>
-          <File Id='AssetFile6ed840f1945f63f5' Name='lz-dx.yaml' Source='..\data\contest-rules\lz-dx.yaml' KeyPath='yes'/>
+          <File Id='AssetFile6ed840f1945f63f5' Name='lz-dx.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\lz-dx.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent64fa9801f309b19b' Guid='*'>
-          <File Id='AssetFile64fa9801f309b19b' Name='maine-counties.dat' Source='..\data\contest-rules\maine-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile64fa9801f309b19b' Name='maine-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\maine-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent0f6da9ce2153dbec' Guid='*'>
-          <File Id='AssetFile0f6da9ce2153dbec' Name='maryland-dc-counties.dat' Source='..\data\contest-rules\maryland-dc-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile0f6da9ce2153dbec' Name='maryland-dc-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\maryland-dc-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent81437a1646dd1cbc' Guid='*'>
-          <File Id='AssetFile81437a1646dd1cbc' Name='mdc-qso-party.yaml' Source='..\data\contest-rules\mdc-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile81437a1646dd1cbc' Name='mdc-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\mdc-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent2edeb77fb9ab301a' Guid='*'>
-          <File Id='AssetFile2edeb77fb9ab301a' Name='me-qso-party.yaml' Source='..\data\contest-rules\me-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile2edeb77fb9ab301a' Name='me-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\me-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentd7c461dcbee7ecfe' Guid='*'>
-          <File Id='AssetFiled7c461dcbee7ecfe' Name='mi-qso-party.yaml' Source='..\data\contest-rules\mi-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFiled7c461dcbee7ecfe' Name='mi-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\mi-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent41c8275754e34562' Guid='*'>
-          <File Id='AssetFile41c8275754e34562' Name='michigan-counties.dat' Source='..\data\contest-rules\michigan-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile41c8275754e34562' Name='michigan-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\michigan-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponenta93e060dde9a6183' Guid='*'>
-          <File Id='AssetFilea93e060dde9a6183' Name='minnesota-counties.dat' Source='..\data\contest-rules\minnesota-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFilea93e060dde9a6183' Name='minnesota-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\minnesota-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent065300520bec576a' Guid='*'>
-          <File Id='AssetFile065300520bec576a' Name='mississippi-counties.dat' Source='..\data\contest-rules\mississippi-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile065300520bec576a' Name='mississippi-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\mississippi-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent8b9d3efaebfea0d1' Guid='*'>
-          <File Id='AssetFile8b9d3efaebfea0d1' Name='missouri-counties.dat' Source='..\data\contest-rules\missouri-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile8b9d3efaebfea0d1' Name='missouri-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\missouri-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentfa30c751961d0bb3' Guid='*'>
-          <File Id='AssetFilefa30c751961d0bb3' Name='mn-qso-party.yaml' Source='..\data\contest-rules\mn-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFilefa30c751961d0bb3' Name='mn-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\mn-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponented4ef1cb542821ee' Guid='*'>
-          <File Id='AssetFileed4ef1cb542821ee' Name='mo-qso-party.yaml' Source='..\data\contest-rules\mo-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFileed4ef1cb542821ee' Name='mo-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\mo-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent4dbe83e68dc43226' Guid='*'>
-          <File Id='AssetFile4dbe83e68dc43226' Name='ms-qso-party.yaml' Source='..\data\contest-rules\ms-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile4dbe83e68dc43226' Name='ms-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ms-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent325b429ae72f48f2' Guid='*'>
-          <File Id='AssetFile325b429ae72f48f2' Name='na-sprint-cw-rtty.yaml' Source='..\data\contest-rules\na-sprint-cw-rtty.yaml' KeyPath='yes'/>
+          <File Id='AssetFile325b429ae72f48f2' Name='na-sprint-cw-rtty.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\na-sprint-cw-rtty.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentdb5f39608f4f190b' Guid='*'>
-          <File Id='AssetFiledb5f39608f4f190b' Name='na-sprint-ssb.yaml' Source='..\data\contest-rules\na-sprint-ssb.yaml' KeyPath='yes'/>
+          <File Id='AssetFiledb5f39608f4f190b' Name='na-sprint-ssb.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\na-sprint-ssb.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent7b5e0e7b1063376e' Guid='*'>
-          <File Id='AssetFile7b5e0e7b1063376e' Name='naqp.yaml' Source='..\data\contest-rules\naqp.yaml' KeyPath='yes'/>
+          <File Id='AssetFile7b5e0e7b1063376e' Name='naqp.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\naqp.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent83f8f104e0060539' Guid='*'>
-          <File Id='AssetFile83f8f104e0060539' Name='nc-qso-party.yaml' Source='..\data\contest-rules\nc-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile83f8f104e0060539' Name='nc-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\nc-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent55b84ab27a71765b' Guid='*'>
-          <File Id='AssetFile55b84ab27a71765b' Name='nccc-sprint.yaml' Source='..\data\contest-rules\nccc-sprint.yaml' KeyPath='yes'/>
+          <File Id='AssetFile55b84ab27a71765b' Name='nccc-sprint.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\nccc-sprint.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentba1a4e4916ff08b8' Guid='*'>
-          <File Id='AssetFileba1a4e4916ff08b8' Name='nd-qso-party.yaml' Source='..\data\contest-rules\nd-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFileba1a4e4916ff08b8' Name='nd-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\nd-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent453905279d0bdc25' Guid='*'>
-          <File Id='AssetFile453905279d0bdc25' Name='ne-qso-party.yaml' Source='..\data\contest-rules\ne-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile453905279d0bdc25' Name='ne-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ne-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentd1b064da682c6da3' Guid='*'>
-          <File Id='AssetFiled1b064da682c6da3' Name='nebraska-counties.dat' Source='..\data\contest-rules\nebraska-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFiled1b064da682c6da3' Name='nebraska-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\nebraska-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentc8111272e0a58d07' Guid='*'>
-          <File Id='AssetFilec8111272e0a58d07' Name='new-england-counties.dat' Source='..\data\contest-rules\new-england-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFilec8111272e0a58d07' Name='new-england-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\new-england-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent783f6e151b037656' Guid='*'>
-          <File Id='AssetFile783f6e151b037656' Name='new-england-qso-party.yaml' Source='..\data\contest-rules\new-england-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile783f6e151b037656' Name='new-england-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\new-england-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentbc2f078c6637e20f' Guid='*'>
-          <File Id='AssetFilebc2f078c6637e20f' Name='new-hampshire-counties.dat' Source='..\data\contest-rules\new-hampshire-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFilebc2f078c6637e20f' Name='new-hampshire-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\new-hampshire-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent31cbc1cd8d0ac359' Guid='*'>
-          <File Id='AssetFile31cbc1cd8d0ac359' Name='new-jersey-counties.dat' Source='..\data\contest-rules\new-jersey-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile31cbc1cd8d0ac359' Name='new-jersey-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\new-jersey-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentce9bf6bd47a82866' Guid='*'>
-          <File Id='AssetFilece9bf6bd47a82866' Name='new-mexico-counties.dat' Source='..\data\contest-rules\new-mexico-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFilece9bf6bd47a82866' Name='new-mexico-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\new-mexico-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent572ff3a72bf769f3' Guid='*'>
-          <File Id='AssetFile572ff3a72bf769f3' Name='new-york-counties.dat' Source='..\data\contest-rules\new-york-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile572ff3a72bf769f3' Name='new-york-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\new-york-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponenta59641dc15294013' Guid='*'>
-          <File Id='AssetFilea59641dc15294013' Name='nh-qso-party.yaml' Source='..\data\contest-rules\nh-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFilea59641dc15294013' Name='nh-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\nh-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentac9632c22fdf05e2' Guid='*'>
-          <File Id='AssetFileac9632c22fdf05e2' Name='nj-qso-party.yaml' Source='..\data\contest-rules\nj-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFileac9632c22fdf05e2' Name='nj-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\nj-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent72b10016aaad67ce' Guid='*'>
-          <File Id='AssetFile72b10016aaad67ce' Name='nm-qso-party.yaml' Source='..\data\contest-rules\nm-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile72b10016aaad67ce' Name='nm-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\nm-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent40d259c8b6e9cdc9' Guid='*'>
-          <File Id='AssetFile40d259c8b6e9cdc9' Name='north-american-countries.dat' Source='..\data\contest-rules\north-american-countries.dat' KeyPath='yes'/>
+          <File Id='AssetFile40d259c8b6e9cdc9' Name='north-american-countries.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\north-american-countries.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent3213933ad101ecc7' Guid='*'>
-          <File Id='AssetFile3213933ad101ecc7' Name='north-carolina-counties.dat' Source='..\data\contest-rules\north-carolina-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile3213933ad101ecc7' Name='north-carolina-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\north-carolina-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent7ac15b4bef744195' Guid='*'>
-          <File Id='AssetFile7ac15b4bef744195' Name='north-dakota-counties.dat' Source='..\data\contest-rules\north-dakota-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile7ac15b4bef744195' Name='north-dakota-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\north-dakota-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent8691a398e0a9c759' Guid='*'>
-          <File Id='AssetFile8691a398e0a9c759' Name='ny-qso-party.yaml' Source='..\data\contest-rules\ny-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile8691a398e0a9c759' Name='ny-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ny-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent6a2be8d552e5b9da' Guid='*'>
-          <File Id='AssetFile6a2be8d552e5b9da' Name='oceania-dx.yaml' Source='..\data\contest-rules\oceania-dx.yaml' KeyPath='yes'/>
+          <File Id='AssetFile6a2be8d552e5b9da' Name='oceania-dx.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\oceania-dx.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentd53a36fab20dcfcd' Guid='*'>
-          <File Id='AssetFiled53a36fab20dcfcd' Name='oh-qso-party.yaml' Source='..\data\contest-rules\oh-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFiled53a36fab20dcfcd' Name='oh-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\oh-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent653236a6c5022109' Guid='*'>
-          <File Id='AssetFile653236a6c5022109' Name='ohio-counties.dat' Source='..\data\contest-rules\ohio-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile653236a6c5022109' Name='ohio-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ohio-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent1c8c7533a84d839a' Guid='*'>
-          <File Id='AssetFile1c8c7533a84d839a' Name='ok-qso-party.yaml' Source='..\data\contest-rules\ok-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile1c8c7533a84d839a' Name='ok-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ok-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentc45eda39edae92ed' Guid='*'>
-          <File Id='AssetFilec45eda39edae92ed' Name='oklahoma-counties.dat' Source='..\data\contest-rules\oklahoma-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFilec45eda39edae92ed' Name='oklahoma-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\oklahoma-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentd6e2962892f0cbda' Guid='*'>
-          <File Id='AssetFiled6e2962892f0cbda' Name='pa-arrl-rac-sections.dat' Source='..\data\contest-rules\pa-arrl-rac-sections.dat' KeyPath='yes'/>
+          <File Id='AssetFiled6e2962892f0cbda' Name='pa-arrl-rac-sections.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\pa-arrl-rac-sections.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent8060b280ddc7316e' Guid='*'>
-          <File Id='AssetFile8060b280ddc7316e' Name='pa-qso-party.yaml' Source='..\data\contest-rules\pa-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile8060b280ddc7316e' Name='pa-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\pa-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent4a051b71ead91ed9' Guid='*'>
-          <File Id='AssetFile4a051b71ead91ed9' Name='pacc.yaml' Source='..\data\contest-rules\pacc.yaml' KeyPath='yes'/>
+          <File Id='AssetFile4a051b71ead91ed9' Name='pacc.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\pacc.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent9fe34e8388c18685' Guid='*'>
-          <File Id='AssetFile9fe34e8388c18685' Name='pennsylvania-counties.dat' Source='..\data\contest-rules\pennsylvania-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile9fe34e8388c18685' Name='pennsylvania-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\pennsylvania-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent39f5619680eb5c59' Guid='*'>
-          <File Id='AssetFile39f5619680eb5c59' Name='phone-fray.yaml' Source='..\data\contest-rules\phone-fray.yaml' KeyPath='yes'/>
+          <File Id='AssetFile39f5619680eb5c59' Name='phone-fray.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\phone-fray.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent472c6f7bbf24be95' Guid='*'>
-          <File Id='AssetFile472c6f7bbf24be95' Name='qcx-challenge.yaml' Source='..\data\contest-rules\qcx-challenge.yaml' KeyPath='yes'/>
+          <File Id='AssetFile472c6f7bbf24be95' Name='qcx-challenge.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\qcx-challenge.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent0a195141dd92dfe2' Guid='*'>
-          <File Id='AssetFile0a195141dd92dfe2' Name='rac_sections.dat' Source='..\data\contest-rules\rac_sections.dat' KeyPath='yes'/>
+          <File Id='AssetFile0a195141dd92dfe2' Name='rac_sections.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\rac_sections.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent07a76fb8a24f44c0' Guid='*'>
-          <File Id='AssetFile07a76fb8a24f44c0' Name='rac-canada.yaml' Source='..\data\contest-rules\rac-canada.yaml' KeyPath='yes'/>
+          <File Id='AssetFile07a76fb8a24f44c0' Name='rac-canada.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\rac-canada.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent3cfadafbc5234e93' Guid='*'>
-          <File Id='AssetFile3cfadafbc5234e93' Name='rac-official-stations.dat' Source='..\data\contest-rules\rac-official-stations.dat' KeyPath='yes'/>
+          <File Id='AssetFile3cfadafbc5234e93' Name='rac-official-stations.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\rac-official-stations.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponenta39a0ee5a9af56f0' Guid='*'>
-          <File Id='AssetFilea39a0ee5a9af56f0' Name='rdxc-regions.dat' Source='..\data\contest-rules\rdxc-regions.dat' KeyPath='yes'/>
+          <File Id='AssetFilea39a0ee5a9af56f0' Name='rdxc-regions.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\rdxc-regions.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentba4f201356e170a7' Guid='*'>
-          <File Id='AssetFileba4f201356e170a7' Name='ref-locations.dat' Source='..\data\contest-rules\ref-locations.dat' KeyPath='yes'/>
+          <File Id='AssetFileba4f201356e170a7' Name='ref-locations.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ref-locations.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponenta5835e000ca0c71f' Guid='*'>
-          <File Id='AssetFilea5835e000ca0c71f' Name='ref.yaml' Source='..\data\contest-rules\ref.yaml' KeyPath='yes'/>
+          <File Id='AssetFilea5835e000ca0c71f' Name='ref.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ref.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentdf8ec39e55fd25f0' Guid='*'>
-          <File Id='AssetFiledf8ec39e55fd25f0' Name='russian-dx.yaml' Source='..\data\contest-rules\russian-dx.yaml' KeyPath='yes'/>
+          <File Id='AssetFiledf8ec39e55fd25f0' Name='russian-dx.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\russian-dx.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponenta30e4c1090e74706' Guid='*'>
-          <File Id='AssetFilea30e4c1090e74706' Name='sac.yaml' Source='..\data\contest-rules\sac.yaml' KeyPath='yes'/>
+          <File Id='AssetFilea30e4c1090e74706' Name='sac.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\sac.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent74b3a498d2714cff' Guid='*'>
-          <File Id='AssetFile74b3a498d2714cff' Name='sc-qso-party.yaml' Source='..\data\contest-rules\sc-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile74b3a498d2714cff' Name='sc-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\sc-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentab4050069da2c6f3' Guid='*'>
-          <File Id='AssetFileab4050069da2c6f3' Name='sd-qso-party.yaml' Source='..\data\contest-rules\sd-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFileab4050069da2c6f3' Name='sd-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\sd-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent5422b89f65a94cba' Guid='*'>
-          <File Id='AssetFile5422b89f65a94cba' Name='south-carolina-counties.dat' Source='..\data\contest-rules\south-carolina-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile5422b89f65a94cba' Name='south-carolina-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\south-carolina-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent687fb88026fa2a0f' Guid='*'>
-          <File Id='AssetFile687fb88026fa2a0f' Name='south-dakota-counties.dat' Source='..\data\contest-rules\south-dakota-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile687fb88026fa2a0f' Name='south-dakota-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\south-dakota-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentcd833206c30465c3' Guid='*'>
-          <File Id='AssetFilecd833206c30465c3' Name='sp-dx.yaml' Source='..\data\contest-rules\sp-dx.yaml' KeyPath='yes'/>
+          <File Id='AssetFilecd833206c30465c3' Name='sp-dx.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\sp-dx.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent481de560690318b4' Guid='*'>
-          <File Id='AssetFile481de560690318b4' Name='tennessee-counties.dat' Source='..\data\contest-rules\tennessee-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile481de560690318b4' Name='tennessee-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\tennessee-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentda889ab14e415689' Guid='*'>
-          <File Id='AssetFileda889ab14e415689' Name='tn-qso-party.yaml' Source='..\data\contest-rules\tn-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFileda889ab14e415689' Name='tn-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\tn-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentf1735aca23670a0e' Guid='*'>
-          <File Id='AssetFilef1735aca23670a0e' Name='tx-qso-party.yaml' Source='..\data\contest-rules\tx-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFilef1735aca23670a0e' Name='tx-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\tx-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent1855fd30ebc82edb' Guid='*'>
-          <File Id='AssetFile1855fd30ebc82edb' Name='ukrainian-dx.yaml' Source='..\data\contest-rules\ukrainian-dx.yaml' KeyPath='yes'/>
+          <File Id='AssetFile1855fd30ebc82edb' Name='ukrainian-dx.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ukrainian-dx.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent34adb4c4612cc234' Guid='*'>
-          <File Id='AssetFile34adb4c4612cc234' Name='ukrainian-oblasts.dat' Source='..\data\contest-rules\ukrainian-oblasts.dat' KeyPath='yes'/>
+          <File Id='AssetFile34adb4c4612cc234' Name='ukrainian-oblasts.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ukrainian-oblasts.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent64f9ceded84efd44' Guid='*'>
-          <File Id='AssetFile64f9ceded84efd44' Name='us_states.dat' Source='..\data\contest-rules\us_states.dat' KeyPath='yes'/>
+          <File Id='AssetFile64f9ceded84efd44' Name='us_states.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\us_states.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent7b46faef459b1571' Guid='*'>
-          <File Id='AssetFile7b46faef459b1571' Name='va-qso-party.yaml' Source='..\data\contest-rules\va-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile7b46faef459b1571' Name='va-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\va-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent144c3eb312561fbe' Guid='*'>
-          <File Id='AssetFile144c3eb312561fbe' Name='vermont-counties.dat' Source='..\data\contest-rules\vermont-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile144c3eb312561fbe' Name='vermont-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\vermont-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentcb8979c1fcb78b3d' Guid='*'>
-          <File Id='AssetFilecb8979c1fcb78b3d' Name='virginia-counties-cities.dat' Source='..\data\contest-rules\virginia-counties-cities.dat' KeyPath='yes'/>
+          <File Id='AssetFilecb8979c1fcb78b3d' Name='virginia-counties-cities.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\virginia-counties-cities.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent19ce940a9f01d618' Guid='*'>
-          <File Id='AssetFile19ce940a9f01d618' Name='vt-qso-party.yaml' Source='..\data\contest-rules\vt-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile19ce940a9f01d618' Name='vt-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\vt-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent1852efa105a0dd2a' Guid='*'>
-          <File Id='AssetFile1852efa105a0dd2a' Name='wa-qso-party.yaml' Source='..\data\contest-rules\wa-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile1852efa105a0dd2a' Name='wa-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\wa-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentbf8029141c88f831' Guid='*'>
-          <File Id='AssetFilebf8029141c88f831' Name='wag.yaml' Source='..\data\contest-rules\wag.yaml' KeyPath='yes'/>
+          <File Id='AssetFilebf8029141c88f831' Name='wag.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\wag.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentc7dd662446019ef1' Guid='*'>
-          <File Id='AssetFilec7dd662446019ef1' Name='washington-counties.dat' Source='..\data\contest-rules\washington-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFilec7dd662446019ef1' Name='washington-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\washington-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent9ce2f11d21cdb25d' Guid='*'>
-          <File Id='AssetFile9ce2f11d21cdb25d' Name='weekly-rtty.yaml' Source='..\data\contest-rules\weekly-rtty.yaml' KeyPath='yes'/>
+          <File Id='AssetFile9ce2f11d21cdb25d' Name='weekly-rtty.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\weekly-rtty.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentb657357166f39ada' Guid='*'>
-          <File Id='AssetFileb657357166f39ada' Name='wfd.yaml' Source='..\data\contest-rules\wfd.yaml' KeyPath='yes'/>
+          <File Id='AssetFileb657357166f39ada' Name='wfd.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\wfd.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent8f0b57be01eb2b84' Guid='*'>
-          <File Id='AssetFile8f0b57be01eb2b84' Name='wi-qso-party.yaml' Source='..\data\contest-rules\wi-qso-party.yaml' KeyPath='yes'/>
+          <File Id='AssetFile8f0b57be01eb2b84' Name='wi-qso-party.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\wi-qso-party.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponent1b208edabbfd7d65' Guid='*'>
-          <File Id='AssetFile1b208edabbfd7d65' Name='wisconsin-counties.dat' Source='..\data\contest-rules\wisconsin-counties.dat' KeyPath='yes'/>
+          <File Id='AssetFile1b208edabbfd7d65' Name='wisconsin-counties.dat' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\wisconsin-counties.dat' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponentc99486a1c4257317' Guid='*'>
-          <File Id='AssetFilec99486a1c4257317' Name='ww-digi.yaml' Source='..\data\contest-rules\ww-digi.yaml' KeyPath='yes'/>
+          <File Id='AssetFilec99486a1c4257317' Name='ww-digi.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\ww-digi.yaml' KeyPath='yes'/>
         </Component>
         <Component Id='AssetComponente8b8a5ec627cd36d' Guid='*'>
-          <File Id='AssetFilee8b8a5ec627cd36d' Name='wwsac.yaml' Source='..\data\contest-rules\wwsac.yaml' KeyPath='yes'/>
+          <File Id='AssetFilee8b8a5ec627cd36d' Name='wwsac.yaml' Source='$(var.CargoTargetBinDir)\..\..\..\data\contest-rules\wwsac.yaml' KeyPath='yes'/>
         </Component>
       </Directory>
       <Component Id='AssetComponent48fc25ff5238e617' Guid='*'>
-        <File Id='AssetFile48fc25ff5238e617' Name='cty.csv' Source='..\data\cty.csv' KeyPath='yes'/>
+        <File Id='AssetFile48fc25ff5238e617' Name='cty.csv' Source='$(var.CargoTargetBinDir)\..\..\..\data\cty.csv' KeyPath='yes'/>
       </Component>
       <Component Id='AssetComponent171a4300d4b6c9b7' Guid='*'>
-        <File Id='AssetFile171a4300d4b6c9b7' Name='log73.db' Source='..\data\log73.db' KeyPath='yes'/>
+        <File Id='AssetFile171a4300d4b6c9b7' Name='log73.db' Source='$(var.CargoTargetBinDir)\..\..\..\data\log73.db' KeyPath='yes'/>
       </Component>
       <Component Id='AssetComponenta00f7fd93580fe1c' Guid='*'>
-        <File Id='AssetFilea00f7fd93580fe1c' Name='MASTER.SCP' Source='..\data\MASTER.SCP' KeyPath='yes'/>
+        <File Id='AssetFilea00f7fd93580fe1c' Name='MASTER.SCP' Source='$(var.CargoTargetBinDir)\..\..\..\data\MASTER.SCP' KeyPath='yes'/>
       </Component>
       <Directory Id='AssetDirectoryaa8607469cbc49b9' Name='voicekeyer'>
       </Directory>
