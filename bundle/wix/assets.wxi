@@ -461,9 +461,6 @@
       <Component Id='AssetComponent48fc25ff5238e617' Guid='*'>
         <File Id='AssetFile48fc25ff5238e617' Name='cty.csv' Source='$(var.CargoTargetBinDir)\..\..\..\data\cty.csv' KeyPath='yes'/>
       </Component>
-      <Component Id='AssetComponent171a4300d4b6c9b7' Guid='*'>
-        <File Id='AssetFile171a4300d4b6c9b7' Name='log73.db' Source='$(var.CargoTargetBinDir)\..\..\..\data\log73.db' KeyPath='yes'/>
-      </Component>
       <Component Id='AssetComponenta00f7fd93580fe1c' Guid='*'>
         <File Id='AssetFilea00f7fd93580fe1c' Name='MASTER.SCP' Source='$(var.CargoTargetBinDir)\..\..\..\data\MASTER.SCP' KeyPath='yes'/>
       </Component>
@@ -624,7 +621,6 @@
     <ComponentRef Id='AssetComponentc99486a1c4257317'/>
     <ComponentRef Id='AssetComponente8b8a5ec627cd36d'/>
     <ComponentRef Id='AssetComponent48fc25ff5238e617'/>
-    <ComponentRef Id='AssetComponent171a4300d4b6c9b7'/>
     <ComponentRef Id='AssetComponenta00f7fd93580fe1c'/>
   </ComponentGroup>
 </Fragment>

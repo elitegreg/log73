@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outputPath = join(repoRoot, 'bundle', 'wix', 'assets.wxi');
 const assetRoots = ['data'];
+const excludedAssetPaths = new Set(['data/log73.db']);
 
 function xml(value) {
   return value.replaceAll('&', '&amp;').replaceAll("'", '&apos;').replaceAll('<', '&lt;');
@@ -32,12 +33,15 @@ function renderDirectory(root, entries, ancestorPath, indent, components) {
   const lines = [`${indent}<Directory Id='${id('AssetDirectory', logicalPath)}' Name='${xml(root)}'>`];
   for (const entry of entries) {
     const entryPath = [...ancestorPath, entry.name];
+    const relativePath = entryPath.join('/');
+    if (excludedAssetPaths.has(relativePath)) {
+      continue;
+    }
     if (entry.kind === 'directory') {
       lines.push(...renderDirectory(entry.name, entry.children, entryPath, `${indent}  `, components));
       continue;
     }
 
-    const relativePath = entryPath.join('/');
     const componentId = id('AssetComponent', relativePath);
     const source = ['$(var.CargoTargetBinDir)', '..', '..', '..', ...entryPath].join('\\');
     components.push(componentId);
