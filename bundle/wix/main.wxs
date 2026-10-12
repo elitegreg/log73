@@ -109,7 +109,7 @@
     </Feature>
 
     <SetProperty Id='ARPINSTALLLOCATION' Value='[APPLICATIONFOLDER]' After='CostFinalize'/>
-    <Icon Id='ProductIcon' SourceFile='..\..\static\app.ico'/>
+    <Icon Id='ProductIcon' SourceFile='..\static\app.ico'/>
     <Property Id='ARPPRODUCTICON' Value='ProductIcon'/>
     <Property Id='ARPHELPLINK' Value='https://github.com/elitegreg/log73'/>
     <UI>
