@@ -301,7 +301,7 @@ jobs:
       - name: Cleanup
         run: |
           # Remove the granular manifests
-          rm -f artifacts/*-dist-manifest.json
+          find artifacts -type f -name '*-dist-manifest.json' -delete
       - name: Create GitHub Release
         env:
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
@@ -312,7 +312,12 @@ jobs:
           # Write and read notes from a file to avoid quoting breaking things
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
 
-          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
+          mapfile -t release_assets < <(find artifacts -type f -print)
+          if gh release view "${{ needs.plan.outputs.tag }}" >/dev/null 2>&1; then
+            gh release upload "${{ needs.plan.outputs.tag }}" --clobber "${release_assets[@]}"
+          else
+            gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" "${release_assets[@]}"
+          fi
 
   announce:
     needs:
