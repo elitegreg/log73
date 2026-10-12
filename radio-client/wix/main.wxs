@@ -142,7 +142,7 @@
                             Icon='ProductIcon'/>
                         <RemoveFolder Id='RemoveLog73RadioClientStartMenuFolder' On='uninstall'/>
                         <RegistryValue
-                            Root='HKLM'
+                            Root='HKCU'
                             Key='Software\Log73\log73-radio-client'
                             Name='StartMenuShortcut'
                             Type='integer'
