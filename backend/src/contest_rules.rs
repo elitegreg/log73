@@ -5,6 +5,7 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     fs,
     path::{Component, Path, PathBuf},
+    sync::Arc,
 };
 use tracing::info;
 
@@ -579,7 +580,7 @@ pub struct ContestSummary {
 
 #[derive(Debug, Clone)]
 pub struct ContestRulesStore {
-    contests: BTreeMap<String, ContestRules>,
+    contests: Arc<BTreeMap<String, ContestRules>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -763,7 +764,9 @@ impl ContestRulesStore {
         }
 
         info!(contests = contests.len(), "loaded contest rules");
-        Ok(Self { contests })
+        Ok(Self {
+            contests: Arc::new(contests),
+        })
     }
 
     pub fn get(&self, id: &str) -> Option<&ContestRules> {
@@ -1891,6 +1894,18 @@ fn value_set_file_path(file_name: &Path, search_paths: &[PathBuf]) -> Result<Pat
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn catalog_clones_share_immutable_storage_and_rule_references() {
+        let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([directory.as_path()]).unwrap();
+        let cloned = store.clone();
+        assert!(Arc::ptr_eq(&store.contests, &cloned.contests));
+        assert!(std::ptr::eq(
+            store.get("CQ-WW-CW").unwrap(),
+            cloned.get("CQ-WW-CW").unwrap()
+        ));
+    }
 
     struct TestDir(PathBuf);
 

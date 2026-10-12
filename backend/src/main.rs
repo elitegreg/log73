@@ -2,10 +2,12 @@ mod adif;
 mod auth;
 mod bandmap;
 mod bands;
+mod blocking;
 mod cabrillo;
 mod client_radios;
 mod contest_rules;
 mod db;
+mod diagnostics;
 mod dxcc;
 mod dxcluster;
 mod grid_distance;
@@ -25,7 +27,7 @@ use axum::{
         DefaultBodyLimit, Path, Query, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
-    http::{HeaderMap, HeaderValue, Request, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware,
     response::{IntoResponse, Response},
     routing::{delete, get, post, put},
@@ -60,9 +62,8 @@ use std::{
     time::Duration,
 };
 use supercheckpartial::SuperCheckPartial;
-use tokio::sync::{RwLock, broadcast, mpsc};
-use tower_http::trace::TraceLayer;
-use tracing::{Span, debug, error, info, warn};
+use tokio::sync::{broadcast, mpsc};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{EnvFilter, fmt, prelude::*};
 use uuid::Uuid;
 
@@ -72,7 +73,8 @@ struct AppState {
     client_radios: ClientRadioRegistry,
     log_events: broadcast::Sender<ServerMessage>,
     db: Database,
-    auth_config: std::sync::Arc<RwLock<AuthConfig>>,
+    auth: auth::AuthService,
+    blocking_work: blocking::BlockingWork,
     config_update_lock: std::sync::Arc<tokio::sync::Mutex<()>>,
     contest_rules: ContestRulesStore,
     bands: bands::BandCatalog,
@@ -86,6 +88,45 @@ struct AppState {
     dxcluster: DxClusterManager,
     bandmap: BandMapManager,
     voice_keyer: VoiceKeyer,
+}
+
+#[derive(Clone)]
+struct AuthMiddlewareState {
+    db: Database,
+    auth: auth::AuthService,
+}
+
+impl AppState {
+    async fn sanitize_radio(&self, mut record: db::RadioRecord) -> Result<db::RadioRecord, String> {
+        if record.control_location == db::RadioControlLocation::Client {
+            return Ok(record);
+        }
+        let keyer = self.voice_keyer.clone();
+        self.blocking_work
+            .run("validate_radio_devices", move || {
+                keyer.sanitize_radio_config(&mut record.config);
+                Ok(record)
+            })
+            .await
+    }
+
+    async fn sync_voice_messages(&self, config: db::RadioConfig) -> Result<(), String> {
+        let keyer = self.voice_keyer.clone();
+        self.blocking_work
+            .run("sync_voice_assets", move || {
+                keyer.sync_radio_messages(&config)
+            })
+            .await
+    }
+
+    async fn validate_radio_voice_messages(&self, messages: String) -> Result<(), String> {
+        let keyer = self.voice_keyer.clone();
+        self.blocking_work
+            .run("validate_voice_assets", move || {
+                keyer.validate_radio_voice_messages(&messages).map(|_| ())
+            })
+            .await
+    }
 }
 
 const MAX_CLIENT_ERROR_TEXT_LENGTH: usize = 4096;
@@ -110,9 +151,10 @@ fn auth_config_or_disabled(result: rusqlite::Result<AuthConfig>) -> AuthConfig {
     }
 }
 
-fn init_tracing(cli: &Cli) -> std::io::Result<Option<tracing_appender::non_blocking::WorkerGuard>> {
+fn init_tracing(cli: &Cli) -> std::io::Result<Vec<tracing_appender::non_blocking::WorkerGuard>> {
     let filter = EnvFilter::try_new(&cli.log_level).unwrap_or_else(|_| EnvFilter::new("info"));
-    let stdout_layer = fmt::layer();
+    let (stdout_writer, stdout_guard) = tracing_appender::non_blocking(std::io::stdout());
+    let stdout_layer = fmt::layer().with_writer(stdout_writer);
 
     if let Some(path) = &cli.log_file {
         let file = OpenOptions::new().create(true).append(true).open(path)?;
@@ -125,7 +167,7 @@ fn init_tracing(cli: &Cli) -> std::io::Result<Option<tracing_appender::non_block
             .with(file_layer)
             .init();
 
-        return Ok(Some(guard));
+        return Ok(vec![stdout_guard, guard]);
     }
 
     tracing_subscriber::registry()
@@ -133,21 +175,7 @@ fn init_tracing(cli: &Cli) -> std::io::Result<Option<tracing_appender::non_block
         .with(stdout_layer)
         .init();
 
-    Ok(None)
-}
-
-fn redacted_headers(headers: &HeaderMap) -> Vec<(String, String)> {
-    headers
-        .iter()
-        .map(|(name, value)| {
-            let value = if name == header::AUTHORIZATION || name == header::COOKIE {
-                "<redacted>".to_string()
-            } else {
-                value.to_str().unwrap_or("<non-utf8>").to_string()
-            };
-            (name.to_string(), value)
-        })
-        .collect()
+    Ok(vec![stdout_guard])
 }
 
 fn debug_payload_log<T: serde::Serialize>(value: &T) -> String {
@@ -433,8 +461,7 @@ async fn main() {
         "loaded DXCC country data"
     );
     let db = Database::open(&paths.database_path).expect("failed to open log73 database");
-    let auth_config =
-        std::sync::Arc::new(RwLock::new(auth_config_or_disabled(db.auth_config().await)));
+    let auth = auth::AuthService::new(auth_config_or_disabled(db.auth_config().await));
     let dxcluster = DxClusterManager::new();
     let voicekeyer_dir = paths.data_dir.join("voicekeyer");
     let voice_keyer = VoiceKeyer::with_voicekeyer_dir(voicekeyer_dir);
@@ -466,7 +493,9 @@ async fn main() {
         "loaded amateur radio band catalog"
     );
     let bandmap = BandMapManager::new(band_catalog.clone(), initial_bandmap_max_age);
-    let radio_manager = RadioManager::new(voice_keyer.clone(), band_catalog.clone());
+    let blocking_work = blocking::BlockingWork::default();
+    let radio_manager = RadioManager::new(voice_keyer.clone(), band_catalog.clone())
+        .with_device_work_limit(blocking_work.permits());
     let radio_configs = db
         .backend_radio_configs()
         .await
@@ -492,7 +521,8 @@ async fn main() {
         client_radios: ClientRadioRegistry::default(),
         log_events,
         db,
-        auth_config,
+        auth,
+        blocking_work,
         config_update_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
         contest_rules,
         bands: band_catalog,
@@ -509,34 +539,6 @@ async fn main() {
     };
     spawn_dxcluster_bandmap_bridge(app_state.dxcluster.clone(), app_state.bandmap.clone());
     spawn_client_radio_expiration_task(app_state.client_radios.clone());
-
-    let request_trace_layer = TraceLayer::new_for_http()
-        .make_span_with(|request: &Request<axum::body::Body>| {
-            tracing::debug_span!(
-                "http_request",
-                method = %request.method(),
-                uri = %request.uri(),
-                version = ?request.version()
-            )
-        })
-        .on_request(|request: &Request<axum::body::Body>, _span: &Span| {
-            debug!(
-                method = %request.method(),
-                uri = %request.uri(),
-                version = ?request.version(),
-                headers = ?redacted_headers(request.headers()),
-                "incoming request"
-            );
-        })
-        .on_response(
-            |response: &axum::response::Response, latency: Duration, _span: &Span| {
-                info!(
-                    status = response.status().as_u16(),
-                    latency_ms = latency.as_secs_f64() * 1000.0,
-                    "request completed"
-                );
-            },
-        );
 
     let api = Router::new()
         .route("/contest-rules", get(list_contest_rules))
@@ -623,8 +625,14 @@ async fn main() {
         .fallback(static_assets::static_handler)
         .with_state(app_state.clone())
         .layer(axum::Extension(radio_io))
-        .layer(middleware::from_fn_with_state(app_state, auth::basic_auth))
-        .layer(request_trace_layer);
+        .layer(middleware::from_fn_with_state(
+            AuthMiddlewareState {
+                db: app_state.db.clone(),
+                auth: app_state.auth.clone(),
+            },
+            cached_basic_auth,
+        ))
+        .layer(middleware::from_fn(diagnostics::request_timing));
 
     let listener = tokio::net::TcpListener::bind(&cli.bind)
         .await
@@ -638,6 +646,22 @@ async fn main() {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .expect("server failed");
+}
+
+async fn cached_basic_auth(
+    State(app_state): State<AuthMiddlewareState>,
+    request: axum::http::Request<Body>,
+    next: middleware::Next,
+) -> Response {
+    // Also recovers auth state when a config request was cancelled after its
+    // SQLite commit. The callback is synchronous under the raw cache read lock.
+    let refresh_timer =
+        diagnostics::StageTimer::new(diagnostics::Stage::Authentication, "refresh_auth_config");
+    app_state
+        .db
+        .with_auth_config(|config| app_state.auth.replace_config(config.clone()));
+    drop(refresh_timer);
+    auth::basic_auth(State(app_state.auth), request, next).await
 }
 
 async fn shutdown_signal() {
@@ -711,6 +735,10 @@ async fn handle_socket(
         return;
     };
     let mut log_events = app_state.log_events.subscribe();
+    if let Err(error) = app_state.log_cache.ensure_loaded(log_id).await {
+        warn!(log_id, %error, "cannot load websocket log");
+        return;
+    }
 
     info!(session_id, radio_id, "backend websocket connected");
     let (mut sender, mut receiver) = socket.split();
@@ -967,6 +995,7 @@ async fn supercheckpartial_matches(
     State(app_state): State<AppState>,
     headers: HeaderMap,
 ) -> Response {
+    app_state.log_cache.refresh_loaded().await;
     cached_json_response_with_cache_control(
         &headers,
         &serde_json::json!({ "callsigns": app_state.supercheckpartial.callsigns() }),
@@ -991,6 +1020,13 @@ async fn bandmap_spots(
     State(app_state): State<AppState>,
     Query(query): Query<BandMapSpotsQuery>,
 ) -> Json<serde_json::Value> {
+    if let Some(log_id) = query.log_id {
+        if let Err(error) = app_state.log_cache.ensure_loaded(log_id).await {
+            debug!(log_id, %error, "cannot load bandmap log");
+        }
+    } else {
+        app_state.log_cache.refresh_loaded().await;
+    }
     let (sequence, spots) = app_state.bandmap.snapshot(query.log_id);
     Json(serde_json::json!({ "sequence": sequence, "spots": spots }))
 }
@@ -1310,13 +1346,17 @@ async fn update_config(
     let replacement_bands = if current_region == payload.iaru_region {
         None
     } else {
+        let user_data_dir = app_state.user_data_dir.clone();
+        let installed_data_dir = app_state.installed_data_dir.clone();
+        let region = payload.iaru_region;
         Some(
-            bands::load_region_bands(
-                &app_state.user_data_dir,
-                &app_state.installed_data_dir,
-                payload.iaru_region,
-            )
-            .map_err(ApiError::internal)?,
+            app_state
+                .blocking_work
+                .run("load_region_bands", move || {
+                    bands::load_region_bands(&user_data_dir, &installed_data_dir, region)
+                })
+                .await
+                .map_err(ApiError::internal)?,
         )
     };
     let login_password = match validation::validate_auth_config(
@@ -1328,7 +1368,7 @@ async fn update_config(
         Ok(validation::LoginPasswordChange::Preserve) => db::LoginPasswordUpdate::Preserve,
         Ok(validation::LoginPasswordChange::Disable) => db::LoginPasswordUpdate::Disable,
         Ok(validation::LoginPasswordChange::Change(password)) => {
-            match auth::hash_password(&password) {
+            match app_state.auth.hash_password(password).await {
                 Ok(login_password) => db::LoginPasswordUpdate::Set(login_password),
                 Err(error) => return Err(ApiError::bad_request(error)),
             }
@@ -1370,10 +1410,9 @@ async fn update_config(
         );
     }
 
-    match app_state.db.auth_config().await {
-        Ok(config) => *app_state.auth_config.write().await = config,
-        Err(error) => warn!(%error, "failed to reload auth config after update"),
-    }
+    app_state
+        .db
+        .with_auth_config(|config| app_state.auth.replace_config(config.clone()));
     match app_state.db.dxcluster_config().await {
         Ok(config) => {
             app_state
@@ -1445,7 +1484,7 @@ async fn update_log(
     }
     match app_state.db.update_log(id, payload).await {
         Ok(Some(log)) => {
-            app_state.log_cache.remove_log(id);
+            app_state.log_cache.remove_log(id).await;
             Ok(Json(log))
         }
         Ok(None) => Err(ApiError::not_found("not found")),
@@ -1458,8 +1497,8 @@ async fn export_cabrillo(
     Path(id): Path<i64>,
     Json(payload): Json<CabrilloExportPayload>,
 ) -> impl IntoResponse {
-    let log = match app_state.db.log(id).await {
-        Ok(Some(log)) => log,
+    let snapshot = match app_state.db.log_snapshot(id).await {
+        Ok(Some(snapshot)) => snapshot,
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -1475,6 +1514,7 @@ async fn export_cabrillo(
                 .into_response();
         }
     };
+    let log = snapshot.log;
     let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
         return (
             StatusCode::BAD_REQUEST,
@@ -1490,16 +1530,7 @@ async fn export_cabrillo(
             .into_response();
     }
 
-    let mut contacts = match app_state.db.contacts(id).await {
-        Ok(contacts) => contacts,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-            )
-                .into_response();
-        }
-    };
+    let mut contacts = snapshot.contacts.to_vec();
     contacts.sort_by_key(contact_score_order);
     let mut scored_contacts = contacts.clone();
     let claimed_score =
@@ -1531,8 +1562,8 @@ async fn export_cabrillo(
 }
 
 async fn export_adif(State(app_state): State<AppState>, Path(id): Path<i64>) -> impl IntoResponse {
-    let log = match app_state.db.log(id).await {
-        Ok(Some(log)) => log,
+    let snapshot = match app_state.db.log_snapshot(id).await {
+        Ok(Some(snapshot)) => snapshot,
         Ok(None) => {
             return (
                 StatusCode::NOT_FOUND,
@@ -1549,16 +1580,9 @@ async fn export_adif(State(app_state): State<AppState>, Path(id): Path<i64>) -> 
         }
     };
 
-    let contacts = match app_state.db.contacts(id).await {
-        Ok(contacts) => contacts,
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-            )
-                .into_response();
-        }
-    };
+    let log = snapshot.log;
+
+    let contacts = snapshot.contacts.to_vec();
 
     let text = match adif::render_log(&log, &contacts) {
         Ok(text) => text,
@@ -1722,7 +1746,7 @@ async fn delete_log(
     match app_state.db.delete_log(id).await {
         Ok(deleted) => {
             if deleted {
-                app_state.log_cache.remove_log(id);
+                app_state.log_cache.remove_log(id).await;
             }
             Ok(Json(serde_json::json!({ "deleted": deleted })))
         }
@@ -1763,9 +1787,11 @@ async fn log_stats(
 async fn input_audio_devices(
     State(app_state): State<AppState>,
 ) -> ApiResult<Vec<voice_keyer::AudioDeviceInfo>> {
+    let keyer = app_state.voice_keyer.clone();
     app_state
-        .voice_keyer
-        .input_devices()
+        .blocking_work
+        .run("input_audio_devices", move || keyer.input_devices())
+        .await
         .map(Json)
         .map_err(ApiError::internal)
 }
@@ -1773,9 +1799,11 @@ async fn input_audio_devices(
 async fn output_audio_devices(
     State(app_state): State<AppState>,
 ) -> ApiResult<Vec<voice_keyer::AudioDeviceInfo>> {
+    let keyer = app_state.voice_keyer.clone();
     app_state
-        .voice_keyer
-        .output_devices()
+        .blocking_work
+        .run("output_audio_devices", move || keyer.output_devices())
+        .await
         .map(Json)
         .map_err(ApiError::internal)
 }
@@ -1933,18 +1961,19 @@ fn radio_websocket_url(radio_id: i64) -> String {
 
 async fn radios(State(app_state): State<AppState>) -> ApiResult<Vec<RadioView>> {
     match app_state.db.radios().await {
-        Ok(mut radios) => {
+        Ok(radios) => {
             let mut views = Vec::with_capacity(radios.len());
-            for radio in &mut radios {
-                if radio.control_location == db::RadioControlLocation::Backend {
-                    app_state.voice_keyer.sanitize_radio_config(radio);
-                }
+            for radio in radios {
+                let radio = app_state
+                    .sanitize_radio(radio)
+                    .await
+                    .map_err(ApiError::internal)?;
                 let client_online = if radio.control_location == db::RadioControlLocation::Client {
                     Some(app_state.client_radios.is_online(radio.id).await)
                 } else {
                     None
                 };
-                views.push(RadioView::from_record(radio.clone(), client_online));
+                views.push(RadioView::from_record(radio, client_online));
             }
             Ok(Json(views))
         }
@@ -1998,28 +2027,34 @@ struct SerialPortOption {
     display_name: String,
 }
 
-async fn serial_ports() -> ApiResult<Vec<SerialPortOption>> {
-    list_serial_ports()
-        .map(|entries| {
-            Json(
-                entries
-                    .into_iter()
-                    .map(|entry| SerialPortOption {
-                        display_name: entry.to_string(),
-                        name: entry.name,
-                    })
-                    .collect::<Vec<_>>(),
-            )
+async fn serial_ports(State(app_state): State<AppState>) -> ApiResult<Vec<SerialPortOption>> {
+    app_state
+        .blocking_work
+        .run("serial_ports", || {
+            list_serial_ports()
+                .map(|entries| {
+                    entries
+                        .into_iter()
+                        .map(|entry| SerialPortOption {
+                            display_name: entry.to_string(),
+                            name: entry.name,
+                        })
+                        .collect()
+                })
+                .map_err(|error| error.to_string())
         })
-        .map_err(|error| ApiError::internal(error.to_string()))
+        .await
+        .map(Json)
+        .map_err(ApiError::internal)
 }
 
 async fn radio(State(app_state): State<AppState>, Path(id): Path<i64>) -> ApiResult<RadioView> {
     match app_state.db.radio(id).await {
-        Ok(Some(mut radio)) => {
-            if radio.control_location == db::RadioControlLocation::Backend {
-                app_state.voice_keyer.sanitize_radio_config(&mut radio);
-            }
+        Ok(Some(radio)) => {
+            let radio = app_state
+                .sanitize_radio(radio)
+                .await
+                .map_err(ApiError::internal)?;
             let client_online = if radio.control_location == db::RadioControlLocation::Client {
                 Some(app_state.client_radios.is_online(radio.id).await)
             } else {
@@ -2141,23 +2176,24 @@ async fn create_radio(
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     if let Err(error) = app_state
-        .voice_keyer
-        .validate_radio_voice_messages(&payload.voice_messages)
+        .validate_radio_voice_messages(payload.voice_messages.clone())
+        .await
     {
         return Json(serde_json::json!({ "ok": false, "error": error }));
     }
     match app_state.db.create_radio(payload).await {
-        Ok(mut record) => {
-            if let Err(error) = app_state.voice_keyer.sync_radio_messages(&record.config) {
+        Ok(record) => {
+            if let Err(error) = app_state.sync_voice_messages(record.config.clone()).await {
                 warn!(radio_id = record.id, %error, "failed to sync voice keyer registrations after radio create");
             }
             if let Err(error) = app_state.radio_io.add_radio(record.config.clone()) {
                 error!(radio_id = record.id, %error, "failed to add created radio to radio I/O configuration");
                 return Json(serde_json::json!({ "ok": false, "error": error }));
             }
-            app_state
-                .voice_keyer
-                .sanitize_radio_config(&mut record.config);
+            let record = match app_state.sanitize_radio(record).await {
+                Ok(record) => record,
+                Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
+            };
             Json(serde_json::json!({ "ok": true, "radio": RadioView::from_record(record, None) }))
         }
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
@@ -2191,25 +2227,26 @@ async fn update_radio(
         .await
         .map_err(ApiError::bad_request)?;
     app_state
-        .voice_keyer
-        .validate_radio_voice_messages(&payload.voice_messages)
+        .validate_radio_voice_messages(payload.voice_messages.clone())
+        .await
         .map_err(ApiError::bad_request)?;
     let mutation = app_state
         .radio_io
         .begin_mutation(id)
         .map_err(|error| radio_mutation_api_error("update", error))?;
     match app_state.db.update_radio(id, payload).await {
-        Ok(Some(mut record)) => {
-            if let Err(error) = app_state.voice_keyer.sync_radio_messages(&record.config) {
+        Ok(Some(record)) => {
+            if let Err(error) = app_state.sync_voice_messages(record.config.clone()).await {
                 warn!(radio_id = record.id, %error, "failed to sync voice keyer registrations after radio update");
             }
             if let Err(error) = mutation.commit_update(record.config.clone()) {
                 error!(id, %error, "failed to commit updated radio I/O configuration");
                 return Err(ApiError::internal(error.to_string()));
             }
-            app_state
-                .voice_keyer
-                .sanitize_radio_config(&mut record.config);
+            let record = app_state
+                .sanitize_radio(record)
+                .await
+                .map_err(ApiError::internal)?;
             Ok(Json(
                 serde_json::json!({ "ok": true, "radio": RadioView::from_record(record, None) }),
             ))
@@ -2423,6 +2460,7 @@ fn effective_serial_scope(
     }
 }
 
+#[cfg(test)]
 fn contact_serial_value(contact: &Contact, field_adif: &str) -> Option<i64> {
     match contact_adif_value(contact, field_adif)? {
         serde_json::Value::Number(value) => value.as_i64(),
@@ -2439,6 +2477,7 @@ fn next_serial_after(maximum: Option<i64>) -> Result<i64, String> {
         .ok_or_else(|| "serial value overflow".to_string())
 }
 
+#[cfg(test)]
 fn serial_state_from_contacts(
     rules: &ContestRules,
     log: &db::Log,
@@ -2488,8 +2527,8 @@ async fn serial_state(
     Path(log_id): Path<i64>,
     Query(query): Query<SerialStateQuery>,
 ) -> Json<serde_json::Value> {
-    let log = match app_state.db.log(log_id).await {
-        Ok(Some(log)) => log,
+    let snapshot = match app_state.db.log_snapshot(log_id).await {
+        Ok(Some(snapshot)) => snapshot,
         Ok(None) => {
             return Json(
                 serde_json::json!({ "ok": false, "error": format!("log {log_id} not found") }),
@@ -2497,6 +2536,7 @@ async fn serial_state(
         }
         Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
     };
+    let log = &snapshot.log;
     let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
         return Json(
             serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id) }),
@@ -2508,14 +2548,52 @@ async fn serial_state(
             "error": format!("{} is not a sent serial field for contest {}", query.field_adif, rules.id),
         }));
     };
-    let contacts = match app_state.db.contacts(log_id).await {
-        Ok(contacts) => contacts,
-        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-    };
-    match serial_state_from_contacts(rules, &log, field, &contacts) {
+    match serial_state_from_snapshot(rules, log, field, &snapshot) {
         Ok(state) => Json(serde_json::json!({ "ok": true, "state": state })),
         Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
     }
+}
+
+fn serial_state_from_snapshot(
+    rules: &ContestRules,
+    log: &db::Log,
+    field: &ExchangeField,
+    snapshot: &db::LogSnapshot,
+) -> Result<SerialState, String> {
+    let scope = effective_serial_scope(rules, log, field);
+    let reservation_required = serial_reservation_required(rules, log, field);
+    let (next, next_by_band) = if scope == SerialScope::Band {
+        let mut by_band = BTreeMap::new();
+        for band in &rules.bands {
+            by_band.insert(
+                band.clone(),
+                next_serial_after(
+                    snapshot
+                        .contacts
+                        .serial_max(&field.adif, Some(band))
+                        .filter(|value| *value > 0),
+                )?,
+            );
+        }
+        (None, by_band)
+    } else {
+        (
+            Some(next_serial_after(
+                snapshot
+                    .contacts
+                    .serial_max(&field.adif, None)
+                    .filter(|value| *value > 0),
+            )?),
+            BTreeMap::new(),
+        )
+    };
+    Ok(SerialState {
+        field_adif: field.adif.clone(),
+        scope,
+        reservation_required,
+        next,
+        next_by_band,
+    })
 }
 
 async fn allocate_serial(
@@ -2865,6 +2943,7 @@ fn normalize_contact_adif_fields(mut contact: Contact) -> Contact {
 mod tests {
     use super::*;
     use crate::db::build_contact;
+    use crate::db::set_contact_adif;
     use axum::http::HeaderValue;
     use serde_json::{Map, json};
 
@@ -2931,6 +3010,369 @@ mod tests {
         let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
         ContestRulesStore::load_dirs([rules_dir.as_path()])
             .expect("bundled contest rules should load")
+    }
+
+    pub(crate) fn cache_test_state() -> AppState {
+        let db = Database::open(":memory:").unwrap();
+        let contest_rules = bundled_rules();
+        let data_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data");
+        let bands =
+            bands::BandCatalog::new(bands::load_region_bands(&data_dir, &data_dir, 2).unwrap());
+        let voice_keyer = VoiceKeyer::with_voicekeyer_dir(
+            std::env::temp_dir().join(format!("log73-unused-voice-{}", uuid::Uuid::new_v4())),
+        );
+        let blocking_work = blocking::BlockingWork::default();
+        let manager = RadioManager::new(voice_keyer.clone(), bands.clone())
+            .with_device_work_limit(blocking_work.permits());
+        let radio_io = RadioWebSocketState::new(manager, RadioIoConfig::new(Vec::new()));
+        let (log_events, _) = broadcast::channel(128);
+        let incremental_scoring = IncrementalScoreTracker::new();
+        let stats = StatsTracker::new();
+        let bandmap = BandMapManager::new(bands.clone(), Duration::from_secs(3600));
+        let supercheckpartial = SuperCheckPartial::default().with_events(log_events.clone());
+        let dxcc = std::sync::Arc::new(dxcc::DxccDatabase::default());
+        let log_cache = LogCache::new(
+            db.clone(),
+            contest_rules.clone(),
+            ScoringModules::new(),
+            dxcc.clone(),
+        );
+        log_cache.register_processor(std::sync::Arc::new(incremental_scoring.clone()));
+        log_cache.register_processor(std::sync::Arc::new(stats.clone()));
+        log_cache.register_processor(std::sync::Arc::new(bandmap.clone()));
+        log_cache.register_processor(std::sync::Arc::new(supercheckpartial.clone()));
+        AppState {
+            db,
+            radio_io,
+            log_events,
+            contest_rules,
+            bands,
+            voice_keyer,
+            blocking_work,
+            config_update_lock: Default::default(),
+            client_radios: Default::default(),
+            auth: auth::AuthService::new(AuthConfig {
+                login_user: String::new(),
+                login_password: String::new(),
+            }),
+            user_data_dir: data_dir.clone(),
+            installed_data_dir: data_dir,
+            log_cache,
+            incremental_scoring,
+            stats,
+            bandmap,
+            supercheckpartial,
+            dxcc,
+            dxcluster: DxClusterManager::new(),
+        }
+    }
+
+    pub(crate) fn cache_test_contact(call: &str) -> Contact {
+        build_contact(
+            Map::new(),
+            Map::from_iter([
+                ("CALL".into(), json!(call)),
+                ("STATION_CALLSIGN".into(), json!("N0CALL")),
+                ("QSO_DATE_TIME_ON".into(), json!(1_700_000_000_i64)),
+                ("BAND".into(), json!("20m")),
+                ("FREQ".into(), json!(14_025_000)),
+                ("MODE".into(), json!("CW")),
+                ("RST_SENT".into(), json!(599)),
+                ("RST_RCVD".into(), json!(599)),
+                ("CQZ".into(), json!(5)),
+                ("MY_CQ_ZONE".into(), json!(4)),
+            ]),
+        )
+    }
+
+    #[tokio::test]
+    async fn warm_handlers_exports_and_validation_execute_no_sql_or_commands() {
+        let state = cache_test_state();
+        let log = state
+            .db
+            .create_log(NewLog {
+                name: "Cached handlers".into(),
+                contest_id: "CQ-WW-CW".into(),
+                station_callsign: "N0CALL".into(),
+                contest_params: json!({ "CQ_ZONE": "4" }),
+            })
+            .await
+            .unwrap();
+        let saved = state
+            .log_cache
+            .upsert_contacts(log.id, vec![cache_test_contact("W1AW")])
+            .await
+            .unwrap()
+            .contacts;
+        let serial_log = state
+            .db
+            .create_log(NewLog {
+                name: "Serial".into(),
+                contest_id: "CQ-WPX-CW".into(),
+                station_callsign: "N0CALL".into(),
+                contest_params: json!({ "CATEGORY-TRANSMITTER": "TWO" }),
+            })
+            .await
+            .unwrap();
+        let mut serial = cache_test_contact("K1ABC");
+        set_contact_adif(&mut serial, "STX", json!(17));
+        state
+            .db
+            .upsert_contacts(serial_log.id, vec![serial])
+            .await
+            .unwrap();
+        let before = state.db.test_counters();
+        let _ = config(State(state.clone())).await.unwrap();
+        let _ = logs(State(state.clone())).await.unwrap();
+        let _ = super::log(State(state.clone()), Path(log.id))
+            .await
+            .unwrap();
+        assert_eq!(
+            log_qso_count(State(state.clone()), Path(log.id))
+                .await
+                .unwrap()
+                .0["qso_count"],
+            json!(1)
+        );
+        assert_eq!(
+            contacts(
+                State(state.clone()),
+                Path(log.id),
+                Query(ContactsQuery::default())
+            )
+            .await
+            .0
+            .len(),
+            1
+        );
+        assert_eq!(
+            log_stats(State(state.clone()), Path(log.id)).await.0["ok"],
+            json!(true)
+        );
+        let _ = radios(State(state.clone())).await.unwrap();
+        validation::validate_contacts(
+            &state.db,
+            &state.contest_rules,
+            state.bands.snapshot().as_ref(),
+            log.id,
+            &saved,
+        )
+        .await
+        .unwrap();
+        validation::validate_import_contacts(
+            &state.db,
+            &state.contest_rules,
+            state.bands.snapshot().as_ref(),
+            log.id,
+            &saved,
+        )
+        .await
+        .unwrap();
+        let mut serial_update = state.db.contacts(serial_log.id).await.unwrap();
+        set_contact_adif(&mut serial_update[0], "SRX", json!(8));
+        validation::validate_contacts(
+            &state.db,
+            &state.contest_rules,
+            state.bands.snapshot().as_ref(),
+            serial_log.id,
+            &serial_update,
+        )
+        .await
+        .unwrap();
+        set_contact_adif(&mut serial_update[0], "STX", json!(18));
+        assert!(
+            validation::validate_contacts(
+                &state.db,
+                &state.contest_rules,
+                state.bands.snapshot().as_ref(),
+                serial_log.id,
+                &serial_update
+            )
+            .await
+            .is_err()
+        );
+        let serial_state = serial_state(
+            State(state.clone()),
+            Path(serial_log.id),
+            Query(SerialStateQuery {
+                field_adif: "STX".into(),
+            }),
+        )
+        .await
+        .0;
+        assert_eq!(serial_state["state"]["next_by_band"]["20M"], json!(18));
+        let adif_response = export_adif(State(state.clone()), Path(log.id))
+            .await
+            .into_response();
+        assert_eq!(adif_response.status(), StatusCode::OK);
+        let adif_body = axum::body::to_bytes(adif_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let adif_text = std::str::from_utf8(&adif_body).unwrap();
+        assert!(adif_text.contains("W1AW"));
+        assert!(!adif_text.contains("sessionId"));
+        let cabrillo_response = export_cabrillo(
+            State(state.clone()),
+            Path(log.id),
+            Json(CabrilloExportPayload {
+                export_params: json!({ "LOCATION": "OH", "NAME": "Benchmark" }),
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(cabrillo_response.status(), StatusCode::OK);
+        assert_eq!(state.db.test_counters(), before);
+    }
+
+    #[tokio::test]
+    async fn indexed_serial_state_matches_reference_for_global_band_and_nonpositive_values() {
+        let state = cache_test_state();
+        for category in ["ONE", "TWO", "UNLIMITED"] {
+            let log = state
+                .db
+                .create_log(NewLog {
+                    name: category.into(),
+                    contest_id: "CQ-WPX-CW".into(),
+                    station_callsign: "N0CALL".into(),
+                    contest_params: json!({ "CATEGORY-TRANSMITTER": category }),
+                })
+                .await
+                .unwrap();
+            let mut contacts = Vec::new();
+            for (serial, band) in [(0, "20m"), (-2, "80m"), (9, "40M"), (12, "20m")] {
+                let mut contact = cache_test_contact("W1AW");
+                set_contact_adif(&mut contact, "STX", json!(serial));
+                set_contact_adif(&mut contact, "BAND", json!(band));
+                contacts.push(contact);
+            }
+            state.db.upsert_contacts(log.id, contacts).await.unwrap();
+            let snapshot = state.db.log_snapshot(log.id).await.unwrap().unwrap();
+            let rules = state.contest_rules.get(&log.contest_id).unwrap();
+            let field = sent_serial_field(rules, "STX").unwrap();
+            let indexed =
+                serial_state_from_snapshot(rules, &snapshot.log, field, &snapshot).unwrap();
+            let reference = serial_state_from_contacts(
+                rules,
+                &snapshot.log,
+                field,
+                &snapshot.contacts.to_vec(),
+            )
+            .unwrap();
+            assert_eq!(
+                serde_json::to_value(indexed).unwrap(),
+                serde_json::to_value(reference).unwrap()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn auth_middleware_refreshes_committed_config_even_without_handler_side_effects() {
+        use base64::Engine;
+        use tower::ServiceExt;
+        let state = cache_test_state();
+        let view = state.db.config_view().await.unwrap();
+        let change = |password| db::UpdateConfig {
+            iaru_region: view.iaru_region,
+            login_user: "test".into(),
+            login_password: password,
+            dxcluster_enabled: view.dxcluster_enabled,
+            dxcluster_host: view.dxcluster_host.clone(),
+            dxcluster_port: view.dxcluster_port,
+            dxcluster_callsign: view.dxcluster_callsign.clone(),
+            dxcluster_max_age_min: view.dxcluster_max_age_min,
+            dxcluster_commands: view.dxcluster_commands.clone(),
+        };
+        let app = Router::new()
+            .route("/protected", get(|| async { StatusCode::OK }))
+            .layer(middleware::from_fn_with_state(
+                AuthMiddlewareState {
+                    db: state.db.clone(),
+                    auth: state.auth.clone(),
+                },
+                cached_basic_auth,
+            ));
+        state
+            .db
+            .update_config(change(db::LoginPasswordUpdate::Set(
+                auth::hash_password("secret").unwrap(),
+            )))
+            .await
+            .unwrap();
+        let before = state.db.test_counters();
+        let request = axum::http::Request::builder()
+            .uri("/protected")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            StatusCode::UNAUTHORIZED
+        );
+        let credentials = base64::engine::general_purpose::STANDARD.encode("test:secret");
+        let request = axum::http::Request::builder()
+            .uri("/protected")
+            .header(header::AUTHORIZATION, format!("Basic {credentials}"))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(
+            app.clone().oneshot(request).await.unwrap().status(),
+            StatusCode::OK
+        );
+        assert_eq!(state.db.test_counters(), before);
+        state
+            .db
+            .update_config(change(db::LoginPasswordUpdate::Disable))
+            .await
+            .unwrap();
+        let before = state.db.test_counters();
+        let request = axum::http::Request::builder()
+            .uri("/protected")
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(app.oneshot(request).await.unwrap().status(), StatusCode::OK);
+        assert_eq!(state.db.test_counters(), before);
+    }
+
+    #[tokio::test]
+    async fn bandmap_and_callsign_reads_refresh_unprocessed_raw_mutations_without_sql() {
+        let state = cache_test_state();
+        let log = state
+            .db
+            .create_log(NewLog {
+                name: "Derived readers".into(),
+                contest_id: "CQ-WW-CW".into(),
+                station_callsign: "N0CALL".into(),
+                contest_params: json!({ "CQ_ZONE": "4" }),
+            })
+            .await
+            .unwrap();
+        state.log_cache.ensure_loaded(log.id).await.unwrap();
+        state
+            .db
+            .upsert_contacts(log.id, vec![cache_test_contact("W1AW")])
+            .await
+            .unwrap();
+        let before = state.db.test_counters();
+        let response = supercheckpartial_matches(State(state.clone()), HeaderMap::new()).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(state.supercheckpartial.callsigns().contains(&"W1AW".into()));
+        let _ = bandmap_spots(
+            State(state.clone()),
+            Query(BandMapSpotsQuery {
+                log_id: Some(log.id),
+            }),
+        )
+        .await;
+        assert_eq!(
+            state.incremental_scoring.totals(log.id).unwrap().qso_count,
+            1
+        );
+        assert_eq!(state.db.test_counters(), before);
+        state.db.delete_log(log.id).await.unwrap();
+        let before = state.db.test_counters();
+        let _ = bandmap_spots(State(state.clone()), Query(BandMapSpotsQuery::default())).await;
+        assert!(state.stats.snapshot(log.id).is_none());
+        assert!(state.incremental_scoring.totals(log.id).is_none());
+        assert_eq!(state.db.test_counters(), before);
     }
 
     #[test]

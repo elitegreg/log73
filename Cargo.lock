@@ -1839,6 +1839,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
+name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest 0.10.7",
+]
+
+[[package]]
 name = "http"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2633,7 +2642,7 @@ checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
 
 [[package]]
 name = "log73-launcher"
-version = "0.3.0-rc.2"
+version = "0.3.0-rc.3"
 dependencies = [
  "argon2",
  "axum",
@@ -2644,6 +2653,7 @@ dependencies = [
  "dxcllistener",
  "dxclparser",
  "futures-util",
+ "hmac",
  "iced",
  "log73-paths",
  "mime_guess",
@@ -2659,9 +2669,11 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha2 0.10.9",
  "shared_child",
  "tokio",
  "toml 0.8.23",
+ "tower",
  "tower-http",
  "tracing",
  "tracing-appender",
@@ -2679,7 +2691,7 @@ dependencies = [
 
 [[package]]
 name = "log73-radio-client"
-version = "0.3.0-rc.2"
+version = "0.3.0-rc.3"
 dependencies = [
  "axum",
  "clap",
@@ -3891,7 +3903,7 @@ dependencies = [
 
 [[package]]
 name = "radio-io"
-version = "0.3.0-rc.2"
+version = "0.3.0-rc.3"
 dependencies = [
  "axum",
  "backon",
@@ -4247,7 +4259,7 @@ version = "8.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42ffa149f6aa81b58a5b3011d01a857c4ed12c7a732d2c51947a4c7c692185f0"
 dependencies = [
- "sha2",
+ "sha2 0.11.0",
  "walkdir",
 ]
 
@@ -4529,6 +4541,17 @@ name = "sha1"
 version = "0.10.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest 0.10.7",
+]
+
+[[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.2.17",

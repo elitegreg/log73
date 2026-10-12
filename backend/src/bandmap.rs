@@ -493,6 +493,10 @@ impl Default for BandMapManager {
 }
 
 impl LogCacheProcessor for BandMapManager {
+    fn on_log_removed(&self, log_id: i64) {
+        self.sync_local_spots_for_log(log_id, &[]);
+    }
+
     fn on_log_loaded(
         &self,
         log_id: i64,

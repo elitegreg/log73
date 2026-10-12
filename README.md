@@ -52,6 +52,13 @@ Use **Configure** from the main screen to set a username and password.
 
 When login is enabled, authentication protects the frontend, `/api/*`, `/ws`, and `/radiows`.
 
+Successful Basic Auth verification is cached in memory for 30 minutes (up to 256
+entries). Concurrent requests with the same credentials share one verification;
+password verification and hashing run outside the async request workers. Changing
+the effective username or password clears the cache immediately. Failed passwords
+are never cached. Authentication overload returns HTTP 503 with `Retry-After: 1`.
+The browser prompt and Radio Client's configured credentials work as before.
+
 ## Prerequisites
 
 - Node.js / npm
@@ -489,6 +496,50 @@ SQLite database file:
 ```
 
 On Linux, the default data directory is `~/.local/share/log73/`, so the default database path is `~/.local/share/log73/log73.db`. The database is created automatically.
+
+File-backed databases use SQLite WAL mode. Linux and macOS use
+`synchronous=FULL`; Windows uses `synchronous=NORMAL` to reduce commit latency.
+On Windows, recent acknowledged writes can be lost after a power failure or OS
+crash, although transactions remain consistent. This setting does not require a
+schema migration. SQLite's default automatic checkpoint policy is retained.
+
+The backend uses a shared, write-through database cache. Configuration, logs,
+radio records, contact ownership, counts, and reservation counters load at
+startup; full contacts load once per log on demand. Warm reads, exports, and
+validation lookups bypass SQLite and its worker queue. Serial maxima are indexed
+in memory, but every contact write and serial reservation still commits to
+SQLite before success is returned. Failed writes leave cached data unchanged.
+Loaded logs remain cached until deletion or shutdown; memory use grows with the
+logs accessed during that run. The backend must own all live database writes:
+direct SQLite edits or a second backend writing the same file require stopping
+the backend and restarting it afterward. External-writer detection is not provided.
+Authentication checks refresh settings from this cache before validating a
+request; bandmap/callsign reads also refresh stale derived log state. Successful
+commits remain visible even if their original request was cancelled.
+Immutable contest definitions are shared across application-state clones, so
+request dispatch does not copy the entire catalog.
+
+Keep the live database on local storage that supports SQLite WAL; network shares
+are not supported. Use SQLite's backup API for live backups, or stop the backend
+cleanly before copying `log73.db`. Copying only `log73.db` while it is running can
+omit committed data still present in `log73.db-wal`; do not delete WAL sidecar
+files from a running database.
+
+Request completion logs include a request ID, method, path, status, total latency,
+authentication time, handler time, database queue/execution time, and blocking
+queue/execution time. Handler time includes the database and blocking stages,
+so these fields are not additive. Query strings, authentication headers, and
+cookies are excluded. Detailed stage events appear at debug level; operations
+and requests exceeding 200 ms emit warnings. Console and file output use
+background writers, flushed on normal shutdown; a full logging queue can drop
+records rather than delaying request workers.
+Summaries also include `db_cache_hits`, `db_cache_misses`, `db_cache_loads`,
+`db_read_commands`, and `db_write_commands`. These count cache accesses and
+worker commands, not individual SQL statements. A cold contact load may occur
+inside a write command; `db_cache_loads` reports that load separately.
+
+For an isolated optimized-binary latency benchmark, see
+[scripts/README.md](scripts/README.md#backend-latency-benchmark).
 
 Tables:
 

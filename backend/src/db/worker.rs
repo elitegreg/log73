@@ -1,35 +1,60 @@
-use super::config::{db_auth_config, db_dxcluster_config, db_iaru_region, db_update_config};
-use super::contact::Contact;
-use super::contacts::{
-    db_contacts, db_delete_contact, db_upsert_contacts, select_contact, select_contact_log_id,
-};
-use super::logs::{
-    db_create_log, db_delete_log, db_log_qso_count, db_logs, db_update_log, select_log,
-};
+use super::cache::{CachedContacts, ContactDeletion, ContactMutation, DatabaseCache, LogSnapshot};
+use super::config::db_update_config;
+use super::contact::{Contact, contact_id};
+use super::contacts::{db_contacts, db_delete_contact, db_upsert_contacts};
+use super::logs::{db_create_log, db_delete_log, db_update_log};
 use super::models::{
-    AuthConfig, ConfigView, DxClusterConfig, Log, NewLog, RadioPayload, RadioRecord,
-    SerialAllocation, UpdateConfig, UpdateLog,
+    AuthConfig, ConfigView, DxClusterConfig, Log, NewLog, RadioControlLocation, RadioPayload,
+    RadioRecord, SerialAllocation, UpdateConfig, UpdateLog,
 };
-use super::radios::{
-    db_backend_radio_configs, db_create_radio, db_delete_radio, db_radios, db_update_radio,
-    db_upsert_client_radio, select_radio,
-};
+use super::radios::{db_create_radio, db_delete_radio, db_update_radio, db_upsert_client_radio};
 use super::schema::initialize_schema;
 use super::serials::db_allocate_serial;
+use crate::diagnostics::{self, Stage, StageTimer, Timings};
 use rusqlite::Connection;
 use std::path::Path;
+use std::sync::{
+    Arc, RwLock,
+    atomic::{AtomicU64, Ordering},
+};
 use std::thread;
+use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
 
 const DB_COMMAND_BUFFER: usize = 64;
 
+#[derive(Default)]
+struct CacheMetrics {
+    commands: AtomicU64,
+    contact_loads: AtomicU64,
+    #[cfg(test)]
+    sql_reads: AtomicU64,
+}
+
+#[cfg(test)]
+thread_local! {
+    static SQL_METRICS: std::cell::RefCell<Option<Arc<CacheMetrics>>> = const { std::cell::RefCell::new(None) };
+}
+
+struct QueuedCommand {
+    command: DbCommand,
+    queued_at: Instant,
+    span: tracing::Span,
+    timings: Option<Arc<Timings>>,
+}
+
+#[cfg(test)]
+type TestAction = Box<dyn FnOnce(&mut Connection) -> rusqlite::Result<()> + Send>;
+
 enum DbCommand {
-    Logs {
-        response: oneshot::Sender<rusqlite::Result<Vec<Log>>>,
+    #[cfg(test)]
+    TestControl {
+        action: TestAction,
+        response: oneshot::Sender<rusqlite::Result<()>>,
     },
-    Log {
-        id: i64,
-        response: oneshot::Sender<rusqlite::Result<Option<Log>>>,
+    #[cfg(test)]
+    TestClose {
+        response: oneshot::Sender<rusqlite::Result<()>>,
     },
     CreateLog {
         log: NewLog,
@@ -43,29 +68,6 @@ enum DbCommand {
     DeleteLog {
         id: i64,
         response: oneshot::Sender<rusqlite::Result<bool>>,
-    },
-    LogQsoCount {
-        id: i64,
-        response: oneshot::Sender<rusqlite::Result<usize>>,
-    },
-    Radios {
-        response: oneshot::Sender<rusqlite::Result<Vec<RadioRecord>>>,
-    },
-    Radio {
-        id: i64,
-        response: oneshot::Sender<rusqlite::Result<Option<RadioRecord>>>,
-    },
-    BackendRadioConfigs {
-        response: oneshot::Sender<rusqlite::Result<Vec<radio_io::RadioConfig>>>,
-    },
-    AuthConfig {
-        response: oneshot::Sender<rusqlite::Result<AuthConfig>>,
-    },
-    DxClusterConfig {
-        response: oneshot::Sender<rusqlite::Result<DxClusterConfig>>,
-    },
-    IaruRegion {
-        response: oneshot::Sender<rusqlite::Result<i64>>,
     },
     UpdateConfig {
         config: UpdateConfig,
@@ -84,29 +86,20 @@ enum DbCommand {
         id: i64,
         response: oneshot::Sender<rusqlite::Result<bool>>,
     },
-    #[allow(dead_code)]
     UpsertClientRadio {
         client_instance_id: String,
         radio_ws_url: String,
         radio: RadioPayload,
         response: oneshot::Sender<rusqlite::Result<RadioRecord>>,
     },
-    Contacts {
+    LoadContacts {
         log_id: i64,
-        response: oneshot::Sender<rusqlite::Result<Vec<Contact>>>,
-    },
-    Contact {
-        id: i64,
-        response: oneshot::Sender<rusqlite::Result<Option<Contact>>>,
+        response: oneshot::Sender<rusqlite::Result<()>>,
     },
     UpsertContacts {
         log_id: i64,
         contacts: Vec<Contact>,
-        response: oneshot::Sender<rusqlite::Result<Vec<Contact>>>,
-    },
-    ContactLogId {
-        id: i64,
-        response: oneshot::Sender<rusqlite::Result<Option<i64>>>,
+        response: oneshot::Sender<rusqlite::Result<ContactMutation>>,
     },
     AllocateSerial {
         log_id: i64,
@@ -115,13 +108,16 @@ enum DbCommand {
     },
     DeleteContact {
         id: i64,
-        response: oneshot::Sender<rusqlite::Result<Option<i64>>>,
+        response: oneshot::Sender<rusqlite::Result<Option<ContactDeletion>>>,
     },
 }
 
 #[derive(Clone)]
 pub struct Database {
-    commands: mpsc::Sender<DbCommand>,
+    commands: mpsc::Sender<QueuedCommand>,
+    cache: Arc<RwLock<DatabaseCache>>,
+    #[cfg(test)]
+    metrics: Arc<CacheMetrics>,
 }
 
 impl Database {
@@ -129,20 +125,38 @@ impl Database {
         let (commands, command_rx) = mpsc::channel(DB_COMMAND_BUFFER);
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
         let path = path.as_ref().to_path_buf();
-
+        let metrics = Arc::new(CacheMetrics::default());
+        let worker_metrics = Arc::clone(&metrics);
         thread::Builder::new()
             .name("log73-db-worker".to_string())
             .spawn(move || {
-                let connection = Connection::open(&path).and_then(|connection| {
-                    connection.pragma_update(None, "foreign_keys", "ON")?;
+                let initialization = Connection::open(&path).and_then(|connection| {
+                    configure_connection(&connection)?;
                     initialize_schema(&connection)?;
-                    Ok(connection)
+                    let cache = Arc::new(RwLock::new(DatabaseCache::load(&connection)?));
+                    Ok((connection, cache))
                 });
-
-                match connection {
-                    Ok(connection) => {
-                        let _ = ready_tx.send(Ok(()));
-                        run_db_worker(connection, command_rx);
+                match initialization {
+                    Ok((connection, cache)) => {
+                        #[cfg(test)]
+                        let mut connection = connection;
+                        #[cfg(test)]
+                        {
+                            SQL_METRICS.with(|slot| {
+                                *slot.borrow_mut() = Some(Arc::clone(&worker_metrics))
+                            });
+                            connection.trace(Some(|sql| {
+                                if sql.trim_start().to_ascii_uppercase().starts_with("SELECT") {
+                                    SQL_METRICS.with(|slot| {
+                                        if let Some(metrics) = slot.borrow().as_ref() {
+                                            metrics.sql_reads.fetch_add(1, Ordering::Relaxed);
+                                        }
+                                    });
+                                }
+                            }));
+                        }
+                        let _ = ready_tx.send(Ok(Arc::clone(&cache)));
+                        run_db_worker(connection, command_rx, cache, worker_metrics);
                     }
                     Err(error) => {
                         let _ = ready_tx.send(Err(error));
@@ -154,14 +168,15 @@ impl Database {
                     "failed to spawn database worker thread: {error}"
                 ))
             })?;
-
-        ready_rx.recv().map_err(|_| {
-            rusqlite::Error::InvalidParameterName(
-                "database worker failed to report initialization status".to_string(),
-            )
-        })??;
-
-        Ok(Self { commands })
+        let cache = ready_rx
+            .recv()
+            .map_err(|_| database_worker_unavailable())??;
+        Ok(Self {
+            commands,
+            cache,
+            #[cfg(test)]
+            metrics,
+        })
     }
 
     async fn call<T>(
@@ -170,7 +185,12 @@ impl Database {
     ) -> rusqlite::Result<T> {
         let (response_tx, response_rx) = oneshot::channel();
         self.commands
-            .send(command(response_tx))
+            .send(QueuedCommand {
+                command: command(response_tx),
+                queued_at: Instant::now(),
+                span: tracing::Span::current(),
+                timings: diagnostics::current_timings(),
+            })
             .await
             .map_err(|_| database_worker_unavailable())?;
         response_rx
@@ -178,91 +198,90 @@ impl Database {
             .map_err(|_| database_worker_unavailable())?
     }
 
+    fn read<T>(&self, read: impl FnOnce(&DatabaseCache) -> T) -> T {
+        diagnostics::cache_hit();
+        read(&self.cache.read().expect("database cache poisoned"))
+    }
+
+    pub fn log_revision(&self, id: i64) -> Option<u64> {
+        self.read(|cache| cache.logs.get(&id).map(|log| log.revision))
+    }
+
     pub async fn logs(&self) -> rusqlite::Result<Vec<Log>> {
-        self.call(|response| DbCommand::Logs { response }).await
+        Ok(self.read(|cache| {
+            let mut logs = cache
+                .logs
+                .values()
+                .map(|log| log.log.clone())
+                .collect::<Vec<_>>();
+            logs.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
+            logs
+        }))
     }
 
     pub async fn log(&self, id: i64) -> rusqlite::Result<Option<Log>> {
-        self.call(|response| DbCommand::Log { id, response }).await
+        Ok(self.read(|cache| cache.logs.get(&id).map(|log| log.log.clone())))
     }
 
     pub async fn create_log(&self, log: NewLog) -> rusqlite::Result<Log> {
         self.call(|response| DbCommand::CreateLog { log, response })
             .await
     }
-
     pub async fn update_log(&self, id: i64, log: UpdateLog) -> rusqlite::Result<Option<Log>> {
         self.call(|response| DbCommand::UpdateLog { id, log, response })
             .await
     }
-
     pub async fn delete_log(&self, id: i64) -> rusqlite::Result<bool> {
+        if self.read(|cache| !cache.logs.contains_key(&id)) {
+            return Ok(false);
+        }
         self.call(|response| DbCommand::DeleteLog { id, response })
             .await
     }
-
     pub async fn log_qso_count(&self, id: i64) -> rusqlite::Result<usize> {
-        self.call(|response| DbCommand::LogQsoCount { id, response })
-            .await
+        Ok(self.read(|cache| cache.counts.get(&id).copied().unwrap_or_default()))
     }
-
     pub async fn radios(&self) -> rusqlite::Result<Vec<RadioRecord>> {
-        self.call(|response| DbCommand::Radios { response }).await
+        Ok(self.read(|cache| cache.radios.values().cloned().collect()))
     }
-
     pub async fn radio(&self, id: i64) -> rusqlite::Result<Option<RadioRecord>> {
-        self.call(|response| DbCommand::Radio { id, response })
-            .await
+        Ok(self.read(|cache| cache.radios.get(&id).cloned()))
     }
-
     pub async fn backend_radio_configs(&self) -> rusqlite::Result<Vec<radio_io::RadioConfig>> {
-        self.call(|response| DbCommand::BackendRadioConfigs { response })
-            .await
+        Ok(self.read(|cache| {
+            cache
+                .radios
+                .values()
+                .filter(|radio| radio.control_location == RadioControlLocation::Backend)
+                .map(|radio| radio.config.clone())
+                .collect()
+        }))
     }
-
     pub async fn auth_config(&self) -> rusqlite::Result<AuthConfig> {
-        self.call(|response| DbCommand::AuthConfig { response })
-            .await
+        Ok(self.read(|cache| cache.config.auth.clone()))
     }
-
+    /// Synchronize consumers while holding the cache's read lock, preventing
+    /// an older config snapshot from replacing a newer authentication generation.
+    pub fn with_auth_config<T>(&self, consume: impl FnOnce(&AuthConfig) -> T) -> T {
+        self.read(|cache| consume(&cache.config.auth))
+    }
     pub async fn dxcluster_config(&self) -> rusqlite::Result<DxClusterConfig> {
-        self.call(|response| DbCommand::DxClusterConfig { response })
-            .await
+        Ok(self.read(|cache| cache.config.dxcluster.clone()))
     }
-
     pub async fn iaru_region(&self) -> rusqlite::Result<i64> {
-        self.call(|response| DbCommand::IaruRegion { response })
-            .await
+        Ok(self.read(|cache| cache.config.region))
     }
-
     pub async fn config_view(&self) -> rusqlite::Result<ConfigView> {
-        let auth_config = self.auth_config().await?;
-        let dxcluster_config = self.dxcluster_config().await?;
-        let login_enabled =
-            !auth_config.login_user.trim().is_empty() && !auth_config.login_password.is_empty();
-        Ok(ConfigView {
-            iaru_region: self.iaru_region().await?,
-            login_user: auth_config.login_user,
-            login_enabled,
-            dxcluster_enabled: dxcluster_config.enabled,
-            dxcluster_host: dxcluster_config.host,
-            dxcluster_port: dxcluster_config.port,
-            dxcluster_callsign: dxcluster_config.callsign,
-            dxcluster_max_age_min: dxcluster_config.max_age_min,
-            dxcluster_commands: dxcluster_config.commands,
-        })
+        Ok(self.read(|cache| cache.config.view()))
     }
-
     pub async fn update_config(&self, config: UpdateConfig) -> rusqlite::Result<()> {
         self.call(|response| DbCommand::UpdateConfig { config, response })
             .await
     }
-
     pub async fn create_radio(&self, radio: RadioPayload) -> rusqlite::Result<RadioRecord> {
         self.call(|response| DbCommand::CreateRadio { radio, response })
             .await
     }
-
     pub async fn update_radio(
         &self,
         id: i64,
@@ -275,14 +294,13 @@ impl Database {
         })
         .await
     }
-
     pub async fn delete_radio(&self, id: i64) -> rusqlite::Result<bool> {
+        if self.read(|cache| !cache.radios.contains_key(&id)) {
+            return Ok(false);
+        }
         self.call(|response| DbCommand::DeleteRadio { id, response })
             .await
     }
-
-    /// B2 registration endpoint boundary; exercised by persistence tests until the route lands.
-    #[allow(dead_code)]
     pub async fn upsert_client_radio(
         &self,
         client_instance_id: String,
@@ -298,21 +316,74 @@ impl Database {
         .await
     }
 
+    /// Metadata and canonical contacts from the same committed cache revision.
+    pub async fn log_snapshot(&self, id: i64) -> rusqlite::Result<Option<LogSnapshot>> {
+        loop {
+            let gate = {
+                let cache = self.cache.read().expect("database cache poisoned");
+                if let Some(snapshot) = cache.snapshot(id) {
+                    diagnostics::cache_hit();
+                    return Ok(Some(snapshot));
+                }
+                let Some(log) = cache.logs.get(&id) else {
+                    diagnostics::cache_hit();
+                    return Ok(None);
+                };
+                Arc::clone(&log.load_gate)
+            };
+            let _guard = gate.lock().await;
+            {
+                let cache = self.cache.read().expect("database cache poisoned");
+                if let Some(snapshot) = cache.snapshot(id) {
+                    diagnostics::cache_hit();
+                    return Ok(Some(snapshot));
+                }
+                if !cache.logs.contains_key(&id) {
+                    return Ok(None);
+                }
+            }
+            diagnostics::cache_miss();
+            self.call(|response| DbCommand::LoadContacts {
+                log_id: id,
+                response,
+            })
+            .await?;
+        }
+    }
+
+    #[allow(dead_code)] // Non-versioned convenience API; callers needing metadata use snapshots.
     pub async fn contacts(&self, log_id: i64) -> rusqlite::Result<Vec<Contact>> {
-        self.call(|response| DbCommand::Contacts { log_id, response })
-            .await
+        Ok(self
+            .log_snapshot(log_id)
+            .await?
+            .map(|snapshot| snapshot.contacts.to_vec())
+            .unwrap_or_default())
     }
-
     pub async fn contact(&self, id: i64) -> rusqlite::Result<Option<Contact>> {
-        self.call(|response| DbCommand::Contact { id, response })
-            .await
+        let Some(log_id) = self.contact_log_id(id).await? else {
+            return Ok(None);
+        };
+        Ok(self
+            .log_snapshot(log_id)
+            .await?
+            .and_then(|snapshot| snapshot.contacts.contact(id)))
     }
-
+    #[allow(dead_code)] // Non-versioned convenience API for persistence callers.
     pub async fn upsert_contacts(
         &self,
         log_id: i64,
         contacts: Vec<Contact>,
     ) -> rusqlite::Result<Vec<Contact>> {
+        Ok(self
+            .upsert_contacts_versioned(log_id, contacts)
+            .await?
+            .contacts)
+    }
+    pub async fn upsert_contacts_versioned(
+        &self,
+        log_id: i64,
+        contacts: Vec<Contact>,
+    ) -> rusqlite::Result<ContactMutation> {
         self.call(|response| DbCommand::UpsertContacts {
             log_id,
             contacts,
@@ -320,12 +391,9 @@ impl Database {
         })
         .await
     }
-
     pub async fn contact_log_id(&self, id: i64) -> rusqlite::Result<Option<i64>> {
-        self.call(|response| DbCommand::ContactLogId { id, response })
-            .await
+        Ok(self.read(|cache| cache.owners.get(&id).copied()))
     }
-
     pub async fn allocate_serial(
         &self,
         log_id: i64,
@@ -338,10 +406,55 @@ impl Database {
         })
         .await
     }
-
+    #[allow(dead_code)] // Kept as the non-versioned persistence API.
     pub async fn delete_contact(&self, id: i64) -> rusqlite::Result<Option<i64>> {
+        Ok(self
+            .delete_contact_versioned(id)
+            .await?
+            .map(|deleted| deleted.log_id))
+    }
+    pub async fn delete_contact_versioned(
+        &self,
+        id: i64,
+    ) -> rusqlite::Result<Option<ContactDeletion>> {
+        if self.read(|cache| !cache.owners.contains_key(&id)) {
+            return Ok(None);
+        }
         self.call(|response| DbCommand::DeleteContact { id, response })
             .await
+    }
+
+    #[cfg(test)]
+    pub fn test_counters(&self) -> (u64, u64, u64) {
+        (
+            self.metrics.commands.load(Ordering::Relaxed),
+            self.metrics.contact_loads.load(Ordering::Relaxed),
+            self.metrics.sql_reads.load(Ordering::Relaxed),
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn test_control(
+        &self,
+        action: impl FnOnce(&mut Connection) -> rusqlite::Result<()> + Send + 'static,
+    ) -> rusqlite::Result<()> {
+        self.call(|response| DbCommand::TestControl {
+            action: Box::new(action),
+            response,
+        })
+        .await
+    }
+
+    #[cfg(test)]
+    async fn test_close(&self) {
+        self.call(|response| DbCommand::TestClose { response })
+            .await
+            .unwrap();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn test_pending_commands(&self) -> usize {
+        DB_COMMAND_BUFFER - self.commands.capacity()
     }
 }
 
@@ -349,99 +462,371 @@ fn database_worker_unavailable() -> rusqlite::Error {
     rusqlite::Error::InvalidParameterName("database worker unavailable".to_string())
 }
 
-fn run_db_worker(mut connection: Connection, mut commands: mpsc::Receiver<DbCommand>) {
-    while let Some(command) = commands.blocking_recv() {
-        match command {
-            DbCommand::Logs { response } => {
-                let _ = response.send(db_logs(&connection));
+fn configure_connection(connection: &Connection) -> rusqlite::Result<()> {
+    let database_file: String =
+        connection.query_row("PRAGMA database_list", [], |row| row.get(2))?;
+    let journal_mode: String =
+        connection.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
+    if !database_file.is_empty() && !journal_mode.eq_ignore_ascii_case("wal") {
+        return Err(rusqlite::Error::InvalidParameterName(format!(
+            "could not enable SQLite WAL mode (effective mode: {journal_mode})"
+        )));
+    }
+    let synchronous = if cfg!(target_os = "windows") {
+        "NORMAL"
+    } else {
+        "FULL"
+    };
+    connection.pragma_update(None, "synchronous", synchronous)?;
+    connection.pragma_update(None, "foreign_keys", "ON")?;
+    tracing::info!(journal_mode, synchronous, "configured SQLite connection");
+    Ok(())
+}
+
+impl DbCommand {
+    fn name(&self) -> &'static str {
+        match self {
+            #[cfg(test)]
+            Self::TestControl { .. } => "test_control",
+            #[cfg(test)]
+            Self::TestClose { .. } => "test_close",
+            Self::CreateLog { .. } => "create_log",
+            Self::UpdateLog { .. } => "update_log",
+            Self::DeleteLog { .. } => "delete_log",
+            Self::UpdateConfig { .. } => "update_config",
+            Self::CreateRadio { .. } => "create_radio",
+            Self::UpdateRadio { .. } => "update_radio",
+            Self::DeleteRadio { .. } => "delete_radio",
+            Self::UpsertClientRadio { .. } => "upsert_client_radio",
+            Self::LoadContacts { .. } => "load_contacts",
+            Self::UpsertContacts { .. } => "upsert_contacts",
+            Self::AllocateSerial { .. } => "allocate_serial",
+            Self::DeleteContact { .. } => "delete_contact",
+        }
+    }
+}
+
+fn load_contacts(
+    connection: &Connection,
+    cache: &RwLock<DatabaseCache>,
+    metrics: &CacheMetrics,
+    id: i64,
+) -> rusqlite::Result<()> {
+    {
+        let cache = cache.read().expect("database cache poisoned");
+        if !cache.logs.contains_key(&id) || cache.contacts.contains_key(&id) {
+            return Ok(());
+        }
+    }
+    let contacts = CachedContacts::new(db_contacts(connection, id)?);
+    metrics.contact_loads.fetch_add(1, Ordering::Relaxed);
+    cache
+        .write()
+        .expect("database cache poisoned")
+        .contacts
+        .insert(id, Arc::new(contacts));
+    Ok(())
+}
+
+fn write_contacts(
+    connection: &mut Connection,
+    cache: &RwLock<DatabaseCache>,
+    metrics: &CacheMetrics,
+    log_id: i64,
+    contacts: Vec<Contact>,
+) -> rusqlite::Result<ContactMutation> {
+    load_contacts(connection, cache, metrics, log_id)?;
+    let (contest_id, previous_revision) = {
+        let cache = cache.read().expect("database cache poisoned");
+        let log = cache
+            .logs
+            .get(&log_id)
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+        for contact in &contacts {
+            if let Some(id) = contact_id(contact)
+                && let Some(owner) = cache.owners.get(&id)
+                && *owner != log_id
+            {
+                return Err(rusqlite::Error::InvalidParameterName(format!(
+                    "contact id {id} belongs to log {owner}, cannot write to log {log_id}"
+                )));
             }
-            DbCommand::Log { id, response } => {
-                let _ = response.send(select_log(&connection, id));
+        }
+        (log.log.contest_id.clone(), log.revision)
+    };
+    let contacts = db_upsert_contacts(connection, log_id, contacts, &contest_id)?;
+    let mut cache = cache.write().expect("database cache poisoned");
+    for contact in &contacts {
+        let id = contact_id(contact).expect("persisted contact ID");
+        if cache.owners.insert(id, log_id).is_none() {
+            *cache.counts.entry(log_id).or_default() += 1;
+        }
+        Arc::make_mut(cache.contacts.get_mut(&log_id).expect("contacts loaded"))
+            .upsert(contact.clone());
+    }
+    let revision = cache.bump_revision(log_id);
+    Ok(ContactMutation {
+        previous_revision,
+        revision,
+        contacts,
+    })
+}
+
+fn reserve_serial(
+    connection: &mut Connection,
+    cache: &RwLock<DatabaseCache>,
+    metrics: &CacheMetrics,
+    log_id: i64,
+    field_adif: String,
+) -> rusqlite::Result<SerialAllocation> {
+    let requested_field = field_adif.trim().to_string();
+    let field_adif = requested_field.to_ascii_uppercase();
+    if log_id <= 0 || field_adif.is_empty() {
+        return Err(rusqlite::Error::InvalidParameterName(
+            "log id must be positive and serial field must not be empty".to_string(),
+        ));
+    }
+    load_contacts(connection, cache, metrics, log_id)?;
+    let serial = {
+        let cache = cache.read().expect("database cache poisoned");
+        let contacts = cache
+            .contacts
+            .get(&log_id)
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+        let committed_next = match contacts.serial_max(&field_adif, None) {
+            Some(value) => value.checked_add(1).ok_or_else(|| {
+                rusqlite::Error::InvalidParameterName("serial allocation overflow".to_string())
+            })?,
+            None => 1,
+        };
+        cache
+            .next_serial
+            .get(&(log_id, field_adif.clone()))
+            .copied()
+            .unwrap_or(1)
+            .max(committed_next)
+            .max(1)
+    };
+    let mut allocation = db_allocate_serial(connection, log_id, &field_adif, serial)?;
+    allocation.field_adif = requested_field;
+    cache
+        .write()
+        .expect("database cache poisoned")
+        .next_serial
+        .insert((log_id, field_adif), serial + 1);
+    Ok(allocation)
+}
+
+fn remove_contact(
+    connection: &Connection,
+    cache: &RwLock<DatabaseCache>,
+    id: i64,
+) -> rusqlite::Result<Option<ContactDeletion>> {
+    let Some(log_id) = db_delete_contact(connection, id)? else {
+        return Ok(None);
+    };
+    let mut cache = cache.write().expect("database cache poisoned");
+    let previous_revision = cache
+        .logs
+        .get(&log_id)
+        .expect("persisted contact log")
+        .revision;
+    cache.owners.remove(&id);
+    *cache
+        .counts
+        .get_mut(&log_id)
+        .expect("persisted contact count") -= 1;
+    if let Some(contacts) = cache.contacts.get_mut(&log_id) {
+        Arc::make_mut(contacts).remove(id);
+    }
+    let revision = cache.bump_revision(log_id);
+    Ok(Some(ContactDeletion {
+        log_id,
+        previous_revision,
+        revision,
+    }))
+}
+
+fn run_db_worker(
+    mut connection: Connection,
+    mut commands: mpsc::Receiver<QueuedCommand>,
+    cache: Arc<RwLock<DatabaseCache>>,
+    metrics: Arc<CacheMetrics>,
+) {
+    while let Some(queued) = commands.blocking_recv() {
+        let _span = queued.span.enter();
+        let operation = queued.command.name();
+        metrics.commands.fetch_add(1, Ordering::Relaxed);
+        let is_load = matches!(queued.command, DbCommand::LoadContacts { .. });
+        diagnostics::database_command(is_load, queued.timings.as_deref());
+        diagnostics::record(
+            Stage::DatabaseQueue,
+            operation,
+            queued.queued_at.elapsed(),
+            queued.timings.as_deref(),
+        );
+        let request_timings = queued.timings.clone();
+        let loads_before = metrics.contact_loads.load(Ordering::Relaxed);
+        let timer = StageTimer::with_timings(Stage::DatabaseExecution, operation, queued.timings);
+        macro_rules! respond {
+            ($response:expr, $work:expr) => {{
+                let result = $work;
+                diagnostics::cache_load(
+                    metrics.contact_loads.load(Ordering::Relaxed) - loads_before,
+                    request_timings.as_deref(),
+                );
+                drop(timer);
+                let _ = $response.send(result);
+            }};
+        }
+        match queued.command {
+            #[cfg(test)]
+            DbCommand::TestControl { action, response } => {
+                respond!(response, action(&mut connection))
             }
-            DbCommand::CreateLog { log, response } => {
-                let _ = response.send(db_create_log(&connection, log));
+            #[cfg(test)]
+            DbCommand::TestClose { response } => {
+                drop(connection);
+                let _ = response.send(Ok(()));
+                break;
             }
-            DbCommand::UpdateLog { id, log, response } => {
-                let _ = response.send(db_update_log(&connection, id, log));
-            }
-            DbCommand::DeleteLog { id, response } => {
-                let _ = response.send(db_delete_log(&connection, id));
-            }
-            DbCommand::LogQsoCount { id, response } => {
-                let _ = response.send(db_log_qso_count(&connection, id));
-            }
-            DbCommand::Radios { response } => {
-                let _ = response.send(db_radios(&connection));
-            }
-            DbCommand::Radio { id, response } => {
-                let _ = response.send(select_radio(&connection, id));
-            }
-            DbCommand::BackendRadioConfigs { response } => {
-                let _ = response.send(db_backend_radio_configs(&connection));
-            }
-            DbCommand::AuthConfig { response } => {
-                let _ = response.send(db_auth_config(&connection));
-            }
-            DbCommand::DxClusterConfig { response } => {
-                let _ = response.send(db_dxcluster_config(&connection));
-            }
-            DbCommand::IaruRegion { response } => {
-                let _ = response.send(db_iaru_region(&connection));
-            }
+            DbCommand::CreateLog { log, response } => respond!(
+                response,
+                db_create_log(&connection, log).inspect(|log| cache
+                    .write()
+                    .expect("database cache poisoned")
+                    .publish_log(log.clone(), true))
+            ),
+            DbCommand::UpdateLog { id, log, response } => respond!(
+                response,
+                db_update_log(&connection, id, log).inspect(|log| {
+                    if let Some(log) = log {
+                        cache
+                            .write()
+                            .expect("database cache poisoned")
+                            .publish_log(log.clone(), false);
+                    }
+                })
+            ),
+            DbCommand::DeleteLog { id, response } => respond!(
+                response,
+                db_delete_log(&connection, id).inspect(|deleted| {
+                    if *deleted {
+                        cache
+                            .write()
+                            .expect("database cache poisoned")
+                            .remove_log(id);
+                    }
+                })
+            ),
             DbCommand::UpdateConfig { config, response } => {
-                let _ = response.send(db_update_config(&connection, config));
+                let password = cache
+                    .read()
+                    .expect("database cache poisoned")
+                    .config
+                    .auth
+                    .login_password
+                    .clone();
+                respond!(
+                    response,
+                    db_update_config(&connection, config, &password).map(|config| {
+                        cache.write().expect("database cache poisoned").config = config;
+                    })
+                );
             }
-            DbCommand::CreateRadio { radio, response } => {
-                let _ = response.send(db_create_radio(&connection, radio));
-            }
+            DbCommand::CreateRadio { radio, response } => respond!(
+                response,
+                db_create_radio(&connection, radio).inspect(|radio| {
+                    cache
+                        .write()
+                        .expect("database cache poisoned")
+                        .radios
+                        .insert(radio.id, radio.clone());
+                })
+            ),
             DbCommand::UpdateRadio {
                 id,
                 radio,
                 response,
-            } => {
-                let _ = response.send(db_update_radio(&connection, id, radio));
-            }
-            DbCommand::DeleteRadio { id, response } => {
-                let _ = response.send(db_delete_radio(&connection, id));
-            }
+            } => respond!(
+                response,
+                db_update_radio(&connection, id, radio).inspect(|radio| {
+                    if let Some(radio) = radio {
+                        cache
+                            .write()
+                            .expect("database cache poisoned")
+                            .radios
+                            .insert(radio.id, radio.clone());
+                    }
+                })
+            ),
+            DbCommand::DeleteRadio { id, response } => respond!(
+                response,
+                db_delete_radio(&connection, id).inspect(|deleted| {
+                    if *deleted {
+                        cache
+                            .write()
+                            .expect("database cache poisoned")
+                            .radios
+                            .remove(&id);
+                    }
+                })
+            ),
             DbCommand::UpsertClientRadio {
                 client_instance_id,
                 radio_ws_url,
                 radio,
                 response,
             } => {
-                let _ = response.send(db_upsert_client_radio(
-                    &connection,
-                    &client_instance_id,
-                    &radio_ws_url,
-                    radio,
-                ));
+                let existing = cache
+                    .read()
+                    .expect("database cache poisoned")
+                    .radios
+                    .values()
+                    .find(|radio| {
+                        radio.client_instance_id.as_deref() == Some(client_instance_id.as_str())
+                    })
+                    .map(|radio| radio.id);
+                respond!(
+                    response,
+                    db_upsert_client_radio(
+                        &connection,
+                        &client_instance_id,
+                        &radio_ws_url,
+                        radio,
+                        existing
+                    )
+                    .inspect(|radio| {
+                        cache
+                            .write()
+                            .expect("database cache poisoned")
+                            .radios
+                            .insert(radio.id, radio.clone());
+                    })
+                );
             }
-            DbCommand::Contacts { log_id, response } => {
-                let _ = response.send(db_contacts(&connection, log_id));
-            }
-            DbCommand::Contact { id, response } => {
-                let _ = response.send(select_contact(&connection, id));
-            }
+            DbCommand::LoadContacts { log_id, response } => respond!(
+                response,
+                load_contacts(&connection, &cache, &metrics, log_id)
+            ),
             DbCommand::UpsertContacts {
                 log_id,
                 contacts,
                 response,
-            } => {
-                let _ = response.send(db_upsert_contacts(&mut connection, log_id, contacts));
-            }
-            DbCommand::ContactLogId { id, response } => {
-                let _ = response.send(select_contact_log_id(&connection, id));
-            }
+            } => respond!(
+                response,
+                write_contacts(&mut connection, &cache, &metrics, log_id, contacts)
+            ),
             DbCommand::AllocateSerial {
                 log_id,
                 field_adif,
                 response,
-            } => {
-                let _ = response.send(db_allocate_serial(&mut connection, log_id, &field_adif));
-            }
+            } => respond!(
+                response,
+                reserve_serial(&mut connection, &cache, &metrics, log_id, field_adif)
+            ),
             DbCommand::DeleteContact { id, response } => {
-                let _ = response.send(db_delete_contact(&connection, id));
+                respond!(response, remove_contact(&connection, &cache, id))
             }
         }
     }
@@ -461,6 +846,406 @@ mod tests {
 
     fn test_database() -> Database {
         Database::open(":memory:").expect("in-memory database opens")
+    }
+
+    #[tokio::test]
+    async fn all_warm_and_missing_reads_bypass_sql_and_worker() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+        let radio = database.create_radio(tcp_radio()).await.unwrap();
+        let saved = database
+            .upsert_contacts(log.id, vec![base_contact()])
+            .await
+            .unwrap();
+        let id = contact_id(&saved[0]).unwrap();
+        let before = database.test_counters();
+        for _ in 0..3 {
+            assert_eq!(database.logs().await.unwrap().len(), 1);
+            assert_eq!(database.log(log.id).await.unwrap().unwrap().id, log.id);
+            assert!(database.log(-1).await.unwrap().is_none());
+            assert_eq!(database.radios().await.unwrap().len(), 1);
+            assert_eq!(
+                database.radio(radio.id).await.unwrap().unwrap().id,
+                radio.id
+            );
+            assert!(database.radio(-1).await.unwrap().is_none());
+            assert_eq!(database.backend_radio_configs().await.unwrap().len(), 1);
+            database.auth_config().await.unwrap();
+            database.dxcluster_config().await.unwrap();
+            database.iaru_region().await.unwrap();
+            database.config_view().await.unwrap();
+            assert_eq!(database.contacts(log.id).await.unwrap(), saved);
+            assert!(database.contacts(-1).await.unwrap().is_empty());
+            assert_eq!(database.contact(id).await.unwrap(), Some(saved[0].clone()));
+            assert!(database.contact(-1).await.unwrap().is_none());
+            assert_eq!(database.contact_log_id(id).await.unwrap(), Some(log.id));
+            assert!(database.contact_log_id(-1).await.unwrap().is_none());
+            assert_eq!(database.log_qso_count(log.id).await.unwrap(), 1);
+            assert_eq!(database.log_qso_count(-1).await.unwrap(), 0);
+            database.log_snapshot(log.id).await.unwrap().unwrap();
+            assert!(database.log_snapshot(-1).await.unwrap().is_none());
+            assert!(!database.delete_log(-1).await.unwrap());
+            assert!(!database.delete_radio(-1).await.unwrap());
+            assert!(database.delete_contact(-1).await.unwrap().is_none());
+        }
+        assert_eq!(database.test_counters(), before);
+    }
+
+    #[tokio::test]
+    async fn concurrent_cold_loads_are_coalesced_and_empty_logs_need_no_load() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+        assert!(database.contacts(log.id).await.unwrap().is_empty());
+        assert_eq!(database.test_counters(), (1, 0, 0));
+        let saved = database
+            .upsert_contacts(log.id, vec![base_contact()])
+            .await
+            .unwrap();
+        database.cache.write().unwrap().contacts.remove(&log.id);
+        let before = database.test_counters();
+        let mut readers = Vec::new();
+        for _ in 0..32 {
+            let database = database.clone();
+            readers.push(tokio::spawn(async move {
+                database.contacts(log.id).await.unwrap()
+            }));
+        }
+        for reader in readers {
+            assert_eq!(reader.await.unwrap(), saved);
+        }
+        let after = database.test_counters();
+        assert_eq!(after, (before.0 + 1, before.1 + 1, before.2 + 1));
+        database.contacts(log.id).await.unwrap();
+        assert_eq!(database.test_counters(), after);
+    }
+
+    #[tokio::test]
+    async fn failed_cold_load_can_be_retried() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+        let saved = database
+            .upsert_contacts(log.id, vec![base_contact()])
+            .await
+            .unwrap();
+        database.cache.write().unwrap().contacts.remove(&log.id);
+        database
+            .test_control(|connection| {
+                connection.execute_batch("ALTER TABLE qsos RENAME TO unavailable_qsos")
+            })
+            .await
+            .unwrap();
+        assert!(database.contacts(log.id).await.is_err());
+        assert!(
+            !database
+                .cache
+                .read()
+                .unwrap()
+                .contacts
+                .contains_key(&log.id)
+        );
+        database
+            .test_control(|connection| {
+                connection.execute_batch("ALTER TABLE unavailable_qsos RENAME TO qsos")
+            })
+            .await
+            .unwrap();
+        assert_eq!(database.contacts(log.id).await.unwrap(), saved);
+        assert_eq!(database.test_counters().1, 1);
+    }
+
+    #[tokio::test]
+    async fn failed_batch_is_atomic_and_duplicate_ids_count_once() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+        let saved = database
+            .upsert_contacts(log.id, vec![base_contact()])
+            .await
+            .unwrap();
+        let revision = database.log_revision(log.id);
+        let mut invalid = base_contact();
+        invalid
+            .get_mut("adif")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove("CALL");
+        assert!(
+            database
+                .upsert_contacts(log.id, vec![base_contact(), invalid])
+                .await
+                .is_err()
+        );
+        assert_eq!(database.contacts(log.id).await.unwrap(), saved);
+        assert_eq!(database.log_qso_count(log.id).await.unwrap(), 1);
+        assert_eq!(database.log_revision(log.id), revision);
+        let mut first = saved[0].clone();
+        set_contact_adif(&mut first, "STX", json!(90));
+        let mut last = first.clone();
+        set_contact_adif(&mut last, "STX", json!(7));
+        database
+            .upsert_contacts(log.id, vec![first, last])
+            .await
+            .unwrap();
+        assert_eq!(database.log_qso_count(log.id).await.unwrap(), 1);
+        let snapshot = database.log_snapshot(log.id).await.unwrap().unwrap();
+        assert_eq!(snapshot.contacts.serial_max("STX", None), Some(7));
+        assert_eq!(
+            database
+                .allocate_serial(log.id, "STX".into())
+                .await
+                .unwrap()
+                .serial,
+            8
+        );
+        assert_eq!(database.test_counters().2, 0);
+    }
+
+    #[tokio::test]
+    async fn serial_indexes_track_updates_deletes_custom_fields_and_overflow() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+        let mut first = base_contact();
+        set_contact_adif(&mut first, "STX", json!(50));
+        set_contact_adif(&mut first, "CUSTOM_SERIAL", json!(" 80 "));
+        let mut second = base_contact();
+        set_contact_adif(&mut second, "STX", json!(12));
+        set_contact_adif(&mut second, "BAND", json!("40m"));
+        let saved = database
+            .upsert_contacts(log.id, vec![first, second])
+            .await
+            .unwrap();
+        let old = database.log_snapshot(log.id).await.unwrap().unwrap();
+        assert_eq!(old.contacts.serial_max("stx", Some("20M")), Some(50));
+        database
+            .delete_contact(contact_id(&saved[0]).unwrap())
+            .await
+            .unwrap();
+        let current = database.log_snapshot(log.id).await.unwrap().unwrap();
+        assert_eq!(current.contacts.serial_max("STX", None), Some(12));
+        assert_eq!(current.contacts.serial_max("STX", Some("20m")), None);
+        assert_eq!(current.contacts.serial_max("CUSTOM_SERIAL", None), None);
+        assert_eq!(old.contacts.serial_max("CUSTOM_SERIAL", None), Some(80));
+        let mut extreme = saved[1].clone();
+        set_contact_adif(&mut extreme, "STX", json!(i64::MAX));
+        database
+            .upsert_contacts(log.id, vec![extreme])
+            .await
+            .unwrap();
+        assert!(
+            database
+                .allocate_serial(log.id, "STX".into())
+                .await
+                .is_err()
+        );
+        assert!(
+            !database
+                .cache
+                .read()
+                .unwrap()
+                .next_serial
+                .contains_key(&(log.id, "STX".into()))
+        );
+        assert_eq!(database.test_counters().2, 0);
+    }
+
+    #[tokio::test]
+    async fn concurrent_reservations_are_unique_and_use_no_selects() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+        let mut tasks = Vec::new();
+        for _ in 0..32 {
+            let database = database.clone();
+            tasks.push(tokio::spawn(async move {
+                database
+                    .allocate_serial(log.id, "STX".into())
+                    .await
+                    .unwrap()
+                    .serial
+            }));
+        }
+        let mut serials = Vec::new();
+        for task in tasks {
+            serials.push(task.await.unwrap());
+        }
+        serials.sort_unstable();
+        assert_eq!(serials, (1..=32).collect::<Vec<_>>());
+        assert_eq!(database.test_counters().2, 0);
+    }
+
+    #[tokio::test]
+    async fn serial_field_casing_shares_reservations_but_preserves_response_field() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+        let first = database
+            .allocate_serial(log.id, " custom_serial ".into())
+            .await
+            .unwrap();
+        assert_eq!(first.serial, 1);
+        assert_eq!(first.field_adif, "custom_serial");
+        let second = database
+            .allocate_serial(log.id, "CUSTOM_SERIAL".into())
+            .await
+            .unwrap();
+        assert_eq!(second.serial, 2);
+        assert_eq!(database.test_counters().2, 0);
+    }
+
+    #[tokio::test]
+    async fn cancelled_queued_write_still_publishes_and_warm_reads_do_not_wait() {
+        let database = test_database();
+        let log = create_test_log(&database).await;
+        let (started_tx, started_rx) = oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let paused_database = database.clone();
+        let pause = tokio::spawn(async move {
+            paused_database
+                .test_control(move |_| {
+                    let _ = started_tx.send(());
+                    let _ = release_rx.recv();
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        });
+        started_rx.await.unwrap();
+        let before = database.test_counters();
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            assert_eq!(database.log(log.id).await.unwrap().unwrap().id, log.id);
+            database.config_view().await.unwrap();
+            database.contacts(log.id).await.unwrap();
+        })
+        .await
+        .expect("warm reads must not wait for the blocked SQLite worker");
+        assert_eq!(database.test_counters(), before);
+        let writing_database = database.clone();
+        let writer = tokio::spawn(async move {
+            writing_database
+                .upsert_contacts(log.id, vec![base_contact()])
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(1), async {
+            while database.commands.capacity() == DB_COMMAND_BUFFER {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        writer.abort();
+        assert!(writer.await.unwrap_err().is_cancelled());
+        release_tx.send(()).unwrap();
+        pause.await.unwrap();
+        database.test_control(|_| Ok(())).await.unwrap();
+        assert_eq!(database.log_qso_count(log.id).await.unwrap(), 1);
+        assert_eq!(database.contacts(log.id).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn restart_restores_catalog_contacts_and_reservations_and_delete_cascades() {
+        let directory =
+            std::env::temp_dir().join(format!("log73-cache-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("log73.db");
+        let database = Database::open(&path).unwrap();
+        let log = create_test_log(&database).await;
+        let radio = database.create_radio(tcp_radio()).await.unwrap();
+        database.update_config(config_update(3)).await.unwrap();
+        let saved = database
+            .upsert_contacts(log.id, vec![base_contact()])
+            .await
+            .unwrap();
+        let id = contact_id(&saved[0]).unwrap();
+        database
+            .allocate_serial(log.id, "CUSTOM_SERIAL".into())
+            .await
+            .unwrap();
+        database.test_close().await;
+        let reopened = Database::open(&path).unwrap();
+        assert_eq!(reopened.log_qso_count(log.id).await.unwrap(), 1);
+        assert_eq!(reopened.contact_log_id(id).await.unwrap(), Some(log.id));
+        assert_eq!(reopened.iaru_region().await.unwrap(), 3);
+        assert_eq!(
+            reopened.radio(radio.id).await.unwrap().unwrap().config,
+            radio.config
+        );
+        assert_eq!(reopened.test_counters(), (0, 0, 0));
+        assert_eq!(reopened.contacts(log.id).await.unwrap(), saved);
+        assert_eq!(reopened.test_counters(), (1, 1, 1));
+        assert_eq!(
+            reopened
+                .allocate_serial(log.id, "CUSTOM_SERIAL".into())
+                .await
+                .unwrap()
+                .serial,
+            2
+        );
+        assert!(reopened.delete_log(log.id).await.unwrap());
+        assert_eq!(reopened.contact_log_id(id).await.unwrap(), None);
+        assert!(reopened.contacts(log.id).await.unwrap().is_empty());
+        assert_eq!(reopened.log_qso_count(log.id).await.unwrap(), 0);
+        assert!(reopened.cache.read().unwrap().next_serial.is_empty());
+        let replacement = create_test_log(&reopened).await;
+        assert!(reopened.contacts(replacement.id).await.unwrap().is_empty());
+        assert_eq!(
+            reopened
+                .allocate_serial(replacement.id, "CUSTOM_SERIAL".into())
+                .await
+                .unwrap()
+                .serial,
+            1
+        );
+        reopened.test_close().await;
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn file_database_uses_platform_durability_and_persists_across_reopen() {
+        let directory =
+            std::env::temp_dir().join(format!("log73-wal-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&directory).unwrap();
+        let path = directory.join("log73.db");
+        {
+            let connection = Connection::open(&path).unwrap();
+            configure_connection(&connection).unwrap();
+            initialize_schema(&connection).unwrap();
+            let journal: String = connection
+                .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+                .unwrap();
+            let synchronous: i64 = connection
+                .query_row("PRAGMA synchronous", [], |row| row.get(0))
+                .unwrap();
+            let foreign_keys: i64 = connection
+                .query_row("PRAGMA foreign_keys", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(journal, "wal");
+            assert_eq!(synchronous, if cfg!(target_os = "windows") { 1 } else { 2 });
+            assert_eq!(foreign_keys, 1);
+            connection.execute("INSERT INTO logs (NAME, CONTEST_ID, STATION_CALLSIGN, CONTEST_PARAMS_JSON) VALUES (?1, ?2, ?3, ?4)",
+                rusqlite::params!["durability test", "test-contest", "N0CALL", "{}"]).unwrap();
+        }
+        {
+            let connection = Connection::open(&path).unwrap();
+            configure_connection(&connection).unwrap();
+            let name: String = connection
+                .query_row("SELECT NAME FROM logs", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(name, "durability test");
+            let integrity: String = connection
+                .query_row("PRAGMA integrity_check", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(integrity, "ok");
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn in_memory_database_retains_supported_journal_mode() {
+        let connection = Connection::open_in_memory().unwrap();
+        configure_connection(&connection).unwrap();
+        let journal: String = connection
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(journal, "memory");
+        initialize_schema(&connection).unwrap();
     }
 
     fn config_update(iaru_region: i64) -> UpdateConfig {

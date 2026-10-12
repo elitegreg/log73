@@ -1,3 +1,4 @@
+mod cache;
 mod config;
 mod contact;
 mod contacts;
@@ -8,6 +9,7 @@ mod schema;
 mod serials;
 mod worker;
 
+pub use cache::LogSnapshot;
 #[allow(unused_imports)]
 pub use config::{
     DEFAULT_DXCLUSTER_MAX_AGE_MIN, DEFAULT_DXCLUSTER_PORT, DEFAULT_IARU_REGION,

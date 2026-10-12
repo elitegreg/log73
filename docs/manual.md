@@ -106,6 +106,19 @@ If login is enabled in configuration, browser access requires credentials.
 - It protects UI + API + websocket endpoints as one shared gate.
 - It is not a per-user account system.
 
+Successful authentication is cached for 30 minutes. The backend shares concurrent
+password checks and runs them outside its request workers. Changing credentials
+invalidates the cache; normal browser and Radio Client authentication is unchanged.
+
+Database reads use a write-through cache: metadata loads at startup and each
+log's contacts load on first use. Writes and serial reservations are persisted
+before they are acknowledged. Loaded contacts remain in memory until log
+deletion or backend shutdown. Do not modify SQLite directly or run another
+backend against the same database while it is running; stop and restart the
+backend to pick up outside edits.
+An overloaded verifier responds with HTTP 503 and asks clients to retry after one
+second.
+
 ### Trust warning
 
 Any trusted operator with current credentials can update credentials in Configure Log73.

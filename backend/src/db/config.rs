@@ -1,5 +1,6 @@
+use super::cache::CachedConfig;
 use super::models::{AuthConfig, DxClusterConfig, LoginPasswordUpdate, UpdateConfig};
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, params};
 
 pub const DEFAULT_DXCLUSTER_PORT: u16 = 23;
 pub const DEFAULT_DXCLUSTER_MAX_AGE_MIN: u16 = 60;
@@ -20,73 +21,28 @@ impl Default for DxClusterConfig {
     }
 }
 
-pub(super) fn db_auth_config(connection: &Connection) -> rusqlite::Result<AuthConfig> {
-    match connection
-        .query_row(
-            "SELECT LOGIN_USER, LOGIN_PASSWORD FROM config LIMIT 1",
-            [],
-            |row| {
-                Ok(AuthConfig {
-                    login_user: row.get(0)?,
-                    login_password: row.get(1)?,
-                })
-            },
-        )
-        .optional()
-    {
-        Ok(Some(config)) => Ok(config),
-        Ok(None) => Ok(AuthConfig {
-            login_user: String::new(),
-            login_password: String::new(),
+pub(super) fn db_config(connection: &Connection) -> rusqlite::Result<CachedConfig> {
+    connection.query_row(
+        "SELECT IARU_REGION, LOGIN_USER, LOGIN_PASSWORD, DXCLUSTER_ENABLED, DXCLUSTER_HOST, DXCLUSTER_PORT, DXCLUSTER_CALLSIGN, DXCLUSTER_MAX_AGE_MIN, DXCLUSTER_COMMANDS FROM config LIMIT 1",
+        [], |row| Ok(CachedConfig {
+            region: row.get(0)?,
+            auth: AuthConfig { login_user: row.get(1)?, login_password: row.get(2)? },
+            dxcluster: DxClusterConfig { enabled: row.get(3)?, host: row.get(4)?, port: row.get(5)?,
+                callsign: row.get(6)?, max_age_min: row.get(7)?, commands: row.get(8)? },
         }),
-        Err(error) if is_missing_config_column(&error) => Ok(AuthConfig {
-            login_user: String::new(),
-            login_password: String::new(),
-        }),
-        Err(error) => Err(error),
-    }
-}
-
-pub(super) fn db_dxcluster_config(connection: &Connection) -> rusqlite::Result<DxClusterConfig> {
-    match connection
-        .query_row(
-            "SELECT DXCLUSTER_ENABLED, DXCLUSTER_HOST, DXCLUSTER_PORT, DXCLUSTER_CALLSIGN, DXCLUSTER_MAX_AGE_MIN, DXCLUSTER_COMMANDS FROM config LIMIT 1",
-            [],
-            |row| {
-                Ok(DxClusterConfig {
-                    enabled: row.get(0)?,
-                    host: row.get(1)?,
-                    port: row.get(2)?,
-                    callsign: row.get(3)?,
-                    max_age_min: row.get(4)?,
-                    commands: row.get(5)?,
-                })
-            },
-        )
-        .optional()
-    {
-        Ok(Some(config)) => Ok(config),
-        Ok(None) => Ok(DxClusterConfig::default()),
-        Err(error) if is_missing_config_column(&error) => Ok(DxClusterConfig::default()),
-        Err(error) => Err(error),
-    }
-}
-
-pub(super) fn db_iaru_region(connection: &Connection) -> rusqlite::Result<i64> {
-    connection.query_row("SELECT IARU_REGION FROM config LIMIT 1", [], |row| {
-        row.get(0)
-    })
+    )
 }
 
 pub(super) fn db_update_config(
     connection: &Connection,
     config: UpdateConfig,
-) -> rusqlite::Result<()> {
+    preserved_password: &str,
+) -> rusqlite::Result<CachedConfig> {
     let max_age_min = config
         .dxcluster_max_age_min
         .clamp(MIN_DXCLUSTER_MAX_AGE_MIN, MAX_DXCLUSTER_MAX_AGE_MIN);
     let login_password = match config.login_password {
-        LoginPasswordUpdate::Preserve => db_auth_config(connection)?.login_password,
+        LoginPasswordUpdate::Preserve => preserved_password.to_string(),
         LoginPasswordUpdate::Set(login_password) => login_password,
         LoginPasswordUpdate::Disable => String::new(),
     };
@@ -125,9 +81,19 @@ pub(super) fn db_update_config(
             ],
         )?;
     }
-    Ok(())
-}
-
-pub(super) fn is_missing_config_column(error: &rusqlite::Error) -> bool {
-    error.to_string().contains("no such column")
+    Ok(CachedConfig {
+        region: config.iaru_region,
+        auth: AuthConfig {
+            login_user: login_user.to_string(),
+            login_password,
+        },
+        dxcluster: DxClusterConfig {
+            enabled: config.dxcluster_enabled,
+            host: dxcluster_host.to_string(),
+            port: config.dxcluster_port,
+            callsign: dxcluster_callsign,
+            max_age_min,
+            commands: config.dxcluster_commands,
+        },
+    })
 }

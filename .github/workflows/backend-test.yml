@@ -6,9 +6,14 @@ on:
 
 jobs:
   backend-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Install system dependencies
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config libasound-dev libpipewire-0.3-dev
       - name: Checkout
         uses: actions/checkout@v4
@@ -26,7 +31,15 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build frontend assets
-        run: pnpm run build
+        run: pnpm exec rsbuild build -m production
+
+      - name: Copy favicon (Linux)
+        if: runner.os == 'Linux'
+        run: cp static/favicon.ico dist/favicon.ico
+
+      - name: Copy favicon (Windows)
+        if: runner.os == 'Windows'
+        run: Copy-Item static/favicon.ico dist/favicon.ico
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

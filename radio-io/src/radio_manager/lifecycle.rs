@@ -5,7 +5,7 @@ use crate::radio::{RadioCommand, RadioState, RadioStatus};
 use crate::voice_keyer::VoiceKeyer;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, Notify, RwLock, broadcast, mpsc, oneshot};
+use tokio::sync::{Mutex, Notify, RwLock, Semaphore, broadcast, mpsc, oneshot};
 use tokio::task::JoinHandle;
 use tracing::debug;
 
@@ -14,6 +14,7 @@ pub struct RadioManager {
     voice_keyer: VoiceKeyer,
     bands: BandCatalog,
     radios: Arc<Mutex<HashMap<i64, ManagedRadioSlot>>>,
+    device_work_limit: Arc<Semaphore>,
 }
 
 #[derive(Clone)]
@@ -47,7 +48,14 @@ impl RadioManager {
             voice_keyer,
             bands,
             radios: Arc::new(Mutex::new(HashMap::new())),
+            device_work_limit: Arc::new(Semaphore::new(2)),
         }
+    }
+
+    /// Share the device-enumeration budget with the backend's HTTP handlers.
+    pub fn with_device_work_limit(mut self, permits: Arc<Semaphore>) -> Self {
+        self.device_work_limit = permits;
+        self
     }
 
     pub async fn acquire(&self, mut config: RadioConfig) -> Result<RadioHandle, String> {
@@ -86,7 +94,20 @@ impl RadioManager {
                 continue;
             }
 
-            self.voice_keyer.sanitize_radio_config(&mut config);
+            let permit = Arc::clone(&self.device_work_limit)
+                .acquire_owned()
+                .await
+                .map_err(|_| "device validation is unavailable".to_string())?;
+            let keyer = self.voice_keyer.clone();
+            let span = tracing::Span::current();
+            config = tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                let _span = span.enter();
+                keyer.sanitize_radio_config(&mut config);
+                config
+            })
+            .await
+            .map_err(|_| "device validation worker failed".to_string())?;
 
             let mut wait_for_shutdown = None;
             {

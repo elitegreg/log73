@@ -2,7 +2,9 @@ use super::contact::{
     Contact, build_contact, contact_adif, contact_adif_value, contact_id, contact_log_id,
     frequency_hz, json_i64, json_string, set_contact_adif, set_contact_meta,
 };
-use rusqlite::types::{Value as SqlValue, ValueRef};
+use rusqlite::types::Value as SqlValue;
+#[cfg(test)]
+use rusqlite::types::ValueRef;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
@@ -128,6 +130,7 @@ INSERT INTO qsos (
     ?32,
     ?33
 )
+RETURNING *
 "#;
 
 const UPSERT_QSO_SQL: &str = r#"
@@ -236,6 +239,7 @@ ON CONFLICT(ID) DO UPDATE SET
     STX_STRING = excluded.STX_STRING,
     TX_PWR = excluded.TX_PWR,
     JSON = excluded.JSON
+RETURNING *
 "#;
 
 pub(super) fn db_contacts(connection: &Connection, log_id: i64) -> rusqlite::Result<Vec<Contact>> {
@@ -249,10 +253,10 @@ pub(super) fn db_upsert_contacts(
     connection: &mut Connection,
     log_id: i64,
     contacts: Vec<Contact>,
+    contest_id: &str,
 ) -> rusqlite::Result<Vec<Contact>> {
     let transaction = connection.transaction()?;
     let mut committed = Vec::with_capacity(contacts.len());
-    let contest_id = select_log_contest_id(&transaction, log_id)?;
 
     for mut contact in contacts {
         set_contact_meta(&mut contact, "logId", Value::Number(log_id.into()));
@@ -264,13 +268,10 @@ pub(super) fn db_upsert_contacts(
             set_contact_adif(
                 &mut contact,
                 "CONTEST_ID",
-                Value::String(contest_id.clone()),
+                Value::String(contest_id.to_string()),
             );
         }
-        let id = upsert_contact(&transaction, contact)?;
-        if let Some(saved) = select_contact(&transaction, id)? {
-            committed.push(saved);
-        }
+        committed.push(upsert_contact(&transaction, contact)?);
     }
 
     transaction.commit()?;
@@ -278,66 +279,17 @@ pub(super) fn db_upsert_contacts(
 }
 
 pub(super) fn db_delete_contact(connection: &Connection, id: i64) -> rusqlite::Result<Option<i64>> {
-    let Some(log_id) = select_contact_log_id(connection, id)? else {
-        return Ok(None);
-    };
-
-    let deleted = connection.execute("DELETE FROM qsos WHERE ID = ?1", params![id])? > 0;
-    Ok(deleted.then_some(log_id))
-}
-
-pub(super) fn select_contact(
-    connection: &Connection,
-    id: i64,
-) -> rusqlite::Result<Option<Contact>> {
     connection
         .query_row(
-            "SELECT * FROM qsos WHERE ID = ?1",
+            "DELETE FROM qsos WHERE ID = ?1 RETURNING LOG_ID",
             params![id],
-            row_to_contact,
+            |row| row.get(0),
         )
         .optional()
 }
 
-pub(super) fn select_contact_log_id(
-    connection: &Connection,
-    id: i64,
-) -> rusqlite::Result<Option<i64>> {
-    connection
-        .query_row(
-            "SELECT LOG_ID FROM qsos WHERE ID = ?1",
-            params![id],
-            |row| row.get::<_, i64>(0),
-        )
-        .optional()
-}
-
-fn select_log_contest_id(connection: &Connection, log_id: i64) -> rusqlite::Result<String> {
-    connection.query_row(
-        "SELECT CONTEST_ID FROM logs WHERE ID = ?1",
-        params![log_id],
-        |row| row.get(0),
-    )
-}
-
-pub(super) fn qso_column_for_adif(field_adif: &str) -> Option<&'static str> {
-    QSO_COLUMNS.iter().copied().find(|column| {
-        !matches!(*column, "LOG_ID" | "JSON") && column.eq_ignore_ascii_case(field_adif)
-    })
-}
-
-fn upsert_contact(connection: &Connection, contact: Contact) -> rusqlite::Result<i64> {
+fn upsert_contact(connection: &Connection, contact: Contact) -> rusqlite::Result<Contact> {
     let id = contact_id(&contact);
-    let requested_log_id = contact_log_id(&contact).unwrap_or(1);
-
-    if let Some(id) = id
-        && let Some(existing_log_id) = select_contact_log_id(connection, id)?
-        && existing_log_id != requested_log_id
-    {
-        return Err(rusqlite::Error::InvalidParameterName(format!(
-            "contact id {id} belongs to log {existing_log_id}, cannot write to log {requested_log_id}",
-        )));
-    }
 
     let values = contact_to_sql_values(&contact);
     let mut sql_values = Vec::with_capacity(values.len() + if id.is_some() { 1 } else { 0 });
@@ -351,8 +303,7 @@ fn upsert_contact(connection: &Connection, contact: Contact) -> rusqlite::Result
     };
 
     let mut statement = connection.prepare_cached(sql)?;
-    statement.execute(rusqlite::params_from_iter(sql_values))?;
-    Ok(id.unwrap_or_else(|| connection.last_insert_rowid()))
+    statement.query_row(rusqlite::params_from_iter(sql_values), row_to_contact)
 }
 
 fn contact_to_sql_values(contact: &Contact) -> Vec<SqlValue> {
@@ -454,7 +405,8 @@ fn row_to_contact(row: &rusqlite::Row<'_>) -> rusqlite::Result<Contact> {
     Ok(build_contact(meta, adif))
 }
 
-pub(super) fn sql_serial_value(value: ValueRef<'_>) -> Option<i64> {
+#[cfg(test)]
+fn sql_serial_value(value: ValueRef<'_>) -> Option<i64> {
     match value {
         ValueRef::Integer(value) => Some(value),
         ValueRef::Real(value) if value.is_finite() && value.fract() == 0.0 => Some(value as i64),
