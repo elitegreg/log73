@@ -15,6 +15,9 @@ jobs:
   backend-test:
     uses: ./.github/workflows/backend-test.yml
 
+  launcher:
+    uses: ./.github/workflows/launcher.yml
+
   frontend-test:
     uses: ./.github/workflows/frontend-test.yml
 

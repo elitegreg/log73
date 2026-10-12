@@ -14,7 +14,7 @@ NFPM ?= $(shell command -v nfpm 2>/dev/null || { command -v go >/dev/null 2>&1 &
 
 all: backend-build launcher-build frontend-build radio-client-build
 
-ci: wix-assets-check backend-lint frontend-lint backend-test frontend-test frontend-build radio-client-test radio-client-build bundle-build
+ci: wix-assets-check backend-lint frontend-lint backend-test launcher-test launcher-build frontend-test frontend-build radio-client-test radio-client-build bundle-build
 
 release: bundle-release
 
@@ -94,17 +94,17 @@ backend-lint: check-linux-native-prereqs
 	cargo fmt --all -- --check
 	cargo clippy --workspace --all-targets --all-features -- -D warnings
 
-launcher-build:
+launcher-build: check-linux-native-prereqs
 	cargo build -p log73-launcher --bin log73-launcher
 
-launcher-test:
+launcher-test: check-linux-native-prereqs
 	cargo test -p log73-launcher --bin log73-launcher
 
 launcher-fmt:
 	cargo fmt -p log73-launcher
 
 launcher-lint:
-	cargo clippy -p log73-launcher --all-targets --all-features
+	cargo clippy -p log73-launcher --all-targets --all-features -- -D warnings
 
 launcher-run:
 	cargo run -p log73-launcher --bin log73-launcher

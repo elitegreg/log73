@@ -1,0 +1,29 @@
+name: Launcher
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  launcher:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config libasound-dev libpipewire-0.3-dev
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+
+      - name: Test Launcher
+        run: cargo test -p log73-launcher --bin log73-launcher
+
+      - name: Build Launcher
+        run: cargo build -p log73-launcher --bin log73-launcher
