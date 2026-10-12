@@ -157,6 +157,13 @@ jobs:
           # Actually do builds and make zips and whatnot
           dist build ${{ needs.plan.outputs.tag-flag }} --print=linkage --output-format=json ${{ matrix.dist_args }} > dist-manifest.json
           echo "dist ran successfully"
+      - name: Report WiX linker failures
+        if: ${{ failure() && runner.os == 'Windows' }}
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $wixObjects = Get-ChildItem target\\wix -Filter *.wixobj | ForEach-Object FullName
+          & light.exe -spdb -ext WixUIExtension -ext WixUtilExtension -cultures:en-us -out target\\wix\\diagnostic.msi -b bundle $wixObjects
       - name: Build macOS application packages
         if: runner.os == 'macOS'
         env:
