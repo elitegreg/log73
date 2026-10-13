@@ -1,6 +1,7 @@
 import { dupeIdentity } from './callsign.js';
+import { normalizeLoggerMode } from './modes.js';
 
-const POSSIBLE_DUPE_FIELDS = new Set(['CALL', 'BAND', 'MODE']);
+const POSSIBLE_DUPE_FIELDS = new Set(['CALL', 'BAND', 'MODE', 'MODE_CLASS']);
 
 function jsonString(value) {
   if (typeof value === 'string') return value;
@@ -10,10 +11,34 @@ function jsonString(value) {
   return null;
 }
 
+// MODE grouping for duplicate keys. Mirrors backend `dupe_mode_class`:
+// CW/CW-R stay CW, SSB and FM stay distinct, everything else collapses to
+// DATA (so FT8 and RTTY match). Returns '' for a missing MODE.
+export function dupeModeKey(mode) {
+  const normalized = normalizeLoggerMode(mode);
+  if (normalized === '') return '';
+  if (normalized === 'CW' || normalized === 'CW-R') return 'CW';
+  if (normalized === 'SSB') return 'SSB';
+  if (normalized === 'FM') return 'FM';
+  return 'DATA';
+}
+
+// MODE_CLASS derivation for duplicate keys. Mirrors the MODE_CLASS branch of
+// backend `field_value`: CW/CW-R stay CW, SSB/FM/AM share PHONE, and every
+// other mode keeps its normalized name. Unknown modes pass through instead of
+// collapsing to '' so unrelated modes never false-match. Returns '' only for
+// a missing MODE.
+export function modeClassKey(mode) {
+  const normalized = normalizeLoggerMode(mode);
+  if (normalized === 'CW' || normalized === 'CW-R') return 'CW';
+  if (normalized === 'SSB' || normalized === 'FM' || normalized === 'AM') {
+    return 'PHONE';
+  }
+  return normalized;
+}
+
 function normalizedFieldValue(field, value) {
-  const normalized = String(value ?? '')
-    .trim()
-    .toUpperCase();
+  const normalized = normalizeLoggerMode(value);
   if (field.toUpperCase() === 'CALL') {
     return dupeIdentity(normalized);
   }
@@ -22,6 +47,14 @@ function normalizedFieldValue(field, value) {
 
 function contactFieldValue(settings, contact, field) {
   const adif = contact?.adif ?? {};
+  // MODE_CLASS is always derived from MODE (a stored MODE_CLASS value is
+  // ignored), matching the backend reference.
+  if (field.toUpperCase() === 'MODE_CLASS') {
+    return modeClassKey(jsonString(adif?.MODE));
+  }
+  if (field.toUpperCase() === 'MODE') {
+    return dupeModeKey(jsonString(adif?.MODE));
+  }
   const directValue = jsonString(adif?.[field]);
   if (directValue !== null) return normalizedFieldValue(field, directValue);
 
@@ -40,6 +73,13 @@ function possibleDupeFields(settings) {
   );
 }
 
+// Duplicate key for a contact under the configured dupe key. Mirrors backend
+// `dupe_key_for`: same `|`-joined key string, same per-field values.
+export function dupeKey(settings, contact) {
+  const dupeFields = settings?.scoring?.dupe_key ?? [];
+  return keyForFields(settings, contact, dupeFields);
+}
+
 export function dupeAlertText(settings, currentContact, historicContacts) {
   const dupeFields = settings?.scoring?.dupe_key ?? [];
   const possibleFields = possibleDupeFields(settings);
@@ -53,7 +93,7 @@ export function dupeAlertText(settings, currentContact, historicContacts) {
     currentContact,
     possibleFields,
   );
-  const currentDupeKey = keyForFields(settings, currentContact, dupeFields);
+  const currentDupeKey = dupeKey(settings, currentContact);
   let alertText = '';
 
   for (const historicContact of historicContacts ?? []) {
@@ -71,9 +111,7 @@ export function dupeAlertText(settings, currentContact, historicContacts) {
       continue;
     }
 
-    if (
-      keyForFields(settings, historicContact, dupeFields) === currentDupeKey
-    ) {
+    if (dupeKey(settings, historicContact) === currentDupeKey) {
       return 'Dupe';
     }
 

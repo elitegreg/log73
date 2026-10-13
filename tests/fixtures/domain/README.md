@@ -73,3 +73,44 @@ JS (via `loadFixture.js` in this directory):
 - `src/domain/validation.test.js`: `logging_valid`, `query_valid`.
 - `src/domain/dupes.test.js`: `dupe_identity`.
 - `src/domain/dxcc.test.js`: `wpx_prefix`, `dxcc` against `dxcc_db`.
+
+## `dupe-keys.json` format
+
+```json
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "cw-ssb-distinct-under-mode-class",
+      "dupe_key": ["CALL", "BAND", "MODE_CLASS"],
+      "contacts": [
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "CW" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "SSB" }
+      ],
+      "keys": ["K1ABC|20m|CW", "K1ABC|20m|PHONE"]
+    }
+  ]
+}
+```
+
+- `version`: fixture schema version. Harnesses reject anything but `1`.
+- `cases[]`: every field is required on every case.
+  - `name`: stable case identifier used in failure messages.
+  - `dupe_key`: configured duplicate-key fields, as in contest rules.
+  - `contacts`: plain ADIF field maps (strings, numbers, or booleans).
+  - `keys`: the exact expected `|`-joined duplicate-key string per contact,
+    in order. Both languages compute keys with the same join and the same
+    per-field normalization (CALL identity, MODE grouping, MODE_CLASS
+    derivation, trim/uppercase otherwise, missing fields as `''`).
+
+## Consumers of `dupe-keys.json`
+
+Rust (via `include_str!` + `serde_json`, cases shared through a loader helper
+in scoring tests):
+
+- `backend/src/scoring.rs` tests: `dupe_key_for` equality over every case.
+
+JS (via `loadFixture.js` in this directory):
+
+- `src/domain/dupes.test.js`: `dupeKey` equality over every case, plus
+  alert-level (Dupe vs Possible Dupe) unit tests.

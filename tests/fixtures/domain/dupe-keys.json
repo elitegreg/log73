@@ -1,0 +1,173 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "mode-digital-collapse",
+      "dupe_key": ["CALL", "BAND", "MODE"],
+      "contacts": [
+        { "CALL": "K1ABC", "BAND": "10m", "MODE": "CW" },
+        { "CALL": "K1ABC", "BAND": "10m", "MODE": "CW-R" },
+        { "CALL": "K1ABC", "BAND": "10m", "MODE": "SSB" },
+        { "CALL": "K1ABC", "BAND": "10m", "MODE": "FM" },
+        { "CALL": "K1ABC", "BAND": "10m", "MODE": "AM" },
+        { "CALL": "K1ABC", "BAND": "10m", "MODE": "PKT" },
+        { "CALL": "K1ABC", "BAND": "10m", "MODE": "RTTY" },
+        { "CALL": "K1ABC", "BAND": "10m", "MODE": "DATA" },
+        { "CALL": "K1ABC", "BAND": "10m", "MODE": "FT8" },
+        { "CALL": "K1ABC", "BAND": "10m", "MODE": "PSK" }
+      ],
+      "keys": [
+        "K1ABC|10M|CW",
+        "K1ABC|10M|CW",
+        "K1ABC|10M|SSB",
+        "K1ABC|10M|FM",
+        "K1ABC|10M|DATA",
+        "K1ABC|10M|DATA",
+        "K1ABC|10M|DATA",
+        "K1ABC|10M|DATA",
+        "K1ABC|10M|DATA",
+        "K1ABC|10M|DATA"
+      ]
+    },
+    {
+      "name": "mode-case-whitespace",
+      "dupe_key": ["CALL", "BAND", "MODE"],
+      "contacts": [
+        { "CALL": "k1abc", "BAND": "20M", "MODE": "cw" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": " Rtty " },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "Ssb" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": " fm" }
+      ],
+      "keys": [
+        "K1ABC|20M|CW",
+        "K1ABC|20M|DATA",
+        "K1ABC|20M|SSB",
+        "K1ABC|20M|FM"
+      ]
+    },
+    {
+      "name": "mode-missing",
+      "dupe_key": ["CALL", "BAND", "MODE"],
+      "contacts": [{}, { "CALL": "K1ABC" }],
+      "keys": ["||", "K1ABC||"]
+    },
+    {
+      "name": "mode-class-basic",
+      "dupe_key": ["CALL", "BAND", "MODE_CLASS"],
+      "contacts": [
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "CW" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "CW-R" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "SSB" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "FM" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "AM" }
+      ],
+      "keys": [
+        "K1ABC|20M|CW",
+        "K1ABC|20M|CW",
+        "K1ABC|20M|PHONE",
+        "K1ABC|20M|PHONE",
+        "K1ABC|20M|PHONE"
+      ]
+    },
+    {
+      "name": "mode-class-digital-passthrough",
+      "dupe_key": ["CALL", "BAND", "MODE_CLASS"],
+      "contacts": [
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "PKT" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "RTTY" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "DATA" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "FT8" }
+      ],
+      "keys": [
+        "K1ABC|20M|PKT",
+        "K1ABC|20M|RTTY",
+        "K1ABC|20M|DATA",
+        "K1ABC|20M|FT8"
+      ]
+    },
+    {
+      "name": "mode-class-missing",
+      "dupe_key": ["CALL", "BAND", "MODE_CLASS"],
+      "contacts": [{}, { "CALL": "K1ABC", "BAND": "20m" }],
+      "keys": ["||", "K1ABC|20M|"]
+    },
+    {
+      "name": "mode-class-ignores-stored-value",
+      "dupe_key": ["CALL", "BAND", "MODE_CLASS"],
+      "contacts": [
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "CW", "MODE_CLASS": "SSB" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "CW" }
+      ],
+      "keys": ["K1ABC|20M|CW", "K1ABC|20M|CW"]
+    },
+    {
+      "name": "exchange-keys",
+      "dupe_key": ["CALL", "BAND", "MODE", "STX_STRING", "SRX_STRING"],
+      "contacts": [
+        {
+          "CALL": "K1ABC",
+          "BAND": "20m",
+          "MODE": "CW",
+          "STX_STRING": "ABBE",
+          "SRX_STRING": "sc"
+        },
+        {
+          "CALL": "K1ABC",
+          "BAND": "20m",
+          "MODE": "CW",
+          "STX_STRING": "abbe ",
+          "SRX_STRING": "SC"
+        },
+        {
+          "CALL": "K1ABC",
+          "BAND": "20m",
+          "MODE": "CW",
+          "STX_STRING": "ABBE",
+          "SRX_STRING": 12
+        },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "CW" }
+      ],
+      "keys": [
+        "K1ABC|20M|CW|ABBE|SC",
+        "K1ABC|20M|CW|ABBE|SC",
+        "K1ABC|20M|CW|ABBE|12",
+        "K1ABC|20M|CW||"
+      ]
+    },
+    {
+      "name": "portable-callsigns-in-keys",
+      "dupe_key": ["CALL", "BAND", "MODE"],
+      "contacts": [
+        { "CALL": "VE3/K1ABC", "BAND": "20m", "MODE": "CW" },
+        { "CALL": "VE3/N2XYZ", "BAND": "20m", "MODE": "CW" },
+        { "CALL": "K1ABC/P", "BAND": "20m", "MODE": "CW" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "CW" }
+      ],
+      "keys": ["K1ABC|20M|CW", "N2XYZ|20M|CW", "K1ABC|20M|CW", "K1ABC|20M|CW"]
+    },
+    {
+      "name": "band-case",
+      "dupe_key": ["CALL", "BAND"],
+      "contacts": [
+        { "CALL": "K1ABC", "BAND": "20M" },
+        { "CALL": "K1ABC", "BAND": "20m" }
+      ],
+      "keys": ["K1ABC|20M", "K1ABC|20M"]
+    },
+    {
+      "name": "empty-dupe-key",
+      "dupe_key": [],
+      "contacts": [{ "CALL": "K1ABC" }, { "CALL": "N2XYZ" }],
+      "keys": ["", ""]
+    },
+    {
+      "name": "true-repeat-identical",
+      "dupe_key": ["CALL", "BAND", "MODE", "SRX_STRING"],
+      "contacts": [
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "SSB", "SRX_STRING": "CT" },
+        { "CALL": "K1ABC", "BAND": "20m", "MODE": "SSB", "SRX_STRING": "CT" }
+      ],
+      "keys": ["K1ABC|20M|SSB|CT", "K1ABC|20M|SSB|CT"]
+    }
+  ]
+}

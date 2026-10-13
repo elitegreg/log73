@@ -2181,6 +2181,111 @@ mod tests {
         }
     }
 
+    /// One row of `tests/fixtures/domain/dupe-keys.json`. See
+    /// `tests/fixtures/domain/README.md` for the format contract.
+    #[derive(Debug, serde::Deserialize)]
+    struct DupeKeyFixtureCase {
+        name: String,
+        dupe_key: Vec<String>,
+        contacts: Vec<Map<String, Value>>,
+        keys: Vec<String>,
+    }
+
+    #[derive(Debug, serde::Deserialize)]
+    struct DupeKeyFixture {
+        version: u32,
+        cases: Vec<DupeKeyFixtureCase>,
+    }
+
+    fn load_dupe_key_fixture() -> DupeKeyFixture {
+        let text = include_str!("../../tests/fixtures/domain/dupe-keys.json");
+        serde_json::from_str(text).expect("dupe-keys fixture should parse")
+    }
+
+    #[test]
+    fn shared_dupe_keys_fixture_matches_scoring_keys() {
+        let fixture = load_dupe_key_fixture();
+        assert_eq!(fixture.version, 1);
+        assert!(!fixture.cases.is_empty());
+        for case in &fixture.cases {
+            let rules = test_rules(
+                fixed_points(1),
+                case.dupe_key.iter().map(String::as_str).collect(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            );
+            // Fresh modules per case: ScoringModules caches by contest id,
+            // and every synthetic case shares the TEST id with its own key.
+            let module = ScoringModules::new().get(&rules, Value::Null);
+            let keys = case
+                .contacts
+                .iter()
+                .map(|adif| {
+                    let contact = crate::db::build_contact(Map::new(), adif.clone());
+                    module.dupe_key_for(&contact).unwrap_or_default()
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(keys, case.keys, "keys for {}", case.name);
+        }
+    }
+
+    fn dupe_key_for_rules(rules: &ContestRules, fields: Vec<(&str, Value)>) -> String {
+        ScoringModules::new()
+            .get(rules, Value::Null)
+            .dupe_key_for(&contact(fields))
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn arrl_10_mode_class_dupe_groups_phone_and_separates_cw() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store.get("ARRL-10").expect("ARRL-10 rules should load");
+
+        assert_eq!(
+            dupe_key_for_rules(rules, vec![("CALL", json!("K1ABC")), ("MODE", json!("CW"))]),
+            "K1ABC|CW"
+        );
+        assert_eq!(
+            dupe_key_for_rules(
+                rules,
+                vec![("CALL", json!("K1ABC")), ("MODE", json!("SSB"))]
+            ),
+            "K1ABC|PHONE"
+        );
+        assert_eq!(
+            dupe_key_for_rules(rules, vec![("CALL", json!("K1ABC")), ("MODE", json!("FM"))]),
+            "K1ABC|PHONE"
+        );
+    }
+
+    #[test]
+    fn mo_qso_party_mode_dupe_groups_digital_modes() {
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store
+            .get("MO-QSO-PARTY (In State)")
+            .expect("MO-QSO-PARTY rules should load");
+
+        let key = |mode: &str| {
+            dupe_key_for_rules(
+                rules,
+                vec![
+                    ("CALL", json!("K1ABC")),
+                    ("BAND", json!("20m")),
+                    ("MODE", json!(mode)),
+                ],
+            )
+        };
+        assert_eq!(key("PKT"), "K1ABC|20M|DATA");
+        assert_eq!(key("RTTY"), key("FT8"));
+        assert_ne!(key("CW"), key("SSB"));
+    }
+
     #[test]
     fn portable_prefix_stations_score_independently_and_repeats_dupe() {
         let rules = test_rules(

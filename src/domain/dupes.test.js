@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadCallsignFixture } from '../../tests/fixtures/domain/loadFixture.js';
+import {
+  loadCallsignFixture,
+  loadDupeKeysFixture,
+} from '../../tests/fixtures/domain/loadFixture.js';
 import { dupeIdentity } from './callsign.js';
-import { dupeAlertText, dupeAlertTextForAdif } from './dupes.js';
+import {
+  dupeAlertText,
+  dupeAlertTextForAdif,
+  dupeKey,
+  dupeModeKey,
+  modeClassKey,
+} from './dupes.js';
 
 const settings = {
   scoring: { dupe_key: ['CALL', 'BAND', 'MODE', 'SRX_STRING'] },
@@ -123,6 +132,41 @@ test('shared fixture dupe identities match', () => {
   }
 });
 
+test('shared dupe-keys fixture matches', () => {
+  const fixture = loadDupeKeysFixture();
+  assert.equal(fixture.version, 1);
+  assert.ok(fixture.cases.length > 0);
+  for (const kase of fixture.cases) {
+    const settings = { scoring: { dupe_key: kase.dupe_key } };
+    const keys = kase.contacts.map((adif) => dupeKey(settings, { adif }));
+    assert.deepEqual(keys, kase.keys, `keys for ${kase.name}`);
+  }
+});
+
+test('dupeModeKey groups digital modes and keeps SSB and FM distinct', () => {
+  assert.equal(dupeModeKey('CW'), 'CW');
+  assert.equal(dupeModeKey('CW-R'), 'CW');
+  assert.equal(dupeModeKey('SSB'), 'SSB');
+  assert.equal(dupeModeKey('FM'), 'FM');
+  for (const mode of ['AM', 'PKT', 'RTTY', 'DATA', 'FT8', 'PSK']) {
+    assert.equal(dupeModeKey(mode), 'DATA', mode);
+  }
+  assert.equal(dupeModeKey(' rtty '), 'DATA');
+  assert.equal(dupeModeKey(null), '');
+});
+
+test('modeClassKey shares phone classes and passes digital modes through', () => {
+  assert.equal(modeClassKey('CW'), 'CW');
+  assert.equal(modeClassKey('CW-R'), 'CW');
+  for (const mode of ['SSB', 'FM', 'AM']) {
+    assert.equal(modeClassKey(mode), 'PHONE', mode);
+  }
+  for (const mode of ['PKT', 'RTTY', 'DATA', 'FT8']) {
+    assert.equal(modeClassKey(mode), mode, mode);
+  }
+  assert.equal(modeClassKey(null), '');
+});
+
 test('dupeAlertText distinguishes operators sharing an operating prefix', () => {
   const prefixSettings = {
     scoring: { dupe_key: ['CALL', 'BAND', 'MODE'] },
@@ -144,6 +188,92 @@ test('dupeAlertText distinguishes operators sharing an operating prefix', () => 
       contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW' }),
     ]),
     'Dupe',
+  );
+});
+
+test('dupeAlertText separates CW and SSB under a MODE_CLASS key', () => {
+  const settings = { scoring: { dupe_key: ['CALL', 'BAND', 'MODE_CLASS'] } };
+  const currentContact = contact({
+    CALL: 'K1ABC',
+    BAND: '20m',
+    MODE: 'CW',
+  });
+
+  assert.equal(
+    dupeAlertText(settings, currentContact, [
+      contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'SSB' }),
+    ]),
+    '',
+  );
+  assert.equal(
+    dupeAlertText(settings, currentContact, [
+      contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW-R' }),
+    ]),
+    'Dupe',
+  );
+});
+
+test('dupeAlertText shares PHONE classes under a MODE_CLASS key', () => {
+  const settings = { scoring: { dupe_key: ['CALL', 'BAND', 'MODE_CLASS'] } };
+
+  assert.equal(
+    dupeAlertText(
+      settings,
+      contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'SSB' }),
+      [contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'FM' })],
+    ),
+    'Dupe',
+  );
+});
+
+test('dupeAlertText matches digital modes under a MODE key', () => {
+  const settings = { scoring: { dupe_key: ['CALL', 'BAND', 'MODE'] } };
+
+  assert.equal(
+    dupeAlertText(
+      settings,
+      contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'PKT' }),
+      [contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'RTTY' })],
+    ),
+    'Dupe',
+  );
+  assert.equal(
+    dupeAlertText(
+      settings,
+      contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW' }),
+      [contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'SSB' })],
+    ),
+    '',
+  );
+});
+
+test('dupeAlertText reports possible dupes when the exchange differs', () => {
+  const settings = {
+    scoring: { dupe_key: ['CALL', 'BAND', 'MODE_CLASS', 'SRX_STRING'] },
+  };
+
+  assert.equal(
+    dupeAlertText(
+      settings,
+      contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'SC' }),
+      [contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW', SRX_STRING: 'NC' })],
+    ),
+    'Possible Dupe',
+  );
+});
+
+test('dupeAlertText reports possible dupes across digital modes', () => {
+  const settings = {
+    scoring: { dupe_key: ['CALL', 'BAND', 'MODE', 'SRX_STRING'] },
+  };
+
+  assert.equal(
+    dupeAlertText(
+      settings,
+      contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'PKT', SRX_STRING: 'SC' }),
+      [contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'RTTY', SRX_STRING: 'NC' })],
+    ),
+    'Possible Dupe',
   );
 });
 
