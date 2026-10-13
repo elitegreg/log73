@@ -632,21 +632,6 @@ mod tests {
     }
 
     #[test]
-    fn render_log_excludes_diagnostic_warnings() {
-        let mut contact = test_contact();
-        crate::db::set_contact_meta(
-            &mut contact,
-            "warnings",
-            json!([{"message": "serial is required"}]),
-        );
-
-        let text = render_log(&test_log(), &[contact]).expect("ADIF export should render");
-
-        assert!(!text.contains("warnings"));
-        assert!(!text.contains("serial is required"));
-    }
-
-    #[test]
     fn parse_records_preserves_portable_callsign() {
         let records = parse_records("<CALL:9>VE3/K1ABC<EOR>").expect("ADIF should parse");
 

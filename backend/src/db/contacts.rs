@@ -1,6 +1,6 @@
 use super::contact::{
     Contact, build_contact, contact_adif, contact_adif_value, contact_id, contact_log_id,
-    contact_warnings_json, frequency_hz, json_i64, json_string, set_contact_adif, set_contact_meta,
+    frequency_hz, json_i64, json_string, set_contact_adif, set_contact_meta,
 };
 use rusqlite::types::Value as SqlValue;
 #[cfg(test)]
@@ -43,7 +43,6 @@ const QSO_COLUMNS: &[&str] = &[
     "STX_STRING",
     "TX_PWR",
     "JSON",
-    "WARNINGS_JSON",
 ];
 
 const INTEGER_COLUMNS: &[&str] = &[
@@ -95,8 +94,7 @@ INSERT INTO qsos (
     STX,
     STX_STRING,
     TX_PWR,
-    JSON,
-    WARNINGS_JSON
+    JSON
 ) VALUES (
     ?1,
     ?2,
@@ -130,8 +128,7 @@ INSERT INTO qsos (
     ?30,
     ?31,
     ?32,
-    ?33,
-    ?34
+    ?33
 )
 RETURNING *
 "#;
@@ -171,8 +168,7 @@ INSERT INTO qsos (
     STX,
     STX_STRING,
     TX_PWR,
-    JSON,
-    WARNINGS_JSON
+    JSON
 ) VALUES (
     ?1,
     ?2,
@@ -207,8 +203,7 @@ INSERT INTO qsos (
     ?31,
     ?32,
     ?33,
-    ?34,
-    ?35
+    ?34
 )
 ON CONFLICT(ID) DO UPDATE SET
     LOG_ID = excluded.LOG_ID,
@@ -243,8 +238,7 @@ ON CONFLICT(ID) DO UPDATE SET
     STX = excluded.STX,
     STX_STRING = excluded.STX_STRING,
     TX_PWR = excluded.TX_PWR,
-    JSON = excluded.JSON,
-    WARNINGS_JSON = excluded.WARNINGS_JSON
+    JSON = excluded.JSON
 RETURNING *
 "#;
 
@@ -284,20 +278,6 @@ pub(super) fn db_upsert_contacts(
     Ok(committed)
 }
 
-pub(super) fn db_contact_has_warnings(connection: &Connection, id: i64) -> rusqlite::Result<bool> {
-    let warnings_json: Option<String> = connection
-        .query_row(
-            "SELECT WARNINGS_JSON FROM qsos WHERE ID = ?1",
-            params![id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    Ok(warnings_json.is_some_and(|json| {
-        serde_json::from_str::<Value>(&json)
-            .is_ok_and(|value| matches!(&value, Value::Array(warnings) if !warnings.is_empty()))
-    }))
-}
-
 pub(super) fn db_delete_contact(connection: &Connection, id: i64) -> rusqlite::Result<Option<i64>> {
     connection
         .query_row(
@@ -332,9 +312,6 @@ fn contact_to_sql_values(contact: &Contact) -> Vec<SqlValue> {
         .map(|column| {
             if *column == "JSON" {
                 return SqlValue::Text(extra_json(contact));
-            }
-            if *column == "WARNINGS_JSON" {
-                return SqlValue::Text(contact_warnings_json(contact));
             }
             if *column == "LOG_ID" {
                 return SqlValue::Integer(contact_log_id(contact).unwrap_or(1));
@@ -407,14 +384,6 @@ fn row_to_contact(row: &rusqlite::Row<'_>) -> rusqlite::Result<Contact> {
     meta.insert("id".to_string(), Value::Number(id.into()));
     meta.insert("logId".to_string(), Value::Number(log_id.into()));
     meta.insert("status".to_string(), Value::String("Committed".to_string()));
-
-    let warnings_json: Option<String> = row.get("WARNINGS_JSON")?;
-    if let Some(warnings_json) = warnings_json
-        && let Ok(Value::Array(warnings)) = serde_json::from_str::<Value>(&warnings_json)
-        && !warnings.is_empty()
-    {
-        meta.insert("warnings".to_string(), Value::Array(warnings));
-    }
 
     for column in QSO_COLUMNS {
         if *column == "JSON" || *column == "LOG_ID" {

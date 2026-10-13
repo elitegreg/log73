@@ -54,24 +54,6 @@ pub fn set_contact_meta(contact: &mut Contact, key: &str, value: Value) {
     }
 }
 
-/// Remove a metadata key when present. Used to strip client-supplied values
-/// the server always recomputes, such as diagnostic warnings.
-pub fn remove_contact_meta(contact: &mut Contact, key: &str) {
-    if let Some(meta) = contact.get_mut(META_KEY).and_then(Value::as_object_mut) {
-        meta.remove(key);
-    }
-}
-
-/// Serialize server-generated diagnostic warnings for storage. Anything but
-/// an array serializes as empty: warnings are recomputed server-side and
-/// client-supplied values are never trusted here.
-pub fn contact_warnings_json(contact: &Contact) -> String {
-    match contact_meta(contact).and_then(|meta| meta.get("warnings")) {
-        Some(Value::Array(warnings)) => Value::Array(warnings.clone()).to_string(),
-        _ => "[]".to_string(),
-    }
-}
-
 pub fn set_contact_adif(contact: &mut Contact, key: &str, value: Value) {
     if !matches!(contact.get(ADIF_KEY), Some(Value::Object(_))) {
         contact.insert(ADIF_KEY.to_string(), Value::Object(Map::new()));
