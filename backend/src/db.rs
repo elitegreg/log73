@@ -20,7 +20,8 @@ pub use contact::set_contact_adif;
 #[allow(unused_imports)]
 pub use contact::{
     Contact, ContactFields, build_contact, contact_adif, contact_adif_value, contact_id,
-    contact_log_id, contact_meta, contact_meta_value, normalize_contact_adif, set_contact_meta,
+    contact_log_id, contact_meta, contact_meta_value, contact_warnings_json,
+    normalize_contact_adif, remove_contact_meta, set_contact_meta,
 };
 #[allow(unused_imports)]
 pub use models::{

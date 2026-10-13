@@ -406,12 +406,27 @@ pub fn validate_dxcluster_config(
     Ok(())
 }
 
+/// Diagnostic findings for one contact: contest-rule problems that annotate
+/// instead of blocking on the diagnostic commit path.
+pub fn diagnose_contact(
+    rules: &ContestRules,
+    bands: &[Band],
+    log_id: i64,
+    contact: &Contact,
+) -> Vec<String> {
+    match validate_contact(rules, bands, log_id, contact) {
+        Ok(()) => Vec::new(),
+        Err(message) => vec![message],
+    }
+}
+
 pub async fn validate_contacts(
     database: &Database,
     contest_rules: &ContestRulesStore,
     bands: &[Band],
     log_id: i64,
     contacts: &[Contact],
+    diagnostic_ids: &HashSet<i64>,
 ) -> Result<(), String> {
     if log_id <= 0 {
         return Err("log id must be positive".to_string());
@@ -435,7 +450,12 @@ pub async fn validate_contacts(
         .ok_or_else(|| format!("unknown contest: {}", log.contest_id))?;
 
     for (index, contact) in contacts.iter().enumerate() {
-        if force_commit_requested(contact) {
+        // Force-requested contacts and contacts already carrying persisted
+        // warnings take the diagnostic path: shape errors still abort here,
+        // contest findings become warnings computed by the caller.
+        let diagnostic = force_commit_requested(contact)
+            || contact_id(contact).is_some_and(|id| diagnostic_ids.contains(&id));
+        if diagnostic {
             validate_contact_shape(contact)
                 .map_err(|error| format!("contact {}: {error}", index + 1))?;
         } else {

@@ -341,6 +341,15 @@ the QSO. When WSJT-X is disabled, DATA mode retains ESM and manual keyboard
 entry. Listener, protocol, ADIF, and database errors are reported as logger
 notifications and recorded in the backend log.
 
+Automatically saved contacts keep saving even when a contest rule is not
+satisfied (a missing exchange or disallowed band/mode, for example). Such a
+contact is stored with a warning annotation instead of being blocked; warned
+rows are highlighted in the log table with the reason available on the row.
+Genuinely malformed messages, log ownership problems, and database errors
+still fail immediately. Correcting a warned contact clears its warnings, and
+warnings are recomputed on every later edit — changing contest rules does not
+rewrite warnings on contacts already logged.
+
 ---
 
 ## 10) Opening and using the logger
