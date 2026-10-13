@@ -368,18 +368,62 @@ function MainWindow({
     }
   }, [operatingMode, storeCurrentCqFrequency]);
 
-  const clearEsmState = useCallback(() => {
-    setEsmRunCallsignAttempt('');
-    setEsmExchangeSentCallsign('');
-  }, [setEsmRunCallsignAttempt, setEsmExchangeSentCallsign]);
-
   function markEsmExchangeSentForCurrentCallsign() {
     const normalizedCallsign = currentCallsign();
     if (!normalizedCallsign) return;
     setEsmExchangeSentCallsign(normalizedCallsign);
   }
 
-  const {
+const clearEsmState = useCallback(() => {
+    setEsmRunCallsignAttempt('');
+    setEsmExchangeSentCallsign('');
+  }, [setEsmRunCallsignAttempt, setEsmExchangeSentCallsign]);
+
+  const clearEntryFields = useCallback(({ clearRit = true } = {}) => {
+    if (wsjtxDataLocked) return;
+    if (clearRit) clearRitIfEnabled();
+    setCallSign('');
+    callsignFrequencyBaselineRef.current = null;
+    pendingBandMapTuneFrequencyRef.current = null;
+    pendingPreviousContactAutofillRef.current = '';
+    setExchangeValues(
+      exchangeDefaults(
+        settings,
+        radioMode,
+        log?.contest_params ?? {},
+        serialAllocation,
+      ),
+    );
+    clearEsmState();
+    callSignEditedAtRef.current = new Date();
+    callSignRef.current?.focus();
+  }, [
+    wsjtxDataLocked,
+    clearRitIfEnabled,
+    setCallSign,
+    setExchangeValues,
+    settings,
+    radioMode,
+    log?.contest_params,
+    serialAllocation,
+    clearEsmState,
+    callsignFrequencyBaselineRef,
+    pendingBandMapTuneFrequencyRef,
+    pendingPreviousContactAutofillRef,
+    callSignEditedAtRef,
+    callSignRef,
+  ]);
+
+  useFrequencyTracker({
+    operatingMode,
+    radioFrequencyHz,
+    radioMode,
+    pendingBandMapTuneFrequencyRef,
+    setOperatingMode,
+    clearEntryFields,
+  });
+
+    const {
     repeatRunF1,
     setRepeatRunF1,
     activeMessageKeys,
@@ -525,49 +569,7 @@ function MainWindow({
     );
   }
 
-  const clearEntryFields = useCallback(({ clearRit = true } = {}) => {
-    if (wsjtxDataLocked) return;
-    if (clearRit) clearRitIfEnabled();
-    setCallSign('');
-    callsignFrequencyBaselineRef.current = null;
-    pendingBandMapTuneFrequencyRef.current = null;
-    pendingPreviousContactAutofillRef.current = '';
-    setExchangeValues(
-      exchangeDefaults(
-        settings,
-        radioMode,
-        log?.contest_params ?? {},
-        serialAllocation,
-      ),
-    );
-    clearEsmState();
-    callSignEditedAtRef.current = new Date();
-    callSignRef.current?.focus();
-  }, [
-    wsjtxDataLocked,
-    clearRitIfEnabled,
-    setCallSign,
-    setExchangeValues,
-    settings,
-    radioMode,
-    log?.contest_params,
-    serialAllocation,
-    clearEsmState,
-    callsignFrequencyBaselineRef,
-    pendingBandMapTuneFrequencyRef,
-    pendingPreviousContactAutofillRef,
-    callSignEditedAtRef,
-    callSignRef,
-  ]);
 
-  useFrequencyTracker({
-    operatingMode,
-    radioFrequencyHz,
-    radioMode,
-    pendingBandMapTuneFrequencyRef,
-    setOperatingMode,
-    clearEntryFields,
-  });
 
   useEffect(() => {
     onRegisterBandMapActivateClear?.(clearEntryFields);

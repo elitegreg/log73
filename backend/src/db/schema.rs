@@ -115,8 +115,7 @@ pub(super) fn initialize_schema(connection: &Connection) -> rusqlite::Result<()>
             STX INTEGER,
             STX_STRING TEXT,
             TX_PWR INTEGER,
-            JSON TEXT,
-            WARNINGS_JSON TEXT NOT NULL DEFAULT '[]'
+            JSON TEXT
         ) STRICT;
 
         CREATE INDEX IF NOT EXISTS idx_qsos_log_id ON qsos(LOG_ID);

@@ -3,21 +3,33 @@ use crate::contest_rules::{
     ContestRules, ContestRulesStore, ExchangeDirection, ExchangeField, FieldInputKind,
     ScoringCondition, SetupField, ValidationMatch,
 };
+use crate::cw;
 use crate::db::{
-    self, Contact, Database, NewLog, UpdateLog, contact_adif_value, contact_id, contact_log_id,
-    contact_meta_value,
+    self, Contact, Database, NewLog, RadioPayload, UpdateLog, contact_adif_value, contact_id,
+    contact_log_id, contact_meta_value,
 };
 use crate::modes::mode_is_cw;
+use crate::voice_messages;
+use radio_io::supported_drivers;
 use regex::Regex;
 use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
+    net::Ipv4Addr,
     sync::{Mutex, OnceLock},
 };
 
 const MAX_LOG_NAME_LEN: usize = 100;
 const MAX_CONTEST_ID_LEN: usize = 100;
 const MAX_CALLSIGN_LEN: usize = 12;
+#[allow(dead_code)]
+const MAX_RADIO_NAME_LEN: usize = 100;
+#[allow(dead_code)]
+const MAX_RADIO_HOST_LEN: usize = 255;
+#[allow(dead_code)]
+const MAX_SERIAL_PORT_LEN: usize = 255;
+#[allow(dead_code)]
+const MAX_SOUND_DEVICE_ID_LEN: usize = 1024;
 const MAX_LOGIN_USER_LEN: usize = 64;
 const MAX_LOGIN_PASSWORD_LEN: usize = 256;
 const MAX_DXCLUSTER_HOST_LEN: usize = 255;
@@ -35,7 +47,17 @@ const MIN_QSO_EPOCH: i64 = 0;
 const MAX_QSO_EPOCH: i64 = 4_102_444_800; // 2100-01-01T00:00:00Z
 #[allow(dead_code)]
 const MAX_RADIO_FREQUENCY_HZ: u64 = 500_000_000;
+#[allow(dead_code)]
+const MAX_RADIO_TUNING_INCREMENT_HZ: u32 = 9_999;
 const MAX_CW_REQUEST_ID_LEN: usize = 64;
+#[allow(dead_code)]
+const MAX_CW_MESSAGES_LEN: usize = 16_384;
+#[allow(dead_code)]
+const MAX_DIGITAL_MESSAGES_LEN: usize = 16_384;
+#[allow(dead_code)]
+const MAX_VOICE_MESSAGES_LEN: usize = 16_384;
+#[allow(dead_code)]
+const ALLOWED_CW_KEYER_TYPES: &[&str] = &["none", "winkeyer", "cat", "serial"];
 
 static COMPILED_REGEX_CACHE: OnceLock<Mutex<HashMap<String, Result<Regex, String>>>> =
     OnceLock::new();
@@ -76,6 +98,219 @@ pub fn validate_cabrillo_export_params(
     export_params: &Value,
 ) -> Result<(), String> {
     validate_configured_params(cabrillo_export_fields(rules), export_params)
+}
+
+#[allow(dead_code)]
+pub fn validate_radio(payload: &RadioPayload) -> Result<(), String> {
+    validate_required_text("radio name", &payload.name, MAX_RADIO_NAME_LEN)?;
+
+    let radio_kind = payload.radio_kind.trim();
+    if !supported_drivers()
+        .iter()
+        .any(|driver| driver.id.eq_ignore_ascii_case(radio_kind))
+    {
+        return Err(format!("unsupported radio driver: {radio_kind}"));
+    }
+    crate::modes::resolved_mode_mappings(radio_kind, &payload.data_mode, &payload.rtty_mode)?;
+
+    let transport_kind = payload.transport_kind.trim().to_ascii_lowercase();
+    if !matches!(transport_kind.as_str(), "none" | "tcp" | "serial") {
+        return Err("transport kind must be none, tcp, or serial".to_string());
+    }
+    if transport_kind == "none" && !radio_kind.eq_ignore_ascii_case("dummy") {
+        return Err("transport is required for non-dummy radios".to_string());
+    }
+
+    validate_tuning_increment_hz("CW tuning increment", payload.cw_tuning_increment_hz)?;
+    validate_tuning_increment_hz("SSB tuning increment", payload.ssb_tuning_increment_hz)?;
+    validate_optional_plain_text(
+        "voice input sound device",
+        payload.voice_input_device_id.as_deref().unwrap_or(""),
+        MAX_SOUND_DEVICE_ID_LEN,
+    )?;
+    validate_optional_plain_text(
+        "voice output sound device",
+        payload.voice_output_device_id.as_deref().unwrap_or(""),
+        MAX_SOUND_DEVICE_ID_LEN,
+    )?;
+    let cw_keyer_type = payload.cw_keyer_type.trim().to_ascii_lowercase();
+    if !ALLOWED_CW_KEYER_TYPES.contains(&cw_keyer_type.as_str()) {
+        return Err("CW keyer type must be one of: none, winkeyer, cat, serial".to_string());
+    }
+    if cw_keyer_type == "cat" && !crate::modes::supports_cat_cw_keying_for_radio_kind(radio_kind)? {
+        return Err("CAT CW keying is not supported by this radio".to_string());
+    }
+
+    match transport_kind.as_str() {
+        "tcp" => {
+            validate_required_text("TCP host", &payload.tcp_host, MAX_RADIO_HOST_LEN)?;
+            validate_host("TCP host", &payload.tcp_host)?;
+            if payload.tcp_port == 0 {
+                return Err("TCP port must be between 1 and 65535".to_string());
+            }
+            if payload.serial_port.chars().count() > MAX_SERIAL_PORT_LEN {
+                return Err(format!(
+                    "serial port must be at most {MAX_SERIAL_PORT_LEN} characters"
+                ));
+            }
+        }
+        "serial" => {
+            validate_required_text("serial port", &payload.serial_port, MAX_SERIAL_PORT_LEN)?;
+            validate_serial_port("serial port", &payload.serial_port)?;
+            if payload.serial_baud_rate == 0 {
+                return Err("serial baud rate must be greater than 0".to_string());
+            }
+            if payload.tcp_host.chars().count() > MAX_RADIO_HOST_LEN {
+                return Err(format!(
+                    "TCP host must be at most {MAX_RADIO_HOST_LEN} characters"
+                ));
+            }
+        }
+        "none" => {
+            if payload.tcp_host.chars().count() > MAX_RADIO_HOST_LEN {
+                return Err(format!(
+                    "TCP host must be at most {MAX_RADIO_HOST_LEN} characters"
+                ));
+            }
+            if payload.serial_port.chars().count() > MAX_SERIAL_PORT_LEN {
+                return Err(format!(
+                    "serial port must be at most {MAX_SERIAL_PORT_LEN} characters"
+                ));
+            }
+        }
+        _ => unreachable!(),
+    }
+
+    if cw_keyer_type == "winkeyer" {
+        validate_required_text(
+            "Winkeyer serial port",
+            &payload.winkeyer_serial_port,
+            MAX_SERIAL_PORT_LEN,
+        )?;
+    } else if payload.winkeyer_serial_port.chars().count() > MAX_SERIAL_PORT_LEN {
+        return Err(format!(
+            "Winkeyer serial port must be at most {MAX_SERIAL_PORT_LEN} characters"
+        ));
+    }
+    validate_serial_port("Winkeyer serial port", &payload.winkeyer_serial_port)?;
+
+    if cw_keyer_type == "serial" {
+        validate_required_text(
+            "CW serial port",
+            &payload.cw_serial_port,
+            MAX_SERIAL_PORT_LEN,
+        )?;
+    } else if payload.cw_serial_port.chars().count() > MAX_SERIAL_PORT_LEN {
+        return Err(format!(
+            "CW serial port must be at most {MAX_SERIAL_PORT_LEN} characters"
+        ));
+    }
+    validate_serial_port("CW serial port", &payload.cw_serial_port)?;
+
+    if payload.cw_serial_baud_rate == 0 {
+        return Err("CW serial baud rate must be greater than 0".to_string());
+    }
+
+    let cw_serial_line = payload.cw_serial_line.trim().to_ascii_lowercase();
+    if !matches!(cw_serial_line.as_str(), "dtr" | "rts") {
+        return Err("CW serial line must be dtr or rts".to_string());
+    }
+
+    if transport_kind == "serial"
+        && cw_keyer_type == "serial"
+        && payload.serial_port.trim() == payload.cw_serial_port.trim()
+        && payload.serial_baud_rate != payload.cw_serial_baud_rate
+    {
+        return Err(
+            "CAT serial baud rate and CW serial baud rate must match when sharing a serial port"
+                .to_string(),
+        );
+    }
+
+    if !matches!(payload.wsjtx_bind_address.trim(), "127.0.0.1" | "0.0.0.0") {
+        return Err("WSJT-X bind address must be 127.0.0.1 or 0.0.0.0".to_string());
+    }
+    if payload.wsjtx_port < 1024 {
+        return Err("WSJT-X port must be between 1024 and 65535".to_string());
+    }
+    if payload.flrig_port < 1024 {
+        return Err("FLRig port must be between 1024 and 65535".to_string());
+    }
+    let multicast_group = payload.wsjtx_multicast_group.trim();
+    if !multicast_group.is_empty() {
+        let group = multicast_group
+            .parse::<Ipv4Addr>()
+            .map_err(|_| "WSJT-X multicast group must be a valid IPv4 address".to_string())?;
+        if !group.is_multicast() {
+            return Err("WSJT-X multicast group must be an IPv4 multicast address".to_string());
+        }
+    }
+
+    validate_cw_messages(&payload.cw_messages)?;
+    validate_digital_messages(&payload.digital_messages)?;
+    validate_voice_messages(&payload.voice_messages)?;
+
+    Ok(())
+}
+
+#[allow(dead_code)]
+pub fn validate_cw_messages(value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err("CW messages are required".to_string());
+    }
+    if value.chars().count() > MAX_CW_MESSAGES_LEN {
+        return Err(format!(
+            "CW messages must be at most {MAX_CW_MESSAGES_LEN} characters"
+        ));
+    }
+    if value
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err("CW messages cannot contain control characters".to_string());
+    }
+
+    cw::validate(value).map(|_| ())
+}
+
+#[allow(dead_code)]
+pub fn validate_digital_messages(value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err("Digital messages are required".to_string());
+    }
+    if value.chars().count() > MAX_DIGITAL_MESSAGES_LEN {
+        return Err(format!(
+            "Digital messages must be at most {MAX_DIGITAL_MESSAGES_LEN} characters"
+        ));
+    }
+    if value
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err("Digital messages cannot contain control characters".to_string());
+    }
+
+    cw::validate(value).map(|_| ())
+}
+
+#[allow(dead_code)]
+pub fn validate_voice_messages(value: &str) -> Result<(), String> {
+    if value.trim().is_empty() {
+        return Err("Voice messages are required".to_string());
+    }
+    if value.chars().count() > MAX_VOICE_MESSAGES_LEN {
+        return Err(format!(
+            "Voice messages must be at most {MAX_VOICE_MESSAGES_LEN} characters"
+        ));
+    }
+    if value
+        .chars()
+        .any(|character| character.is_control() && !matches!(character, '\n' | '\r' | '\t'))
+    {
+        return Err("Voice messages cannot contain control characters".to_string());
+    }
+
+    voice_messages::validate(value).map(|_| ())
 }
 
 pub fn validate_auth_config(
@@ -171,27 +406,12 @@ pub fn validate_dxcluster_config(
     Ok(())
 }
 
-/// Diagnostic findings for one contact: contest-rule problems that annotate
-/// instead of blocking on the diagnostic commit path.
-pub fn diagnose_contact(
-    rules: &ContestRules,
-    bands: &[Band],
-    log_id: i64,
-    contact: &Contact,
-) -> Vec<String> {
-    match validate_contact(rules, bands, log_id, contact) {
-        Ok(()) => Vec::new(),
-        Err(message) => vec![message],
-    }
-}
-
 pub async fn validate_contacts(
     database: &Database,
     contest_rules: &ContestRulesStore,
     bands: &[Band],
     log_id: i64,
     contacts: &[Contact],
-    diagnostic_ids: &HashSet<i64>,
 ) -> Result<(), String> {
     if log_id <= 0 {
         return Err("log id must be positive".to_string());
@@ -215,12 +435,7 @@ pub async fn validate_contacts(
         .ok_or_else(|| format!("unknown contest: {}", log.contest_id))?;
 
     for (index, contact) in contacts.iter().enumerate() {
-        // Force-requested contacts and contacts already carrying persisted
-        // warnings take the diagnostic path: shape errors still abort here,
-        // contest findings become warnings computed by the caller.
-        let diagnostic = force_commit_requested(contact)
-            || contact_id(contact).is_some_and(|id| diagnostic_ids.contains(&id));
-        if diagnostic {
+        if force_commit_requested(contact) {
             validate_contact_shape(contact)
                 .map_err(|error| format!("contact {}: {error}", index + 1))?;
         } else {
@@ -971,6 +1186,24 @@ fn validate_host(label: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
+fn validate_serial_port(label: &str, value: &str) -> Result<(), String> {
+    if value.chars().any(char::is_control) {
+        return Err(format!("{label} cannot contain control characters"));
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn validate_tuning_increment_hz(label: &str, value: u32) -> Result<(), String> {
+    if value == 0 || value > MAX_RADIO_TUNING_INCREMENT_HZ {
+        return Err(format!(
+            "{label} must be between 1 and {MAX_RADIO_TUNING_INCREMENT_HZ} Hz"
+        ));
+    }
+    Ok(())
+}
+
 fn allowed_bands(rules: &ContestRules) -> String {
     rules.bands.join(", ")
 }
@@ -1119,6 +1352,45 @@ mod tests {
         );
     }
 
+    fn test_radio() -> RadioPayload {
+        RadioPayload {
+            name: "Elecraft TCP".to_string(),
+            radio_kind: "elecraft-k4".to_string(),
+            transport_kind: "tcp".to_string(),
+            tcp_host: "127.0.0.1".to_string(),
+            tcp_port: 5002,
+            serial_port: String::new(),
+            serial_baud_rate: 115_200,
+            options: String::new(),
+            data_mode: "DATA-USB".to_string(),
+            rtty_mode: "RTTY".to_string(),
+            digital_program: "none".to_string(),
+            wsjtx_enabled: false,
+            wsjtx_bind_address: "127.0.0.1".to_string(),
+            wsjtx_port: 2237,
+            wsjtx_multicast_group: String::new(),
+            fldigi_data_enabled: false,
+            fldigi_rtty_enabled: false,
+            fldigi_host: radio_io::DEFAULT_FLDIGI_HOST.to_string(),
+            fldigi_port: radio_io::DEFAULT_FLDIGI_PORT,
+            flrig_enabled: false,
+            flrig_port: radio_io::DEFAULT_FLRIG_PORT,
+            cw_tuning_increment_hz: db::DEFAULT_CW_TUNING_INCREMENT_HZ,
+            ssb_tuning_increment_hz: db::DEFAULT_SSB_TUNING_INCREMENT_HZ,
+            rit_clear_on_log: false,
+            voice_input_device_id: None,
+            voice_output_device_id: None,
+            cw_keyer_type: "none".to_string(),
+            winkeyer_serial_port: String::new(),
+            cw_serial_port: String::new(),
+            cw_serial_baud_rate: 9_600,
+            cw_serial_line: "dtr".to_string(),
+            cw_messages: cw::DEFAULT_CW_MESSAGES.to_string(),
+            digital_messages: radio_io::digital_messages::DEFAULT_DIGITAL_MESSAGES.to_string(),
+            voice_messages: voice_messages::DEFAULT_VOICE_MESSAGES.to_string(),
+        }
+    }
+
     #[test]
     fn validates_typed_fields_like_frontend() {
         assert!(validate_typed_field("RST", "RST", "599", &[], None, false, "CW").is_ok());
@@ -1154,6 +1426,23 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn validates_wsjtx_network_settings() {
+        let mut radio = test_radio();
+        radio.wsjtx_enabled = true;
+        radio.wsjtx_multicast_group = "239.255.0.1".to_string();
+        assert!(validate_radio(&radio).is_ok());
+
+        radio.wsjtx_port = 1023;
+        assert!(validate_radio(&radio).is_err());
+        radio.wsjtx_port = 2237;
+        radio.wsjtx_bind_address = "192.0.2.1".to_string();
+        assert!(validate_radio(&radio).is_err());
+        radio.wsjtx_bind_address = "0.0.0.0".to_string();
+        radio.wsjtx_multicast_group = "192.0.2.1".to_string();
+        assert!(validate_radio(&radio).is_err());
     }
 
     #[test]
@@ -1449,5 +1738,209 @@ mod tests {
         let mut contact = test_contact();
         contact.insert("BAND".to_string(), json!("40m"));
         assert!(validate_contact(&rules, &test_bands(), 1, &contact).is_err());
+    }
+
+    #[test]
+    fn validates_tcp_radio_config() {
+        assert!(validate_radio(&test_radio()).is_ok());
+    }
+
+    #[test]
+    fn rejects_radio_mode_mapping_outside_transmit_capabilities() {
+        let mut radio = test_radio();
+        radio.radio_kind = "elecraft-k2".to_string();
+        radio.data_mode = "WFM".to_string();
+
+        let error = validate_radio(&radio).expect_err("unsupported mapping should be rejected");
+        assert!(error.contains("not supported for transmit"));
+    }
+
+    #[test]
+    fn rejects_invalid_tuning_increment_values() {
+        let mut radio = test_radio();
+        radio.cw_tuning_increment_hz = 0;
+
+        let error = validate_radio(&radio).expect_err("CW tuning increment should be rejected");
+        assert!(error.contains("CW tuning increment"));
+
+        radio.cw_tuning_increment_hz = db::DEFAULT_CW_TUNING_INCREMENT_HZ;
+        radio.ssb_tuning_increment_hz = 0;
+
+        let error = validate_radio(&radio).expect_err("SSB tuning increment should be rejected");
+        assert!(error.contains("SSB tuning increment"));
+    }
+
+    #[test]
+    fn validates_serial_radio_config() {
+        let mut radio = test_radio();
+        radio.transport_kind = "serial".to_string();
+        radio.tcp_host = String::new();
+        radio.tcp_port = 0;
+        radio.serial_port = "/dev/ttyUSB0".to_string();
+
+        assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn rejects_unknown_radio_kind() {
+        let mut radio = test_radio();
+        radio.radio_kind = "not-a-radio".to_string();
+
+        let error = validate_radio(&radio).expect_err("radio kind should be rejected");
+        assert!(error.contains("unsupported radio driver"));
+    }
+
+    #[test]
+    fn validates_dummy_radio_without_transport() {
+        let mut radio = test_radio();
+        radio.radio_kind = "dummy".to_string();
+        radio.transport_kind = "none".to_string();
+        radio.tcp_host = String::new();
+        radio.tcp_port = 0;
+
+        assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn rejects_tcp_radio_without_host() {
+        let mut radio = test_radio();
+        radio.tcp_host = String::new();
+
+        let error = validate_radio(&radio).expect_err("missing host should fail");
+        assert!(error.contains("TCP host"));
+    }
+
+    #[test]
+    fn validates_optional_voice_sound_device_ids() {
+        let mut radio = test_radio();
+        radio.voice_input_device_id = Some("alsa:hw:1,0".to_string());
+        radio.voice_output_device_id = Some("wasapi:{0.0.0.00000000}".to_string());
+
+        assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn rejects_voice_sound_device_ids_with_control_characters_or_excessive_length() {
+        let mut radio = test_radio();
+        radio.voice_output_device_id = Some("alsa:bad\u{0007}".to_string());
+        let error = validate_radio(&radio).expect_err("control character should fail");
+        assert!(error.contains("voice output sound device"));
+
+        radio.voice_output_device_id = Some("x".repeat(MAX_SOUND_DEVICE_ID_LEN + 1));
+        let error = validate_radio(&radio).expect_err("long device id should fail");
+        assert!(error.contains("voice output sound device"));
+    }
+
+    #[test]
+    fn validates_cat_cw_keyer_type() {
+        let mut radio = test_radio();
+        radio.cw_keyer_type = "cat".to_string();
+
+        assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn rejects_cat_cw_keyer_when_radio_does_not_support_cw_sending() {
+        let mut radio = test_radio();
+        radio.radio_kind = "yaesu-ftdx10".to_string();
+        radio.cw_keyer_type = "cat".to_string();
+
+        let error = validate_radio(&radio).expect_err("unsupported CAT CW keyer should fail");
+        assert!(error.contains("CAT CW keying is not supported"));
+    }
+
+    #[test]
+    fn winkeyer_requires_serial_port() {
+        let mut radio = test_radio();
+        radio.cw_keyer_type = "winkeyer".to_string();
+
+        let error = validate_radio(&radio).expect_err("winkeyer port should be required");
+        assert!(error.contains("Winkeyer serial port"));
+    }
+
+    #[test]
+    fn validates_serial_cw_keyer_type() {
+        let mut radio = test_radio();
+        radio.cw_keyer_type = "serial".to_string();
+        radio.cw_serial_port = "/dev/ttyUSB1".to_string();
+        radio.cw_serial_baud_rate = 9_600;
+        radio.cw_serial_line = "rts".to_string();
+
+        assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn serial_cw_keyer_requires_serial_port() {
+        let mut radio = test_radio();
+        radio.cw_keyer_type = "serial".to_string();
+
+        let error = validate_radio(&radio).expect_err("CW serial port should be required");
+        assert!(error.contains("CW serial port"));
+    }
+
+    #[test]
+    fn serial_cw_keyer_rejects_unknown_line() {
+        let mut radio = test_radio();
+        radio.cw_keyer_type = "serial".to_string();
+        radio.cw_serial_port = "/dev/ttyUSB1".to_string();
+        radio.cw_serial_line = "both".to_string();
+
+        let error = validate_radio(&radio).expect_err("CW serial line should be rejected");
+        assert!(error.contains("CW serial line"));
+    }
+
+    #[test]
+    fn serial_cw_keyer_allows_shared_cat_port_with_matching_baud_rate() {
+        let mut radio = test_radio();
+        radio.transport_kind = "serial".to_string();
+        radio.tcp_host = String::new();
+        radio.tcp_port = 0;
+        radio.serial_port = "/dev/ttyUSB0".to_string();
+        radio.serial_baud_rate = 9_600;
+        radio.cw_keyer_type = "serial".to_string();
+        radio.cw_serial_port = "/dev/ttyUSB0".to_string();
+        radio.cw_serial_baud_rate = 9_600;
+
+        assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn serial_cw_keyer_rejects_shared_cat_port_with_different_baud_rate() {
+        let mut radio = test_radio();
+        radio.transport_kind = "serial".to_string();
+        radio.tcp_host = String::new();
+        radio.tcp_port = 0;
+        radio.serial_port = "/dev/ttyUSB0".to_string();
+        radio.serial_baud_rate = 115_200;
+        radio.cw_keyer_type = "serial".to_string();
+        radio.cw_serial_port = "/dev/ttyUSB0".to_string();
+        radio.cw_serial_baud_rate = 9_600;
+
+        let error = validate_radio(&radio).expect_err("shared baud rate mismatch should fail");
+        assert!(error.contains("baud rate"));
+    }
+
+    #[test]
+    fn serial_cw_keyer_allows_different_cat_port_with_different_baud_rate() {
+        let mut radio = test_radio();
+        radio.transport_kind = "serial".to_string();
+        radio.tcp_host = String::new();
+        radio.tcp_port = 0;
+        radio.serial_port = "/dev/ttyUSB0".to_string();
+        radio.serial_baud_rate = 115_200;
+        radio.cw_keyer_type = "serial".to_string();
+        radio.cw_serial_port = "/dev/ttyUSB1".to_string();
+        radio.cw_serial_baud_rate = 9_600;
+
+        assert!(validate_radio(&radio).is_ok());
+    }
+
+    #[test]
+    fn rejects_unknown_cw_keyer_type() {
+        let mut radio = test_radio();
+        radio.cw_keyer_type = "laser".to_string();
+
+        let error = validate_radio(&radio).expect_err("cw keyer type should be rejected");
+        assert!(error.contains("CW keyer type"));
     }
 }

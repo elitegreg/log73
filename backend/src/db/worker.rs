@@ -1,9 +1,7 @@
 use super::cache::{CachedContacts, ContactDeletion, ContactMutation, DatabaseCache, LogSnapshot};
 use super::config::db_update_config;
 use super::contact::{Contact, contact_id};
-use super::contacts::{
-    db_contact_has_warnings, db_contacts, db_delete_contact, db_upsert_contacts,
-};
+use super::contacts::{db_contacts, db_delete_contact, db_upsert_contacts};
 use super::logs::{db_create_log, db_delete_log, db_update_log};
 use super::models::{
     AuthConfig, ConfigView, DxClusterConfig, Log, NewLog, RadioControlLocation, RadioPayload,
@@ -111,10 +109,6 @@ enum DbCommand {
     DeleteContact {
         id: i64,
         response: oneshot::Sender<rusqlite::Result<Option<ContactDeletion>>>,
-    },
-    ContactHasWarnings {
-        id: i64,
-        response: oneshot::Sender<rusqlite::Result<bool>>,
     },
 }
 
@@ -419,10 +413,6 @@ impl Database {
             .await?
             .map(|deleted| deleted.log_id))
     }
-    pub async fn contact_has_warnings(&self, id: i64) -> rusqlite::Result<bool> {
-        self.call(|response| DbCommand::ContactHasWarnings { id, response })
-            .await
-    }
     pub async fn delete_contact_versioned(
         &self,
         id: i64,
@@ -512,7 +502,6 @@ impl DbCommand {
             Self::UpsertContacts { .. } => "upsert_contacts",
             Self::AllocateSerial { .. } => "allocate_serial",
             Self::DeleteContact { .. } => "delete_contact",
-            Self::ContactHasWarnings { .. } => "contact_has_warnings",
         }
     }
 }
@@ -839,9 +828,6 @@ fn run_db_worker(
             DbCommand::DeleteContact { id, response } => {
                 respond!(response, remove_contact(&connection, &cache, id))
             }
-            DbCommand::ContactHasWarnings { id, response } => {
-                respond!(response, db_contact_has_warnings(&connection, id))
-            }
         }
     }
 }
@@ -852,8 +838,7 @@ mod tests {
     use crate::cw::DEFAULT_CW_MESSAGES;
     use crate::db::config::{DEFAULT_DXCLUSTER_MAX_AGE_MIN, DEFAULT_DXCLUSTER_PORT};
     use crate::db::contact::{
-        contact_adif_value, contact_id, contact_log_id, contact_meta_value, set_contact_adif,
-        set_contact_meta,
+        contact_adif_value, contact_id, contact_log_id, set_contact_adif, set_contact_meta,
     };
     use crate::db::models::LoginPasswordUpdate;
     use crate::voice_messages::DEFAULT_VOICE_MESSAGES;
@@ -1754,51 +1739,6 @@ mod tests {
                 ("MODE".to_string(), json!("FT8")),
             ]),
         )
-    }
-
-    #[tokio::test]
-    async fn diagnostic_warnings_round_trip_through_storage() {
-        let database = test_database();
-        let log = create_test_log(&database).await;
-
-        let mut warned = base_contact();
-        crate::db::set_contact_meta(
-            &mut warned,
-            "warnings",
-            json!([{"message": "serial is required"}]),
-        );
-        let saved = database
-            .upsert_contacts(log.id, vec![warned])
-            .await
-            .unwrap();
-        let id = contact_id(&saved[0]).unwrap();
-        assert!(database.contact_has_warnings(id).await.unwrap());
-
-        let reloaded = database.contact(id).await.unwrap().unwrap();
-        assert_eq!(
-            contact_meta_value(&reloaded, "warnings"),
-            Some(&json!([{"message": "serial is required"}]))
-        );
-
-        // Clearing warnings persists the cleared state.
-        let mut cleared = reloaded;
-        crate::db::set_contact_meta(&mut cleared, "warnings", json!([]));
-        database
-            .upsert_contacts(log.id, vec![cleared])
-            .await
-            .unwrap();
-        assert!(!database.contact_has_warnings(id).await.unwrap());
-        let reloaded = database.contact(id).await.unwrap().unwrap();
-        assert_eq!(contact_meta_value(&reloaded, "warnings"), None);
-
-        // Contacts without warnings read back without the key.
-        let plain = database
-            .upsert_contacts(log.id, vec![base_contact()])
-            .await
-            .unwrap();
-        let plain_id = contact_id(&plain[0]).unwrap();
-        assert!(!database.contact_has_warnings(plain_id).await.unwrap());
-        assert!(!database.contact_has_warnings(-1).await.unwrap());
     }
 
     #[tokio::test]

@@ -55,7 +55,7 @@ use radio_io::{
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use stats::StatsTracker;
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, hash_map::DefaultHasher},
+    collections::{BTreeMap, HashMap, hash_map::DefaultHasher},
     fs,
     fs::OpenOptions,
     hash::Hasher,
@@ -243,30 +243,7 @@ fn should_redact_debug_string_field(key: &str) -> bool {
             | "cw_serial_port"
             | "sessionid"
             | "session_id"
-            // Credential fields. The `<redacted>` form hides even the value
-            // length, which matters for plaintext password-change fields.
-            | "password"
-            | "passwd"
-            | "password_hash"
-            | "login_password"
-            | "login_password_change"
-            | "login_password_confirm"
     )
-}
-
-// Sanctioned sanitizer for any future request-header debug logging: clones the
-// map with Authorization/Cookie values replaced. Kept alongside
-// `debug_payload_log` (and its tests) so issue #18 can move them as one unit
-// to the logging module. Currently exercised by tests only.
-#[allow(dead_code)]
-fn redacted_headers_for_log(headers: &HeaderMap) -> HeaderMap {
-    let mut sanitized = headers.clone();
-    for name in [header::AUTHORIZATION, header::COOKIE] {
-        if let Some(value) = sanitized.get_mut(name) {
-            *value = HeaderValue::from_static("<redacted>");
-        }
-    }
-    sanitized
 }
 
 fn redacted_debug_value_summary(value: &serde_json::Value) -> String {
@@ -2732,94 +2709,28 @@ async fn commit_contact(
         Ok(contacts) => contacts,
         Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
     };
-
-    // Strip client-supplied warnings: diagnostics are recomputed server-side
-    // on every commit. Client force flags are still honored.
-    let mut contacts = input_contacts;
-    for contact in &mut contacts {
-        crate::db::remove_contact_meta(contact, "warnings");
-    }
-
-    // Contacts already carrying persisted warnings take the diagnostic path
-    // even without force, so later corrections stay committable.
-    let mut diagnostic_ids = HashSet::new();
-    for contact in &contacts {
-        if validation::force_commit_requested(contact) {
-            continue;
-        }
-        if let Some(id) = contact_id(contact) {
-            match app_state.db.contact_has_warnings(id).await {
-                Ok(true) => {
-                    diagnostic_ids.insert(id);
-                }
-                Ok(false) => {}
-                Err(error) => {
-                    return Json(serde_json::json!({ "ok": false, "error": error.to_string() }));
-                }
-            }
-        }
-    }
-
     if let Err(error) = validation::validate_contacts(
         &app_state.db,
         &app_state.contest_rules,
         app_state.bands.snapshot().as_ref(),
         log_id,
-        &contacts,
-        &diagnostic_ids,
+        &input_contacts,
     )
     .await
     {
         return Json(serde_json::json!({ "ok": false, "error": error, "status": "failed" }));
     }
 
-    // Diagnose force-path and warned contacts on the same enriched values
-    // scoring sees, and attach server-generated warnings for persistence.
-    let needs_diagnosis = contacts.iter().any(|contact| {
-        validation::force_commit_requested(contact)
-            || contact_id(contact).is_some_and(|id| diagnostic_ids.contains(&id))
-    });
-    if needs_diagnosis {
-        let log = match app_state.db.log(log_id).await {
-            Ok(Some(log)) => log,
-            Ok(None) => {
-                return Json(
-                    serde_json::json!({ "ok": false, "error": format!("log {log_id} not found"), "status": "failed" }),
-                );
-            }
-            Err(error) => {
-                return Json(serde_json::json!({ "ok": false, "error": error.to_string() }));
-            }
-        };
-        let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
-            return Json(
-                serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id), "status": "failed" }),
-            );
-        };
-        let bands = app_state.bands.snapshot();
-        let mut enriched = contacts.clone();
-        app_state.log_cache.enrich_contacts(&mut enriched);
-        for (contact, enriched_contact) in contacts.iter_mut().zip(enriched.iter()) {
-            let diagnostic = validation::force_commit_requested(contact)
-                || contact_id(contact).is_some_and(|id| diagnostic_ids.contains(&id));
-            if !diagnostic {
-                continue;
-            }
-            let findings =
-                validation::diagnose_contact(rules, bands.as_ref(), log_id, enriched_contact);
-            let warnings = serde_json::Value::Array(
-                findings
-                    .into_iter()
-                    .map(|message| serde_json::json!({ "message": message }))
-                    .collect(),
-            );
-            set_contact_meta(contact, "warnings", warnings);
-        }
-    }
+    let session_ids = input_contacts
+        .iter()
+        .map(contact_session_id)
+        .collect::<Vec<_>>();
 
-    let session_ids = contacts.iter().map(contact_session_id).collect::<Vec<_>>();
-
-    match app_state.log_cache.upsert_contacts(log_id, contacts).await {
+    match app_state
+        .log_cache
+        .upsert_contacts(log_id, input_contacts)
+        .await
+    {
         Ok(mut result) => {
             for (contact, session_id) in result.contacts.iter_mut().zip(session_ids) {
                 if let Some(session_id) = session_id {
@@ -3175,152 +3086,6 @@ mod tests {
         )
     }
 
-    async fn wpx_test_log(state: &AppState) -> crate::db::Log {
-        state
-            .db
-            .create_log(NewLog {
-                name: "Warned".into(),
-                contest_id: "CQ-WPX-CW".into(),
-                station_callsign: "N0CALL".into(),
-                contest_params: json!({}),
-            })
-            .await
-            .unwrap()
-    }
-
-    #[tokio::test]
-    async fn force_commit_with_missing_exchange_succeeds_with_warnings() {
-        let state = cache_test_state();
-        let log = wpx_test_log(&state).await;
-
-        let mut contact = cache_test_contact("K1ABC");
-        set_contact_meta(&mut contact, "force", json!(true));
-        // Forged client warnings must be replaced by server diagnostics.
-        set_contact_meta(&mut contact, "warnings", json!([{"message": "forged"}]));
-
-        let body = commit_contact(
-            State(state.clone()),
-            Path(log.id),
-            Json(serde_json::Value::Object(contact)),
-        )
-        .await
-        .0;
-        assert_eq!(body["ok"], json!(true));
-        let warnings = body["contact"]["meta"]["warnings"]
-            .as_array()
-            .expect("response carries warnings");
-        assert!(!warnings.is_empty());
-        assert!(
-            warnings
-                .iter()
-                .all(|warning| warning["message"] != json!("forged"))
-        );
-
-        let id = body["contact"]["meta"]["id"]
-            .as_i64()
-            .expect("response carries id");
-        let reloaded = state
-            .db
-            .contact(id)
-            .await
-            .unwrap()
-            .expect("contact reloads");
-        assert_eq!(
-            contact_meta_value(&reloaded, "warnings").cloned(),
-            body["contact"]["meta"].get("warnings").cloned()
-        );
-    }
-
-    #[tokio::test]
-    async fn warned_contact_edits_recompute_and_clear_incrementally() {
-        let state = cache_test_state();
-        let log = wpx_test_log(&state).await;
-
-        // Sent serials are immutable once logged, so the initial commit sets
-        // STX and leaves the mutable received serial missing.
-        let mut contact = cache_test_contact("K1ABC");
-        set_contact_adif(&mut contact, "STX", json!(1));
-        set_contact_meta(&mut contact, "force", json!(true));
-        let body = commit_contact(
-            State(state.clone()),
-            Path(log.id),
-            Json(serde_json::Value::Object(contact)),
-        )
-        .await
-        .0;
-        assert_eq!(body["ok"], json!(true));
-        assert!(
-            body["contact"]["meta"]["warnings"]
-                .as_array()
-                .is_some_and(|warnings| !warnings.is_empty())
-        );
-        let id = body["contact"]["meta"]["id"].as_i64().unwrap();
-
-        // Ordinary re-commit while problems remain: still committable via the
-        // persisted-warnings path, still warned.
-        let partial = state.db.contact(id).await.unwrap().unwrap();
-        let partial_body = commit_contact(
-            State(state.clone()),
-            Path(log.id),
-            Json(serde_json::Value::Object(partial)),
-        )
-        .await
-        .0;
-        assert_eq!(partial_body["ok"], json!(true));
-        assert!(
-            partial_body["contact"]["meta"]["warnings"]
-                .as_array()
-                .is_some_and(|warnings| !warnings.is_empty())
-        );
-
-        // Completing the exchange clears warnings without force.
-        let mut fixed = state.db.contact(id).await.unwrap().unwrap();
-        set_contact_adif(&mut fixed, "SRX", json!(1));
-        let fixed_body = commit_contact(
-            State(state.clone()),
-            Path(log.id),
-            Json(serde_json::Value::Object(fixed)),
-        )
-        .await
-        .0;
-        assert_eq!(fixed_body["ok"], json!(true));
-        assert!(fixed_body["contact"]["meta"].get("warnings").is_none());
-    }
-
-    #[tokio::test]
-    async fn ordinary_commit_with_missing_exchange_still_fails() {
-        let state = cache_test_state();
-        let log = wpx_test_log(&state).await;
-
-        let body = commit_contact(
-            State(state.clone()),
-            Path(log.id),
-            Json(serde_json::Value::Object(cache_test_contact("K1ABC"))),
-        )
-        .await
-        .0;
-        assert_eq!(body["ok"], json!(false));
-    }
-
-    #[tokio::test]
-    async fn force_commit_with_malformed_payload_still_fails() {
-        let state = cache_test_state();
-        let log = wpx_test_log(&state).await;
-
-        let mut contact = cache_test_contact("K1ABC");
-        set_contact_meta(&mut contact, "force", json!(true));
-        contact.insert("bogus".to_string(), json!(1));
-
-        let body = commit_contact(
-            State(state.clone()),
-            Path(log.id),
-            Json(serde_json::Value::Object(contact)),
-        )
-        .await
-        .0;
-        assert_eq!(body["ok"], json!(false));
-    }
-
     #[tokio::test]
     async fn warm_handlers_exports_and_validation_execute_no_sql_or_commands() {
         let state = cache_test_state();
@@ -3392,7 +3157,6 @@ mod tests {
             state.bands.snapshot().as_ref(),
             log.id,
             &saved,
-            &std::collections::HashSet::new(),
         )
         .await
         .unwrap();
@@ -3413,7 +3177,6 @@ mod tests {
             state.bands.snapshot().as_ref(),
             serial_log.id,
             &serial_update,
-            &std::collections::HashSet::new(),
         )
         .await
         .unwrap();
@@ -3424,8 +3187,7 @@ mod tests {
                 &state.contest_rules,
                 state.bands.snapshot().as_ref(),
                 serial_log.id,
-                &serial_update,
-                &std::collections::HashSet::new()
+                &serial_update
             )
             .await
             .is_err()
@@ -4018,74 +3780,6 @@ mod tests {
     }
 
     #[test]
-    fn debug_payload_log_redacts_credential_fields() {
-        let payload = json!({
-            "iaru_region": 2,
-            "login_user": "greg",
-            "login_password_change": "s3cret-new-password",
-            "login_password_confirm": "s3cret-new-password",
-            "disable_login": false,
-            "auth": {
-                "LOGIN_PASSWORD": "stored-hash-value",
-                "Password_Hash": "argon2-hash-value"
-            },
-            "attempts": [
-                { "password": "first-attempt-secret" },
-                { "PASSWD": "second-attempt-secret" }
-            ]
-        });
-
-        let logged = debug_payload_log(&payload);
-
-        assert!(logged.contains("\"login_password_change\":\"<redacted>\""));
-        assert!(logged.contains("\"login_password_confirm\":\"<redacted>\""));
-        assert!(logged.contains("\"LOGIN_PASSWORD\":\"<redacted>\""));
-        assert!(logged.contains("\"Password_Hash\":\"<redacted>\""));
-        assert!(logged.contains("\"password\":\"<redacted>\""));
-        assert!(logged.contains("\"PASSWD\":\"<redacted>\""));
-        // Harmless control fields stay available for diagnostics.
-        assert!(logged.contains("\"disable_login\":false"));
-        assert!(logged.contains("\"login_user\":\"greg\""));
-        // Regression check asserts absence of the actual secret values.
-        assert!(!logged.contains("s3cret-new-password"));
-        assert!(!logged.contains("stored-hash-value"));
-        assert!(!logged.contains("argon2-hash-value"));
-        assert!(!logged.contains("first-attempt-secret"));
-        assert!(!logged.contains("second-attempt-secret"));
-    }
-
-    #[test]
-    fn redacted_headers_for_log_redacts_sensitive_headers() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            header::AUTHORIZATION,
-            HeaderValue::from_static("Basic c2VjcmV0OnRva2Vu"),
-        );
-        headers.insert(header::COOKIE, HeaderValue::from_static("session=abc123"));
-        headers.insert(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        );
-
-        let sanitized = redacted_headers_for_log(&headers);
-
-        assert_eq!(sanitized.get(header::AUTHORIZATION).unwrap(), "<redacted>");
-        assert_eq!(sanitized.get(header::COOKIE).unwrap(), "<redacted>");
-        assert_eq!(
-            sanitized.get(header::CONTENT_TYPE).unwrap(),
-            "application/json"
-        );
-        // The original map is untouched and no secret value survives.
-        assert_eq!(
-            headers.get(header::AUTHORIZATION).unwrap(),
-            "Basic c2VjcmV0OnRva2Vu"
-        );
-        let serialized = format!("{:?}", sanitized);
-        assert!(!serialized.contains("c2VjcmV0OnRva2Vu"));
-        assert!(!serialized.contains("abc123"));
-    }
-
-    #[test]
     fn debug_payload_log_truncates_large_output() {
         let payload = json!({
             "notes": "x".repeat(MAX_DEBUG_PAYLOAD_LOG_LENGTH * 2),
@@ -4095,21 +3789,6 @@ mod tests {
         let logged = debug_payload_log(&payload);
 
         assert!(logged.contains("<string length="));
-        assert!(logged.contains("<truncated total_chars="));
-        assert!(logged.chars().count() <= MAX_DEBUG_PAYLOAD_LOG_LENGTH);
-    }
-
-    #[test]
-    fn debug_payload_log_truncates_multibyte_output_within_bounds() {
-        // Each entry stays under the per-string limit so the total-length
-        // truncation path (not the per-string shortening) handles the bound.
-        let payload = json!({
-            "notes": vec!["📻".repeat(100); 100],
-            "other": "ok"
-        });
-
-        let logged = debug_payload_log(&payload);
-
         assert!(logged.contains("<truncated total_chars="));
         assert!(logged.chars().count() <= MAX_DEBUG_PAYLOAD_LOG_LENGTH);
     }
