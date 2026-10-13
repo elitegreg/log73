@@ -1,0 +1,254 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "rac-province-sent-inside-canada",
+      "condition": { "field": "MY_DXCC", "values": ["1"] },
+      "fields": { "MY_DXCC": 1 },
+      "meta": {},
+      "applies": true
+    },
+    {
+      "name": "rac-province-sent-outside-canada",
+      "condition": { "field": "MY_DXCC", "values": ["1"] },
+      "fields": { "MY_DXCC": 291 },
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "rac-serial-sent-excluded-inside-canada",
+      "condition": { "field": "MY_DXCC", "exclude_values": ["1"] },
+      "fields": { "MY_DXCC": 1 },
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "rac-serial-sent-allowed-outside-canada",
+      "condition": { "field": "MY_DXCC", "exclude_values": ["1"] },
+      "fields": { "MY_DXCC": 291 },
+      "meta": {},
+      "applies": true
+    },
+    {
+      "name": "rac-province-received-inside-canada",
+      "condition": { "field": "DXCC", "values": ["1"] },
+      "fields": { "DXCC": "1" },
+      "meta": {},
+      "applies": true
+    },
+    {
+      "name": "rac-serial-received-excluded-inside-canada",
+      "condition": { "field": "DXCC", "exclude_values": ["1"] },
+      "fields": { "DXCC": 1 },
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "rac-serial-received-foreign-applies",
+      "condition": { "field": "DXCC", "exclude_values": ["1"] },
+      "fields": { "DXCC": 230 },
+      "meta": {},
+      "applies": true
+    },
+    {
+      "name": "arrl160-section-positive-hit",
+      "condition": { "field": "MY_DXCC", "values": ["1", "291"] },
+      "fields": { "MY_DXCC": "291" },
+      "meta": {},
+      "applies": true
+    },
+    {
+      "name": "arrl160-section-positive-miss",
+      "condition": { "field": "MY_DXCC", "values": ["1", "291"] },
+      "fields": { "MY_DXCC": "230" },
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "lz-district-positive-hit",
+      "condition": { "field": "DXCC", "values": ["212"] },
+      "fields": { "DXCC": 212 },
+      "meta": {},
+      "applies": true
+    },
+    {
+      "name": "lz-district-positive-miss",
+      "condition": { "field": "DXCC", "values": ["212"] },
+      "fields": { "DXCC": "211" },
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "values-plus-exclude-excluded-wins",
+      "condition": {
+        "field": "DXCC",
+        "values": ["1", "291"],
+        "exclude_values": ["291"]
+      },
+      "fields": { "DXCC": 291 },
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "values-plus-exclude-included-applies",
+      "condition": {
+        "field": "DXCC",
+        "values": ["1", "291"],
+        "exclude_values": ["291"]
+      },
+      "fields": { "DXCC": 1 },
+      "meta": {},
+      "applies": true
+    },
+    {
+      "name": "matches-field-equal",
+      "condition": { "field": "STX_STRING", "matches_field": "SRX_STRING" },
+      "fields": { "STX_STRING": "abbe", "SRX_STRING": "ABBE" },
+      "meta": {},
+      "applies": true
+    },
+    {
+      "name": "matches-field-unequal",
+      "condition": { "field": "STX_STRING", "matches_field": "SRX_STRING" },
+      "fields": { "STX_STRING": "ABBE", "SRX_STRING": "NC" },
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "matches-field-other-missing",
+      "condition": { "field": "STX_STRING", "matches_field": "SRX_STRING" },
+      "fields": { "STX_STRING": "ABBE" },
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "matches-field-source-missing",
+      "condition": { "field": "STX_STRING", "matches_field": "SRX_STRING" },
+      "fields": { "SRX_STRING": "ABBE" },
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "not-matches-field-unequal",
+      "condition": { "field": "CALL", "not_matches_field": "STATION_CALLSIGN" },
+      "fields": { "CALL": "K1ABC", "STATION_CALLSIGN": "N0CALL" },
+      "meta": {},
+      "applies": true
+    },
+    {
+      "name": "not-matches-field-equal",
+      "condition": { "field": "CALL", "not_matches_field": "STATION_CALLSIGN" },
+      "fields": { "CALL": "K1ABC", "STATION_CALLSIGN": "k1abc" },
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "not-matches-field-other-missing",
+      "condition": { "field": "CALL", "not_matches_field": "STATION_CALLSIGN" },
+      "fields": { "CALL": "K1ABC" },
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "empty-source-never-applies",
+      "condition": { "field": "DXCC", "values": ["1"] },
+      "fields": { "DXCC": "   " },
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "missing-field-never-applies",
+      "condition": { "field": "DXCC", "values": ["1"] },
+      "fields": {},
+      "meta": {},
+      "applies": false
+    },
+    {
+      "name": "meta-fallback-when-adif-absent",
+      "condition": { "field": "MY_DXCC", "values": ["1"] },
+      "fields": {},
+      "meta": { "MY_DXCC": 1 },
+      "applies": true
+    },
+    {
+      "name": "adif-wins-over-meta",
+      "condition": { "field": "DXCC", "values": ["1"] },
+      "fields": { "DXCC": 291 },
+      "meta": { "DXCC": 1 },
+      "applies": false
+    },
+    {
+      "name": "adif-blank-wins-over-meta",
+      "condition": { "field": "DXCC", "values": ["1"] },
+      "fields": { "DXCC": " " },
+      "meta": { "DXCC": 1 },
+      "applies": false
+    },
+    {
+      "name": "meta-fallback-for-other-field",
+      "condition": { "field": "STX_STRING", "matches_field": "SRX_STRING" },
+      "fields": { "STX_STRING": "ABBE" },
+      "meta": { "SRX_STRING": "abbe" },
+      "applies": true
+    },
+    {
+      "name": "lowercase-adif-field-name",
+      "condition": { "field": "DXCC", "values": ["1"] },
+      "fields": { "dxcc": " 1 " },
+      "meta": {},
+      "applies": true
+    },
+    {
+      "name": "verbatim-meta-key-miss",
+      "condition": { "field": "DXCC", "values": ["1"] },
+      "fields": {},
+      "meta": { "dxcc": 1 },
+      "applies": false
+    },
+    {
+      "name": "verbatim-meta-key-hit",
+      "condition": { "field": "MY_DXCC", "values": ["1"] },
+      "fields": {},
+      "meta": { "MY_DXCC": 1 },
+      "applies": true
+    },
+    {
+      "name": "boolean-value-normalizes",
+      "condition": { "field": "DXCC", "values": ["TRUE"] },
+      "fields": { "DXCC": true },
+      "meta": {},
+      "applies": true
+    },
+    {
+      "name": "object-value-falls-through-to-meta",
+      "condition": { "field": "DXCC", "values": ["1"] },
+      "fields": { "DXCC": { "code": 1 } },
+      "meta": { "DXCC": 1 },
+      "applies": true
+    },
+    {
+      "name": "suffixes-ignored-applies",
+      "condition": {
+        "field": "DXCC",
+        "values": ["1"],
+        "suffixes": ["/P"],
+        "exclude_suffixes": ["/M"]
+      },
+      "fields": { "DXCC": 1 },
+      "meta": {},
+      "applies": true
+    },
+    {
+      "name": "suffixes-ignored-miss",
+      "condition": {
+        "field": "DXCC",
+        "values": ["1"],
+        "suffixes": ["/P"],
+        "exclude_suffixes": ["/M"]
+      },
+      "fields": { "DXCC": 291 },
+      "meta": {},
+      "applies": false
+    }
+  ]
+}

@@ -164,6 +164,7 @@ function cellValidation(settings, column, entry, radioMode) {
     exchangeValueForColumn(settings, column, entry),
     contactMode(entry, radioMode),
     entryAdif(entry),
+    entryMeta(entry),
   );
 }
 
@@ -280,6 +281,7 @@ function parseUpdateValue(settings, column, value, radioMode, entry = null) {
       sanitizedValue,
       validationMode,
       entryAdif(entry),
+      entryMeta(entry),
     );
     if (!validation.ok) return { ok: false, error: validation.error };
   }

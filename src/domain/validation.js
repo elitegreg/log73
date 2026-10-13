@@ -7,6 +7,7 @@ import {
   normalizeCallsign,
   parseCallsign,
 } from './callsign.js';
+import { conditionApplies } from './conditions.js';
 import { parseFieldInput } from './contactFields.js';
 import { modeIsCw } from './modes.js';
 
@@ -175,18 +176,11 @@ export function validateExchangeField(
   value,
   radioMode = 'CW',
   conditionFields = {},
+  conditionMeta = {},
 ) {
   const condition = field?.only_when;
   if (condition) {
-    const conditionValue = String(conditionFields?.[condition.field] ?? '')
-      .trim()
-      .toUpperCase();
-    const candidates = (condition.values ?? []).map((candidate) =>
-      String(candidate).trim().toUpperCase(),
-    );
-    const applies =
-      conditionValue !== '' &&
-      (candidates.length === 0 || candidates.includes(conditionValue));
+    const applies = conditionApplies(condition, conditionFields, conditionMeta);
     const trimmedValue = String(value ?? '').trim();
     if (!applies) {
       return trimmedValue === ''

@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { loadCallsignFixture } from '../../tests/fixtures/domain/loadFixture.js';
+import {
+  loadCallsignFixture,
+  loadConditionsFixture,
+} from '../../tests/fixtures/domain/loadFixture.js';
+import { conditionApplies } from './conditions.js';
 import {
   fieldValueLabel,
   validateCallsign,
@@ -72,6 +76,55 @@ test('validateExchangeField requires non-empty values', () => {
   );
   assert.equal(result.ok, false);
   assert.match(result.error, /Section is required/);
+});
+
+test('shared conditions fixture matches', () => {
+  const fixture = loadConditionsFixture();
+  assert.equal(fixture.version, 1);
+  assert.ok(fixture.cases.length > 0);
+  for (const kase of fixture.cases) {
+    assert.equal(
+      conditionApplies(kase.condition, kase.fields, kase.meta),
+      kase.applies,
+      kase.name,
+    );
+  }
+});
+
+test('validateExchangeField honors exclusions and field comparisons', () => {
+  const serialField = {
+    label: 'Serial',
+    input: { kind: 'serial', max_length: 4 },
+    only_when: { field: 'MY_DXCC', exclude_values: ['1'] },
+  };
+  // Inside Canada the field must stay blank.
+  assert.equal(
+    validateExchangeField(serialField, '', 'CW', { MY_DXCC: 1 }).ok,
+    true,
+  );
+  assert.equal(
+    validateExchangeField(serialField, '123', 'CW', { MY_DXCC: 1 }).ok,
+    false,
+  );
+  // Outside Canada normal serial validation applies.
+  assert.equal(
+    validateExchangeField(serialField, '123', 'CW', { MY_DXCC: 291 }).ok,
+    true,
+  );
+
+  const matchedField = {
+    label: 'Match',
+    input: { kind: 'string', max_length: 8 },
+    only_when: { field: 'A', matches_field: 'B' },
+  };
+  assert.equal(
+    validateExchangeField(matchedField, 'x', 'CW', { A: 'x', B: 'X' }).ok,
+    true,
+  );
+  assert.equal(
+    validateExchangeField(matchedField, 'x', 'CW', { A: 'x', B: 'y' }).ok,
+    false,
+  );
 });
 
 test('validateExchangeField conditionally requires or forbids an exchange', () => {

@@ -114,3 +114,48 @@ JS (via `loadFixture.js` in this directory):
 
 - `src/domain/dupes.test.js`: `dupeKey` equality over every case, plus
   alert-level (Dupe vs Possible Dupe) unit tests.
+
+## `conditions.json` format
+
+```json
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "rac-serial-sent-excluded-inside-canada",
+      "condition": { "field": "MY_DXCC", "exclude_values": ["1"] },
+      "fields": { "MY_DXCC": 1 },
+      "meta": {},
+      "applies": false
+    }
+  ]
+}
+```
+
+- `version`: fixture schema version. Harnesses reject anything but `1`.
+- `cases[]`: every field is required on every case.
+  - `name`: stable case identifier used in failure messages.
+  - `condition`: an already-resolved `only_when` condition (no value sets —
+    the resolved contract is what the browser consumes): `field`,
+    `matches_field`/`not_matches_field`, `values`, `exclude_values`.
+    `suffixes`/`exclude_suffixes` may appear to prove they are ignored.
+  - `fields` / `meta`: contact ADIF and metadata maps (strings, numbers,
+    booleans, or nested values, which count as absent).
+  - `applies`: whether the field the condition guards is applicable.
+- Lookup semantics mirror the backend exactly: ADIF first with
+  case-insensitive field names, then metadata with a verbatim
+  case-sensitive key; a present scalar (even blank) wins, anything else
+  falls through.
+
+## Consumers of `conditions.json`
+
+Rust (via `include_str!` + `serde_json`, cases shared through a loader helper
+in validation tests):
+
+- `backend/src/validation.rs` tests: `contact_matches_condition` over every
+  case, built as real contacts via `build_contact`.
+
+JS (via `loadFixture.js` in this directory):
+
+- `src/domain/validation.test.js`: `conditionApplies` over every case, plus
+  `validateExchangeField` blank/required behavior under conditions.

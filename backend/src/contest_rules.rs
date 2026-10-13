@@ -1907,6 +1907,63 @@ mod tests {
         ));
     }
 
+    fn rac_canada_rules() -> ContestRules {
+        let directory = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([directory.as_path()])
+            .expect("bundled contest rules should load");
+        store
+            .get("CANADA-DAY")
+            .expect("RAC Canada rules should load")
+            .clone()
+    }
+
+    fn rac_only_when(rules: &ContestRules, id: &str) -> ScoringCondition {
+        rules
+            .exchange
+            .iter()
+            .find(|field| field.id == id)
+            .unwrap_or_else(|| panic!("exchange field {id} should exist"))
+            .only_when
+            .clone()
+            .expect("only_when should exist")
+    }
+
+    #[test]
+    fn rac_canada_only_when_conditions_resolve_sets() {
+        let rules = rac_canada_rules();
+
+        let province_sent = rac_only_when(&rules, "province-sent");
+        assert_eq!(province_sent.field, "MY_DXCC");
+        assert_eq!(province_sent.values, vec!["1".to_string()]);
+        assert!(province_sent.exclude_values.is_empty());
+
+        let serial_sent = rac_only_when(&rules, "serial-sent");
+        assert_eq!(serial_sent.field, "MY_DXCC");
+        assert!(serial_sent.values.is_empty());
+        assert_eq!(serial_sent.exclude_values, vec!["1".to_string()]);
+
+        let province_received = rac_only_when(&rules, "province-received");
+        assert_eq!(province_received.field, "DXCC");
+        assert_eq!(province_received.values, vec!["1".to_string()]);
+
+        let serial_received = rac_only_when(&rules, "serial-received");
+        assert_eq!(serial_received.field, "DXCC");
+        assert_eq!(serial_received.exclude_values, vec!["1".to_string()]);
+    }
+
+    #[test]
+    fn serialized_conditions_carry_resolved_values_without_sets() {
+        let rules = rac_canada_rules();
+        let condition = rac_only_when(&rules, "serial-sent");
+
+        let json = serde_json::to_value(&condition).expect("condition should serialize");
+        assert_eq!(json["field"], serde_json::json!("MY_DXCC"));
+        assert_eq!(json["exclude_values"], serde_json::json!(["1"]));
+        assert!(json.get("in_set").is_none());
+        assert!(json.get("in_sets").is_none());
+        assert!(json.get("exclude_in_sets").is_none());
+    }
+
     struct TestDir(PathBuf);
 
     impl TestDir {

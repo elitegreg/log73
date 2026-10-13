@@ -1571,6 +1571,78 @@ mod tests {
         }
     }
 
+    /// One row of `tests/fixtures/domain/conditions.json`. See
+    /// `tests/fixtures/domain/README.md` for the format contract.
+    #[derive(Debug, serde::Deserialize)]
+    struct ConditionFixtureCase {
+        name: String,
+        condition: ScoringCondition,
+        fields: Map<String, Value>,
+        meta: Map<String, Value>,
+        applies: bool,
+    }
+
+    #[derive(Debug, serde::Deserialize)]
+    struct ConditionFixture {
+        version: u32,
+        cases: Vec<ConditionFixtureCase>,
+    }
+
+    fn load_conditions_fixture() -> ConditionFixture {
+        let text = include_str!("../../tests/fixtures/domain/conditions.json");
+        serde_json::from_str(text).expect("conditions fixture should parse")
+    }
+
+    #[test]
+    fn shared_conditions_fixture_matches_backend_predicate() {
+        let fixture = load_conditions_fixture();
+        assert_eq!(fixture.version, 1);
+        assert!(!fixture.cases.is_empty());
+        for case in &fixture.cases {
+            let contact = crate::db::build_contact(case.meta.clone(), case.fields.clone());
+            assert_eq!(
+                contact_matches_condition(&contact, &case.condition),
+                case.applies,
+                "condition {}",
+                case.name
+            );
+        }
+    }
+
+    #[test]
+    fn rac_canada_serial_applicability_follows_station_dxcc() {
+        use crate::contest_rules::ContestRulesStore;
+        use std::path::PathBuf;
+
+        let rules_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data/contest-rules");
+        let store = ContestRulesStore::load_dirs([rules_dir.as_path()])
+            .expect("bundled contest rules should load");
+        let rules = store
+            .get("CANADA-DAY")
+            .expect("RAC Canada rules should load");
+        let serial_sent = rules
+            .exchange
+            .iter()
+            .find(|field| field.id == "serial-sent")
+            .expect("serial-sent field should exist");
+
+        let contact_with = |my_dxcc: Value| {
+            crate::db::build_contact(
+                Map::new(),
+                Map::from_iter([("MY_DXCC".to_string(), my_dxcc)]),
+            )
+        };
+
+        assert!(!exchange_field_applies(
+            serial_sent,
+            &contact_with(json!(1)),
+        ));
+        assert!(exchange_field_applies(
+            serial_sent,
+            &contact_with(json!(291)),
+        ));
+    }
+
     #[test]
     fn rejects_invalid_station_and_operator_callsigns() {
         let error = validate_callsign("station callsign", "KABC", false)
