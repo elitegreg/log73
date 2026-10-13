@@ -326,22 +326,6 @@ impl ContestScorer {
     }
 
     #[allow(dead_code)]
-    pub fn remove_scored_qso(&mut self, contact: &Contact) -> ScoreTotals {
-        self.totals.qso_count = self.totals.qso_count.saturating_sub(1);
-        self.totals.qso_points -= scored_i64(contact, "pts");
-        self.raw_multiplier_count -= scored_i64(contact, "mult");
-        self.direct_bonus_points -= scored_i64(contact, "bonus");
-        if !is_dupe_contact(contact) && scored_i64(contact, "pts") > 0 {
-            for key in self.module.qso_count_bonus_keys_for(contact) {
-                decrement_count(&mut self.qso_count_bonus_counts, &key);
-            }
-        }
-        self.remove_dupe_key(contact);
-        self.recalculate_score();
-        self.totals.clone()
-    }
-
-    #[allow(dead_code)]
     pub fn totals(&self) -> ScoreTotals {
         self.totals.clone()
     }
