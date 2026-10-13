@@ -120,6 +120,38 @@ test('committedBackendContact assigns meta.clientId from meta.id', () => {
   assert.equal(committed.meta.clientId, '42');
 });
 
+test('mergeContact retains server warnings on committed contacts', () => {
+  const pending = {
+    meta: {
+      clientId: 'local-123',
+      status: 'Pending',
+    },
+    adif: {
+      CALL: 'K1ABC',
+      QSO_DATE_TIME_ON: 100,
+    },
+  };
+
+  const merged = mergeContact([pending], {
+    meta: {
+      id: 77,
+      clientId: 'local-123',
+      status: 'Committed',
+      warnings: [{ message: 'serial is required' }],
+    },
+    adif: {
+      CALL: 'K1ABC',
+      QSO_DATE_TIME_ON: 100,
+    },
+  });
+
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].meta.status, 'Committed');
+  assert.deepEqual(merged[0].meta.warnings, [
+    { message: 'serial is required' },
+  ]);
+});
+
 test('mergeContact updates pending contact and rekeys committed meta.clientId to meta.id', () => {
   const pending = {
     meta: {

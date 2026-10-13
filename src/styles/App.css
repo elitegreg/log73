@@ -677,11 +677,16 @@
   background-color: #ffd1d1;
 }
 
+.log-table tbody tr.warned-contact {
+  background-color: #ffe9c4;
+}
+
 .log-table tbody tr.selected-contact,
 .log-table tbody tr.selected-contact:nth-child(odd),
 .log-table tbody tr.selected-contact:nth-child(even),
 .log-table tbody tr.selected-contact.uncommitted-contact,
-.log-table tbody tr.selected-contact.failed-contact {
+.log-table tbody tr.selected-contact.failed-contact,
+.log-table tbody tr.selected-contact.warned-contact {
   background-color: #2f6fd6;
 }
 

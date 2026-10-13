@@ -9,7 +9,11 @@ import {
 import { adifModeForLoggerMode } from '../domain/modes';
 import { validateExchangeField } from '../domain/validation';
 import { useNotifications } from '../lib/notificationsContext';
-import { sanitizeLogCellUpdate } from './logWindowHelpers';
+import {
+  contactWarnings,
+  contactWarningsTitle,
+  sanitizeLogCellUpdate,
+} from './logWindowHelpers';
 
 const COLUMN_PADDING_CHARS = 2;
 const FIXED_COLUMN_WIDTHS = {
@@ -195,16 +199,18 @@ function contactRowClassName(entry, isSelected) {
   if (entryMeta(entry).status === 'Failed') classes.push('failed-contact');
   else if (entryMeta(entry).status !== 'Committed')
     classes.push('uncommitted-contact');
+  else if (contactWarnings(entry).length > 0) classes.push('warned-contact');
   if (isSelected) classes.push('selected-contact');
   return classes.join(' ') || undefined;
 }
 
 function contactRowTitle(entry) {
   const meta = entryMeta(entry);
-  if (meta.status !== 'Failed') return undefined;
-  return meta.error
-    ? `Contact upload failed: ${meta.error}`
-    : 'Contact upload failed.';
+  if (meta.status === 'Failed')
+    return meta.error
+      ? `Contact upload failed: ${meta.error}`
+      : 'Contact upload failed.';
+  return contactWarningsTitle(entry) ?? undefined;
 }
 
 function editableFieldForColumn(column) {

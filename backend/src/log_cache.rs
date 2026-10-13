@@ -71,6 +71,13 @@ struct CachedLog {
 }
 
 impl LogCache {
+    /// Fill missing DXCC-derived ADIF fields on in-memory contacts without
+    /// persisting. Used to diagnose warnings on the same enriched values
+    /// scoring sees; the later upsert enrich is idempotent fill-missing.
+    pub(crate) fn enrich_contacts(&self, contacts: &mut [Contact]) {
+        enrich_missing_dxcc(&self.inner.dxcc, contacts);
+    }
+
     pub fn new(
         db: Database,
         contest_rules: ContestRulesStore,
