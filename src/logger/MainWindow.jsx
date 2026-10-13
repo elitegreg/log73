@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   buildSentExchange,
   fieldDefault,
@@ -37,10 +37,9 @@ import {
   shouldBlockEsmCallEnter,
   normalizedContactFrequencyHz,
   shouldAdvanceFromCallsignAutofill,
-  callsignClearThresholdHz,
-  loggerFrequencyChangeAction,
   alphanumericWordAt,
 } from './mainWindowHelpers';
+import { useFrequencyTracker } from './hooks/useFrequencyTracker';
 import RadioControls from './components/RadioControls';
 import EntryFields from './components/EntryFields';
 import FunctionKeys from './components/FunctionKeys';
@@ -182,7 +181,6 @@ function MainWindow({
     return Number.isFinite(storedWpm) ? storedWpm : DEFAULT_CW_WPM;
   });
   const setCwWpmRef = useRef(onSetCwWpm);
-  const previousRadioFrequencyHzRef = useRef(null);
   const allowedBands = settings?.bands ?? [];
   const bandCatalog = settings?.band_catalog ?? [];
   const currentBand = bandForFrequency(radioFrequencyHz, bandCatalog);
@@ -231,25 +229,7 @@ function MainWindow({
     onDebouncedCallsignChange?.(debouncedCallSign.trim().toUpperCase());
   }, [debouncedCallSign, onDebouncedCallsignChange]);
 
-  useEffect(() => {
-    const previousFrequencyHz = previousRadioFrequencyHzRef.current;
-    previousRadioFrequencyHzRef.current = radioFrequencyHz;
-    const action = loggerFrequencyChangeAction({
-      previousFrequencyHz,
-      nextFrequencyHz: radioFrequencyHz,
-      thresholdHz: callsignClearThresholdHz(radioMode),
-      pendingBandMapTuneFrequencyHz: pendingBandMapTuneFrequencyRef.current,
-    });
-    if (action === 'clear-pending-bandmap-tune') {
-      pendingBandMapTuneFrequencyRef.current = null;
-      return;
-    }
-    if (action !== 'clear-logger') return;
-    if (operatingMode === 'Run') {
-      setOperatingMode('S&P');
-    }
-    clearEntryFields();
-  }, [operatingMode, radioFrequencyHz, radioMode]);
+
 
   const messageModeKey = operatingMode === 'Run' ? 'run' : 's&p';
   const modeMessageLabels = modeIsPhone(radioMode)
@@ -388,10 +368,10 @@ function MainWindow({
     }
   }, [operatingMode, storeCurrentCqFrequency]);
 
-  function clearEsmState() {
+  const clearEsmState = useCallback(() => {
     setEsmRunCallsignAttempt('');
     setEsmExchangeSentCallsign('');
-  }
+  }, [setEsmRunCallsignAttempt, setEsmExchangeSentCallsign]);
 
   function markEsmExchangeSentForCurrentCallsign() {
     const normalizedCallsign = currentCallsign();
@@ -545,7 +525,7 @@ function MainWindow({
     );
   }
 
-  function clearEntryFields({ clearRit = true } = {}) {
+  const clearEntryFields = useCallback(({ clearRit = true } = {}) => {
     if (wsjtxDataLocked) return;
     if (clearRit) clearRitIfEnabled();
     setCallSign('');
@@ -563,19 +543,36 @@ function MainWindow({
     clearEsmState();
     callSignEditedAtRef.current = new Date();
     callSignRef.current?.focus();
-  }
+  }, [
+    wsjtxDataLocked,
+    clearRitIfEnabled,
+    setCallSign,
+    setExchangeValues,
+    settings,
+    radioMode,
+    log?.contest_params,
+    serialAllocation,
+    clearEsmState,
+    callsignFrequencyBaselineRef,
+    pendingBandMapTuneFrequencyRef,
+    pendingPreviousContactAutofillRef,
+    callSignEditedAtRef,
+    callSignRef,
+  ]);
+
+  useFrequencyTracker({
+    operatingMode,
+    radioFrequencyHz,
+    radioMode,
+    pendingBandMapTuneFrequencyRef,
+    setOperatingMode,
+    clearEntryFields,
+  });
 
   useEffect(() => {
     onRegisterBandMapActivateClear?.(clearEntryFields);
     return () => onRegisterBandMapActivateClear?.(null);
-  }, [
-    onRegisterBandMapActivateClear,
-    clearRitIfEnabled,
-    radioMode,
-    settings,
-    log,
-    serialAllocation,
-  ]);
+  }, [onRegisterBandMapActivateClear, clearEntryFields]);
 
   function logContact(force = false, values = exchangeValues) {
     if (wsjtxDataLocked) return false;
