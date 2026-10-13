@@ -243,7 +243,30 @@ fn should_redact_debug_string_field(key: &str) -> bool {
             | "cw_serial_port"
             | "sessionid"
             | "session_id"
+            // Credential fields. The `<redacted>` form hides even the value
+            // length, which matters for plaintext password-change fields.
+            | "password"
+            | "passwd"
+            | "password_hash"
+            | "login_password"
+            | "login_password_change"
+            | "login_password_confirm"
     )
+}
+
+// Sanctioned sanitizer for any future request-header debug logging: clones the
+// map with Authorization/Cookie values replaced. Kept alongside
+// `debug_payload_log` (and its tests) so issue #18 can move them as one unit
+// to the logging module. Currently exercised by tests only.
+#[allow(dead_code)]
+fn redacted_headers_for_log(headers: &HeaderMap) -> HeaderMap {
+    let mut sanitized = headers.clone();
+    for name in [header::AUTHORIZATION, header::COOKIE] {
+        if let Some(value) = sanitized.get_mut(name) {
+            *value = HeaderValue::from_static("<redacted>");
+        }
+    }
+    sanitized
 }
 
 fn redacted_debug_value_summary(value: &serde_json::Value) -> String {
@@ -3995,6 +4018,74 @@ mod tests {
     }
 
     #[test]
+    fn debug_payload_log_redacts_credential_fields() {
+        let payload = json!({
+            "iaru_region": 2,
+            "login_user": "greg",
+            "login_password_change": "s3cret-new-password",
+            "login_password_confirm": "s3cret-new-password",
+            "disable_login": false,
+            "auth": {
+                "LOGIN_PASSWORD": "stored-hash-value",
+                "Password_Hash": "argon2-hash-value"
+            },
+            "attempts": [
+                { "password": "first-attempt-secret" },
+                { "PASSWD": "second-attempt-secret" }
+            ]
+        });
+
+        let logged = debug_payload_log(&payload);
+
+        assert!(logged.contains("\"login_password_change\":\"<redacted>\""));
+        assert!(logged.contains("\"login_password_confirm\":\"<redacted>\""));
+        assert!(logged.contains("\"LOGIN_PASSWORD\":\"<redacted>\""));
+        assert!(logged.contains("\"Password_Hash\":\"<redacted>\""));
+        assert!(logged.contains("\"password\":\"<redacted>\""));
+        assert!(logged.contains("\"PASSWD\":\"<redacted>\""));
+        // Harmless control fields stay available for diagnostics.
+        assert!(logged.contains("\"disable_login\":false"));
+        assert!(logged.contains("\"login_user\":\"greg\""));
+        // Regression check asserts absence of the actual secret values.
+        assert!(!logged.contains("s3cret-new-password"));
+        assert!(!logged.contains("stored-hash-value"));
+        assert!(!logged.contains("argon2-hash-value"));
+        assert!(!logged.contains("first-attempt-secret"));
+        assert!(!logged.contains("second-attempt-secret"));
+    }
+
+    #[test]
+    fn redacted_headers_for_log_redacts_sensitive_headers() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Basic c2VjcmV0OnRva2Vu"),
+        );
+        headers.insert(header::COOKIE, HeaderValue::from_static("session=abc123"));
+        headers.insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json"),
+        );
+
+        let sanitized = redacted_headers_for_log(&headers);
+
+        assert_eq!(sanitized.get(header::AUTHORIZATION).unwrap(), "<redacted>");
+        assert_eq!(sanitized.get(header::COOKIE).unwrap(), "<redacted>");
+        assert_eq!(
+            sanitized.get(header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        // The original map is untouched and no secret value survives.
+        assert_eq!(
+            headers.get(header::AUTHORIZATION).unwrap(),
+            "Basic c2VjcmV0OnRva2Vu"
+        );
+        let serialized = format!("{:?}", sanitized);
+        assert!(!serialized.contains("c2VjcmV0OnRva2Vu"));
+        assert!(!serialized.contains("abc123"));
+    }
+
+    #[test]
     fn debug_payload_log_truncates_large_output() {
         let payload = json!({
             "notes": "x".repeat(MAX_DEBUG_PAYLOAD_LOG_LENGTH * 2),
@@ -4004,6 +4095,21 @@ mod tests {
         let logged = debug_payload_log(&payload);
 
         assert!(logged.contains("<string length="));
+        assert!(logged.contains("<truncated total_chars="));
+        assert!(logged.chars().count() <= MAX_DEBUG_PAYLOAD_LOG_LENGTH);
+    }
+
+    #[test]
+    fn debug_payload_log_truncates_multibyte_output_within_bounds() {
+        // Each entry stays under the per-string limit so the total-length
+        // truncation path (not the per-string shortening) handles the bound.
+        let payload = json!({
+            "notes": vec!["📻".repeat(100); 100],
+            "other": "ok"
+        });
+
+        let logged = debug_payload_log(&payload);
+
         assert!(logged.contains("<truncated total_chars="));
         assert!(logged.chars().count() <= MAX_DEBUG_PAYLOAD_LOG_LENGTH);
     }
