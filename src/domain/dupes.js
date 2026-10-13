@@ -1,3 +1,5 @@
+import { dupeIdentity } from './callsign.js';
+
 const POSSIBLE_DUPE_FIELDS = new Set(['CALL', 'BAND', 'MODE']);
 
 function jsonString(value) {
@@ -13,7 +15,7 @@ function normalizedFieldValue(field, value) {
     .trim()
     .toUpperCase();
   if (field.toUpperCase() === 'CALL') {
-    return normalized.split('/')[0];
+    return dupeIdentity(normalized);
   }
   return normalized;
 }

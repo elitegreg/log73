@@ -1,0 +1,495 @@
+{
+  "version": 1,
+  "dxcc_db": {
+    "entities": [
+      {
+        "country_name": "Germany",
+        "adif": 230,
+        "cq_zone": 14,
+        "itu_zone": 27,
+        "continent": "EU",
+        "latitude": 51.0,
+        "longitude": 10.0,
+        "utc_offset": -1.0,
+        "primary_prefix": "DL",
+        "waedc_cq_list": false
+      },
+      {
+        "country_name": "Canada",
+        "adif": 1,
+        "cq_zone": 4,
+        "itu_zone": 9,
+        "continent": "NA",
+        "latitude": 56.0,
+        "longitude": 96.0,
+        "utc_offset": 5.0,
+        "primary_prefix": "VE3",
+        "waedc_cq_list": false
+      },
+      {
+        "country_name": "United States",
+        "adif": 291,
+        "cq_zone": 5,
+        "itu_zone": 8,
+        "continent": "NA",
+        "latitude": 38.0,
+        "longitude": 97.0,
+        "utc_offset": 5.0,
+        "primary_prefix": "K",
+        "waedc_cq_list": false
+      },
+      {
+        "country_name": "Sable Island",
+        "adif": 249,
+        "cq_zone": 5,
+        "itu_zone": 9,
+        "continent": "NA",
+        "latitude": 43.93,
+        "longitude": -59.9,
+        "utc_offset": 4.0,
+        "primary_prefix": "CY0",
+        "waedc_cq_list": false
+      }
+    ],
+    "rules": [
+      { "pattern": "DL", "exact": false, "entity_index": 0 },
+      { "pattern": "VE3", "exact": false, "entity_index": 1 },
+      { "pattern": "K", "exact": false, "entity_index": 2 },
+      { "pattern": "W", "exact": false, "entity_index": 2 },
+      { "pattern": "N", "exact": false, "entity_index": 2 },
+      { "pattern": "VE3/NG4M", "exact": true, "entity_index": 3 }
+    ]
+  },
+  "cases": [
+    {
+      "input": "DL/W1AW",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "W1AW",
+      "modifier": "DL",
+      "dupe_identity": "W1AW",
+      "wpx_prefix": "DL0",
+      "dxcc": { "adif": 230, "primary_prefix": "DL" }
+    },
+    {
+      "input": "F/W1AW",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "W1AW",
+      "modifier": "F",
+      "dupe_identity": "W1AW",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "PA/W1AW",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "W1AW",
+      "modifier": "PA",
+      "dupe_identity": "W1AW",
+      "wpx_prefix": "PA0",
+      "dxcc": null
+    },
+    {
+      "input": "EA/W1AW",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "W1AW",
+      "modifier": "EA",
+      "dupe_identity": "W1AW",
+      "wpx_prefix": "EA0",
+      "dxcc": null
+    },
+    {
+      "input": "G/W1AW",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "W1AW",
+      "modifier": "G",
+      "dupe_identity": "W1AW",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "VE3/K1ABC",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "K1ABC",
+      "modifier": "VE3",
+      "dupe_identity": "K1ABC",
+      "wpx_prefix": "VE3",
+      "dxcc": { "adif": 1, "primary_prefix": "VE3" }
+    },
+    {
+      "input": "VE3/N2XYZ",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "N2XYZ",
+      "modifier": "VE3",
+      "dupe_identity": "N2XYZ",
+      "wpx_prefix": "VE3",
+      "dxcc": { "adif": 1, "primary_prefix": "VE3" }
+    },
+    {
+      "input": "VP2M/K1ABC",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "K1ABC",
+      "modifier": "VP2M",
+      "dupe_identity": "K1ABC",
+      "wpx_prefix": "VP2",
+      "dxcc": null
+    },
+    {
+      "input": "K1ABC/VE3",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "K1ABC",
+      "modifier": "VE3",
+      "dupe_identity": "K1ABC",
+      "wpx_prefix": "VE3",
+      "dxcc": { "adif": 1, "primary_prefix": "VE3" }
+    },
+    {
+      "input": "KL7RA/WK9",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "KL7RA",
+      "modifier": "WK9",
+      "dupe_identity": "KL7RA",
+      "wpx_prefix": "WK9",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "EA8/K1A",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "K1A",
+      "modifier": "EA8",
+      "dupe_identity": "K1A",
+      "wpx_prefix": "EA8",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "K1ABC/P",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "K1ABC",
+      "modifier": "P",
+      "dupe_identity": "K1ABC",
+      "wpx_prefix": "K1",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "N0CALL/M",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "N0CALL",
+      "modifier": "M",
+      "dupe_identity": "N0CALL",
+      "wpx_prefix": "N0",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "W3AAA/MM",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "W3AAA",
+      "modifier": "MM",
+      "dupe_identity": "W3AAA",
+      "wpx_prefix": "W3",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "K1ABC/QRP",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "K1ABC",
+      "modifier": "QRP",
+      "dupe_identity": "K1ABC",
+      "wpx_prefix": "K1",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "W9ABC/4",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "W9ABC",
+      "modifier": "4",
+      "dupe_identity": "W9ABC",
+      "wpx_prefix": "W4",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "NG4M/1",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "NG4M",
+      "modifier": "1",
+      "dupe_identity": "NG4M",
+      "wpx_prefix": "NG1",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "NG4M/XYZ",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "NG4M",
+      "modifier": "XYZ",
+      "dupe_identity": "NG4M",
+      "wpx_prefix": "XY0",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "F1ABC/MM",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "F1ABC",
+      "modifier": "MM",
+      "dupe_identity": "F1ABC",
+      "wpx_prefix": "F1",
+      "dxcc": null
+    },
+    {
+      "input": "K1ABC",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "K1ABC",
+      "modifier": null,
+      "dupe_identity": "K1ABC",
+      "wpx_prefix": "K1",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "4O9A",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "4O9A",
+      "modifier": null,
+      "dupe_identity": "4O9A",
+      "wpx_prefix": "4O9",
+      "dxcc": null
+    },
+    {
+      "input": "W1AW",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "W1AW",
+      "modifier": null,
+      "dupe_identity": "W1AW",
+      "wpx_prefix": "W1",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "KABC",
+      "logging_valid": false,
+      "query_valid": false,
+      "base": "KABC",
+      "modifier": null,
+      "dupe_identity": "KABC",
+      "wpx_prefix": "KA0",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "BAD",
+      "logging_valid": false,
+      "query_valid": false,
+      "base": "BAD",
+      "modifier": null,
+      "dupe_identity": "BAD",
+      "wpx_prefix": "BA0",
+      "dxcc": null
+    },
+    {
+      "input": "  dl/w1aw  ",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "W1AW",
+      "modifier": "DL",
+      "dupe_identity": "W1AW",
+      "wpx_prefix": "DL0",
+      "dxcc": { "adif": 230, "primary_prefix": "DL" }
+    },
+    {
+      "input": "k1abc/p",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "K1ABC",
+      "modifier": "P",
+      "dupe_identity": "K1ABC",
+      "wpx_prefix": "K1",
+      "dxcc": { "adif": 291, "primary_prefix": "K" }
+    },
+    {
+      "input": "   ",
+      "logging_valid": false,
+      "query_valid": false,
+      "base": "",
+      "modifier": null,
+      "dupe_identity": "",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "K1A*",
+      "logging_valid": false,
+      "query_valid": false,
+      "base": "K1A*",
+      "modifier": null,
+      "dupe_identity": "K1A*",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "K 1ABC",
+      "logging_valid": false,
+      "query_valid": false,
+      "base": "K 1ABC",
+      "modifier": null,
+      "dupe_identity": "K 1ABC",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "/K1ABC",
+      "logging_valid": false,
+      "query_valid": false,
+      "base": null,
+      "modifier": null,
+      "dupe_identity": "/K1ABC",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "K1ABC/",
+      "logging_valid": false,
+      "query_valid": false,
+      "base": null,
+      "modifier": null,
+      "dupe_identity": "K1ABC/",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "K1/A/BC",
+      "logging_valid": false,
+      "query_valid": false,
+      "base": null,
+      "modifier": null,
+      "dupe_identity": "K1/A/BC",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "A/B/C",
+      "logging_valid": false,
+      "query_valid": false,
+      "base": null,
+      "modifier": null,
+      "dupe_identity": "A/B/C",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "AB/CD",
+      "logging_valid": false,
+      "query_valid": false,
+      "base": null,
+      "modifier": null,
+      "dupe_identity": "AB/CD",
+      "wpx_prefix": "CD0",
+      "dxcc": null
+    },
+    {
+      "input": "W1?",
+      "logging_valid": false,
+      "query_valid": true,
+      "base": "W1?",
+      "modifier": null,
+      "dupe_identity": "W1?",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "WB4?",
+      "logging_valid": false,
+      "query_valid": true,
+      "base": "WB4?",
+      "modifier": null,
+      "dupe_identity": "WB4?",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "?",
+      "logging_valid": false,
+      "query_valid": true,
+      "base": "?",
+      "modifier": null,
+      "dupe_identity": "?",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "K?ABC",
+      "logging_valid": false,
+      "query_valid": true,
+      "base": "K?ABC",
+      "modifier": null,
+      "dupe_identity": "K?ABC",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "W1?/P",
+      "logging_valid": false,
+      "query_valid": true,
+      "base": "W1?",
+      "modifier": "P",
+      "dupe_identity": "W1?",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "DL/W1AW12345",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "W1AW12345",
+      "modifier": "DL",
+      "dupe_identity": "W1AW12345",
+      "wpx_prefix": "DL0",
+      "dxcc": { "adif": 230, "primary_prefix": "DL" }
+    },
+    {
+      "input": "DL/W1AW123456",
+      "logging_valid": false,
+      "query_valid": false,
+      "base": "W1AW123456",
+      "modifier": "DL",
+      "dupe_identity": "W1AW123456",
+      "wpx_prefix": "DL0",
+      "dxcc": { "adif": 230, "primary_prefix": "DL" }
+    },
+    {
+      "input": "",
+      "logging_valid": false,
+      "query_valid": false,
+      "base": "",
+      "modifier": null,
+      "dupe_identity": "",
+      "wpx_prefix": null,
+      "dxcc": null
+    },
+    {
+      "input": "VE3/NG4M",
+      "logging_valid": true,
+      "query_valid": true,
+      "base": "NG4M",
+      "modifier": "VE3",
+      "dupe_identity": "NG4M",
+      "wpx_prefix": "VE3",
+      "dxcc": { "adif": 249, "primary_prefix": "CY0" }
+    }
+  ]
+}

@@ -4,6 +4,7 @@ mod bandmap;
 mod bands;
 mod blocking;
 mod cabrillo;
+mod callsign;
 mod client_radios;
 mod contest_rules;
 mod db;

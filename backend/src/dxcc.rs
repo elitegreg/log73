@@ -1,14 +1,15 @@
+use crate::callsign::normalize as normalize_callsign;
 use csv::{ReaderBuilder, StringRecord};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{fs::File, io::Read, path::Path};
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct DxccDatabase {
     pub entities: Vec<DxccEntity>,
     pub rules: Vec<DxccRule>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DxccEntity {
     pub country_name: String,
     pub adif: u16,
@@ -22,16 +23,22 @@ pub struct DxccEntity {
     pub waedc_cq_list: bool,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DxccRule {
     pub pattern: String,
     pub exact: bool,
     pub entity_index: usize,
+    #[serde(default)]
     pub cq_zone: Option<u8>,
+    #[serde(default)]
     pub itu_zone: Option<u8>,
+    #[serde(default)]
     pub continent: Option<String>,
+    #[serde(default)]
     pub latitude: Option<f64>,
+    #[serde(default)]
     pub longitude: Option<f64>,
+    #[serde(default)]
     pub utc_offset: Option<f64>,
 }
 
@@ -278,10 +285,6 @@ fn prefix_from_component(component: &str) -> Option<String> {
         .take(2)
         .collect::<String>();
     (letters.len() == 2).then(|| format!("{letters}0"))
-}
-
-fn normalize_callsign(callsign: &str) -> String {
-    callsign.trim().to_uppercase()
 }
 
 fn split_slash_callsign(callsign: &str) -> Option<(&str, &str)> {
@@ -549,6 +552,29 @@ K,United States,291,NA,5,8,38.00,97.00,5.0,K N W =GM0AVR;
                 .adif,
             247
         );
+    }
+
+    #[test]
+    fn shared_fixture_matches_wpx_prefix_and_lookup() {
+        let fixture = crate::callsign::load_fixture();
+        assert_eq!(fixture.version, 1);
+        for case in &fixture.cases {
+            assert_eq!(
+                callsign_prefix(&case.input),
+                case.wpx_prefix,
+                "WPX prefix for {:?}",
+                case.input
+            );
+            let actual = fixture
+                .dxcc_db
+                .lookup(&case.input)
+                .map(|info| (info.adif, info.primary_prefix));
+            let expected = case
+                .dxcc
+                .as_ref()
+                .map(|dxcc| (dxcc.adif, dxcc.primary_prefix.clone()));
+            assert_eq!(actual, expected, "DXCC lookup for {:?}", case.input);
+        }
     }
 
     #[test]

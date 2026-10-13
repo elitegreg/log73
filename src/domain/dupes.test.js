@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { loadCallsignFixture } from '../../tests/fixtures/domain/loadFixture.js';
+import { dupeIdentity } from './callsign.js';
 import { dupeAlertText, dupeAlertTextForAdif } from './dupes.js';
 
 const settings = {
@@ -105,6 +107,42 @@ test('dupeAlertText normalizes callsigns and canonical field values like scoring
       contact({ CALL: 'k1abc/p', BAND: '20m', MODE: 'cw' }),
       [contact({ CALL: 'K1ABC', BAND: '20M', MODE: 'CW' })],
     ),
+    'Dupe',
+  );
+});
+
+test('shared fixture dupe identities match', () => {
+  const fixture = loadCallsignFixture();
+  assert.equal(fixture.version, 1);
+  for (const kase of fixture.cases) {
+    assert.equal(
+      dupeIdentity(kase.input),
+      kase.dupe_identity,
+      `identity for ${kase.input}`,
+    );
+  }
+});
+
+test('dupeAlertText distinguishes operators sharing an operating prefix', () => {
+  const prefixSettings = {
+    scoring: { dupe_key: ['CALL', 'BAND', 'MODE'] },
+  };
+  const currentContact = contact({
+    CALL: 'VE3/K1ABC',
+    BAND: '20m',
+    MODE: 'CW',
+  });
+
+  assert.equal(
+    dupeAlertText(prefixSettings, currentContact, [
+      contact({ CALL: 'VE3/N2XYZ', BAND: '20m', MODE: 'CW' }),
+    ]),
+    '',
+  );
+  assert.equal(
+    dupeAlertText(prefixSettings, currentContact, [
+      contact({ CALL: 'K1ABC', BAND: '20m', MODE: 'CW' }),
+    ]),
     'Dupe',
   );
 });

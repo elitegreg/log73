@@ -1,5 +1,16 @@
+import {
+  STRUCTURE_EDGE_SLASH,
+  STRUCTURE_INVALID_CHARACTER,
+  STRUCTURE_TOO_MANY_SLASHES,
+  checkCallsignStructure,
+  isCallsignLike,
+  normalizeCallsign,
+  parseCallsign,
+} from './callsign.js';
 import { parseFieldInput } from './contactFields.js';
 import { modeIsCw } from './modes.js';
+
+const MAX_CALLSIGN_LENGTH = 12;
 
 export function fieldValueLabel(field) {
   return field?.label ?? field?.key ?? field?.id ?? 'Field';
@@ -67,46 +78,52 @@ function validateSingleValue(field, value, radioMode) {
   return { ok: true, error: '' };
 }
 
-export function validateCallsign(value) {
-  const normalizedValue = String(value ?? '')
-    .trim()
-    .toUpperCase();
+export function validateCallsign(value, allowQuery = false) {
+  const normalizedValue = normalizeCallsign(value);
 
   if (normalizedValue === '') {
     return { ok: false, error: 'Callsign is required.' };
   }
 
-  if (!/^[A-Z0-9/?]+$/.test(normalizedValue)) {
+  if ([...normalizedValue].length > MAX_CALLSIGN_LENGTH) {
+    return {
+      ok: false,
+      error: `Callsign must be at most ${MAX_CALLSIGN_LENGTH} characters.`,
+    };
+  }
+
+  const structureError = checkCallsignStructure(normalizedValue, true);
+  if (structureError === STRUCTURE_INVALID_CHARACTER) {
     return {
       ok: false,
       error: "Callsign can only contain A-Z, 0-9, '/', and '?'.",
     };
   }
 
-  if (normalizedValue.includes('?')) {
+  if (!allowQuery && normalizedValue.includes('?')) {
     return {
       ok: false,
       error: "Callsign cannot contain '?' when logging.",
     };
   }
 
-  const slashCount = [...normalizedValue].filter(
-    (character) => character === '/',
-  ).length;
-  if (slashCount > 1) {
+  if (structureError === STRUCTURE_TOO_MANY_SLASHES) {
     return { ok: false, error: 'Callsign can contain at most one slash.' };
   }
 
-  if (normalizedValue.startsWith('/') || normalizedValue.endsWith('/')) {
+  if (structureError === STRUCTURE_EDGE_SLASH) {
     return {
       ok: false,
       error: 'Callsign slash must be in the middle, not at the ends.',
     };
   }
 
-  const secondCharacter = normalizedValue[1] ?? '';
-  const thirdCharacter = normalizedValue[2] ?? '';
-  if (!/\d/.test(secondCharacter) && !/\d/.test(thirdCharacter)) {
+  // The digit rule applies to the resolved base station (so DL/W1AW is
+  // judged by W1AW), not to the complete input. In query mode a base
+  // containing `?` wildcards bypasses the digit rule: the query is partial.
+  const { base } = parseCallsign(value);
+  const wildcardQuery = allowQuery && (base ?? '').includes('?');
+  if (!wildcardQuery && !isCallsignLike(base ?? '')) {
     return {
       ok: false,
       error: 'Callsign must have a digit in the 2nd or 3rd character.',

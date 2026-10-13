@@ -1126,40 +1126,34 @@ fn validate_required_text(label: &str, value: &str, max_length: usize) -> Result
 
 fn validate_callsign(label: &str, value: &str, allow_query: bool) -> Result<(), String> {
     validate_required_text(label, value, MAX_CALLSIGN_LEN)?;
-    let value = value.trim().to_uppercase();
+    let parts = crate::callsign::parse(value);
 
-    if !value.chars().all(|character| {
-        character.is_ascii_uppercase()
-            || character.is_ascii_digit()
-            || character == '/'
-            || (allow_query && character == '?')
-    }) {
-        let allowed = if allow_query {
-            "A-Z, 0-9, '/', and '?'"
-        } else {
-            "A-Z, 0-9, and '/'"
-        };
-        return Err(format!("{label} can only contain {allowed}"));
+    match crate::callsign::check_structure(&parts.normalized, allow_query) {
+        Ok(()) => {}
+        Err(crate::callsign::StructureError::InvalidCharacter) => {
+            let allowed = if allow_query {
+                "A-Z, 0-9, '/', and '?'"
+            } else {
+                "A-Z, 0-9, and '/'"
+            };
+            return Err(format!("{label} can only contain {allowed}"));
+        }
+        Err(crate::callsign::StructureError::TooManySlashes) => {
+            return Err(format!("{label} can contain at most one slash"));
+        }
+        Err(crate::callsign::StructureError::EdgeSlash) => {
+            return Err(format!(
+                "{label} slash must be in the middle, not at the ends"
+            ));
+        }
     }
 
-    if !allow_query && value.contains('?') {
-        return Err(format!("{label} cannot contain '?'"));
-    }
-
-    let slash_count = value.chars().filter(|character| *character == '/').count();
-    if slash_count > 1 {
-        return Err(format!("{label} can contain at most one slash"));
-    }
-    if value.starts_with('/') || value.ends_with('/') {
-        return Err(format!(
-            "{label} slash must be in the middle, not at the ends"
-        ));
-    }
-
-    let characters = value.chars().collect::<Vec<_>>();
-    let second_character = characters.get(1).copied().unwrap_or_default();
-    let third_character = characters.get(2).copied().unwrap_or_default();
-    if !second_character.is_ascii_digit() && !third_character.is_ascii_digit() {
+    // The digit rule applies to the resolved base station (so DL/W1AW is
+    // judged by W1AW), not to the complete input. In query mode a base
+    // containing `?` wildcards bypasses the digit rule: the query is partial.
+    let base = parts.base.as_deref().unwrap_or_default();
+    let wildcard_query = allow_query && base.contains('?');
+    if !wildcard_query && !crate::callsign::is_callsign_like(base) {
         return Err(format!(
             "{label} must have a digit in the 2nd or 3rd character"
         ));
@@ -1555,6 +1549,26 @@ mod tests {
         assert!(validate_callsign("station callsign", "K1ABC/4", false).is_ok());
         assert!(validate_callsign("operator callsign", "N0CALL/M", false).is_ok());
         assert!(validate_callsign("callsign", "W1AW/4", false).is_ok());
+    }
+
+    #[test]
+    fn shared_fixture_matches_logging_and_query_validity() {
+        let fixture = crate::callsign::load_fixture();
+        assert_eq!(fixture.version, 1);
+        for case in &fixture.cases {
+            assert_eq!(
+                validate_callsign("callsign", &case.input, false).is_ok(),
+                case.logging_valid,
+                "logging validity for {:?}",
+                case.input
+            );
+            assert_eq!(
+                validate_callsign("callsign", &case.input, true).is_ok(),
+                case.query_valid,
+                "query validity for {:?}",
+                case.input
+            );
+        }
     }
 
     #[test]

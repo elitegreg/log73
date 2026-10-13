@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { loadCallsignFixture } from '../../tests/fixtures/domain/loadFixture.js';
 import {
   callsignPrefix,
   dxccContinent,
@@ -127,6 +128,24 @@ test('callsignPrefix follows WPX prefix rules', () => {
     ['?', null],
   ]) {
     assert.equal(callsignPrefix(callsign), expected, callsign);
+  }
+});
+
+test('shared fixture WPX prefixes and DXCC lookups match', () => {
+  const fixture = loadCallsignFixture();
+  assert.equal(fixture.version, 1);
+  for (const kase of fixture.cases) {
+    assert.equal(
+      callsignPrefix(kase.input),
+      kase.wpx_prefix,
+      `WPX prefix for ${kase.input}`,
+    );
+    const info = lookupDxcc(fixture.dxcc_db, kase.input);
+    const actual =
+      info === null
+        ? null
+        : { adif: info.adif, primary_prefix: info.primary_prefix };
+    assert.deepEqual(actual, kase.dxcc, `DXCC lookup for ${kase.input}`);
   }
 });
 

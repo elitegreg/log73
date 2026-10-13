@@ -925,10 +925,7 @@ fn normalized_field_value(field: &str, value: &str) -> String {
 }
 
 fn normalized_callsign(callsign: &str) -> String {
-    callsign
-        .split_once('/')
-        .map(|(base, _)| base.to_string())
-        .unwrap_or_else(|| callsign.to_string())
+    crate::callsign::dupe_identity(callsign)
 }
 
 fn scored_i64(contact: &Contact, field: &str) -> i64 {
@@ -2168,6 +2165,64 @@ mod tests {
             field_value(&empty, &rules, "WPX_PREFIX").as_deref(),
             Some("W7")
         );
+    }
+
+    #[test]
+    fn shared_fixture_matches_scoring_dupe_identity() {
+        let fixture = crate::callsign::load_fixture();
+        assert_eq!(fixture.version, 1);
+        for case in &fixture.cases {
+            assert_eq!(
+                normalized_callsign(&case.input),
+                case.dupe_identity,
+                "dupe identity for {:?}",
+                case.input
+            );
+        }
+    }
+
+    #[test]
+    fn portable_prefix_stations_score_independently_and_repeats_dupe() {
+        let rules = test_rules(
+            mode_points(),
+            vec!["CALL", "BAND", "MODE"],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut contacts = vec![
+            contact(vec![
+                ("CALL", json!("VE3/K1ABC")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+            ]),
+            contact(vec![
+                ("CALL", json!("VE3/N2XYZ")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+            ]),
+            contact(vec![
+                ("CALL", json!("VE3/K1ABC")),
+                ("BAND", json!("20m")),
+                ("MODE", json!("CW")),
+            ]),
+        ];
+
+        let totals = score_contacts(&rules, Value::Null, &mut contacts);
+
+        assert_eq!(totals.qso_count, 3);
+        assert_eq!(totals.qso_points, 4);
+        assert_eq!(
+            contact_meta_value(&contacts[0], "dupe"),
+            Some(&json!(false))
+        );
+        assert_eq!(
+            contact_meta_value(&contacts[1], "dupe"),
+            Some(&json!(false))
+        );
+        assert_eq!(contact_meta_value(&contacts[2], "dupe"), Some(&json!(true)));
+        assert_eq!(contact_meta_value(&contacts[2], "pts"), Some(&json!(0)));
     }
 
     #[test]

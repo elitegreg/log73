@@ -1,8 +1,4 @@
-function normalizeCallsign(callsign) {
-  return String(callsign ?? '')
-    .trim()
-    .toUpperCase();
-}
+import { normalizeCallsign } from './callsign.js';
 
 export function callsignPrefix(callsign) {
   const normalized = normalizeCallsign(callsign);

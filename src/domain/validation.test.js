@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { loadCallsignFixture } from '../../tests/fixtures/domain/loadFixture.js';
 import {
   fieldValueLabel,
   validateCallsign,
@@ -29,6 +30,39 @@ test('validateCallsign enforces logging rules', () => {
   assert.equal(validateCallsign('K1ABC/').ok, false);
   assert.equal(validateCallsign('K1/A/BC').ok, false);
   assert.equal(validateCallsign('KABC').ok, false);
+});
+
+test('validateCallsign accepts portable prefixes and enforces length', () => {
+  for (const input of ['DL/W1AW', 'F/W1AW', 'PA/W1AW', 'EA/W1AW', 'G/W1AW']) {
+    assert.equal(validateCallsign(input).ok, true, input);
+  }
+  assert.equal(validateCallsign('DL/W1AW12345').ok, true);
+  assert.equal(validateCallsign('DL/W1AW123456').ok, false);
+});
+
+test('validateCallsign query mode tolerates wildcards', () => {
+  assert.equal(validateCallsign('W1?', true).ok, true);
+  assert.equal(validateCallsign('K?ABC', true).ok, true);
+  assert.equal(validateCallsign('W1ABC', true).ok, true);
+  assert.equal(validateCallsign('K1/A/BC', true).ok, false);
+  assert.equal(validateCallsign('KABC', true).ok, false);
+});
+
+test('shared fixture logging and query validity match', () => {
+  const fixture = loadCallsignFixture();
+  assert.equal(fixture.version, 1);
+  for (const kase of fixture.cases) {
+    assert.equal(
+      validateCallsign(kase.input).ok,
+      kase.logging_valid,
+      `logging validity for ${kase.input}`,
+    );
+    assert.equal(
+      validateCallsign(kase.input, true).ok,
+      kase.query_valid,
+      `query validity for ${kase.input}`,
+    );
+  }
 });
 
 test('validateExchangeField requires non-empty values', () => {

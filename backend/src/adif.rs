@@ -622,6 +622,26 @@ mod tests {
     }
 
     #[test]
+    fn render_log_preserves_portable_callsign() {
+        let mut contact = test_contact();
+        crate::db::set_contact_adif(&mut contact, "CALL", json!("VE3/K1ABC"));
+
+        let text = render_log(&test_log(), &[contact]).expect("ADIF export should render");
+
+        assert!(text.contains("<CALL:9>VE3/K1ABC"));
+    }
+
+    #[test]
+    fn parse_records_preserves_portable_callsign() {
+        let records = parse_records("<CALL:9>VE3/K1ABC<EOR>").expect("ADIF should parse");
+
+        assert_eq!(
+            records[0].fields.get("CALL").map(String::as_str),
+            Some("VE3/K1ABC")
+        );
+    }
+
+    #[test]
     fn render_log_maps_cw_reverse_to_adif_cw() {
         let mut contact = test_contact();
         crate::db::set_contact_adif(&mut contact, "MODE", json!("CW-R"));
