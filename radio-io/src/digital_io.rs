@@ -256,10 +256,10 @@ impl DigitalIoManager {
             let listener = listeners
                 .get(&radio_id)
                 .ok_or_else(|| format!("radio {radio_id} has no open logger"))?;
-            if !listener
+            if listener
                 .target
                 .as_ref()
-                .is_some_and(|target| target.logger_id == logger_id)
+                .is_none_or(|target| target.logger_id != logger_id)
             {
                 return Err("digital I/O is not enabled for this logger".to_string());
             }
@@ -318,10 +318,10 @@ impl DigitalIoManager {
             let listener = listeners
                 .get(&radio_id)
                 .ok_or_else(|| format!("radio {radio_id} has no open logger"))?;
-            if !listener
+            if listener
                 .target
                 .as_ref()
-                .is_some_and(|target| target.logger_id == logger_id)
+                .is_none_or(|target| target.logger_id != logger_id)
             {
                 return Err("digital I/O is not enabled for this logger".to_string());
             }

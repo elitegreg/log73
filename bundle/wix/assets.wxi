@@ -464,8 +464,6 @@
       <Component Id='AssetComponenta00f7fd93580fe1c' Guid='*'>
         <File Id='AssetFilea00f7fd93580fe1c' Name='MASTER.SCP' Source='$(var.CargoTargetBinDir)\..\..\..\data\MASTER.SCP' KeyPath='yes'/>
       </Component>
-      <Directory Id='AssetDirectoryaa8607469cbc49b9' Name='voicekeyer'>
-      </Directory>
     </Directory>
   </DirectoryRef>
   <ComponentGroup Id='PackageAssets'>

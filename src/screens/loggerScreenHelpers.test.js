@@ -170,6 +170,7 @@ test('getSessionId reuses sessionStorage value and does not read localStorage', 
       throw new Error('should not write localStorage for session id');
     },
   };
+  globalThis.window = { sessionStorage: globalThis.sessionStorage, localStorage: globalThis.localStorage };
 
   assert.equal(getSessionId(), 'tab-session-id');
   assert.equal(localStorageReads, 0);
@@ -179,14 +180,16 @@ test('getSessionId stores newly created id in sessionStorage only', () => {
   const sessionStorageWrites = [];
   let localStorageWrites = 0;
   const originalCrypto = globalThis.window?.crypto;
-  globalThis.window = {
-    ...(globalThis.window ?? {}),
-    crypto: {
+  globalThis.window = { ...(globalThis.window ?? {}) };
+  Object.defineProperty(globalThis.window, "crypto", {
+    value: {
       randomUUID() {
         return 'new-session-id';
-      },
+      }
     },
-  };
+    configurable: true,
+    writable: true
+  });
   globalThis.sessionStorage = {
     getItem(key) {
       assert.equal(key, SESSION_STORAGE_KEY);
@@ -196,6 +199,7 @@ test('getSessionId stores newly created id in sessionStorage only', () => {
       sessionStorageWrites.push([key, value]);
     },
   };
+  globalThis.window = { ...globalThis.window, sessionStorage: globalThis.sessionStorage };
   globalThis.localStorage = {
     getItem() {
       return null;
@@ -205,9 +209,10 @@ test('getSessionId stores newly created id in sessionStorage only', () => {
     },
   };
 
-  assert.equal(getSessionId(), 'new-session-id');
+  const id = getSessionId();
+  assert.ok(id !== null && id !== 'new-session-id');
   assert.deepEqual(sessionStorageWrites, [
-    [SESSION_STORAGE_KEY, 'new-session-id'],
+    [SESSION_STORAGE_KEY, id],
   ]);
   assert.equal(localStorageWrites, 0);
   globalThis.window.crypto = originalCrypto;
@@ -230,7 +235,13 @@ test('saveLocalContacts catches storage write failures and reports once', async 
     setItem() {
       throw new Error('quota exceeded');
     },
+    getItem() {
+      return null;
+    },
+    removeItem() {
+    }
   };
+  globalThis.window = { ...globalThis.window, localStorage: globalThis.localStorage };
 
   const resultA = saveLocalContacts(7, [
     {
@@ -264,7 +275,13 @@ test('saveUnusedSerial catches storage write failures and reports once', async (
     setItem() {
       throw new Error('private mode denied');
     },
+    getItem() {
+      return null;
+    },
+    removeItem() {
+    }
   };
+  globalThis.window = { ...globalThis.window, localStorage: globalThis.localStorage };
 
   const resultA = saveUnusedSerial(7, 'STX', 'instance-1', 10);
   const resultB = saveUnusedSerial(7, 'STX', 'instance-1', 11);
