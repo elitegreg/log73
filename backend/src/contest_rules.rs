@@ -1771,8 +1771,8 @@ fn derive_qso_table(contest: &ContestRules) -> QsoTable {
                 source: QsoColumnSource::Adif,
                 field: field.adif.clone(),
                 format: QsoColumnFormat::Text,
-                editable: !field.fixed
-                    && !(field.direction == ExchangeDirection::Sent
+                editable: !(field.fixed
+                    || field.direction == ExchangeDirection::Sent
                         && field.input.kind == FieldInputKind::Serial),
             });
         }
