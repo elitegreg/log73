@@ -651,7 +651,6 @@ pub(crate) fn app_router(app_state: AppState, radio_io: radio_io::RadioWebSocket
         .route("/radiows", get(radio_io::radio_ws_handler))
         .fallback(static_assets::static_handler)
         .layer(axum::Extension(radio_io))
-        .layer(middleware::from_fn(diagnostics::request_timing))
         .layer(middleware::from_fn_with_state(
             AuthMiddlewareState {
                 db: app_state.db.clone(),
@@ -659,6 +658,7 @@ pub(crate) fn app_router(app_state: AppState, radio_io: radio_io::RadioWebSocket
             },
             cached_basic_auth,
         ))
+        .layer(middleware::from_fn(diagnostics::request_timing))
         .with_state(app_state)
 }
 
