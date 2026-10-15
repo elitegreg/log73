@@ -541,6 +541,32 @@ async fn main() {
     spawn_dxcluster_bandmap_bridge(app_state.dxcluster.clone(), app_state.bandmap.clone());
     spawn_client_radio_expiration_task(app_state.client_radios.clone());
 
+    let radio_io = app_state.radio_io.clone();
+    let app = app_router(app_state.clone(), radio_io);
+
+    let listener = tokio::net::TcpListener::bind(&cli.bind)
+        .await
+        .unwrap_or_else(|error| panic!("failed to bind backend to {}: {error}", cli.bind));
+
+    let auth_config = auth_config_or_disabled(app_state.db.auth_config().await);
+    if !auth::is_auth_enabled(&auth_config) {
+        info!(
+            address = %cli.bind,
+            "authentication is disabled; binding publicly allows unrestricted access"
+        );
+    }
+
+    info!(
+        address = %cli.bind,
+        "log73 backend listening; radio connections are lazy"
+    );
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("server failed");
+}
+
+pub(crate) fn app_router(app_state: AppState, radio_io: radio_io::RadioWebSocketState) -> Router {
     let api = Router::new()
         .route("/contest-rules", get(list_contest_rules))
         .route("/contest-settings", get(contest_settings))
@@ -619,12 +645,11 @@ async fn main() {
         .route("/radios/{id}/cw-labels", get(cw_labels))
         .route("/radios/{id}/message-labels", get(message_labels));
 
-    let app = Router::new()
+    Router::new()
         .nest("/api", api)
         .route("/ws", get(ws_handler))
         .route("/radiows", get(radio_io::radio_ws_handler))
         .fallback(static_assets::static_handler)
-        .with_state(app_state.clone())
         .layer(axum::Extension(radio_io))
         .layer(middleware::from_fn_with_state(
             AuthMiddlewareState {
@@ -633,20 +658,8 @@ async fn main() {
             },
             cached_basic_auth,
         ))
-        .layer(middleware::from_fn(diagnostics::request_timing));
-
-    let listener = tokio::net::TcpListener::bind(&cli.bind)
-        .await
-        .unwrap_or_else(|error| panic!("failed to bind backend to {}: {error}", cli.bind));
-
-    info!(
-        address = %cli.bind,
-        "log73 backend listening; radio connections are lazy"
-    );
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .expect("server failed");
+        .layer(middleware::from_fn(diagnostics::request_timing))
+        .with_state(app_state)
 }
 
 async fn cached_basic_auth(
@@ -3013,8 +3026,39 @@ mod tests {
             .expect("bundled contest rules should load")
     }
 
-    pub(crate) fn cache_test_state() -> AppState {
+    pub(crate) fn cache_test_state_with_auth(auth_config: AuthConfig) -> AppState {
         let db = Database::open(":memory:").unwrap();
+
+        std::thread::spawn({
+            let db = db.clone();
+            let auth_config = auth_config.clone();
+            move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                let view = rt.block_on(db.config_view()).unwrap();
+                rt.block_on(db.update_config(db::UpdateConfig {
+                    iaru_region: view.iaru_region,
+                    login_user: auth_config.login_user.clone(),
+                    login_password: if auth_config.login_password.is_empty() {
+                        db::LoginPasswordUpdate::Disable
+                    } else {
+                        db::LoginPasswordUpdate::Set(auth_config.login_password.clone())
+                    },
+                    dxcluster_enabled: view.dxcluster_enabled,
+                    dxcluster_host: view.dxcluster_host,
+                    dxcluster_port: view.dxcluster_port,
+                    dxcluster_callsign: view.dxcluster_callsign,
+                    dxcluster_max_age_min: view.dxcluster_max_age_min,
+                    dxcluster_commands: view.dxcluster_commands,
+                }))
+                .unwrap();
+            }
+        })
+        .join()
+        .unwrap();
+
         let contest_rules = bundled_rules();
         let data_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../data");
         let bands =
@@ -3052,10 +3096,7 @@ mod tests {
             blocking_work,
             config_update_lock: Default::default(),
             client_radios: Default::default(),
-            auth: auth::AuthService::new(AuthConfig {
-                login_user: String::new(),
-                login_password: String::new(),
-            }),
+            auth: auth::AuthService::new(auth_config),
             user_data_dir: data_dir.clone(),
             installed_data_dir: data_dir,
             log_cache,
@@ -3065,6 +3106,133 @@ mod tests {
             supercheckpartial,
             dxcc,
             dxcluster: DxClusterManager::new(),
+        }
+    }
+
+    pub(crate) fn cache_test_state() -> AppState {
+        cache_test_state_with_auth(AuthConfig {
+            login_user: String::new(),
+            login_password: String::new(),
+        })
+    }
+
+    fn auth_test_state() -> AppState {
+        cache_test_state_with_auth(AuthConfig {
+            login_user: "user".to_string(),
+            login_password: auth::hash_password("pass").unwrap(),
+        })
+    }
+
+    mod auth_router_tests {
+        use super::*;
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode, header};
+        use tower::ServiceExt;
+
+        fn auth_header(user: &str, pass: &str) -> String {
+            use base64::Engine;
+            let credentials = format!("{}:{}", user, pass);
+            format!(
+                "Basic {}",
+                base64::engine::general_purpose::STANDARD.encode(credentials)
+            )
+        }
+
+        #[tokio::test]
+        async fn router_rejects_unauthenticated_requests_when_auth_enabled() {
+            let state = auth_test_state();
+            let radio_io = state.radio_io.clone();
+            let app = app_router(state, radio_io);
+
+            let endpoints = vec!["/api/modes", "/ws", "/radiows", "/", "/help/"];
+
+            for endpoint in endpoints {
+                let request = Request::builder()
+                    .uri(endpoint)
+                    .body(Body::empty())
+                    .unwrap();
+
+                let response = app.clone().oneshot(request).await.unwrap();
+                assert_eq!(
+                    response.status(),
+                    StatusCode::UNAUTHORIZED,
+                    "Failed on endpoint {}",
+                    endpoint
+                );
+                assert_eq!(
+                    response.headers().get(header::WWW_AUTHENTICATE).unwrap(),
+                    "Basic realm=\"Log73\""
+                );
+            }
+        }
+
+        #[tokio::test]
+        async fn router_accepts_authenticated_requests_when_auth_enabled() {
+            let state = auth_test_state();
+            let radio_io = state.radio_io.clone();
+            let app = app_router(state, radio_io);
+
+            let endpoints = vec!["/api/modes", "/ws", "/radiows", "/", "/help/"];
+
+            for endpoint in endpoints {
+                let request = Request::builder()
+                    .uri(endpoint)
+                    .header(header::AUTHORIZATION, auth_header("user", "pass"))
+                    .body(Body::empty())
+                    .unwrap();
+
+                let response = app.clone().oneshot(request).await.unwrap();
+
+                if endpoint == "/ws" || endpoint == "/radiows" {
+                    assert_eq!(
+                        response.status(),
+                        StatusCode::BAD_REQUEST,
+                        "Failed on endpoint {}",
+                        endpoint
+                    );
+                } else {
+                    assert_eq!(
+                        response.status(),
+                        StatusCode::OK,
+                        "Failed on endpoint {}",
+                        endpoint
+                    );
+                }
+            }
+        }
+
+        #[tokio::test]
+        async fn router_allows_all_requests_when_auth_disabled() {
+            let state = cache_test_state();
+            let radio_io = state.radio_io.clone();
+            let app = app_router(state, radio_io);
+
+            let endpoints = vec!["/api/modes", "/ws", "/radiows", "/", "/help/"];
+
+            for endpoint in endpoints {
+                let request = Request::builder()
+                    .uri(endpoint)
+                    .body(Body::empty())
+                    .unwrap();
+
+                let response = app.clone().oneshot(request).await.unwrap();
+
+                if endpoint == "/ws" || endpoint == "/radiows" {
+                    assert_eq!(
+                        response.status(),
+                        StatusCode::BAD_REQUEST,
+                        "Failed on endpoint {}",
+                        endpoint
+                    );
+                } else {
+                    assert_eq!(
+                        response.status(),
+                        StatusCode::OK,
+                        "Failed on endpoint {}",
+                        endpoint
+                    );
+                }
+            }
         }
     }
 
