@@ -541,7 +541,8 @@ async fn main() {
     spawn_dxcluster_bandmap_bridge(app_state.dxcluster.clone(), app_state.bandmap.clone());
     spawn_client_radio_expiration_task(app_state.client_radios.clone());
 
-    let app = app_router(app_state.clone());
+    let radio_io = app_state.radio_io.clone();
+    let app = app_router(app_state.clone(), radio_io);
 
     let listener = tokio::net::TcpListener::bind(&cli.bind)
         .await
@@ -565,7 +566,7 @@ async fn main() {
         .expect("server failed");
 }
 
-pub(crate) fn app_router(app_state: AppState) -> Router {
+pub(crate) fn app_router(app_state: AppState, radio_io: radio_io::RadioWebSocketState) -> Router {
     let api = Router::new()
         .route("/contest-rules", get(list_contest_rules))
         .route("/contest-settings", get(contest_settings))
@@ -649,7 +650,7 @@ pub(crate) fn app_router(app_state: AppState) -> Router {
         .route("/ws", get(ws_handler))
         .route("/radiows", get(radio_io::radio_ws_handler))
         .fallback(static_assets::static_handler)
-        .layer(axum::Extension(app_state.radio_io.clone()))
+        .layer(axum::Extension(radio_io))
         .layer(middleware::from_fn(diagnostics::request_timing))
         .layer(middleware::from_fn_with_state(
             AuthMiddlewareState {
@@ -3037,23 +3038,22 @@ mod tests {
                     .build()
                     .unwrap();
                 let view = rt.block_on(db.config_view()).unwrap();
-                let _ = rt
-                    .block_on(db.update_config(db::UpdateConfig {
-                        iaru_region: view.iaru_region,
-                        login_user: auth_config.login_user.clone(),
-                        login_password: if auth_config.login_password.is_empty() {
-                            db::LoginPasswordUpdate::Disable
-                        } else {
-                            db::LoginPasswordUpdate::Set(auth_config.login_password.clone())
-                        },
-                        dxcluster_enabled: view.dxcluster_enabled,
-                        dxcluster_host: view.dxcluster_host,
-                        dxcluster_port: view.dxcluster_port,
-                        dxcluster_callsign: view.dxcluster_callsign,
-                        dxcluster_max_age_min: view.dxcluster_max_age_min,
-                        dxcluster_commands: view.dxcluster_commands,
-                    }))
-                    .unwrap();
+                rt.block_on(db.update_config(db::UpdateConfig {
+                    iaru_region: view.iaru_region,
+                    login_user: auth_config.login_user.clone(),
+                    login_password: if auth_config.login_password.is_empty() {
+                        db::LoginPasswordUpdate::Disable
+                    } else {
+                        db::LoginPasswordUpdate::Set(auth_config.login_password.clone())
+                    },
+                    dxcluster_enabled: view.dxcluster_enabled,
+                    dxcluster_host: view.dxcluster_host,
+                    dxcluster_port: view.dxcluster_port,
+                    dxcluster_callsign: view.dxcluster_callsign,
+                    dxcluster_max_age_min: view.dxcluster_max_age_min,
+                    dxcluster_commands: view.dxcluster_commands,
+                }))
+                .unwrap();
             }
         })
         .join()
@@ -3141,7 +3141,8 @@ mod tests {
         #[tokio::test]
         async fn router_rejects_unauthenticated_requests_when_auth_enabled() {
             let state = auth_test_state();
-            let app = app_router(state);
+            let radio_io = state.radio_io.clone();
+            let app = app_router(state, radio_io);
 
             let endpoints = vec!["/api/modes", "/ws", "/radiows", "/", "/help/"];
 
@@ -3168,7 +3169,8 @@ mod tests {
         #[tokio::test]
         async fn router_accepts_authenticated_requests_when_auth_enabled() {
             let state = auth_test_state();
-            let app = app_router(state);
+            let radio_io = state.radio_io.clone();
+            let app = app_router(state, radio_io);
 
             let endpoints = vec!["/api/modes", "/ws", "/radiows", "/", "/help/"];
 
@@ -3202,7 +3204,8 @@ mod tests {
         #[tokio::test]
         async fn router_allows_all_requests_when_auth_disabled() {
             let state = cache_test_state();
-            let app = app_router(state);
+            let radio_io = state.radio_io.clone();
+            let app = app_router(state, radio_io);
 
             let endpoints = vec!["/api/modes", "/ws", "/radiows", "/", "/help/"];
 
