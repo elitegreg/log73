@@ -363,7 +363,7 @@ fn unauthorized() -> Response {
         .into_response()
 }
 
-fn is_auth_enabled(config: &AuthConfig) -> bool {
+pub fn is_auth_enabled(config: &AuthConfig) -> bool {
     !config.login_user.trim().is_empty() && !config.login_password.is_empty()
 }
 
