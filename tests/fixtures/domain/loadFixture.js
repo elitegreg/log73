@@ -15,3 +15,21 @@ export function loadDupeKeysFixture() {
 export function loadConditionsFixture() {
   return JSON.parse(readFileSync(CONDITIONS_URL, 'utf8'));
 }
+
+export function loadModesFixture() {
+  return JSON.parse(
+    readFileSync(new URL('./modes.json', import.meta.url), 'utf8'),
+  );
+}
+
+export function loadMessageModesFixture() {
+  return JSON.parse(
+    readFileSync(new URL('./message-modes.json', import.meta.url), 'utf8'),
+  );
+}
+
+export function loadMessageEntriesFixture() {
+  return JSON.parse(
+    readFileSync(new URL('./message-entries.json', import.meta.url), 'utf8'),
+  );
+}

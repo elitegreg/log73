@@ -6,8 +6,6 @@ import {
 import { callsignPrefix } from '../domain/dxcc.js';
 import {
   LOGGER_MODE_OPTIONS,
-  adifModeForLoggerMode,
-  isSelectableMode,
   modeIsCw,
   modeIsDigital,
   modeIsPhone,
@@ -18,15 +16,6 @@ import {
   messageActionForConfig,
 } from '../domain/messages.js';
 
-export {
-  adifModeForLoggerMode,
-  isSelectableMode,
-  modeIsCw,
-  modeIsDigital,
-  modeIsPhone,
-};
-
-export const MODE_OPTIONS = LOGGER_MODE_OPTIONS;
 export const CW_WPM_STORAGE_KEY = 'log73.cw_wpm';
 export const ESM_ENABLED_STORAGE_KEY = 'log73.esm_enabled';
 export const BAND_MAP_ENABLED_STORAGE_KEY = 'log73.band_map_enabled';
@@ -61,8 +50,6 @@ export const EPOCH_MS_PER_SECOND = 1000;
 export const CALLSIGN_FIELD_WIDTH_CHARS = 13;
 export const CW_DIGITAL_CALLSIGN_CLEAR_THRESHOLD_HZ = 100;
 export const PHONE_CALLSIGN_CLEAR_THRESHOLD_HZ = 200;
-
-const PHONE_MODES = new Set(['SSB', 'FM', 'AM']);
 
 export function catIndicatorState(radioSocketStatus, catStatus) {
   if (radioSocketStatus !== 'connected') return 'disconnected';
@@ -241,7 +228,7 @@ export function formatFrequency(frequencyHz) {
 }
 
 export function callsignClearThresholdHz(mode) {
-  return PHONE_MODES.has(normalizeLoggerMode(mode))
+  return modeIsPhone(mode)
     ? PHONE_CALLSIGN_CLEAR_THRESHOLD_HZ
     : CW_DIGITAL_CALLSIGN_CLEAR_THRESHOLD_HZ;
 }
@@ -350,7 +337,7 @@ export function cwActionForMessage(config, mode, key) {
 export function availableModeOptions(settings = {}) {
   return settings?.mode_catalog?.length > 0
     ? settings.mode_catalog
-    : MODE_OPTIONS;
+    : LOGGER_MODE_OPTIONS;
 }
 
 export function typedModeFromCallsignInput(value, settings) {

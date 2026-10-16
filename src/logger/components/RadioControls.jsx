@@ -1,11 +1,11 @@
-import React from 'react';
-import { wsjtxTargetControlVisible } from '../../domain/wsjtx';
 import {
-  MODE_OPTIONS,
-  catIndicatorState,
+  LOGGER_MODE_OPTIONS,
   isSelectableMode,
   modeIsCw,
-} from '../mainWindowHelpers';
+} from '../../domain/modes.js';
+import React from 'react';
+import { wsjtxTargetControlVisible } from '../../domain/wsjtx';
+import { catIndicatorState } from '../mainWindowHelpers';
 
 function RadioControls({
   operatingMode,
@@ -38,8 +38,8 @@ function RadioControls({
 }) {
   const modeSelectable = isSelectableMode(radioMode);
   const modeOptions = modeSelectable
-    ? MODE_OPTIONS
-    : [...MODE_OPTIONS, radioMode].filter(Boolean);
+    ? LOGGER_MODE_OPTIONS
+    : [...LOGGER_MODE_OPTIONS, radioMode].filter(Boolean);
   const showWsjtXTarget = wsjtxTargetControlVisible(wsjtxEnabled, radioMode);
   const catIndicator = catIndicatorState(radioSocketStatus, catStatus);
   const catTitle =

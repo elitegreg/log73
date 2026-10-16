@@ -1,30 +1,24 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 import {
-  RUN_MESSAGE_MODE,
-  SEARCH_AND_POUNCE_MESSAGE_MODE,
   normalizeMessageMode,
   parseMessageModeSectionHeader,
 } from './messageModes.js';
+import { loadMessageModesFixture } from '../../tests/fixtures/domain/loadFixture.js';
 
-test('normalizeMessageMode accepts search-and-pounce aliases', () => {
-  assert.equal(normalizeMessageMode('run'), RUN_MESSAGE_MODE);
-  assert.equal(normalizeMessageMode('sp'), SEARCH_AND_POUNCE_MESSAGE_MODE);
-  assert.equal(
-    normalizeMessageMode('search_and_pounce'),
-    SEARCH_AND_POUNCE_MESSAGE_MODE,
-  );
-  assert.equal(
-    normalizeMessageMode('search and pounce'),
-    SEARCH_AND_POUNCE_MESSAGE_MODE,
-  );
+const fixture = loadMessageModesFixture();
+test('shared message mode contract has the supported schema and cases', () => {
+  assert.equal(fixture.version, 1);
+  assert.ok(fixture.normalization_cases.length > 0);
+  assert.ok(fixture.header_cases.length > 0);
 });
-
-test('parseMessageModeSectionHeader recognizes run and S&P headings', () => {
-  assert.equal(parseMessageModeSectionHeader('# RUN Messages'), 'run');
-  assert.equal(parseMessageModeSectionHeader('# S&P Messages'), 's&p');
-  assert.equal(
-    parseMessageModeSectionHeader('# Search and Pounce Messages'),
-    's&p',
-  );
-});
+for (const c of fixture.normalization_cases) {
+  test(`shared message mode: ${c.name}`, () => {
+    assert.equal(normalizeMessageMode(c.input), c.normalized);
+  });
+}
+for (const c of fixture.header_cases) {
+  test(`shared message header: ${c.name}`, () => {
+    assert.equal(parseMessageModeSectionHeader(c.input), c.mode);
+  });
+}

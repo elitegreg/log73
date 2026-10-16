@@ -1,3 +1,9 @@
+import {
+  adifModeForLoggerMode,
+  modeIsCw,
+  modeIsDigital,
+  modeIsPhone,
+} from '../domain/modes.js';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   buildSentExchange,
@@ -22,10 +28,6 @@ import {
   previousContactExchangeAutofill,
   formatFrequency,
   isFrequencyInput,
-  adifModeForLoggerMode,
-  modeIsCw,
-  modeIsDigital,
-  modeIsPhone,
   esmEnterAction,
   esmStateAfterCallsignEdit,
   bandForFrequency,

@@ -1,0 +1,758 @@
+{
+  "version": 1,
+  "parser_cases": [
+    {
+      "name": "sections-comments-and-order",
+      "config": "F1 Outside,IGNORE\n# comment\n\n# RUN Messages\nF1 Cq,CQ TEST\n# ordinary comment\nF5 His Call,{CALL}\n# S&P Messages\nF1 Qrl?,QRL?\n# RUN Messages\nF2 Exch,{EXCH}\n",
+      "entries": [
+        {
+          "mode": "run",
+          "key": "F1",
+          "label": "Cq",
+          "target": "CQ TEST"
+        },
+        {
+          "mode": "run",
+          "key": "F5",
+          "label": "His Call",
+          "target": "{CALL}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F1",
+          "label": "Qrl?",
+          "target": "QRL?"
+        },
+        {
+          "mode": "run",
+          "key": "F2",
+          "label": "Exch",
+          "target": "{EXCH}"
+        }
+      ]
+    },
+    {
+      "name": "padded-case-and-full-labels",
+      "config": "  # run messages \n  f5\t His  Call \t,  {CALL}  \nF6\tRepeat\tExchange,CQ, TEST, AGAIN\n# sp messages\nf12 Clear,{ action : Clear }",
+      "entries": [
+        {
+          "mode": "run",
+          "key": "F5",
+          "label": "His  Call",
+          "target": "{CALL}"
+        },
+        {
+          "mode": "run",
+          "key": "F6",
+          "label": "Repeat\tExchange",
+          "target": "CQ, TEST, AGAIN"
+        },
+        {
+          "mode": "s&p",
+          "key": "F12",
+          "label": "Clear",
+          "target": "{ action : Clear }"
+        }
+      ]
+    },
+    {
+      "name": "empty-labels-and-targets",
+      "config": "# RUN Messages\nF1,CQ\nF2   ,  \nF3 - ,\n# S&P Messages\nF4 ,,{CALL},\n",
+      "entries": [
+        {
+          "mode": "run",
+          "key": "F1",
+          "label": "",
+          "target": "CQ"
+        },
+        {
+          "mode": "run",
+          "key": "F2",
+          "label": "",
+          "target": ""
+        },
+        {
+          "mode": "run",
+          "key": "F3",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "s&p",
+          "key": "F4",
+          "label": "",
+          "target": ",{CALL},"
+        }
+      ]
+    },
+    {
+      "name": "malformed-lines-and-permissive-keys",
+      "config": "# RUN Messages\nmissing comma\n,CQ\n ,CQ\nX1 Wrong,CQ\nF13 Extra,CQ\nFoo Text,TEXT\nF Bare,BARE\nF1 First,ONE\nF1 Second,TWO\n",
+      "entries": [
+        {
+          "mode": "run",
+          "key": "F13",
+          "label": "Extra",
+          "target": "CQ"
+        },
+        {
+          "mode": "run",
+          "key": "FOO",
+          "label": "Text",
+          "target": "TEXT"
+        },
+        {
+          "mode": "run",
+          "key": "F",
+          "label": "Bare",
+          "target": "BARE"
+        },
+        {
+          "mode": "run",
+          "key": "F1",
+          "label": "First",
+          "target": "ONE"
+        },
+        {
+          "mode": "run",
+          "key": "F1",
+          "label": "Second",
+          "target": "TWO"
+        }
+      ]
+    },
+    {
+      "name": "crlf-and-unterminated-final-line",
+      "config": "# RUN Messages\r\nF1 Cq,CQ\r\n\r\n# Search and Pounce Messages\r\nF2 Exch,{EXCH}",
+      "entries": [
+        {
+          "mode": "run",
+          "key": "F1",
+          "label": "Cq",
+          "target": "CQ"
+        },
+        {
+          "mode": "s&p",
+          "key": "F2",
+          "label": "Exch",
+          "target": "{EXCH}"
+        }
+      ]
+    },
+    {
+      "name": "mixed-line-endings",
+      "config": "# RUN Messages\r\nF1 Cq,CQ\n# S&P Messages\r\nF2 Exch,{EXCH}\n",
+      "entries": [
+        {
+          "mode": "run",
+          "key": "F1",
+          "label": "Cq",
+          "target": "CQ"
+        },
+        {
+          "mode": "s&p",
+          "key": "F2",
+          "label": "Exch",
+          "target": "{EXCH}"
+        }
+      ]
+    },
+    {
+      "name": "no-section",
+      "config": "F1 Before,CQ\n# unrecognized section\nF2 After,CQ",
+      "entries": []
+    },
+    {
+      "name": "header-detection-precedes-entry-parsing",
+      "config": "# S&P Messages\nF1 Label,RUN MESSAGES\nF2 After,CQ\nF3 Label,S&P MESSAGES\nF4 After,QRL?",
+      "entries": [
+        {
+          "mode": "run",
+          "key": "F2",
+          "label": "After",
+          "target": "CQ"
+        },
+        {
+          "mode": "s&p",
+          "key": "F4",
+          "label": "After",
+          "target": "QRL?"
+        }
+      ]
+    },
+    {
+      "name": "empty",
+      "config": "",
+      "entries": []
+    },
+    {
+      "name": "missing",
+      "config": null,
+      "entries": []
+    }
+  ],
+  "action_cases": [
+    {
+      "name": "clear",
+      "template": "{Action:Clear}",
+      "action": "Clear"
+    },
+    {
+      "name": "case-and-whitespace",
+      "template": " \t{ aCtIoN :  Clear  } \n",
+      "action": "Clear"
+    },
+    {
+      "name": "unknown-action-name",
+      "template": "{Action:Custom}",
+      "action": "Custom"
+    },
+    {
+      "name": "colon-in-value",
+      "template": "{Action:Custom:Value}",
+      "action": "Custom:Value"
+    },
+    {
+      "name": "spaces-in-value",
+      "template": "{Action:Custom Value}",
+      "action": "Custom Value"
+    },
+    {
+      "name": "newline-in-value",
+      "template": "{Action:Custom\nValue}",
+      "action": "Custom\nValue"
+    },
+    {
+      "name": "empty-value",
+      "template": "{Action:}",
+      "action": null
+    },
+    {
+      "name": "blank-value",
+      "template": "{Action: \t }",
+      "action": null
+    },
+    {
+      "name": "missing-value",
+      "template": "{Action}",
+      "action": null
+    },
+    {
+      "name": "wrong-token",
+      "template": "{CALL}",
+      "action": null
+    },
+    {
+      "name": "wrong-name",
+      "template": "{Other:Clear}",
+      "action": null
+    },
+    {
+      "name": "literal",
+      "template": "CQ TEST",
+      "action": null
+    },
+    {
+      "name": "prefix",
+      "template": "CQ {Action:Clear}",
+      "action": null
+    },
+    {
+      "name": "suffix",
+      "template": "{Action:Clear} TU",
+      "action": null
+    },
+    {
+      "name": "adjacent-tokens",
+      "template": "{Action:Clear}{CALL}",
+      "action": null
+    },
+    {
+      "name": "nested-placeholder",
+      "template": "{Action:Clear{CALL}}",
+      "action": null
+    },
+    {
+      "name": "opening-brace-in-value",
+      "template": "{Action:{Clear}",
+      "action": null
+    },
+    {
+      "name": "closing-brace-in-value",
+      "template": "{Action:Clear}Extra}",
+      "action": null
+    },
+    {
+      "name": "missing-close",
+      "template": "{Action:Clear",
+      "action": null
+    },
+    {
+      "name": "missing-open",
+      "template": "Action:Clear}",
+      "action": null
+    },
+    {
+      "name": "empty",
+      "template": "",
+      "action": null
+    },
+    {
+      "name": "missing",
+      "template": null,
+      "action": null
+    }
+  ],
+  "default_configs": [
+    {
+      "kind": "cw",
+      "config": "###################\n#   RUN Messages\n###################\nF1 Cq,Cq Test {STATION_CALLSIGN}\nF2 Exch,{EXCH}\nF3 Tu,Tu\nF4 {STATION_CALLSIGN},{STATION_CALLSIGN}\nF5 His Call,{CALL}\nF6 Repeat,{EXCH} {EXCH}\nF7 ?, ?\nF8 Agn?,Agn?\nF9 Nr?,Nr?\nF10 Call?,Cl?\nF11 -,\nF12 Clear,{Action:Clear}\n#\n###################\n#   S&P Messages\n###################\nF1 Qrl?,Qrl? de {STATION_CALLSIGN}\nF2 Exch,{EXCH}\nF3 Tu,Tu\nF4 {STATION_CALLSIGN},{STATION_CALLSIGN}\nF5 His Call,{CALL}\nF6 Repeat,{EXCH} {EXCH}\nF7 ?,?\nF8 Agn?,Agn?\nF9 Nr?,Nr?\nF10 Call?,Cl?\nF11 -,\nF12 Clear,{Action:Clear}\n",
+      "entries": [
+        {
+          "mode": "run",
+          "key": "F1",
+          "label": "Cq",
+          "target": "Cq Test {STATION_CALLSIGN}"
+        },
+        {
+          "mode": "run",
+          "key": "F2",
+          "label": "Exch",
+          "target": "{EXCH}"
+        },
+        {
+          "mode": "run",
+          "key": "F3",
+          "label": "Tu",
+          "target": "Tu"
+        },
+        {
+          "mode": "run",
+          "key": "F4",
+          "label": "{STATION_CALLSIGN}",
+          "target": "{STATION_CALLSIGN}"
+        },
+        {
+          "mode": "run",
+          "key": "F5",
+          "label": "His Call",
+          "target": "{CALL}"
+        },
+        {
+          "mode": "run",
+          "key": "F6",
+          "label": "Repeat",
+          "target": "{EXCH} {EXCH}"
+        },
+        {
+          "mode": "run",
+          "key": "F7",
+          "label": "?",
+          "target": "?"
+        },
+        {
+          "mode": "run",
+          "key": "F8",
+          "label": "Agn?",
+          "target": "Agn?"
+        },
+        {
+          "mode": "run",
+          "key": "F9",
+          "label": "Nr?",
+          "target": "Nr?"
+        },
+        {
+          "mode": "run",
+          "key": "F10",
+          "label": "Call?",
+          "target": "Cl?"
+        },
+        {
+          "mode": "run",
+          "key": "F11",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "run",
+          "key": "F12",
+          "label": "Clear",
+          "target": "{Action:Clear}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F1",
+          "label": "Qrl?",
+          "target": "Qrl? de {STATION_CALLSIGN}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F2",
+          "label": "Exch",
+          "target": "{EXCH}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F3",
+          "label": "Tu",
+          "target": "Tu"
+        },
+        {
+          "mode": "s&p",
+          "key": "F4",
+          "label": "{STATION_CALLSIGN}",
+          "target": "{STATION_CALLSIGN}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F5",
+          "label": "His Call",
+          "target": "{CALL}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F6",
+          "label": "Repeat",
+          "target": "{EXCH} {EXCH}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F7",
+          "label": "?",
+          "target": "?"
+        },
+        {
+          "mode": "s&p",
+          "key": "F8",
+          "label": "Agn?",
+          "target": "Agn?"
+        },
+        {
+          "mode": "s&p",
+          "key": "F9",
+          "label": "Nr?",
+          "target": "Nr?"
+        },
+        {
+          "mode": "s&p",
+          "key": "F10",
+          "label": "Call?",
+          "target": "Cl?"
+        },
+        {
+          "mode": "s&p",
+          "key": "F11",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "s&p",
+          "key": "F12",
+          "label": "Clear",
+          "target": "{Action:Clear}"
+        }
+      ]
+    },
+    {
+      "kind": "digital",
+      "config": "###################\n#   RUN Messages\n###################\nF1 Cq,Cq Cq Test {STATION_CALLSIGN} {STATION_CALLSIGN}\nF2 Exch,{EXCH}\nF3 Tu,Tu\nF4 {STATION_CALLSIGN},{STATION_CALLSIGN}\nF5 His Call,{CALL}\nF6 Repeat,{EXCH} {EXCH}\nF7 -,\nF8 Agn?,Agn Agn\nF9 Nr?,Nr Agn\nF10 Call?,Call Agn\nF11 -,\nF12 Clear,{Action:Clear}\n#\n###################\n#   S&P Messages\n###################\nF1 Qrl?,Qrl? de {STATION_CALLSIGN}\nF2 Exch,{EXCH}\nF3 Tu,Tu\nF4 {STATION_CALLSIGN},{STATION_CALLSIGN}\nF5 His Call,{CALL}\nF6 Repeat,{EXCH} {EXCH}\nF7 ?,?\nF8 Agn?,Agn?\nF9 Nr?,Nr?\nF10 Call?,Cl?\nF11 -,\nF12 Clear,{Action:Clear}\n",
+      "entries": [
+        {
+          "mode": "run",
+          "key": "F1",
+          "label": "Cq",
+          "target": "Cq Cq Test {STATION_CALLSIGN} {STATION_CALLSIGN}"
+        },
+        {
+          "mode": "run",
+          "key": "F2",
+          "label": "Exch",
+          "target": "{EXCH}"
+        },
+        {
+          "mode": "run",
+          "key": "F3",
+          "label": "Tu",
+          "target": "Tu"
+        },
+        {
+          "mode": "run",
+          "key": "F4",
+          "label": "{STATION_CALLSIGN}",
+          "target": "{STATION_CALLSIGN}"
+        },
+        {
+          "mode": "run",
+          "key": "F5",
+          "label": "His Call",
+          "target": "{CALL}"
+        },
+        {
+          "mode": "run",
+          "key": "F6",
+          "label": "Repeat",
+          "target": "{EXCH} {EXCH}"
+        },
+        {
+          "mode": "run",
+          "key": "F7",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "run",
+          "key": "F8",
+          "label": "Agn?",
+          "target": "Agn Agn"
+        },
+        {
+          "mode": "run",
+          "key": "F9",
+          "label": "Nr?",
+          "target": "Nr Agn"
+        },
+        {
+          "mode": "run",
+          "key": "F10",
+          "label": "Call?",
+          "target": "Call Agn"
+        },
+        {
+          "mode": "run",
+          "key": "F11",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "run",
+          "key": "F12",
+          "label": "Clear",
+          "target": "{Action:Clear}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F1",
+          "label": "Qrl?",
+          "target": "Qrl? de {STATION_CALLSIGN}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F2",
+          "label": "Exch",
+          "target": "{EXCH}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F3",
+          "label": "Tu",
+          "target": "Tu"
+        },
+        {
+          "mode": "s&p",
+          "key": "F4",
+          "label": "{STATION_CALLSIGN}",
+          "target": "{STATION_CALLSIGN}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F5",
+          "label": "His Call",
+          "target": "{CALL}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F6",
+          "label": "Repeat",
+          "target": "{EXCH} {EXCH}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F7",
+          "label": "?",
+          "target": "?"
+        },
+        {
+          "mode": "s&p",
+          "key": "F8",
+          "label": "Agn?",
+          "target": "Agn?"
+        },
+        {
+          "mode": "s&p",
+          "key": "F9",
+          "label": "Nr?",
+          "target": "Nr?"
+        },
+        {
+          "mode": "s&p",
+          "key": "F10",
+          "label": "Call?",
+          "target": "Cl?"
+        },
+        {
+          "mode": "s&p",
+          "key": "F11",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "s&p",
+          "key": "F12",
+          "label": "Clear",
+          "target": "{Action:Clear}"
+        }
+      ]
+    },
+    {
+      "kind": "voice",
+      "config": "###################\n#   RUN Messages\n###################\nF1 CQ,{OPERATOR}/CQ.wav\nF2 Exch,{OPERATOR}/Exchange.wav\nF3 TNX,{OPERATOR}/Thanks.wav\nF4 {STATION_CALLSIGN},{OPERATOR}/Mycall.wav\nF5 -,\nF6 -,\nF7 QRZ?,{OPERATOR}/QRZ.wav\nF8 Agn?,{OPERATOR}/AllAgain.wav\nF9 Exchg?,{OPERATOR}/Exchange query.wav\nF10 -,\nF11 -,\nF12 Clear,{Action:Clear}\n#\n###################\n#   S&P Messages\n###################\nF1 QRL?,{OPERATOR}/QRL.wav\nF2 Exch,{OPERATOR}/Exchange.wav\nF3 -,\nF4 {STATION_CALLSIGN},{OPERATOR}/Mycall.wav\nF5 -,\nF6 {STATION_CALLSIGN},{OPERATOR}/Mycall.wav\nF7 -,\nF8 Agn?,{OPERATOR}/AllAgain.wav\nF9 -,\nF10 -,\nF11 -,\nF12 Clear,{Action:Clear}\n",
+      "entries": [
+        {
+          "mode": "run",
+          "key": "F1",
+          "label": "CQ",
+          "target": "{OPERATOR}/CQ.wav"
+        },
+        {
+          "mode": "run",
+          "key": "F2",
+          "label": "Exch",
+          "target": "{OPERATOR}/Exchange.wav"
+        },
+        {
+          "mode": "run",
+          "key": "F3",
+          "label": "TNX",
+          "target": "{OPERATOR}/Thanks.wav"
+        },
+        {
+          "mode": "run",
+          "key": "F4",
+          "label": "{STATION_CALLSIGN}",
+          "target": "{OPERATOR}/Mycall.wav"
+        },
+        {
+          "mode": "run",
+          "key": "F5",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "run",
+          "key": "F6",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "run",
+          "key": "F7",
+          "label": "QRZ?",
+          "target": "{OPERATOR}/QRZ.wav"
+        },
+        {
+          "mode": "run",
+          "key": "F8",
+          "label": "Agn?",
+          "target": "{OPERATOR}/AllAgain.wav"
+        },
+        {
+          "mode": "run",
+          "key": "F9",
+          "label": "Exchg?",
+          "target": "{OPERATOR}/Exchange query.wav"
+        },
+        {
+          "mode": "run",
+          "key": "F10",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "run",
+          "key": "F11",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "run",
+          "key": "F12",
+          "label": "Clear",
+          "target": "{Action:Clear}"
+        },
+        {
+          "mode": "s&p",
+          "key": "F1",
+          "label": "QRL?",
+          "target": "{OPERATOR}/QRL.wav"
+        },
+        {
+          "mode": "s&p",
+          "key": "F2",
+          "label": "Exch",
+          "target": "{OPERATOR}/Exchange.wav"
+        },
+        {
+          "mode": "s&p",
+          "key": "F3",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "s&p",
+          "key": "F4",
+          "label": "{STATION_CALLSIGN}",
+          "target": "{OPERATOR}/Mycall.wav"
+        },
+        {
+          "mode": "s&p",
+          "key": "F5",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "s&p",
+          "key": "F6",
+          "label": "{STATION_CALLSIGN}",
+          "target": "{OPERATOR}/Mycall.wav"
+        },
+        {
+          "mode": "s&p",
+          "key": "F7",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "s&p",
+          "key": "F8",
+          "label": "Agn?",
+          "target": "{OPERATOR}/AllAgain.wav"
+        },
+        {
+          "mode": "s&p",
+          "key": "F9",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "s&p",
+          "key": "F10",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "s&p",
+          "key": "F11",
+          "label": "-",
+          "target": ""
+        },
+        {
+          "mode": "s&p",
+          "key": "F12",
+          "label": "Clear",
+          "target": "{Action:Clear}"
+        }
+      ]
+    }
+  ]
+}

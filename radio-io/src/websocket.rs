@@ -1,3 +1,4 @@
+use crate::modes::mode_is_cw;
 use crate::{
     DigitalIoEvent, DigitalIoManager, DigitalIoTargetState, RadioClientMessage, RadioCommand,
     RadioConfig, RadioIoConfig, RadioManager, RadioServerMessage, WsjtXEvent, WsjtXManager,
@@ -940,10 +941,6 @@ fn fldigi_enabled_for_mode(config: &RadioConfig, mode: &str) -> bool {
     }
 }
 
-fn mode_is_cw(mode: &str) -> bool {
-    mode.eq_ignore_ascii_case("CW") || mode.eq_ignore_ascii_case("CW-R")
-}
-
 async fn send_fldigi_text(
     manager: &DigitalIoManager,
     radio_id: i64,
@@ -1002,8 +999,7 @@ fn validate_digital_io_text(text: &str) -> Result<(), String> {
 }
 
 fn validate_radio_mode(mode: &str) -> Result<(), String> {
-    let mode = mode.trim().to_uppercase();
-    if modes::LOGGER_MODE_OPTIONS.contains(&mode.as_str()) {
+    if modes::is_selectable_mode(mode) {
         Ok(())
     } else {
         Err(format!(

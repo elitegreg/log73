@@ -1,3 +1,7 @@
+import {
+  loadMessageEntriesFixture,
+  loadMessageModesFixture,
+} from '../../tests/fixtures/domain/loadFixture.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -125,4 +129,90 @@ test('message batches join text messages and separate voice files', () => {
     text: 'CQ TEST',
     wait_for_completion: true,
   });
+});
+
+const fixture = loadMessageEntriesFixture();
+const modeFixture = loadMessageModesFixture();
+
+test('shared message entry contract has the supported schema and cases', () => {
+  assert.equal(fixture.version, 1);
+  assert.ok(fixture.parser_cases.length > 0);
+  assert.ok(fixture.action_cases.length > 0);
+  assert.ok(fixture.default_configs.length > 0);
+  assert.equal(modeFixture.version, 1);
+  assert.ok(modeFixture.header_cases.length > 0);
+});
+
+for (const c of fixture.parser_cases) {
+  test(`shared message entries: ${c.name}`, () => {
+    assert.deepEqual(parseMessageEntries(c.config), c.entries);
+  });
+}
+
+for (const c of fixture.action_cases) {
+  test(`shared message action: ${c.name}`, () => {
+    assert.equal(actionFromTemplate(c.template), c.action);
+    if (c.action !== null) {
+      // Configure multiline values through the existing whitespace-permitted
+      // action syntax; config entries themselves occupy one line.
+      const target = c.template.trim().replaceAll('\n', ' ');
+      const config = `# RUN Messages\nF12 Clear,${target}`;
+      assert.equal(
+        messageActionForConfig(config, 'run', 'F12'),
+        c.action.replaceAll('\n', ' '),
+      );
+      assert.equal(renderMessageForConfig(config, 'run', 'F12'), null);
+    }
+  });
+}
+
+for (const c of fixture.default_configs) {
+  test(`shared default message entries: ${c.kind}`, () => {
+    assert.deepEqual(parseMessageEntries(c.config), c.entries);
+  });
+}
+
+for (const c of modeFixture.header_cases) {
+  test(`shared message header integration: ${c.name}`, () => {
+    const config = `${c.input ?? ''}\nF1 Label,target`;
+    assert.deepEqual(
+      parseMessageEntries(config),
+      c.mode === null
+        ? []
+        : [{ mode: c.mode, key: 'F1', label: 'Label', target: 'target' }],
+    );
+  });
+}
+
+test('frontend template substitution preserves literal syntax and missing-field behavior', () => {
+  assert.equal(
+    renderMessageTemplate(
+      ' {CALL}|{STX}|{ENABLED}|{EMPTY}|{NULL}|{MISSING}|{call}|{1BAD}|{BAD-NAME}|{UNCLOSED ',
+      { CALL: ' K1ABC ', STX: 0, ENABLED: false, EMPTY: '', NULL: null },
+    ),
+    'K1ABC|0|false||||{call}|{1BAD}|{BAD-NAME}|{UNCLOSED',
+  );
+  assert.equal(renderMessageTemplate(null), '');
+  assert.equal(
+    renderMessageTemplate('{RST_SENT}/{SENTRSTCUT}', { RST_SENT: ' 5n9 ' }),
+    '5NN/5NN',
+  );
+  assert.equal(renderMessageTemplate('{RST_SENT}/{SENTRSTCUT}'), '/');
+});
+
+test('malformed action tokens remain ordinary configured text', () => {
+  const config =
+    '# RUN Messages\nF1 Empty,{Action:}\nF2 Blank,{Action: }\nF3 Suffix,{Action:Clear} TU';
+  assert.equal(renderMessageForConfig(config, 'run', 'F1'), '{Action:}');
+  assert.equal(renderMessageForConfig(config, 'run', 'F2'), '{Action: }');
+  assert.equal(
+    renderMessageForConfig(config, 'run', 'F3'),
+    '{Action:Clear} TU',
+  );
+});
+
+test('duplicate entries retain order and frontend lookup selects the first', () => {
+  const config = '# RUN Messages\nF1 First,ONE\nF1 Second,TWO';
+  assert.equal(messageEntryForConfig(config, 'run', 'F1').label, 'First');
+  assert.equal(renderMessageForConfig(config, 'run', 'F1'), 'ONE');
 });

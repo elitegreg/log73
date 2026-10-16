@@ -1,0 +1,186 @@
+{
+  "version": 1,
+  "logger_modes": ["CW", "CW-R", "SSB", "FM", "AM", "DATA", "RTTY"],
+  "cases": [
+    {
+      "name": "cw",
+      "input": "CW",
+      "normalized": "CW",
+      "selectable": true,
+      "cw": true,
+      "phone": false,
+      "digital": false,
+      "adif": "CW"
+    },
+    {
+      "name": "cw-reverse",
+      "input": "CW-R",
+      "normalized": "CW-R",
+      "selectable": true,
+      "cw": true,
+      "phone": false,
+      "digital": false,
+      "adif": "CW"
+    },
+    {
+      "name": "ssb",
+      "input": "SSB",
+      "normalized": "SSB",
+      "selectable": true,
+      "cw": false,
+      "phone": true,
+      "digital": false,
+      "adif": "SSB"
+    },
+    {
+      "name": "fm",
+      "input": "FM",
+      "normalized": "FM",
+      "selectable": true,
+      "cw": false,
+      "phone": true,
+      "digital": false,
+      "adif": "FM"
+    },
+    {
+      "name": "am",
+      "input": "AM",
+      "normalized": "AM",
+      "selectable": true,
+      "cw": false,
+      "phone": true,
+      "digital": false,
+      "adif": "AM"
+    },
+    {
+      "name": "data",
+      "input": "DATA",
+      "normalized": "DATA",
+      "selectable": true,
+      "cw": false,
+      "phone": false,
+      "digital": true,
+      "adif": "RTTY"
+    },
+    {
+      "name": "rtty",
+      "input": "RTTY",
+      "normalized": "RTTY",
+      "selectable": true,
+      "cw": false,
+      "phone": false,
+      "digital": true,
+      "adif": "RTTY"
+    },
+    {
+      "name": "padded-cw",
+      "input": " cw-r ",
+      "normalized": "CW-R",
+      "selectable": true,
+      "cw": true,
+      "phone": false,
+      "digital": false,
+      "adif": "CW"
+    },
+    {
+      "name": "padded-phone",
+      "input": " am ",
+      "normalized": "AM",
+      "selectable": true,
+      "cw": false,
+      "phone": true,
+      "digital": false,
+      "adif": "AM"
+    },
+    {
+      "name": "padded-data",
+      "input": " data ",
+      "normalized": "DATA",
+      "selectable": true,
+      "cw": false,
+      "phone": false,
+      "digital": true,
+      "adif": "RTTY"
+    },
+    {
+      "name": "explicit-ft8",
+      "input": " ft8 ",
+      "normalized": "FT8",
+      "selectable": false,
+      "cw": false,
+      "phone": false,
+      "digital": false,
+      "adif": "FT8"
+    },
+    {
+      "name": "explicit-pkt",
+      "input": "PKT",
+      "normalized": "PKT",
+      "selectable": false,
+      "cw": false,
+      "phone": false,
+      "digital": false,
+      "adif": "PKT"
+    },
+    {
+      "name": "explicit-mfsk",
+      "input": "MFSK",
+      "normalized": "MFSK",
+      "selectable": false,
+      "cw": false,
+      "phone": false,
+      "digital": false,
+      "adif": "MFSK"
+    },
+    {
+      "name": "hardware-usb",
+      "input": "USB",
+      "normalized": "USB",
+      "selectable": false,
+      "cw": false,
+      "phone": false,
+      "digital": false,
+      "adif": "USB"
+    },
+    {
+      "name": "unknown",
+      "input": "unknown",
+      "normalized": "UNKNOWN",
+      "selectable": false,
+      "cw": false,
+      "phone": false,
+      "digital": false,
+      "adif": "UNKNOWN"
+    },
+    {
+      "name": "empty",
+      "input": "",
+      "normalized": "",
+      "selectable": false,
+      "cw": false,
+      "phone": false,
+      "digital": false,
+      "adif": ""
+    },
+    {
+      "name": "blank",
+      "input": " \t ",
+      "normalized": "",
+      "selectable": false,
+      "cw": false,
+      "phone": false,
+      "digital": false,
+      "adif": ""
+    },
+    {
+      "name": "missing",
+      "input": null,
+      "normalized": "",
+      "selectable": false,
+      "cw": false,
+      "phone": false,
+      "digital": false,
+      "adif": ""
+    }
+  ]
+}

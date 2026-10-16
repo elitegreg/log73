@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "normalization_cases": [
+    {
+      "name": "run",
+      "input": "run",
+      "normalized": "run"
+    },
+    {
+      "name": "padded-run",
+      "input": " RUN ",
+      "normalized": "run"
+    },
+    {
+      "name": "s-and-p",
+      "input": "s&p",
+      "normalized": "s&p"
+    },
+    {
+      "name": "sp",
+      "input": "SP",
+      "normalized": "s&p"
+    },
+    {
+      "name": "underscores",
+      "input": "search_and_pounce",
+      "normalized": "s&p"
+    },
+    {
+      "name": "words",
+      "input": " Search And Pounce ",
+      "normalized": "s&p"
+    },
+    {
+      "name": "unknown",
+      "input": "other",
+      "normalized": "s&p"
+    },
+    {
+      "name": "empty",
+      "input": "",
+      "normalized": "s&p"
+    },
+    {
+      "name": "missing",
+      "input": null,
+      "normalized": "s&p"
+    }
+  ],
+  "header_cases": [
+    {
+      "name": "run",
+      "input": "# RUN Messages",
+      "mode": "run"
+    },
+    {
+      "name": "padded-run",
+      "input": "  # run messages  ",
+      "mode": "run"
+    },
+    {
+      "name": "s-and-p",
+      "input": "# S&P Messages",
+      "mode": "s&p"
+    },
+    {
+      "name": "sp",
+      "input": "# SP Messages",
+      "mode": "s&p"
+    },
+    {
+      "name": "words",
+      "input": "# Search and Pounce Messages",
+      "mode": "s&p"
+    },
+    {
+      "name": "substring",
+      "input": "prefix RUN MESSAGES suffix",
+      "mode": "run"
+    },
+    {
+      "name": "run-precedence",
+      "input": "S&P MESSAGES then RUN MESSAGES",
+      "mode": "run"
+    },
+    {
+      "name": "ordinary",
+      "input": "F1 CQ TEST",
+      "mode": null
+    },
+    {
+      "name": "underscores",
+      "input": "SEARCH_AND_POUNCE MESSAGES",
+      "mode": null
+    },
+    {
+      "name": "empty",
+      "input": "",
+      "mode": null
+    },
+    {
+      "name": "missing",
+      "input": null,
+      "mode": null
+    }
+  ]
+}

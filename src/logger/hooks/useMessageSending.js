@@ -1,3 +1,4 @@
+import { modeIsDigital, modeIsPhone } from '../../domain/modes.js';
 import { useEffect, useRef, useState } from 'react';
 import {
   CW_REPEAT_DELAY_MS,
@@ -6,8 +7,6 @@ import {
   messageActionForRadioMode,
   messageActiveTimeoutMs,
   messageButtonIsSendable,
-  modeIsDigital,
-  modeIsPhone,
 } from '../mainWindowHelpers';
 import {
   activeMessageKeysFromRequests,

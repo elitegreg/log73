@@ -186,9 +186,7 @@ pub fn mode_candidates_for_request(
     }
 }
 
-pub fn mode_is_phone(mode: &str) -> bool {
-    matches!(mode.trim().to_uppercase().as_str(), "SSB" | "FM" | "AM")
-}
+pub use crate::modes::mode_is_phone;
 
 fn ssb_mode_for_frequency(frequency_hz: u64, bands: &[Band]) -> Mode {
     match band_for_frequency(bands, frequency_hz)

@@ -1,3 +1,4 @@
+import { modeIsCw } from '../domain/modes.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
@@ -20,7 +21,6 @@ import {
   exchangeDefaults,
   esmEnterAction,
   esmStateAfterCallsignEdit,
-  modeIsCw,
   nextCwWpm,
   isPageUpKey,
   isPageDownKey,

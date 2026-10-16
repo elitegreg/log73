@@ -1,9 +1,6 @@
+import { modeIsCw, modeIsDigital } from '../../domain/modes.js';
 import { useEffect, useRef, useState } from 'react';
-import {
-  createMessageRequestId,
-  modeIsCw,
-  modeIsDigital,
-} from '../mainWindowHelpers.js';
+import { createMessageRequestId } from '../mainWindowHelpers.js';
 
 export function textSendingIsEnabled(radioMode, digitalTextEnabled) {
   return (

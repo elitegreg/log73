@@ -6,37 +6,25 @@ import {
   isSelectableMode,
   modeIsCw,
   modeIsPhone,
+  modeIsDigital,
   normalizeLoggerMode,
 } from './modes.js';
+import { loadModesFixture } from '../../tests/fixtures/domain/loadFixture.js';
 
-test('LOGGER_MODE_OPTIONS lists concrete selectable modes', () => {
-  assert.deepEqual(LOGGER_MODE_OPTIONS, [
-    'CW',
-    'CW-R',
-    'SSB',
-    'FM',
-    'AM',
-    'DATA',
-    'RTTY',
-  ]);
+const fixture = loadModesFixture();
+test('shared logger mode contract has the supported schema and selectable order', () => {
+  assert.equal(fixture.version, 1);
+  assert.ok(fixture.cases.length > 0);
+  assert.ok(fixture.logger_modes.length > 0);
+  assert.deepEqual(LOGGER_MODE_OPTIONS, fixture.logger_modes);
 });
-
-test('mode helpers normalize and classify modes', () => {
-  assert.equal(normalizeLoggerMode(' cw-r '), 'CW-R');
-  assert.equal(isSelectableMode('DATA'), true);
-  assert.equal(isSelectableMode('AM'), true);
-  assert.equal(modeIsCw('CW'), true);
-  assert.equal(modeIsCw('cw-r'), true);
-  assert.equal(modeIsCw('RTTY'), false);
-  assert.equal(modeIsPhone('SSB'), true);
-  assert.equal(modeIsPhone('fm'), true);
-  assert.equal(modeIsPhone(' am '), true);
-  assert.equal(modeIsPhone('CW'), false);
-});
-
-test('adifModeForLoggerMode maps logger modes to ADIF modes', () => {
-  assert.equal(adifModeForLoggerMode('CW'), 'CW');
-  assert.equal(adifModeForLoggerMode('CW-R'), 'CW');
-  assert.equal(adifModeForLoggerMode('DATA'), 'PKT');
-  assert.equal(adifModeForLoggerMode('RTTY'), 'RTTY');
-});
+for (const c of fixture.cases) {
+  test(`shared logger mode: ${c.name}`, () => {
+    assert.equal(normalizeLoggerMode(c.input), c.normalized);
+    assert.equal(isSelectableMode(c.input), c.selectable);
+    assert.equal(modeIsCw(c.input), c.cw);
+    assert.equal(modeIsPhone(c.input), c.phone);
+    assert.equal(modeIsDigital(c.input), c.digital);
+    assert.equal(adifModeForLoggerMode(c.input), c.adif);
+  });
+}

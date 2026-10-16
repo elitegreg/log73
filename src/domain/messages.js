@@ -20,15 +20,15 @@ export function parseMessageEntries(config) {
     if (commaIndex <= 0) continue;
     const keyAndLabel = line.slice(0, commaIndex).trim();
     const target = line.slice(commaIndex + 1).trim();
-    const parts = keyAndLabel.split(/\s+/, 2);
-    const key = String(parts[0] ?? '')
-      .trim()
-      .toUpperCase();
+    const separatorIndex = keyAndLabel.search(/\s/);
+    const key = (
+      separatorIndex < 0 ? keyAndLabel : keyAndLabel.slice(0, separatorIndex)
+    ).toUpperCase();
     if (!key.startsWith('F')) continue;
     entries.push({
       mode: currentMode,
       key,
-      label: String(parts[1] ?? '').trim(),
+      label: separatorIndex < 0 ? '' : keyAndLabel.slice(separatorIndex).trim(),
       target,
     });
   }
@@ -39,8 +39,8 @@ export function parseMessageEntries(config) {
 export function actionFromTemplate(template) {
   const match = String(template ?? '')
     .trim()
-    .match(/^\{\s*action\s*:\s*([^}]+?)\s*\}$/i);
-  return match ? match[1].trim() : null;
+    .match(/^\{\s*action\s*:\s*([^{}]+?)\s*\}$/i);
+  return match?.[1].trim() || null;
 }
 
 export function messageActionForConfig(config, mode, key) {

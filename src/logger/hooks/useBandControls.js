@@ -1,6 +1,6 @@
+import { isSelectableMode } from '../../domain/modes.js';
 import {
   bandByName,
-  isSelectableMode,
   steppedFrequencyHz,
   tuningIncrementHzForMode,
 } from '../mainWindowHelpers';

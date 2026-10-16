@@ -486,10 +486,7 @@ fn frequency_value_string(value: &Value) -> Option<String> {
 }
 
 fn mode_value_string(value: &Value) -> Option<String> {
-    value_string(value).map(|mode| match mode.trim().to_uppercase().as_str() {
-        "CW-R" => "CW".to_string(),
-        mode => mode.to_string(),
-    })
+    value_string(value).map(|mode| radio_io::modes::adif_mode_for_logger_mode(&mode))
 }
 
 fn format_frequency_mhz(hz: i64) -> String {
@@ -664,6 +661,28 @@ mod tests {
 
         assert!(text.contains("<MODE:2>CW"));
         assert!(!text.contains("CW-R"));
+    }
+
+    #[test]
+    fn render_log_maps_generic_data_and_preserves_explicit_adif_modes() {
+        for (mode, expected) in [
+            ("DATA", "RTTY"),
+            (" data ", "RTTY"),
+            ("FT8", "FT8"),
+            ("PKT", "PKT"),
+            ("RTTY", "RTTY"),
+            ("MFSK", "MFSK"),
+        ] {
+            let mut contact = test_contact();
+            crate::db::set_contact_adif(&mut contact, "MODE", json!(mode));
+            crate::db::set_contact_adif(&mut contact, "SUBMODE", json!("FT4"));
+            let text = render_log(&test_log(), &[contact]).expect("ADIF export should render");
+            assert!(
+                text.contains(&format!("<MODE:{}>{expected}", expected.len())),
+                "{mode}: {text}"
+            );
+            assert!(text.contains("<SUBMODE:3>FT4"), "{mode}: {text}");
+        }
     }
 
     #[test]

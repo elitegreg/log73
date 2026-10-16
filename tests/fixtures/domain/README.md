@@ -159,3 +159,76 @@ JS (via `loadFixture.js` in this directory):
 
 - `src/domain/validation.test.js`: `conditionApplies` over every case, plus
   `validateExchangeField` blank/required behavior under conditions.
+
+## Mode contracts
+
+`modes.json` version 1 contains the ordered `logger_modes` list and nonempty
+`cases`. Each case has a stable `name`, raw `input` (string or null),
+`normalized` string, `selectable`, `cw`, `phone`, and `digital` booleans, and
+an `adif` output string. JS `src/domain/modes.test.js` and Rust
+`radio-io/src/modes.rs` assert every field in every case.
+
+`message-modes.json` version 1 contains nonempty `normalization_cases` and
+`header_cases`. Both have `name` and `input`; normalization cases expect a
+`normalized` string, while header cases expect `mode` (string or null).
+JS `src/domain/messageModes.test.js` and Rust `radio-io/src/message_mode.rs`
+iterate both arrays. Header matching preserves substring recognition and
+Run precedence. Both harnesses reject unsupported versions and empty arrays.
+Null inputs represent missing text and adapt to an empty string for Rust.
+
+Logger selection/classification, ADIF storage, Run/S&P message modes, CAT
+hardware mappings, and duplicate MODE/MODE_CLASS grouping are separate
+contracts. Logger digital classification includes DATA and RTTY only;
+explicit ADIF modes such as FT8 and PKT pass through conversion. Generic
+DATA temporarily exports/stores as RTTY; CW-R converts to CW. Conversion
+preserves explicit modes and SUBMODE, without changing duplicate grouping.
+
+Configurable ADIF defaults are tracked in [#57](https://github.com/elitegreg/log73/issues/57).
+
+## `message-entries.json` format
+
+Version 1 contains three nonempty arrays:
+
+- `parser_cases`: `name`, raw `config` (string or null), and ordered `entries`.
+  Entries have `mode`, uppercase `key`, full `label`, and trimmed `target`.
+- `action_cases`: `name`, raw `template` (string or null), and expected `action`
+  (string or null).
+- `default_configs`: `kind` (`cw`, `digital`, or `voice`), the complete production
+  `config`, and ordered expected `entries`. Rust also asserts exact equality
+  with the production constants, so copied defaults cannot silently drift.
+
+JS `src/domain/messages.test.js` and Rust `radio-io/src/messages.rs` execute
+all shared cases, reject unsupported versions and empty collections, and
+reuse the header cases in `message-modes.json` as parser integration tests.
+Rust adapts null text to an empty string and maps entry structs to the fixture
+shape; the harness does not implement parsing itself.
+
+Entries before a recognized section are ignored. Header recognition precedes
+comment/entry parsing and preserves the existing substring rules. Labels retain
+all words and internal whitespace. Targets split at the first comma. Entry
+parsing retains F-prefixed keys and duplicates in order; Rust validation
+separately enforces F1–F12, unique keys per section, and both sections. Frontend
+lookup selects the first matching entry.
+
+Action recognition requires an entire `{Action:value}` token, ignoring the
+case of `Action` and surrounding whitespace. Values must be nonempty after
+trimming and contain no braces. Unknown action names, colons, internal spaces,
+and newlines in values remain accepted by the token helper. Empty, nested,
+unclosed, or surrounding-text tokens are ordinary text in both languages.
+Config entries occupy one line; literal newlines inside an action value are
+only a token-helper case. Recognized actions never render as configured text.
+
+### Frontend-only rendering
+
+Field substitution, missing/null field removal, cut numbers (`9` to `N` for
+`RST_SENT`/`SENTRSTCUT`), and optional `{NEWLINE}` expansion are frontend
+operations tested in `src/domain/messages.test.js`. Placeholders require
+uppercase names beginning with a letter; values are stringified and trimmed,
+then the rendered result is trimmed. Without digital newline expansion,
+`NEWLINE` follows ordinary field substitution (an absent field becomes empty).
+The low-level template renderer preserves action syntax as literal text;
+the configured-message renderer recognizes and suppresses actions first.
+
+Rust receives rendered transmission text. Its voice-path placeholder helpers
+inspect and validate paths rather than substitute logger field values. They
+are intentionally not forced into a rendering parity contract.

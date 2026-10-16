@@ -38,6 +38,6 @@ export function modeIsDigital(mode) {
 export function adifModeForLoggerMode(mode) {
   const normalizedMode = normalizeLoggerMode(mode);
   if (modeIsCw(normalizedMode)) return 'CW';
-  if (normalizedMode === 'DATA') return 'PKT';
+  if (normalizedMode === 'DATA') return 'RTTY';
   return normalizedMode;
 }

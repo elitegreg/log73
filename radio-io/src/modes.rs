@@ -2,8 +2,33 @@ use radio_cat_rs::{DriverDescriptor, Mode, RadioRegion, supported_drivers};
 
 pub const LOGGER_MODE_OPTIONS: &[&str] = &["CW", "CW-R", "SSB", "FM", "AM", "DATA", "RTTY"];
 
+pub fn normalize_logger_mode(mode: &str) -> String {
+    mode.trim().to_uppercase()
+}
+
+pub fn is_selectable_mode(mode: &str) -> bool {
+    LOGGER_MODE_OPTIONS.contains(&normalize_logger_mode(mode).as_str())
+}
+
 pub fn mode_is_cw(mode: &str) -> bool {
-    matches!(mode.trim().to_uppercase().as_str(), "CW" | "CW-R")
+    matches!(normalize_logger_mode(mode).as_str(), "CW" | "CW-R")
+}
+
+pub fn mode_is_phone(mode: &str) -> bool {
+    matches!(normalize_logger_mode(mode).as_str(), "SSB" | "FM" | "AM")
+}
+
+pub fn mode_is_digital(mode: &str) -> bool {
+    matches!(normalize_logger_mode(mode).as_str(), "DATA" | "RTTY")
+}
+
+pub fn adif_mode_for_logger_mode(mode: &str) -> String {
+    let normalized = normalize_logger_mode(mode);
+    match normalized.as_str() {
+        "CW-R" => "CW".to_string(),
+        "DATA" => "RTTY".to_string(),
+        _ => normalized,
+    }
 }
 
 pub fn transmit_modes_for_radio_kind(radio_kind: &str) -> Result<&'static [Mode], String> {
@@ -105,12 +130,48 @@ fn capability_region(driver: DriverDescriptor) -> Option<RadioRegion> {
 mod tests {
     use super::*;
 
+    #[derive(serde::Deserialize)]
+    struct Fixture {
+        version: u32,
+        logger_modes: Vec<String>,
+        cases: Vec<Case>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Case {
+        name: String,
+        input: Option<String>,
+        normalized: String,
+        selectable: bool,
+        cw: bool,
+        phone: bool,
+        digital: bool,
+        adif: String,
+    }
+
     #[test]
-    fn logger_modes_are_the_supported_generic_modes() {
-        assert_eq!(
-            LOGGER_MODE_OPTIONS,
-            ["CW", "CW-R", "SSB", "FM", "AM", "DATA", "RTTY"]
-        );
+    fn shared_logger_mode_contract() {
+        let fixture: Fixture =
+            serde_json::from_str(include_str!("../../tests/fixtures/domain/modes.json"))
+                .expect("valid logger mode fixture");
+        assert_eq!(fixture.version, 1);
+        assert!(!fixture.cases.is_empty());
+        assert!(!fixture.logger_modes.is_empty());
+        assert_eq!(LOGGER_MODE_OPTIONS, fixture.logger_modes);
+        for case in fixture.cases {
+            let input = case.input.as_deref().unwrap_or_default();
+            assert_eq!(
+                normalize_logger_mode(input),
+                case.normalized,
+                "{}",
+                case.name
+            );
+            assert_eq!(is_selectable_mode(input), case.selectable, "{}", case.name);
+            assert_eq!(mode_is_cw(input), case.cw, "{}", case.name);
+            assert_eq!(mode_is_phone(input), case.phone, "{}", case.name);
+            assert_eq!(mode_is_digital(input), case.digital, "{}", case.name);
+            assert_eq!(adif_mode_for_logger_mode(input), case.adif, "{}", case.name);
+        }
     }
 
     #[test]
