@@ -226,7 +226,12 @@ fn sanitize_debug_payload_value(key: Option<&str>, value: &mut serde_json::Value
 fn should_fully_redact_debug_field(key: &str) -> bool {
     matches!(
         key.to_ascii_lowercase().as_str(),
-        "adif" | "contest_params" | "cw_messages" | "voice_messages" | "dxcluster_commands"
+        "adif"
+            | "contest_params"
+            | "cw_messages"
+            | "digital_messages"
+            | "voice_messages"
+            | "dxcluster_commands"
     )
 }
 
@@ -243,6 +248,13 @@ fn should_redact_debug_string_field(key: &str) -> bool {
             | "cw_serial_port"
             | "sessionid"
             | "session_id"
+            // Hide credential contents and lengths, including structured values.
+            | "password"
+            | "passwd"
+            | "password_hash"
+            | "login_password"
+            | "login_password_change"
+            | "login_password_confirm"
     )
 }
 
@@ -3918,6 +3930,7 @@ mod tests {
             "station_callsign": "N0CALL",
             "contest_params": { "State": "SC" },
             "cw_messages": "F1 CQ TEST",
+            "digital_messages": "F1 CQ DIGITAL SECRET",
             "voice_messages": "F1 CQ,operator1/cq.wav",
             "dxcluster_commands": "set/whatever",
             "tcp_host": "127.0.0.1",
@@ -3932,6 +3945,7 @@ mod tests {
         assert!(logged.contains("\"station_callsign\":\"<redacted>\""));
         assert!(logged.contains("\"contest_params\":\"<redacted object keys=1>\""));
         assert!(logged.contains("\"cw_messages\":\"<redacted string length=10>\""));
+        assert!(logged.contains("\"digital_messages\":\"<redacted string length="));
         assert!(logged.contains("\"voice_messages\":\"<redacted string length="));
         assert!(logged.contains("\"dxcluster_commands\":\"<redacted string length=12>\""));
         assert!(logged.contains("\"tcp_host\":\"<redacted>\""));
@@ -3945,6 +3959,64 @@ mod tests {
         assert!(!logged.contains("127.0.0.1"));
         assert!(!logged.contains("/dev/ttyUSB0"));
         assert!(!logged.contains("K1ABC"));
+        assert!(!logged.contains("F1 CQ DIGITAL SECRET"));
+    }
+
+    #[test]
+    fn debug_payload_log_redacts_nested_credentials_and_messages() {
+        let payload = json!({
+            "login_password_change": "new-password-secret",
+            "login_password_confirm": "confirm-password-secret",
+            "auth": {
+                "LOGIN_PASSWORD": { "Set": "stored-hash-secret" },
+                "Password_Hash": "argon2-hash-secret"
+            },
+            "attempts": [
+                { "password": "attempt-password-secret" },
+                { "PASSWD": ["array-password-secret"] },
+                { "DiGiTaL_MeSsAgEs": "nested-digital-secret" }
+            ],
+            "name": "Local radio",
+            "iaru_region": 2,
+            "disable_login": false,
+            "tcp_port": 4532
+        });
+
+        let logged = debug_payload_log(&payload);
+        let sanitized: serde_json::Value = serde_json::from_str(&logged).unwrap();
+
+        for value in [
+            &sanitized["login_password_change"],
+            &sanitized["login_password_confirm"],
+            &sanitized["auth"]["LOGIN_PASSWORD"],
+            &sanitized["auth"]["Password_Hash"],
+            &sanitized["attempts"][0]["password"],
+            &sanitized["attempts"][1]["PASSWD"],
+        ] {
+            assert_eq!(value, "<redacted>");
+        }
+        assert!(
+            sanitized["attempts"][2]["DiGiTaL_MeSsAgEs"]
+                .as_str()
+                .unwrap()
+                .starts_with("<redacted string length=")
+        );
+        assert_eq!(sanitized["name"], "Local radio");
+        assert_eq!(sanitized["iaru_region"], 2);
+        assert_eq!(sanitized["disable_login"], false);
+        assert_eq!(sanitized["tcp_port"], 4532);
+
+        for secret in [
+            "new-password-secret",
+            "confirm-password-secret",
+            "stored-hash-secret",
+            "argon2-hash-secret",
+            "attempt-password-secret",
+            "array-password-secret",
+            "nested-digital-secret",
+        ] {
+            assert!(!logged.contains(secret), "sensitive value leaked");
+        }
     }
 
     #[test]
@@ -3957,6 +4029,18 @@ mod tests {
         let logged = debug_payload_log(&payload);
 
         assert!(logged.contains("<string length="));
+        assert!(logged.contains("<truncated total_chars="));
+        assert!(logged.chars().count() <= MAX_DEBUG_PAYLOAD_LOG_LENGTH);
+    }
+
+    #[test]
+    fn debug_payload_log_truncates_multibyte_output_within_bounds() {
+        // Individual strings stay below the per-string limit, exercising total truncation.
+        let payload = json!({ "notes": vec!["📻".repeat(100); 100] });
+
+        let logged = debug_payload_log(&payload);
+
+        assert!(logged.contains('📻'));
         assert!(logged.contains("<truncated total_chars="));
         assert!(logged.chars().count() <= MAX_DEBUG_PAYLOAD_LOG_LENGTH);
     }
