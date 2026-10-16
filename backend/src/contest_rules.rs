@@ -1,3 +1,4 @@
+use crate::qso_time::parse_utc_minute;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_yaml::{Mapping as YamlMapping, Value as YamlValue};
@@ -1697,13 +1698,6 @@ fn validate_contest(contest: &ContestRules) -> Result<(), String> {
         }
     }
     Ok(())
-}
-
-fn parse_utc_minute(value: &str) -> Option<u16> {
-    let (hour, minute) = value.trim().split_once(':')?;
-    let hour = hour.parse::<u16>().ok()?;
-    let minute = minute.parse::<u16>().ok()?;
-    (hour < 24 && minute < 60).then_some(hour * 60 + minute)
 }
 
 fn validate_ids<'a>(ids: impl IntoIterator<Item = &'a str>, kind: &str) -> Result<(), String> {

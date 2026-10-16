@@ -3,6 +3,7 @@ use crate::db::{Contact, contact_adif_value, contact_id, contact_meta_value, set
 use crate::dxcc::callsign_prefix;
 use crate::grid_distance::grid_distance_kilometers;
 use crate::log_cache::LogCacheProcessor;
+use crate::qso_time::parse_utc_minute;
 use serde_json::{Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -583,13 +584,6 @@ fn time_bonus_points(qso_points: &QsoPoints, contact: &Contact) -> i64 {
             matches.then_some(rule.points)
         })
         .sum()
-}
-
-fn parse_utc_minute(value: &str) -> Option<u16> {
-    let (hour, minute) = value.trim().split_once(':')?;
-    let hour = hour.parse::<u16>().ok()?;
-    let minute = minute.parse::<u16>().ok()?;
-    (hour < 24 && minute < 60).then_some(hour * 60 + minute)
 }
 
 fn condition_matches(

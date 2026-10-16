@@ -1,3 +1,11 @@
+/// Parses a configured UTC time into minutes since midnight.
+pub(crate) fn parse_utc_minute(value: &str) -> Option<u16> {
+    let (hour, minute) = value.trim().split_once(':')?;
+    let hour = hour.parse::<u16>().ok()?;
+    let minute = minute.parse::<u16>().ok()?;
+    (hour < 24 && minute < 60).then_some(hour * 60 + minute)
+}
+
 pub fn qso_epoch(date: &str, time: &str) -> Option<i64> {
     if date.len() != 8 || !date.chars().all(|character| character.is_ascii_digit()) {
         return None;
@@ -99,6 +107,45 @@ fn civil_from_days(days: i64) -> (i32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_utc_minutes_with_existing_integer_syntax() {
+        for (value, expected) in [
+            ("00:00", 0),
+            ("23:59", 1439),
+            ("12:34", 754),
+            (" \t12:34\r\n", 754),
+            ("1:2", 62),
+            ("001:002", 62),
+            ("+1:+2", 62),
+        ] {
+            assert_eq!(parse_utc_minute(value), Some(expected), "{value:?}");
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_utc_minutes() {
+        for value in [
+            "24:00",
+            "00:60",
+            "-1:00",
+            "00:-1",
+            "",
+            " ",
+            ":",
+            "12:",
+            ":34",
+            "1234",
+            "12:34:00",
+            "ab:cd",
+            "12:34Z",
+            "12:34+01:00",
+            "1 :2",
+            "1: 2",
+        ] {
+            assert_eq!(parse_utc_minute(value), None, "{value:?}");
+        }
+    }
 
     #[test]
     fn parses_qso_epoch_from_adif_date_and_time() {
