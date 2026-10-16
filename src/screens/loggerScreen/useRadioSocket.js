@@ -1,19 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { reportClientErrorLater } from '../../lib/errorReporting.js';
-import {
-  BACKEND_WS_IDLE_PING_DELAY_MS,
-  BACKEND_WS_INITIAL_RECONNECT_DELAY_MS,
-  BACKEND_WS_MAX_RECONNECT_DELAY_MS,
-  BACKEND_WS_PING_TIMEOUT_MS,
-  DEFAULT_RADIO_STATE,
-} from '../loggerScreenHelpers.js';
+import { DEFAULT_RADIO_STATE } from '../loggerScreenHelpers.js';
 import {
   radioSocketUrl,
   wsjtxReceiptMessage,
   wsjtxTargetUpdate,
 } from './radioSocketController.js';
 
-const RADIO_WS_CONNECT_TIMEOUT_MS = 5000;
+import { createReconnectingSocket } from './reconnectingSocketController.js';
 
 export function useRadioSocket({
   numericRadioId,
@@ -31,49 +25,48 @@ export function useRadioSocket({
   const [wsjtxTarget, setWsjtXTargetState] = useState(false);
   const [digitalIoTarget, setDigitalIoTargetState] = useState(false);
   const [digitalIoText, setDigitalIoText] = useState('');
-  const radioSocketRef = useRef(null);
+  const controllerRef = useRef(null);
   const wsjtxTargetIntentRef = useRef(false);
   const digitalIoTargetIntentRef = useRef(false);
-  const onWsjtXLoggedAdifRef = useRef(onWsjtXLoggedAdif);
-  onWsjtXLoggedAdifRef.current = onWsjtXLoggedAdif;
+  const callbacksRef = useRef({});
+  useLayoutEffect(() => {
+    callbacksRef.current = {
+      notifyOperationalError,
+      onWsjtXLoggedAdif,
+      isClientRadio,
+    };
+  }, [notifyOperationalError, onWsjtXLoggedAdif, isClientRadio]);
 
   const sendRadioMessage = useCallback((message) => {
-    const socket = radioSocketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify(message));
-    }
+    controllerRef.current?.send(message);
   }, []);
 
-  const setWsjtXTarget = useCallback((enabled) => {
-    const nextEnabled = Boolean(enabled);
-    wsjtxTargetIntentRef.current = nextEnabled;
-    setWsjtXTargetState(nextEnabled);
-    const socket = radioSocketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(
-        JSON.stringify({ type: 'set_wsjtx_target', enabled: nextEnabled }),
-      );
-    }
-  }, []);
+  const setWsjtXTarget = useCallback(
+    (enabled) => {
+      const nextEnabled = Boolean(enabled);
+      wsjtxTargetIntentRef.current = nextEnabled;
+      setWsjtXTargetState(nextEnabled);
+      sendRadioMessage({ type: 'set_wsjtx_target', enabled: nextEnabled });
+    },
+    [sendRadioMessage],
+  );
 
-  const setDigitalIoTarget = useCallback((enabled) => {
-    const nextEnabled = Boolean(enabled);
-    digitalIoTargetIntentRef.current = nextEnabled;
-    setDigitalIoTargetState(nextEnabled);
-    const socket = radioSocketRef.current;
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.send(
-        JSON.stringify({ type: 'set_digital_io_target', enabled: nextEnabled }),
-      );
-    }
-  }, []);
+  const setDigitalIoTarget = useCallback(
+    (enabled) => {
+      const nextEnabled = Boolean(enabled);
+      digitalIoTargetIntentRef.current = nextEnabled;
+      setDigitalIoTargetState(nextEnabled);
+      sendRadioMessage({ type: 'set_digital_io_target', enabled: nextEnabled });
+    },
+    [sendRadioMessage],
+  );
 
   const clearDigitalIo = useCallback(() => {
     setDigitalIoText('');
     sendRadioMessage({ type: 'digital_io_clear' });
   }, [sendRadioMessage]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setRadioState(DEFAULT_RADIO_STATE);
     setMessageSentEvent(null);
     setWsjtXTargetState(false);
@@ -92,194 +85,40 @@ export function useRadioSocket({
       return undefined;
     }
 
-    let shouldReconnect = true;
-    let reconnectDelayMs = BACKEND_WS_INITIAL_RECONNECT_DELAY_MS;
-    let reconnectTimerId;
-    let connectTimeoutTimerId;
-    let healthCheckTimerId;
-    let pongTimeoutTimerId;
-    let lastMessageAt = Date.now();
-    let pendingPingRequestId = null;
-
-    function clearTimer(timerId) {
-      if (timerId !== undefined) window.clearTimeout(timerId);
-    }
-
-    function clearHealthState() {
-      clearTimer(healthCheckTimerId);
-      clearTimer(pongTimeoutTimerId);
-      healthCheckTimerId = undefined;
-      pongTimeoutTimerId = undefined;
-      pendingPingRequestId = null;
-    }
-
-    function scheduleReconnect() {
-      if (!shouldReconnect || reconnectTimerId !== undefined) return;
-      reconnectTimerId = window.setTimeout(() => {
-        reconnectTimerId = undefined;
-        connectRadioSocket();
-      }, reconnectDelayMs);
-      reconnectDelayMs = Math.min(
-        reconnectDelayMs * 2,
-        BACKEND_WS_MAX_RECONNECT_DELAY_MS,
-      );
-    }
-
-    function scheduleHealthCheck() {
-      clearTimer(healthCheckTimerId);
-      healthCheckTimerId = undefined;
-      const socket = radioSocketRef.current;
-      if (
-        !shouldReconnect ||
-        document.hidden ||
-        socket?.readyState !== WebSocket.OPEN ||
-        pendingPingRequestId
-      ) {
-        return;
-      }
-      const idleMs = Date.now() - lastMessageAt;
-      healthCheckTimerId = window.setTimeout(
-        checkRadioSocketHealth,
-        Math.max(BACKEND_WS_IDLE_PING_DELAY_MS - idleMs, 0),
-      );
-    }
-
-    function markSocketActivity() {
-      lastMessageAt = Date.now();
-      pendingPingRequestId = null;
-      clearTimer(pongTimeoutTimerId);
-      pongTimeoutTimerId = undefined;
-      scheduleHealthCheck();
-    }
-
-    function checkRadioSocketHealth({ forcePing = false } = {}) {
-      healthCheckTimerId = undefined;
-      if (!shouldReconnect || document.hidden) return;
-      const socket = radioSocketRef.current;
-      if (!socket || socket.readyState === WebSocket.CLOSED) {
-        connectRadioSocket();
-        return;
-      }
-      if (socket.readyState !== WebSocket.OPEN || pendingPingRequestId) {
-        scheduleHealthCheck();
-        return;
-      }
-      if (
-        !forcePing &&
-        Date.now() - lastMessageAt < BACKEND_WS_IDLE_PING_DELAY_MS
-      ) {
-        scheduleHealthCheck();
-        return;
-      }
-
-      const requestId = window.crypto?.randomUUID
-        ? window.crypto.randomUUID()
-        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      pendingPingRequestId = requestId;
-      try {
-        socket.send(JSON.stringify({ type: 'ping', request_id: requestId }));
-      } catch {
-        pendingPingRequestId = null;
-        socket.close();
-        return;
-      }
-      pongTimeoutTimerId = window.setTimeout(() => {
-        pongTimeoutTimerId = undefined;
-        if (
-          radioSocketRef.current === socket &&
-          pendingPingRequestId === requestId
-        ) {
-          pendingPingRequestId = null;
-          socket.close();
-        }
-      }, BACKEND_WS_PING_TIMEOUT_MS);
-    }
-
-    function connectRadioSocket() {
-      if (!shouldReconnect) return;
-      const current = radioSocketRef.current;
-      if (
-        current?.readyState === WebSocket.CONNECTING ||
-        current?.readyState === WebSocket.OPEN
-      ) {
-        return;
-      }
-
-      clearTimer(reconnectTimerId);
-      clearTimer(connectTimeoutTimerId);
-      reconnectTimerId = undefined;
-      connectTimeoutTimerId = undefined;
-      clearHealthState();
-
-      let url;
-      try {
-        url = radioSocketUrl(radioWebsocketUrl, {
-          loggerId,
-          logId: numericLogId,
-        });
-      } catch (error) {
-        setRadioSocketStatus('disconnected');
-        setCatStatus('offline');
-        notifyOperationalError(
-          'radioSocketUrl',
-          'Unable to connect to radio I/O.',
-          error,
-          { radioId: numericRadioId, radioWebsocketUrl },
-        );
-        return;
-      }
-
-      setRadioSocketStatus('connecting');
-      setCatStatus('offline');
-      let socket;
-      try {
-        socket = new WebSocket(url);
-      } catch (error) {
-        setRadioSocketStatus('disconnected');
-        notifyOperationalError(
-          'radioSocketConnect',
-          'Unable to connect to radio I/O.',
-          error,
-          { radioId: numericRadioId, url },
-        );
-        scheduleReconnect();
-        return;
-      }
-      radioSocketRef.current = socket;
-      connectTimeoutTimerId = window.setTimeout(() => {
-        connectTimeoutTimerId = undefined;
-        if (
-          radioSocketRef.current === socket &&
-          socket.readyState !== WebSocket.OPEN
-        ) {
-          socket.close();
-        }
-      }, RADIO_WS_CONNECT_TIMEOUT_MS);
-
-      socket.addEventListener('open', () => {
-        if (radioSocketRef.current !== socket) return;
-        clearTimer(connectTimeoutTimerId);
-        connectTimeoutTimerId = undefined;
-        reconnectDelayMs = BACKEND_WS_INITIAL_RECONNECT_DELAY_MS;
-        setRadioSocketStatus('connected');
-        markSocketActivity();
-        if (wsjtxTargetIntentRef.current) {
-          socket.send(
-            JSON.stringify({ type: 'set_wsjtx_target', enabled: true }),
-          );
-        }
-        if (digitalIoTargetIntentRef.current) {
-          socket.send(
-            JSON.stringify({ type: 'set_digital_io_target', enabled: true }),
-          );
-        }
+    let url;
+    try {
+      url = radioSocketUrl(radioWebsocketUrl, {
+        loggerId,
+        logId: numericLogId,
       });
+    } catch (error) {
+      setRadioSocketStatus('disconnected');
+      setCatStatus('offline');
+      callbacksRef.current.notifyOperationalError(
+        'radioSocketUrl',
+        'Unable to connect to radio I/O.',
+        error,
+        { radioId: numericRadioId, radioWebsocketUrl },
+      );
+      return undefined;
+    }
 
-      socket.addEventListener('message', (event) => {
-        if (radioSocketRef.current !== socket) return;
-        markSocketActivity();
-        try {
-          const message = JSON.parse(event.data);
+    const controller = createReconnectingSocket({
+      url,
+      createPing: (requestId) => ({ type: 'ping', request_id: requestId }),
+      isPong: (message) => message?.type === 'pong',
+      getCallbacks: () => ({
+        onStatusChange(status) {
+          setRadioSocketStatus(status);
+          if (status !== 'connected') setCatStatus('offline');
+        },
+        onOpen({ send }) {
+          if (wsjtxTargetIntentRef.current)
+            send({ type: 'set_wsjtx_target', enabled: true });
+          if (digitalIoTargetIntentRef.current)
+            send({ type: 'set_digital_io_target', enabled: true });
+        },
+        onMessage(message, { send }) {
           if (message.type === 'radio_status') {
             setCatStatus(message.online ? 'online' : 'offline');
           } else if (message.type === 'radio_state') {
@@ -303,13 +142,11 @@ export function useRadioSocket({
             if (message.logger_id) {
               wsjtxTargetIntentRef.current = targetUpdate.isTarget;
             } else if (targetUpdate.reclaimTarget) {
-              socket.send(
-                JSON.stringify({ type: 'set_wsjtx_target', enabled: true }),
-              );
+              send({ type: 'set_wsjtx_target', enabled: true });
             }
           } else if (message.type === 'wsjtx_logged_adif') {
             if (Number(message.log_id) !== numericLogId) {
-              notifyOperationalError(
+              callbacksRef.current.notifyOperationalError(
                 'wsjtxWrongLog',
                 'Ignored a WSJT-X contact for another log.',
                 null,
@@ -320,16 +157,17 @@ export function useRadioSocket({
                 },
               );
             } else {
-              const accepted = onWsjtXLoggedAdifRef.current?.(message);
+              const accepted =
+                callbacksRef.current.onWsjtXLoggedAdif?.(message);
               const receipt = wsjtxReceiptMessage(
                 message,
                 numericLogId,
                 accepted,
               );
-              if (receipt) socket.send(JSON.stringify(receipt));
+              if (receipt) send(receipt);
             }
           } else if (message.type === 'wsjtx_error') {
-            notifyOperationalError(
+            callbacksRef.current.notifyOperationalError(
               'wsjtx',
               'WSJT-X integration error.',
               message.message,
@@ -343,25 +181,26 @@ export function useRadioSocket({
             if (message.logger_id) {
               digitalIoTargetIntentRef.current = isTarget;
             } else if (digitalIoTargetIntentRef.current) {
-              socket.send(
-                JSON.stringify({ type: 'set_digital_io_target', enabled: true }),
-              );
+              send({ type: 'set_digital_io_target', enabled: true });
             }
           } else if (message.type === 'digital_io_received') {
             if (Number(message.log_id) === numericLogId) {
-              setDigitalIoText((current) => `${current}${String(message.text ?? '')}`.slice(-65536));
+              setDigitalIoText((current) =>
+                `${current}${String(message.text ?? '')}`.slice(-65536),
+              );
             }
           } else if (message.type === 'digital_io_error') {
-            notifyOperationalError(
+            callbacksRef.current.notifyOperationalError(
               'digitalIo',
               'Digital I/O integration error.',
               message.message,
               { logId: numericLogId, radioId: numericRadioId },
             );
           }
-        } catch (error) {
-          if (messageIsWsjtXLoggedAdif(event.data)) {
-            notifyOperationalError(
+        },
+        onMessageError(error, raw) {
+          if (messageIsWsjtXLoggedAdif(raw)) {
+            callbacksRef.current.notifyOperationalError(
               'wsjtxLoggedAdif',
               'Unable to add the WSJT-X contact to the log.',
               error,
@@ -374,81 +213,38 @@ export function useRadioSocket({
             error,
             details: { radioId: numericRadioId },
           });
-        }
-      });
-
-      socket.addEventListener('close', () => {
-        if (radioSocketRef.current !== socket) return;
-        radioSocketRef.current = null;
-        clearTimer(connectTimeoutTimerId);
-        connectTimeoutTimerId = undefined;
-        clearHealthState();
-        setRadioSocketStatus('disconnected');
-        setCatStatus('offline');
-        setWsjtXTargetState(false);
-        setDigitalIoTargetState(false);
-        scheduleReconnect();
-      });
-
-      socket.addEventListener('error', () => {
-        if (isClientRadio && radioSocketRef.current === socket) {
-          notifyOperationalError(
-            'clientRadioSocketConnect',
-            'log73-radio-client is not running on this computer or this is another operator’s client-side radio.',
-            null,
-            { logId: numericLogId, radioId: numericRadioId },
-          );
-        }
-        if (radioSocketRef.current === socket) socket.close();
-      });
-    }
-
-    function handleForeground() {
-      if (document.hidden) return;
-      const socket = radioSocketRef.current;
-      if (socket?.readyState === WebSocket.OPEN) {
-        checkRadioSocketHealth({ forcePing: true });
-      } else {
-        clearTimer(reconnectTimerId);
-        reconnectTimerId = undefined;
-        reconnectDelayMs = BACKEND_WS_INITIAL_RECONNECT_DELAY_MS;
-        connectRadioSocket();
-      }
-    }
-
-    function handleVisibilityChange() {
-      if (document.hidden) {
-        clearHealthState();
-        return;
-      }
-      handleForeground();
-    }
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleForeground);
-    window.addEventListener('pageshow', handleForeground);
-    connectRadioSocket();
+        },
+        onClose() {
+          setWsjtXTargetState(false);
+          setDigitalIoTargetState(false);
+        },
+        onError(error, { phase }) {
+          if (phase === 'socket' && callbacksRef.current.isClientRadio) {
+            callbacksRef.current.notifyOperationalError(
+              'clientRadioSocketConnect',
+              'log73-radio-client is not running on this computer or this is another operator’s client-side radio.',
+              null,
+              { logId: numericLogId, radioId: numericRadioId },
+            );
+          } else if (phase !== 'socket') {
+            callbacksRef.current.notifyOperationalError(
+              'radioSocketConnect',
+              'Unable to connect to radio I/O.',
+              error,
+              { radioId: numericRadioId, url },
+            );
+          }
+        },
+      }),
+    });
+    controllerRef.current = controller;
+    controller.start();
     return () => {
-      shouldReconnect = false;
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleForeground);
-      window.removeEventListener('pageshow', handleForeground);
-      clearTimer(reconnectTimerId);
-      clearTimer(connectTimeoutTimerId);
-      clearHealthState();
-      const socket = radioSocketRef.current;
-      radioSocketRef.current = null;
-      socket?.close();
+      controller.dispose();
+      if (controllerRef.current === controller) controllerRef.current = null;
       setCatStatus('offline');
     };
-  }, [
-    loggerId,
-    numericLogId,
-    numericRadioId,
-    isClientRadio,
-    notifyOperationalError,
-    radioWebsocketUrl,
-  ]);
+  }, [loggerId, numericLogId, numericRadioId, radioWebsocketUrl]);
 
   return {
     radioState,

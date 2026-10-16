@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { apiJson } from '../lib/api';
 import BandMapWindow from '../logger/BandMapWindow';
@@ -199,20 +205,29 @@ function LoggerScreen() {
   const isTransmitterSelectionPending =
     transmitterPromptKey !== null && cabrilloTransmitterId === null;
 
-  wsjtxLoggedAdifHandlerRef.current = (message) => {
-    const contact = wsjtxContactFromMessage({
-      eventId: message.event_id,
-      text: message.text,
-      logId: numericLogId,
+  const handleWsjtXLoggedAdif = useCallback(
+    (message) => {
+      const contact = wsjtxContactFromMessage({
+        eventId: message.event_id,
+        text: message.text,
+        logId: numericLogId,
+        sessionId,
+        operatorCallsign,
+        cabrilloTransmitterId,
+      });
+      setAllContacts((currentContacts) =>
+        appendPendingContact(currentContacts, contact),
+      );
+      return true;
+    },
+    [
+      numericLogId,
       sessionId,
       operatorCallsign,
       cabrilloTransmitterId,
-    });
-    setAllContacts((currentContacts) =>
-      appendPendingContact(currentContacts, contact),
-    );
-    return true;
-  };
+      setAllContacts,
+    ],
+  );
 
   const handleBackendSocketMessage = useCallback(
     (message) => {
@@ -230,11 +245,23 @@ function LoggerScreen() {
     [handleSerialContactLogged, handleSocketMessage],
   );
 
-  socketOpenHandlerRef.current = handleLoggerSocketOpen;
-  socketMessageHandlerRef.current = handleBackendSocketMessage;
-  remoteContactHandlerRef.current = upsertRemoteContact;
-  remoteContactDeletedHandlerRef.current = removeRemoteContact;
-  refreshContactsHandlerRef.current = refreshContacts;
+  // Publish one committed session's handlers together. A render for a new log
+  // must not expose its callbacks to the previous session's live sockets.
+  useLayoutEffect(() => {
+    socketOpenHandlerRef.current = handleLoggerSocketOpen;
+    socketMessageHandlerRef.current = handleBackendSocketMessage;
+    remoteContactHandlerRef.current = upsertRemoteContact;
+    remoteContactDeletedHandlerRef.current = removeRemoteContact;
+    refreshContactsHandlerRef.current = refreshContacts;
+    wsjtxLoggedAdifHandlerRef.current = handleWsjtXLoggedAdif;
+  }, [
+    handleLoggerSocketOpen,
+    handleBackendSocketMessage,
+    upsertRemoteContact,
+    removeRemoteContact,
+    refreshContacts,
+    handleWsjtXLoggedAdif,
+  ]);
 
   useEffect(() => {
     const element = loggerMainColumnRef.current;
