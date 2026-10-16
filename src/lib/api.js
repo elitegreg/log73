@@ -1,23 +1,3 @@
-function unwrapLegacySuccessPayload(payload) {
-  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
-    return payload;
-  }
-  if (payload.ok === false) {
-    const error = new Error(payload.error ?? 'request failed');
-    error.payload = payload;
-    throw error;
-  }
-  if (payload.ok !== true) {
-    return payload;
-  }
-
-  const entries = Object.entries(payload).filter(([key]) => key !== 'ok');
-  if (entries.length === 1) {
-    return entries[0][1];
-  }
-  return Object.fromEntries(entries);
-}
-
 async function errorFromResponse(response) {
   let message = `request failed: ${response.status}`;
   const contentType = response.headers.get('content-type') ?? '';
@@ -54,7 +34,8 @@ export async function apiJson(path, options = {}) {
   }
 
   if (response.status === 204) return null;
-  return unwrapLegacySuccessPayload(await response.json());
+  const text = await response.text();
+  return text.trim() ? JSON.parse(text) : null;
 }
 
 export async function apiDownload(path, options = {}) {

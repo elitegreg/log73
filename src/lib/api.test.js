@@ -1,53 +1,106 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { apiJson, websocketUrl } from './api.js';
+import { apiJson, apiDownload, websocketUrl } from './api.js';
 
-test('apiJson unwraps legacy ok payloads', async () => {
-  globalThis.fetch = async () => ({
-    ok: true,
-    status: 200,
-    headers: new Headers({ 'content-type': 'application/json' }),
-    json: async () => ({ ok: true, config: { login_user: 'greg' } }),
-  });
+function respond(t, body, options = {}) {
+  t.mock.method(globalThis, 'fetch', async () => new Response(body, options));
+}
 
-  const result = await apiJson('/config');
-
-  assert.deepEqual(result, { login_user: 'greg' });
+test('apiJson preserves single-field, multiple-field, and scalar success bodies', async (t) => {
+  for (const payload of [
+    { login_user: 'greg' },
+    { contact: { meta: { id: 1 } }, contacts: [{ meta: { id: 1 } }] },
+    { imported: 1, contacts: [] },
+    { next: 10, next_by_band: {}, reservation_required: false },
+    { cw: [], digital: [], voice: [] },
+    { ok: true, domain_field: 1 },
+    ['CW', 'SSB'],
+    'message defaults',
+    true,
+    {},
+  ]) {
+    respond(t, JSON.stringify(payload), {
+      headers: { 'content-type': 'application/json' },
+    });
+    assert.deepEqual(await apiJson('/resource'), payload);
+  }
 });
 
-test('apiJson throws backend json error messages for non-2xx responses', async () => {
-  globalThis.fetch = async () => ({
-    ok: false,
-    status: 400,
-    headers: new Headers({ 'content-type': 'application/json' }),
-    json: async () => ({ error: 'bad request details' }),
-    text: async () => '',
-  });
-
-  await assert.rejects(() => apiJson('/config'), /bad request details/);
+test('apiJson preserves structured import and outbox error details', async (t) => {
+  for (const payload of [
+    {
+      error: 'invalid record',
+      line: 3,
+      errors: [{ line: 3, error: 'invalid record' }],
+    },
+    { error: 'contact 1: serial is required', status: 'failed' },
+  ]) {
+    respond(t, JSON.stringify(payload), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    });
+    await assert.rejects(
+      () => apiJson('/logs/1/contacts'),
+      (error) => {
+        assert.equal(error.message, payload.error);
+        assert.deepEqual(error.payload, payload);
+        return true;
+      },
+    );
+  }
 });
 
-test('apiJson throws legacy ok false errors during transition', async () => {
-  globalThis.fetch = async () => ({
-    ok: true,
-    status: 200,
-    headers: new Headers({ 'content-type': 'application/json' }),
-    json: async () => ({ ok: false, error: 'legacy failure' }),
-  });
-
-  await assert.rejects(() => apiJson('/logs'), /legacy failure/);
+test('API helpers report JSON, malformed JSON, and non-JSON failures', async (t) => {
+  for (const request of [apiJson, apiDownload]) {
+    for (const [body, contentType, message] of [
+      ['{"error":"missing resource"}', 'application/json', 'missing resource'],
+      ['{broken', 'application/json', 'request failed: 500'],
+      ['{}', 'application/json', 'request failed: 500'],
+      ['  proxy unavailable  ', 'text/plain', 'proxy unavailable'],
+      ['', 'text/plain', 'request failed: 500'],
+    ]) {
+      respond(t, body, {
+        status: 500,
+        headers: { 'content-type': contentType },
+      });
+      await assert.rejects(
+        () => request('/resource'),
+        (error) => {
+          assert.equal(error.message, message);
+          return true;
+        },
+      );
+    }
+  }
 });
 
-test('apiJson returns null for 204 responses', async () => {
-  globalThis.fetch = async () => ({
-    ok: true,
-    status: 204,
-    headers: new Headers(),
-  });
+test('apiJson returns null for 204 and empty success bodies', async (t) => {
+  respond(t, null, { status: 204 });
+  assert.equal(await apiJson('/client-errors', { method: 'POST' }), null);
+  respond(t, '');
+  assert.equal(await apiJson('/empty'), null);
+});
 
-  const result = await apiJson('/client-errors', { method: 'POST' });
+test('apiJson rejects malformed successful JSON', async (t) => {
+  respond(t, '{broken');
+  await assert.rejects(() => apiJson('/resource'), SyntaxError);
+});
 
-  assert.equal(result, null);
+test('apiDownload preserves contents and filename, with a fallback filename', async (t) => {
+  for (const [headers, expected] of [
+    [
+      { 'content-disposition': 'attachment; filename="N0CALL.adi"' },
+      'N0CALL.adi',
+    ],
+    [{}, 'download.log'],
+  ]) {
+    respond(t, 'ADIF content', { headers });
+    const { blob, filename } = await apiDownload('/logs/1/adif', {
+      method: 'POST',
+    });
+    assert.equal(await blob.text(), 'ADIF content');
+    assert.equal(filename, expected);
+  }
 });
 
 test('websocketUrl resolves a relative radio endpoint', () => {

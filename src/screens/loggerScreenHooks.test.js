@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { apiJson } from '../lib/api.js';
+import { mergeContact } from './loggerScreenHelpers.js';
 import {
   formatSocketDebugDetails,
   logSocketDebug,
@@ -38,6 +40,77 @@ import {
   operatorStats,
   reportQsoStatsFailure,
 } from './loggerScreen/qsoStatsState.js';
+
+test('direct commit responses with warnings leave the outbox successfully', async (t) => {
+  const pending = {
+    meta: {
+      clientId: 'wsjtx-event',
+      status: 'Pending',
+      source: 'wsjtx',
+      force: true,
+    },
+    adif: { CALL: 'K1ABC', QSO_DATE_TIME_ON: 100 },
+  };
+  const committed = {
+    ...pending,
+    meta: {
+      ...pending.meta,
+      id: 1,
+      status: 'Committed',
+      warnings: [{ message: 'Serial is required' }],
+    },
+  };
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json({ contact: committed, contacts: [committed] }),
+  );
+  const response = await apiJson('/logs/1/contacts', {
+    method: 'POST',
+    body: JSON.stringify(contactCommitPayload(pending, 1)),
+  });
+  const contacts = mergeContact([pending], response.contact);
+  assert.equal(contacts.length, 1);
+  assert.deepEqual(contacts[0].meta.warnings, committed.meta.warnings);
+  assert.equal(nextContactToCommit(contacts, new Set()), undefined);
+});
+
+test('HTTP commit failures preserve pending outbox contacts for retry', async (t) => {
+  const pending = {
+    meta: { clientId: 'pending', status: 'Pending' },
+    adif: { CALL: 'K1ABC' },
+  };
+  for (const status of [400, 500]) {
+    t.mock.method(globalThis, 'fetch', async () =>
+      Response.json({ error: 'commit failed', status: 'failed' }, { status }),
+    );
+    await assert.rejects(
+      () =>
+        apiJson('/logs/1/contacts', {
+          method: 'POST',
+          body: JSON.stringify(pending),
+        }),
+      (error) => {
+        assert.equal(error.payload.status, 'failed');
+        return true;
+      },
+    );
+    assert.equal(nextContactToCommit([pending], new Set()), pending);
+    assert.equal(pending.meta.status, 'Pending');
+  }
+});
+
+test('direct serial-state responses initialize the existing allocator', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () =>
+    Response.json({
+      field_adif: 'STX',
+      scope: 'band',
+      reservation_required: false,
+      next_by_band: { '20M': 18 },
+    }),
+  );
+  const response = await apiJson('/logs/1/serial-allocation?field_adif=STX');
+  const state = serialStateFromBackend(response);
+  assert.equal(currentSerialForBand(state, '20m'), 18);
+});
 
 test('QSO stats helpers select operators and format unavailable rates', () => {
   const stats = {

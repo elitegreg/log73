@@ -171,59 +171,120 @@ pub fn validate_dxcluster_config(
     Ok(())
 }
 
+/// Diagnostic findings for one contact: contest-rule problems that annotate
+/// instead of blocking on the diagnostic commit path.
+pub fn diagnose_contact(
+    rules: &ContestRules,
+    bands: &[Band],
+    log_id: i64,
+    contact: &Contact,
+) -> Vec<String> {
+    match validate_contact(rules, bands, log_id, contact) {
+        Ok(()) => Vec::new(),
+        Err(message) => vec![message],
+    }
+}
+
+/// Preserve failure provenance so HTTP callers do not infer status from error text.
+#[derive(Debug)]
+pub enum ContactValidationError {
+    Invalid(String),
+    NotFound(String),
+    Internal(String),
+}
+
+impl From<String> for ContactValidationError {
+    fn from(message: String) -> Self {
+        Self::Invalid(message)
+    }
+}
+
+impl std::fmt::Display for ContactValidationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Invalid(message) | Self::NotFound(message) | Self::Internal(message) => {
+                formatter.write_str(message)
+            }
+        }
+    }
+}
+
+impl ContactValidationError {
+    fn for_contact(self, index: usize) -> Self {
+        let message = format!("contact {}: {self}", index + 1);
+        match self {
+            Self::Invalid(_) => Self::Invalid(message),
+            Self::NotFound(_) => Self::NotFound(message),
+            Self::Internal(_) => Self::Internal(message),
+        }
+    }
+}
+
 pub async fn validate_contacts(
     database: &Database,
     contest_rules: &ContestRulesStore,
     bands: &[Band],
     log_id: i64,
     contacts: &[Contact],
-) -> Result<(), String> {
+    diagnostic_ids: &HashSet<i64>,
+) -> Result<(), ContactValidationError> {
     if log_id <= 0 {
-        return Err("log id must be positive".to_string());
+        return Err("log id must be positive".to_string().into());
     }
     if contacts.is_empty() {
-        return Err("contacts payload must contain at least one contact".to_string());
+        return Err("contacts payload must contain at least one contact"
+            .to_string()
+            .into());
     }
     if contacts.len() > MAX_CONTACTS_PER_UPLOAD {
         return Err(format!(
             "contacts payload cannot contain more than {MAX_CONTACTS_PER_UPLOAD} contacts"
-        ));
+        )
+        .into());
     }
 
     let log = database
         .log(log_id)
         .await
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("log {log_id} not found"))?;
-    let rules = contest_rules
-        .get(&log.contest_id)
-        .ok_or_else(|| format!("unknown contest: {}", log.contest_id))?;
+        .map_err(|error| ContactValidationError::Internal(error.to_string()))?
+        .ok_or_else(|| ContactValidationError::NotFound(format!("log {log_id} not found")))?;
+    let rules = contest_rules.get(&log.contest_id).ok_or_else(|| {
+        ContactValidationError::Invalid(format!("unknown contest: {}", log.contest_id))
+    })?;
 
     for (index, contact) in contacts.iter().enumerate() {
-        if force_commit_requested(contact) {
-            validate_contact_shape(contact)
-                .map_err(|error| format!("contact {}: {error}", index + 1))?;
+        // Force-requested contacts and contacts already carrying persisted
+        // warnings take the diagnostic path: shape errors still abort here,
+        // contest findings become warnings computed by the caller.
+        let diagnostic = force_commit_requested(contact)
+            || contact_id(contact).is_some_and(|id| diagnostic_ids.contains(&id));
+        if diagnostic {
+            validate_contact_shape(contact).map_err(|error| {
+                ContactValidationError::Invalid(format!("contact {}: {error}", index + 1))
+            })?;
         } else {
-            validate_contact(rules, bands, log_id, contact)
-                .map_err(|error| format!("contact {}: {error}", index + 1))?;
+            validate_contact(rules, bands, log_id, contact).map_err(|error| {
+                ContactValidationError::Invalid(format!("contact {}: {error}", index + 1))
+            })?;
         }
 
         if let Some(contact_id) = contact_id(contact)
-            && let Some(existing_log_id) = database
-                .contact_log_id(contact_id)
-                .await
-                .map_err(|error| format!("contact {}: {error}", index + 1))?
+            && let Some(existing_log_id) =
+                database.contact_log_id(contact_id).await.map_err(|error| {
+                    ContactValidationError::Internal(format!("contact {}: {error}", index + 1))
+                })?
             && existing_log_id != log_id
         {
             return Err(format!(
                 "contact {}: contact id {contact_id} belongs to log {existing_log_id}",
                 index + 1
-            ));
+            )
+            .into());
         }
 
         validate_immutable_sent_serial_fields(database, rules, contact)
             .await
-            .map_err(|error| format!("contact {}: {error}", index + 1))?;
+            .map_err(|error| error.for_contact(index))?;
     }
 
     Ok(())
@@ -235,36 +296,49 @@ pub async fn validate_import_contacts(
     bands: &[Band],
     log_id: i64,
     contacts: &[Contact],
-) -> Result<(), (usize, String)> {
+) -> Result<(), (usize, ContactValidationError)> {
     if log_id <= 0 {
-        return Err((0, "log id must be positive".to_string()));
+        return Err((0, "log id must be positive".to_string().into()));
     }
     if contacts.is_empty() {
-        return Err((0, "ADIF file does not contain any QSO records".to_string()));
+        return Err((
+            0,
+            "ADIF file does not contain any QSO records"
+                .to_string()
+                .into(),
+        ));
     }
 
     let log = database
         .log(log_id)
         .await
-        .map_err(|error| (0, error.to_string()))?
-        .ok_or_else(|| (0, format!("log {log_id} not found")))?;
-    let rules = contest_rules
-        .get(&log.contest_id)
-        .ok_or_else(|| (0, format!("unknown contest: {}", log.contest_id)))?;
+        .map_err(|error| (0, ContactValidationError::Internal(error.to_string())))?
+        .ok_or_else(|| {
+            (
+                0,
+                ContactValidationError::NotFound(format!("log {log_id} not found")),
+            )
+        })?;
+    let rules = contest_rules.get(&log.contest_id).ok_or_else(|| {
+        (
+            0,
+            ContactValidationError::Invalid(format!("unknown contest: {}", log.contest_id)),
+        )
+    })?;
 
     for (index, contact) in contacts.iter().enumerate() {
-        validate_contact(rules, bands, log_id, contact).map_err(|error| (index, error))?;
+        validate_contact(rules, bands, log_id, contact).map_err(|error| (index, error.into()))?;
 
         if let Some(contact_id) = contact_id(contact)
             && let Some(existing_log_id) = database
                 .contact_log_id(contact_id)
                 .await
-                .map_err(|error| (index, error.to_string()))?
+                .map_err(|error| (index, ContactValidationError::Internal(error.to_string())))?
             && existing_log_id != log_id
         {
             return Err((
                 index,
-                format!("contact id {contact_id} belongs to log {existing_log_id}"),
+                format!("contact id {contact_id} belongs to log {existing_log_id}").into(),
             ));
         }
 
@@ -286,7 +360,7 @@ async fn validate_immutable_sent_serial_fields(
     database: &Database,
     rules: &ContestRules,
     contact: &Contact,
-) -> Result<(), String> {
+) -> Result<(), ContactValidationError> {
     let sent_serial_fields = rules
         .exchange
         .iter()
@@ -304,7 +378,7 @@ async fn validate_immutable_sent_serial_fields(
     let Some(existing) = database
         .contact(contact_id)
         .await
-        .map_err(|error| error.to_string())?
+        .map_err(|error| ContactValidationError::Internal(error.to_string()))?
     else {
         return Ok(());
     };
@@ -313,7 +387,7 @@ async fn validate_immutable_sent_serial_fields(
         let previous = serial_field_value(contact_adif_value(&existing, &field.adif));
         let next = serial_field_value(contact_adif_value(contact, &field.adif));
         if previous != next {
-            return Err(format!("{} cannot be changed after logging", field.label));
+            return Err(format!("{} cannot be changed after logging", field.label).into());
         }
     }
 

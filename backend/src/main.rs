@@ -1,4 +1,6 @@
 mod adif;
+#[cfg(test)]
+mod api_contract_tests;
 mod auth;
 mod bandmap;
 mod bands;
@@ -25,7 +27,7 @@ use axum::{
     Json, Router,
     body::Body,
     extract::{
-        DefaultBodyLimit, Path, Query, State,
+        DefaultBodyLimit, FromRequest, Path, Query, Request, State,
         ws::{Message, WebSocket, WebSocketUpgrade},
     },
     http::{HeaderMap, HeaderValue, StatusCode, header},
@@ -55,7 +57,7 @@ use radio_io::{
 use scoring::{IncrementalScoreTracker, ScoreTotals, ScoringModules, score_contacts};
 use stats::StatsTracker;
 use std::{
-    collections::{BTreeMap, HashMap, hash_map::DefaultHasher},
+    collections::{BTreeMap, HashMap, HashSet, hash_map::DefaultHasher},
     fs,
     fs::OpenOptions,
     hash::Hasher,
@@ -120,13 +122,15 @@ impl AppState {
             .await
     }
 
-    async fn validate_radio_voice_messages(&self, messages: String) -> Result<(), String> {
+    async fn validate_radio_voice_messages(&self, messages: String) -> Result<(), ApiError> {
         let keyer = self.voice_keyer.clone();
         self.blocking_work
             .run("validate_voice_assets", move || {
-                keyer.validate_radio_voice_messages(&messages).map(|_| ())
+                Ok(keyer.validate_radio_voice_messages(&messages).map(|_| ()))
             })
             .await
+            .map_err(ApiError::internal)?
+            .map_err(ApiError::bad_request)
     }
 }
 
@@ -287,6 +291,8 @@ struct ErrorBody {
     error: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     code: Option<&'static str>,
+    #[serde(flatten)]
+    details: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug)]
@@ -302,6 +308,7 @@ impl ApiError {
             body: ErrorBody {
                 error: error.into(),
                 code: None,
+                details: Default::default(),
             },
         }
     }
@@ -321,6 +328,21 @@ impl ApiError {
     fn conflict(error: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, error)
     }
+
+    fn with_detail(mut self, key: &str, value: impl Into<serde_json::Value>) -> Self {
+        self.body.details.insert(key.to_string(), value.into());
+        self
+    }
+}
+
+impl From<validation::ContactValidationError> for ApiError {
+    fn from(error: validation::ContactValidationError) -> Self {
+        match error {
+            validation::ContactValidationError::Invalid(message) => Self::bad_request(message),
+            validation::ContactValidationError::NotFound(message) => Self::not_found(message),
+            validation::ContactValidationError::Internal(message) => Self::internal(message),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -330,6 +352,63 @@ impl IntoResponse for ApiError {
 }
 
 type ApiResult<T> = Result<Json<T>, ApiError>;
+
+/// Keep JSON extraction failures on the same error contract as handler failures.
+struct ApiJson<T>(T);
+
+impl<S, T> FromRequest<S> for ApiJson<T>
+where
+    S: Send + Sync,
+    T: serde::de::DeserializeOwned,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
+        Json::<T>::from_request(request, state)
+            .await
+            .map(|Json(payload)| Self(payload))
+            .map_err(|error| {
+                let status = if error.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                    StatusCode::PAYLOAD_TOO_LARGE
+                } else {
+                    StatusCode::BAD_REQUEST
+                };
+                ApiError::new(status, error.body_text())
+            })
+    }
+}
+
+// Path/query/method rejections originate in Axum rather than in a handler.
+async fn api_error_response(request: Request, next: middleware::Next) -> Response {
+    let response = next.run(request).await;
+    if !(response.status().is_client_error() || response.status().is_server_error())
+        || response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .is_some_and(|value| value.as_bytes().starts_with(b"application/json"))
+    {
+        return response;
+    }
+    let (mut parts, body) = response.into_parts();
+    let text = axum::body::to_bytes(body, 64 * 1024)
+        .await
+        .unwrap_or_default();
+    let message = String::from_utf8_lossy(&text);
+    let message = if message.trim().is_empty() {
+        parts.status.canonical_reason().unwrap_or("request failed")
+    } else {
+        message.trim()
+    };
+    let body = ApiError::new(parts.status, message)
+        .into_response()
+        .into_body();
+    parts.headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/json"),
+    );
+    parts.headers.remove(header::CONTENT_LENGTH);
+    Response::from_parts(parts, body)
+}
 
 #[derive(Debug, Parser)]
 #[command(version, about = "Log73 contest logger backend")]
@@ -655,7 +734,8 @@ pub(crate) fn app_router(app_state: AppState, radio_io: radio_io::RadioWebSocket
             get(radio).put(update_radio).delete(delete_radio),
         )
         .route("/radios/{id}/cw-labels", get(cw_labels))
-        .route("/radios/{id}/message-labels", get(message_labels));
+        .route("/radios/{id}/message-labels", get(message_labels))
+        .layer(middleware::from_fn(api_error_response));
 
     Router::new()
         .nest("/api", api)
@@ -1081,7 +1161,7 @@ enum SaveBandMapSpotPayload {
 
 async fn save_bandmap_spot(
     State(app_state): State<AppState>,
-    Json(payload): Json<SaveBandMapSpotPayload>,
+    ApiJson(payload): ApiJson<SaveBandMapSpotPayload>,
 ) -> ApiResult<serde_json::Value> {
     match payload {
         SaveBandMapSpotPayload::Local {
@@ -1163,7 +1243,7 @@ struct SaveDxClusterSpotPayload {
 
 async fn save_dxcluster_spot(
     State(app_state): State<AppState>,
-    Json(payload): Json<SaveDxClusterSpotPayload>,
+    ApiJson(payload): ApiJson<SaveDxClusterSpotPayload>,
 ) -> ApiResult<serde_json::Value> {
     if let Err(error) = validation::validate_dxcluster_spot_request(
         payload.frequency_hz,
@@ -1311,7 +1391,7 @@ fn normalized_json_text(value: Option<&serde_json::Value>, max_len: usize) -> Op
     Some(truncate_text(&serialized, max_len))
 }
 
-async fn report_client_error(Json(payload): Json<ClientErrorReportPayload>) -> StatusCode {
+async fn report_client_error(ApiJson(payload): ApiJson<ClientErrorReportPayload>) -> StatusCode {
     let source = normalized_text(payload.source.as_deref(), MAX_CLIENT_ERROR_TEXT_LENGTH)
         .unwrap_or_else(|| "frontend".to_string());
     let message = normalized_text(payload.message.as_deref(), MAX_CLIENT_ERROR_TEXT_LENGTH);
@@ -1357,7 +1437,7 @@ async fn report_client_error(Json(payload): Json<ClientErrorReportPayload>) -> S
 
 async fn update_config(
     State(app_state): State<AppState>,
-    Json(payload): Json<UpdateConfigPayload>,
+    ApiJson(payload): ApiJson<UpdateConfigPayload>,
 ) -> ApiResult<db::ConfigView> {
     debug!("update config PUT request");
     let _config_update_guard = app_state.config_update_lock.lock().await;
@@ -1393,12 +1473,13 @@ async fn update_config(
     ) {
         Ok(validation::LoginPasswordChange::Preserve) => db::LoginPasswordUpdate::Preserve,
         Ok(validation::LoginPasswordChange::Disable) => db::LoginPasswordUpdate::Disable,
-        Ok(validation::LoginPasswordChange::Change(password)) => {
-            match app_state.auth.hash_password(password).await {
-                Ok(login_password) => db::LoginPasswordUpdate::Set(login_password),
-                Err(error) => return Err(ApiError::bad_request(error)),
-            }
-        }
+        Ok(validation::LoginPasswordChange::Change(password)) => db::LoginPasswordUpdate::Set(
+            app_state
+                .auth
+                .hash_password(password)
+                .await
+                .map_err(ApiError::internal)?,
+        ),
         Err(error) => return Err(ApiError::bad_request(error)),
     };
     if let Err(error) = validation::validate_dxcluster_config(
@@ -1474,7 +1555,7 @@ async fn log(State(app_state): State<AppState>, Path(id): Path<i64>) -> ApiResul
 
 async fn create_log(
     State(app_state): State<AppState>,
-    Json(payload): Json<NewLog>,
+    ApiJson(payload): ApiJson<NewLog>,
 ) -> ApiResult<db::Log> {
     debug!(payload = %debug_payload_log(&payload), "create log POST body");
     if let Err(error) = validation::validate_new_log(&app_state.contest_rules, &payload) {
@@ -1491,7 +1572,7 @@ async fn create_log(
 async fn update_log(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-    Json(payload): Json<UpdateLog>,
+    ApiJson(payload): ApiJson<UpdateLog>,
 ) -> ApiResult<db::Log> {
     debug!(id, payload = %debug_payload_log(&payload), "update log PUT body");
     let log = match app_state.db.log(id).await {
@@ -1521,138 +1602,86 @@ async fn update_log(
 async fn export_cabrillo(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-    Json(payload): Json<CabrilloExportPayload>,
-) -> impl IntoResponse {
-    let snapshot = match app_state.db.log_snapshot(id).await {
-        Ok(Some(snapshot)) => snapshot,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "ok": false, "error": "not found" })),
-            )
-                .into_response();
-        }
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-            )
-                .into_response();
-        }
-    };
+    ApiJson(payload): ApiJson<CabrilloExportPayload>,
+) -> Result<Response, ApiError> {
+    let snapshot = app_state
+        .db
+        .log_snapshot(id)
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .ok_or_else(|| ApiError::not_found("not found"))?;
     let log = snapshot.log;
-    let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id) })),
-        )
-            .into_response();
-    };
-    if let Err(error) = validation::validate_cabrillo_export_params(rules, &payload.export_params) {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "ok": false, "error": error })),
-        )
-            .into_response();
-    }
-
+    let rules = app_state
+        .contest_rules
+        .get(&log.contest_id)
+        .ok_or_else(|| ApiError::bad_request(format!("unknown contest: {}", log.contest_id)))?;
+    validation::validate_cabrillo_export_params(rules, &payload.export_params)
+        .map_err(ApiError::bad_request)?;
     let mut contacts = snapshot.contacts.to_vec();
     contacts.sort_by_key(contact_score_order);
     let mut scored_contacts = contacts.clone();
     let claimed_score =
         score_contacts(rules, log.contest_params.clone(), &mut scored_contacts).score;
     let band_snapshot = app_state.bands.snapshot();
-    let text = match cabrillo::render_log(
+    let text = cabrillo::render_log(
         rules,
         &log,
         &contacts,
         &payload.export_params,
         claimed_score,
         band_snapshot.as_ref(),
-    ) {
-        Ok(text) => text,
-        Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "ok": false, "error": error })),
-            )
-                .into_response();
-        }
-    };
-
-    download_response(
+    )
+    .map_err(ApiError::bad_request)?;
+    Ok(download_response(
         text,
         "text/plain; charset=utf-8",
         &cabrillo::export_filename(&log),
-    )
+    ))
 }
 
-async fn export_adif(State(app_state): State<AppState>, Path(id): Path<i64>) -> impl IntoResponse {
-    let snapshot = match app_state.db.log_snapshot(id).await {
-        Ok(Some(snapshot)) => snapshot,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "ok": false, "error": "not found" })),
-            )
-                .into_response();
-        }
-        Err(error) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-            )
-                .into_response();
-        }
-    };
-
+async fn export_adif(
+    State(app_state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Response, ApiError> {
+    let snapshot = app_state
+        .db
+        .log_snapshot(id)
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .ok_or_else(|| ApiError::not_found("not found"))?;
     let log = snapshot.log;
-
-    let contacts = snapshot.contacts.to_vec();
-
-    let text = match adif::render_log(&log, &contacts) {
-        Ok(text) => text,
-        Err(error) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({ "ok": false, "error": error })),
-            )
-                .into_response();
-        }
-    };
-
-    download_response(
+    let text = adif::render_log(&log, &snapshot.contacts.to_vec()).map_err(ApiError::internal)?;
+    Ok(download_response(
         text,
         "text/plain; charset=utf-8",
         &adif::export_filename(&log),
-    )
+    ))
 }
 
 async fn import_adif(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-    Json(payload): Json<AdifImportPayload>,
-) -> Json<serde_json::Value> {
+    ApiJson(payload): ApiJson<AdifImportPayload>,
+) -> ApiResult<serde_json::Value> {
     let log = match app_state.db.log(id).await {
         Ok(Some(log)) => log,
-        Ok(None) => return Json(serde_json::json!({ "ok": false, "error": "not found" })),
-        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Ok(None) => return Err(ApiError::not_found("not found")),
+        Err(error) => return Err(ApiError::internal(error.to_string())),
     };
     let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
-        return Json(
-            serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id) }),
-        );
+        return Err(ApiError::bad_request(format!(
+            "unknown contest: {}",
+            log.contest_id
+        )));
     };
 
     let imported = match adif::import_contacts(&log, rules, &payload.adif, &payload.mappings) {
         Ok(imported) => imported,
         Err(error) => {
-            return Json(serde_json::json!({
-                "ok": false,
-                "error": error.error,
-                "line": error.line,
-                "errors": [error],
-            }));
+            return Err(import_api_error(
+                ApiError::bad_request(error.error.clone()),
+                error,
+            ));
         }
     };
     let contacts = imported
@@ -1673,13 +1702,11 @@ async fn import_adif(
             .get(index)
             .map(|imported| imported.line)
             .unwrap_or(1);
-        let import_error = adif::ImportError { line, error };
-        return Json(serde_json::json!({
-            "ok": false,
-            "error": import_error.error,
-            "line": import_error.line,
-            "errors": [import_error],
-        }));
+        let import_error = adif::ImportError {
+            line,
+            error: error.to_string(),
+        };
+        return Err(import_api_error(error.into(), import_error));
     }
 
     match app_state.log_cache.upsert_contacts(id, contacts).await {
@@ -1699,14 +1726,19 @@ async fn import_adif(
             send_score_update(&app_state, id, &totals);
 
             let imported = result.contacts.len();
-            Json(serde_json::json!({
-                "ok": true,
+            Ok(Json(serde_json::json!({
                 "imported": imported,
                 "contacts": result.contacts,
-            }))
+            })))
         }
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
+        Err(error) => Err(ApiError::internal(error.to_string())),
     }
+}
+
+fn import_api_error(error: ApiError, diagnostic: adif::ImportError) -> ApiError {
+    error
+        .with_detail("line", diagnostic.line)
+        .with_detail("errors", serde_json::json!([diagnostic]))
 }
 
 fn download_response(body: String, content_type: &str, filename: &str) -> axum::response::Response {
@@ -1774,7 +1806,10 @@ async fn delete_log(
             if deleted {
                 app_state.log_cache.remove_log(id).await;
             }
-            Ok(Json(serde_json::json!({ "deleted": deleted })))
+            if !deleted {
+                return Err(ApiError::not_found("not found"));
+            }
+            Ok(Json(serde_json::json!({ "deleted": true })))
         }
         Err(error) => Err(ApiError::internal(error.to_string())),
     }
@@ -1799,15 +1834,27 @@ async fn log_qso_count(
 async fn log_stats(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-) -> Json<serde_json::Value> {
-    if let Err(error) = app_state.log_cache.ensure_loaded(id).await {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
-    }
+) -> ApiResult<stats::LogStatsSnapshot> {
+    require_log(&app_state, id).await?;
+    app_state
+        .log_cache
+        .ensure_loaded(id)
+        .await
+        .map_err(ApiError::internal)?;
+    app_state
+        .stats
+        .snapshot(id)
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("not found"))
+}
 
-    match app_state.stats.snapshot(id) {
-        Some(stats) => Json(serde_json::json!({ "ok": true, "stats": stats })),
-        None => Json(serde_json::json!({ "ok": false, "error": "not found" })),
-    }
+async fn require_log(app_state: &AppState, id: i64) -> Result<db::Log, ApiError> {
+    app_state
+        .db
+        .log(id)
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .ok_or_else(|| ApiError::not_found(format!("log {id} not found")))
 }
 
 async fn input_audio_devices(
@@ -1857,7 +1904,7 @@ struct ClientRadioRegistration {
 async fn register_client_radio(
     State(app_state): State<AppState>,
     Path(client_instance_id): Path<String>,
-    Json(mut payload): Json<RegisterClientRadioRequest>,
+    ApiJson(mut payload): ApiJson<RegisterClientRadioRequest>,
 ) -> ApiResult<ClientRadioRegistration> {
     let client_instance_id = validate_client_instance_id(&client_instance_id)?;
     validate_client_radio_ws_url(&payload.radio_ws_url)?;
@@ -1889,8 +1936,8 @@ async fn register_client_radio(
 async fn client_radio_heartbeat(
     State(app_state): State<AppState>,
     Path(client_instance_id): Path<String>,
-    Json(payload): Json<ClientRadioLeaseRequest>,
-) -> ApiResult<serde_json::Value> {
+    ApiJson(payload): ApiJson<ClientRadioLeaseRequest>,
+) -> Result<StatusCode, ApiError> {
     let client_instance_id = validate_client_instance_id(&client_instance_id)?;
     validate_client_radio_lease_request(&payload)?;
     app_state
@@ -1898,14 +1945,14 @@ async fn client_radio_heartbeat(
         .heartbeat(payload.radio_id, &client_instance_id, &payload.lease_id)
         .await
         .map_err(|_| ApiError::conflict("client radio lease is stale or has been replaced"))?;
-    Ok(Json(serde_json::json!({ "ok": true })))
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn client_radio_offline(
     State(app_state): State<AppState>,
     Path(client_instance_id): Path<String>,
-    Json(payload): Json<ClientRadioLeaseRequest>,
-) -> ApiResult<serde_json::Value> {
+    ApiJson(payload): ApiJson<ClientRadioLeaseRequest>,
+) -> Result<StatusCode, ApiError> {
     let client_instance_id = validate_client_instance_id(&client_instance_id)?;
     validate_client_radio_lease_request(&payload)?;
     app_state
@@ -1914,7 +1961,7 @@ async fn client_radio_offline(
         .await
         .map_err(|_| ApiError::conflict("client radio lease is stale or has been replaced"))?;
     info!(radio_id = payload.radio_id, "client radio marked offline");
-    Ok(Json(serde_json::json!({ "ok": true })))
+    Ok(StatusCode::NO_CONTENT)
 }
 
 fn validate_client_instance_id(value: &str) -> Result<String, ApiError> {
@@ -2138,14 +2185,11 @@ async fn default_cw_messages() -> Json<String> {
     Json(cw::DEFAULT_CW_MESSAGES.to_string())
 }
 
-async fn validate_cw_messages(Json(payload): Json<CwMessagesPayload>) -> Json<serde_json::Value> {
-    match radio_io::validate_cw_messages(&payload.cw_messages) {
-        Ok(()) => Json(serde_json::json!({
-            "ok": true,
-            "labels": cw::labels(&payload.cw_messages)
-        })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
-    }
+async fn validate_cw_messages(
+    ApiJson(payload): ApiJson<CwMessagesPayload>,
+) -> ApiResult<cw::CwLabels> {
+    radio_io::validate_cw_messages(&payload.cw_messages).map_err(ApiError::bad_request)?;
+    Ok(Json(cw::labels(&payload.cw_messages)))
 }
 
 async fn default_digital_messages() -> Json<String> {
@@ -2153,84 +2197,64 @@ async fn default_digital_messages() -> Json<String> {
 }
 
 async fn validate_digital_messages(
-    Json(payload): Json<DigitalMessagesPayload>,
-) -> Json<serde_json::Value> {
-    match radio_io::validate_digital_messages(&payload.digital_messages) {
-        Ok(()) => Json(serde_json::json!({
-            "ok": true,
-            "labels": cw::labels(&payload.digital_messages)
-        })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
-    }
+    ApiJson(payload): ApiJson<DigitalMessagesPayload>,
+) -> ApiResult<cw::CwLabels> {
+    radio_io::validate_digital_messages(&payload.digital_messages)
+        .map_err(ApiError::bad_request)?;
+    Ok(Json(cw::labels(&payload.digital_messages)))
 }
 
-async fn default_voice_messages() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "ok": true,
-        "voice_messages": voice_messages::DEFAULT_VOICE_MESSAGES
-    }))
+async fn default_voice_messages() -> Json<String> {
+    Json(voice_messages::DEFAULT_VOICE_MESSAGES.to_string())
 }
 
 async fn validate_voice_messages(
     State(app_state): State<AppState>,
-    Json(payload): Json<VoiceMessagesPayload>,
-) -> Json<serde_json::Value> {
-    match app_state
+    ApiJson(payload): ApiJson<VoiceMessagesPayload>,
+) -> ApiResult<voice_messages::VoiceLabels> {
+    app_state
         .voice_keyer
         .validate_voice_messages(&payload.voice_messages)
-    {
-        Ok(labels) => Json(serde_json::json!({ "ok": true, "labels": labels })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
-    }
+        .map(Json)
+        .map_err(ApiError::bad_request)
 }
 
 async fn create_radio(
     State(app_state): State<AppState>,
-    Json(mut payload): Json<RadioPayload>,
-) -> Json<serde_json::Value> {
-    if let Err(error) = radio_io::normalize_radio_settings(&mut payload) {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
-    }
+    ApiJson(mut payload): ApiJson<RadioPayload>,
+) -> ApiResult<RadioView> {
+    radio_io::normalize_radio_settings(&mut payload).map_err(ApiError::bad_request)?;
     debug!(payload = %debug_payload_log(&payload), "create radio POST body");
-    if let Err(error) = radio_io::validate_radio_settings(&payload) {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
-    }
-    if let Err(error) = validate_unique_wsjtx_port(&app_state, None, &payload).await {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
-    }
-    if let Err(error) = validate_unique_flrig_port(&app_state, None, &payload).await {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
-    }
-    if let Err(error) = app_state
+    radio_io::validate_radio_settings(&payload).map_err(ApiError::bad_request)?;
+    validate_unique_wsjtx_port(&app_state, None, &payload).await?;
+    validate_unique_flrig_port(&app_state, None, &payload).await?;
+    app_state
         .validate_radio_voice_messages(payload.voice_messages.clone())
+        .await?;
+    let record = app_state
+        .db
+        .create_radio(payload)
         .await
-    {
-        return Json(serde_json::json!({ "ok": false, "error": error }));
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    if let Err(error) = app_state.sync_voice_messages(record.config.clone()).await {
+        warn!(radio_id = record.id, %error, "failed to sync voice keyer registrations after radio create");
     }
-    match app_state.db.create_radio(payload).await {
-        Ok(record) => {
-            if let Err(error) = app_state.sync_voice_messages(record.config.clone()).await {
-                warn!(radio_id = record.id, %error, "failed to sync voice keyer registrations after radio create");
-            }
-            if let Err(error) = app_state.radio_io.add_radio(record.config.clone()) {
-                error!(radio_id = record.id, %error, "failed to add created radio to radio I/O configuration");
-                return Json(serde_json::json!({ "ok": false, "error": error }));
-            }
-            let record = match app_state.sanitize_radio(record).await {
-                Ok(record) => record,
-                Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
-            };
-            Json(serde_json::json!({ "ok": true, "radio": RadioView::from_record(record, None) }))
-        }
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-    }
+    app_state
+        .radio_io
+        .add_radio(record.config.clone())
+        .map_err(ApiError::internal)?;
+    let record = app_state
+        .sanitize_radio(record)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(RadioView::from_record(record, None)))
 }
 
 async fn update_radio(
     State(app_state): State<AppState>,
     Path(id): Path<i64>,
-    Json(mut payload): Json<RadioPayload>,
-) -> ApiResult<serde_json::Value> {
+    ApiJson(mut payload): ApiJson<RadioPayload>,
+) -> ApiResult<RadioView> {
     let record = app_state
         .db
         .radio(id)
@@ -2246,16 +2270,11 @@ async fn update_radio(
     radio_io::normalize_radio_settings(&mut payload).map_err(ApiError::bad_request)?;
     debug!(id, payload = %debug_payload_log(&payload), "update radio PUT body");
     radio_io::validate_radio_settings(&payload).map_err(ApiError::bad_request)?;
-    validate_unique_wsjtx_port(&app_state, Some(id), &payload)
-        .await
-        .map_err(ApiError::bad_request)?;
-    validate_unique_flrig_port(&app_state, Some(id), &payload)
-        .await
-        .map_err(ApiError::bad_request)?;
+    validate_unique_wsjtx_port(&app_state, Some(id), &payload).await?;
+    validate_unique_flrig_port(&app_state, Some(id), &payload).await?;
     app_state
         .validate_radio_voice_messages(payload.voice_messages.clone())
-        .await
-        .map_err(ApiError::bad_request)?;
+        .await?;
     let mutation = app_state
         .radio_io
         .begin_mutation(id)
@@ -2273,9 +2292,7 @@ async fn update_radio(
                 .sanitize_radio(record)
                 .await
                 .map_err(ApiError::internal)?;
-            Ok(Json(
-                serde_json::json!({ "ok": true, "radio": RadioView::from_record(record, None) }),
-            ))
+            Ok(Json(RadioView::from_record(record, None)))
         }
         Ok(None) => Err(ApiError::not_found("not found")),
         Err(error) => Err(ApiError::internal(error.to_string())),
@@ -2286,7 +2303,7 @@ async fn validate_unique_wsjtx_port(
     app_state: &AppState,
     radio_id: Option<i64>,
     payload: &RadioPayload,
-) -> Result<(), String> {
+) -> Result<(), ApiError> {
     if !payload.wsjtx_enabled {
         return Ok(());
     }
@@ -2294,17 +2311,17 @@ async fn validate_unique_wsjtx_port(
         .db
         .radios()
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| ApiError::internal(error.to_string()))?;
     if radios.iter().any(|radio| {
         radio.control_location == db::RadioControlLocation::Backend
             && radio.wsjtx_enabled
             && radio.wsjtx_port == payload.wsjtx_port
             && Some(radio.id) != radio_id
     }) {
-        return Err(format!(
+        return Err(ApiError::bad_request(format!(
             "WSJT-X port {} is already used by another enabled radio",
             payload.wsjtx_port
-        ));
+        )));
     }
     Ok(())
 }
@@ -2313,7 +2330,7 @@ async fn validate_unique_flrig_port(
     app_state: &AppState,
     radio_id: Option<i64>,
     payload: &RadioPayload,
-) -> Result<(), String> {
+) -> Result<(), ApiError> {
     if !payload.flrig_enabled {
         return Ok(());
     }
@@ -2321,25 +2338,22 @@ async fn validate_unique_flrig_port(
         .db
         .radios()
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| ApiError::internal(error.to_string()))?;
     if radios.iter().any(|radio| {
         radio.control_location == db::RadioControlLocation::Backend
             && radio.flrig_enabled
             && radio.flrig_port == payload.flrig_port
             && Some(radio.id) != radio_id
     }) {
-        return Err(format!(
+        return Err(ApiError::bad_request(format!(
             "FLRig port {} is already used by another enabled radio",
             payload.flrig_port
-        ));
+        )));
     }
     Ok(())
 }
 
-async fn delete_radio(
-    State(app_state): State<AppState>,
-    Path(id): Path<i64>,
-) -> ApiResult<serde_json::Value> {
+async fn delete_radio(State(app_state): State<AppState>, Path(id): Path<i64>) -> ApiResult<bool> {
     let record = app_state
         .db
         .radio(id)
@@ -2361,7 +2375,7 @@ async fn delete_radio(
         if !deleted {
             return Err(ApiError::not_found("not found"));
         }
-        return Ok(Json(serde_json::json!({ "ok": true, "deleted": true })));
+        return Ok(Json(true));
     }
 
     let mutation = app_state
@@ -2378,7 +2392,7 @@ async fn delete_radio(
                 error!(id, %error, "failed to commit deleted radio I/O configuration");
                 return Err(ApiError::internal(error.to_string()));
             }
-            Ok(Json(serde_json::json!({ "ok": true, "deleted": deleted })))
+            Ok(Json(deleted))
         }
         Err(error) => Err(ApiError::internal(error.to_string())),
     }
@@ -2552,32 +2566,27 @@ async fn serial_state(
     State(app_state): State<AppState>,
     Path(log_id): Path<i64>,
     Query(query): Query<SerialStateQuery>,
-) -> Json<serde_json::Value> {
-    let snapshot = match app_state.db.log_snapshot(log_id).await {
-        Ok(Some(snapshot)) => snapshot,
-        Ok(None) => {
-            return Json(
-                serde_json::json!({ "ok": false, "error": format!("log {log_id} not found") }),
-            );
-        }
-        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-    };
+) -> ApiResult<SerialState> {
+    let snapshot = app_state
+        .db
+        .log_snapshot(log_id)
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .ok_or_else(|| ApiError::not_found(format!("log {log_id} not found")))?;
     let log = &snapshot.log;
-    let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
-        return Json(
-            serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id) }),
-        );
-    };
-    let Some(field) = sent_serial_field(rules, query.field_adif.trim()) else {
-        return Json(serde_json::json!({
-            "ok": false,
-            "error": format!("{} is not a sent serial field for contest {}", query.field_adif, rules.id),
-        }));
-    };
-    match serial_state_from_snapshot(rules, log, field, &snapshot) {
-        Ok(state) => Json(serde_json::json!({ "ok": true, "state": state })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
-    }
+    let rules = app_state
+        .contest_rules
+        .get(&log.contest_id)
+        .ok_or_else(|| ApiError::bad_request(format!("unknown contest: {}", log.contest_id)))?;
+    let field = sent_serial_field(rules, query.field_adif.trim()).ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "{} is not a sent serial field for contest {}",
+            query.field_adif, rules.id
+        ))
+    })?;
+    serial_state_from_snapshot(rules, log, field, &snapshot)
+        .map(Json)
+        .map_err(ApiError::internal)
 }
 
 fn serial_state_from_snapshot(
@@ -2625,49 +2634,35 @@ fn serial_state_from_snapshot(
 async fn allocate_serial(
     State(app_state): State<AppState>,
     Path(log_id): Path<i64>,
-    Json(payload): Json<SerialAllocationPayload>,
-) -> Json<serde_json::Value> {
+    ApiJson(payload): ApiJson<SerialAllocationPayload>,
+) -> ApiResult<db::SerialAllocation> {
     let field_adif = payload.field_adif.trim();
     if field_adif.is_empty() {
-        return Json(
-            serde_json::json!({ "ok": false, "error": "serial field ADIF name is required" }),
-        );
+        return Err(ApiError::bad_request("serial field ADIF name is required"));
     }
-    let log = match app_state.db.log(log_id).await {
-        Ok(Some(log)) => log,
-        Ok(None) => {
-            return Json(
-                serde_json::json!({ "ok": false, "error": format!("log {log_id} not found") }),
-            );
-        }
-        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-    };
-    let Some(rules) = app_state.contest_rules.get(&log.contest_id) else {
-        return Json(
-            serde_json::json!({ "ok": false, "error": format!("unknown contest: {}", log.contest_id) }),
-        );
-    };
-    let Some(serial_field) = sent_serial_field(rules, field_adif) else {
-        return Json(serde_json::json!({
-            "ok": false,
-            "error": format!("{} is not a sent serial field for contest {}", field_adif, rules.id),
-        }));
-    };
+    let log = require_log(&app_state, log_id).await?;
+    let rules = app_state
+        .contest_rules
+        .get(&log.contest_id)
+        .ok_or_else(|| ApiError::bad_request(format!("unknown contest: {}", log.contest_id)))?;
+    let serial_field = sent_serial_field(rules, field_adif).ok_or_else(|| {
+        ApiError::bad_request(format!(
+            "{} is not a sent serial field for contest {}",
+            field_adif, rules.id
+        ))
+    })?;
     if !serial_reservation_required(rules, &log, serial_field) {
-        return Json(serde_json::json!({
-            "ok": false,
-            "error": format!("{} does not require serial reservation for contest {}", field_adif, rules.id),
-        }));
+        return Err(ApiError::bad_request(format!(
+            "{} does not require serial reservation for contest {}",
+            field_adif, rules.id
+        )));
     }
-
-    match app_state
+    app_state
         .db
         .allocate_serial(log_id, serial_field.adif.clone())
         .await
-    {
-        Ok(allocation) => Json(serde_json::json!({ "ok": true, "allocation": allocation })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error.to_string() })),
-    }
+        .map(Json)
+        .map_err(|error| ApiError::internal(error.to_string()))
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -2695,7 +2690,8 @@ async fn contacts(
     State(app_state): State<AppState>,
     Path(log_id): Path<i64>,
     Query(query): Query<ContactsQuery>,
-) -> Json<Vec<Contact>> {
+) -> ApiResult<Vec<Contact>> {
+    require_log(&app_state, log_id).await?;
     let (limit, offset) = contacts_page(&query).unwrap_or((usize::MAX, 0));
     let callsign_prefix = query
         .callsign_prefix
@@ -2704,58 +2700,107 @@ async fn contacts(
         .filter(|callsign_prefix| !callsign_prefix.is_empty())
         .map(str::to_uppercase);
 
-    let contacts = match app_state
+    let contacts = app_state
         .log_cache
         .contacts_display_page(log_id, offset, limit, callsign_prefix)
         .await
-    {
-        Ok(contacts) => contacts,
-        Err(error) => {
-            error!(log_id, %error, "failed to load contacts");
-            Vec::new()
-        }
-    };
+        .map_err(ApiError::internal)?;
 
     let totals = app_state
         .incremental_scoring
         .totals(log_id)
         .unwrap_or_default();
     send_score_update(&app_state, log_id, &totals);
-    Json(contacts)
+    Ok(Json(contacts))
 }
 
 async fn commit_contact(
     State(app_state): State<AppState>,
     Path(log_id): Path<i64>,
-    Json(payload): Json<serde_json::Value>,
-) -> Json<serde_json::Value> {
+    ApiJson(payload): ApiJson<serde_json::Value>,
+) -> ApiResult<serde_json::Value> {
     debug!(log_id, payload = %debug_payload_log(&payload), "commit contact POST body");
     let input_contacts = match contacts_from_payload(payload) {
         Ok(contacts) => contacts,
-        Err(error) => return Json(serde_json::json!({ "ok": false, "error": error })),
+        Err(error) => return Err(ApiError::bad_request(error)),
     };
+
+    // Strip client-supplied warnings: diagnostics are recomputed server-side
+    // on every commit. Client force flags are still honored.
+    let mut contacts = input_contacts;
+    for contact in &mut contacts {
+        crate::db::remove_contact_meta(contact, "warnings");
+    }
+
+    // Contacts already carrying persisted warnings take the diagnostic path
+    // even without force, so later corrections stay committable.
+    let mut diagnostic_ids = HashSet::new();
+    for contact in &contacts {
+        if validation::force_commit_requested(contact) {
+            continue;
+        }
+        if let Some(id) = contact_id(contact) {
+            match app_state.db.contact_has_warnings(id).await {
+                Ok(true) => {
+                    diagnostic_ids.insert(id);
+                }
+                Ok(false) => {}
+                Err(error) => {
+                    return Err(ApiError::internal(error.to_string()));
+                }
+            }
+        }
+    }
+
     if let Err(error) = validation::validate_contacts(
         &app_state.db,
         &app_state.contest_rules,
         app_state.bands.snapshot().as_ref(),
         log_id,
-        &input_contacts,
+        &contacts,
+        &diagnostic_ids,
     )
     .await
     {
-        return Json(serde_json::json!({ "ok": false, "error": error, "status": "failed" }));
+        return Err(ApiError::from(error).with_detail("status", "failed"));
     }
 
-    let session_ids = input_contacts
-        .iter()
-        .map(contact_session_id)
-        .collect::<Vec<_>>();
+    // Diagnose force-path and warned contacts on the same enriched values
+    // scoring sees, and attach server-generated warnings for persistence.
+    let needs_diagnosis = contacts.iter().any(|contact| {
+        validation::force_commit_requested(contact)
+            || contact_id(contact).is_some_and(|id| diagnostic_ids.contains(&id))
+    });
+    if needs_diagnosis {
+        let log = require_log(&app_state, log_id).await?;
+        let rules = app_state
+            .contest_rules
+            .get(&log.contest_id)
+            .ok_or_else(|| ApiError::bad_request(format!("unknown contest: {}", log.contest_id)))?;
+        let bands = app_state.bands.snapshot();
+        let mut enriched = contacts.clone();
+        app_state.log_cache.enrich_contacts(&mut enriched);
+        for (contact, enriched_contact) in contacts.iter_mut().zip(enriched.iter()) {
+            let diagnostic = validation::force_commit_requested(contact)
+                || contact_id(contact).is_some_and(|id| diagnostic_ids.contains(&id));
+            if !diagnostic {
+                continue;
+            }
+            let findings =
+                validation::diagnose_contact(rules, bands.as_ref(), log_id, enriched_contact);
+            let warnings = serde_json::Value::Array(
+                findings
+                    .into_iter()
+                    .map(|message| serde_json::json!({ "message": message }))
+                    .collect(),
+            );
+            set_contact_meta(contact, "warnings", warnings);
+        }
+    }
 
-    match app_state
-        .log_cache
-        .upsert_contacts(log_id, input_contacts)
-        .await
-    {
+    let session_ids = contacts.iter().map(contact_session_id).collect::<Vec<_>>();
+
+    match app_state.log_cache.upsert_contacts(log_id, contacts).await {
         Ok(mut result) => {
             for (contact, session_id) in result.contacts.iter_mut().zip(session_ids) {
                 if let Some(session_id) = session_id {
@@ -2779,23 +2824,19 @@ async fn commit_contact(
             send_score_update(&app_state, log_id, &totals);
 
             let contact = result.contacts.first().cloned();
-            Json(serde_json::json!({
-                "ok": true,
+            Ok(Json(serde_json::json!({
                 "contact": contact,
                 "contacts": result.contacts
-            }))
+            })))
         }
         Err(error) => {
             error!(log_id, %error, "failed to commit contacts");
-            Json(serde_json::json!({ "ok": false, "error": error }))
+            Err(ApiError::internal(error))
         }
     }
 }
 
-async fn delete_contact(
-    State(app_state): State<AppState>,
-    Path(id): Path<i64>,
-) -> Json<serde_json::Value> {
+async fn delete_contact(State(app_state): State<AppState>, Path(id): Path<i64>) -> ApiResult<bool> {
     match app_state.log_cache.delete_contact(id).await {
         Ok(Some(result)) => {
             let _ = app_state.log_events.send(ServerMessage::ContactDeleted {
@@ -2813,10 +2854,10 @@ async fn delete_contact(
                 .totals(result.log_id)
                 .unwrap_or_default();
             send_score_update(&app_state, result.log_id, &totals);
-            Json(serde_json::json!({ "ok": true, "deleted": true }))
+            Ok(Json(true))
         }
-        Ok(None) => Json(serde_json::json!({ "ok": true, "deleted": false })),
-        Err(error) => Json(serde_json::json!({ "ok": false, "error": error })),
+        Ok(None) => Err(ApiError::not_found("not found")),
+        Err(error) => Err(ApiError::internal(error)),
     }
 }
 
@@ -3266,6 +3307,152 @@ mod tests {
         )
     }
 
+    async fn wpx_test_log(state: &AppState) -> crate::db::Log {
+        state
+            .db
+            .create_log(NewLog {
+                name: "Warned".into(),
+                contest_id: "CQ-WPX-CW".into(),
+                station_callsign: "N0CALL".into(),
+                contest_params: json!({}),
+            })
+            .await
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn force_commit_with_missing_exchange_succeeds_with_warnings() {
+        let state = cache_test_state();
+        let log = wpx_test_log(&state).await;
+
+        let mut contact = cache_test_contact("K1ABC");
+        set_contact_meta(&mut contact, "force", json!(true));
+        // Forged client warnings must be replaced by server diagnostics.
+        set_contact_meta(&mut contact, "warnings", json!([{"message": "forged"}]));
+
+        let body = commit_contact(
+            State(state.clone()),
+            Path(log.id),
+            ApiJson(serde_json::Value::Object(contact)),
+        )
+        .await
+        .unwrap()
+        .0;
+        let warnings = body["contact"]["meta"]["warnings"]
+            .as_array()
+            .expect("response carries warnings");
+        assert!(!warnings.is_empty());
+        assert!(
+            warnings
+                .iter()
+                .all(|warning| warning["message"] != json!("forged"))
+        );
+
+        let id = body["contact"]["meta"]["id"]
+            .as_i64()
+            .expect("response carries id");
+        let reloaded = state
+            .db
+            .contact(id)
+            .await
+            .unwrap()
+            .expect("contact reloads");
+        assert_eq!(
+            contact_meta_value(&reloaded, "warnings").cloned(),
+            body["contact"]["meta"].get("warnings").cloned()
+        );
+    }
+
+    #[tokio::test]
+    async fn warned_contact_edits_recompute_and_clear_incrementally() {
+        let state = cache_test_state();
+        let log = wpx_test_log(&state).await;
+
+        // Sent serials are immutable once logged, so the initial commit sets
+        // STX and leaves the mutable received serial missing.
+        let mut contact = cache_test_contact("K1ABC");
+        set_contact_adif(&mut contact, "STX", json!(1));
+        set_contact_meta(&mut contact, "force", json!(true));
+        let body = commit_contact(
+            State(state.clone()),
+            Path(log.id),
+            ApiJson(serde_json::Value::Object(contact)),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(
+            body["contact"]["meta"]["warnings"]
+                .as_array()
+                .is_some_and(|warnings| !warnings.is_empty())
+        );
+        let id = body["contact"]["meta"]["id"].as_i64().unwrap();
+
+        // Ordinary re-commit while problems remain: still committable via the
+        // persisted-warnings path, still warned.
+        let partial = state.db.contact(id).await.unwrap().unwrap();
+        let partial_body = commit_contact(
+            State(state.clone()),
+            Path(log.id),
+            ApiJson(serde_json::Value::Object(partial)),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(
+            partial_body["contact"]["meta"]["warnings"]
+                .as_array()
+                .is_some_and(|warnings| !warnings.is_empty())
+        );
+
+        // Completing the exchange clears warnings without force.
+        let mut fixed = state.db.contact(id).await.unwrap().unwrap();
+        set_contact_adif(&mut fixed, "SRX", json!(1));
+        let fixed_body = commit_contact(
+            State(state.clone()),
+            Path(log.id),
+            ApiJson(serde_json::Value::Object(fixed)),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(fixed_body["contact"]["meta"].get("warnings").is_none());
+    }
+
+    #[tokio::test]
+    async fn ordinary_commit_with_missing_exchange_still_fails() {
+        let state = cache_test_state();
+        let log = wpx_test_log(&state).await;
+
+        let body = commit_contact(
+            State(state.clone()),
+            Path(log.id),
+            ApiJson(serde_json::Value::Object(cache_test_contact("K1ABC"))),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(body.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn force_commit_with_malformed_payload_still_fails() {
+        let state = cache_test_state();
+        let log = wpx_test_log(&state).await;
+
+        let mut contact = cache_test_contact("K1ABC");
+        set_contact_meta(&mut contact, "force", json!(true));
+        contact.insert("bogus".to_string(), json!(1));
+
+        let body = commit_contact(
+            State(state.clone()),
+            Path(log.id),
+            ApiJson(serde_json::Value::Object(contact)),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(body.status, StatusCode::BAD_REQUEST);
+    }
+
     #[tokio::test]
     async fn warm_handlers_exports_and_validation_execute_no_sql_or_commands() {
         let state = cache_test_state();
@@ -3322,14 +3509,12 @@ mod tests {
                 Query(ContactsQuery::default())
             )
             .await
+            .unwrap()
             .0
             .len(),
             1
         );
-        assert_eq!(
-            log_stats(State(state.clone()), Path(log.id)).await.0["ok"],
-            json!(true)
-        );
+        assert!(log_stats(State(state.clone()), Path(log.id)).await.is_ok());
         let _ = radios(State(state.clone())).await.unwrap();
         validation::validate_contacts(
             &state.db,
@@ -3337,6 +3522,7 @@ mod tests {
             state.bands.snapshot().as_ref(),
             log.id,
             &saved,
+            &std::collections::HashSet::new(),
         )
         .await
         .unwrap();
@@ -3357,6 +3543,7 @@ mod tests {
             state.bands.snapshot().as_ref(),
             serial_log.id,
             &serial_update,
+            &std::collections::HashSet::new(),
         )
         .await
         .unwrap();
@@ -3367,7 +3554,8 @@ mod tests {
                 &state.contest_rules,
                 state.bands.snapshot().as_ref(),
                 serial_log.id,
-                &serial_update
+                &serial_update,
+                &std::collections::HashSet::new()
             )
             .await
             .is_err()
@@ -3380,8 +3568,9 @@ mod tests {
             }),
         )
         .await
+        .unwrap()
         .0;
-        assert_eq!(serial_state["state"]["next_by_band"]["20M"], json!(18));
+        assert_eq!(serial_state.next_by_band["20M"], 18);
         let adif_response = export_adif(State(state.clone()), Path(log.id))
             .await
             .into_response();
@@ -3395,7 +3584,7 @@ mod tests {
         let cabrillo_response = export_cabrillo(
             State(state.clone()),
             Path(log.id),
-            Json(CabrilloExportPayload {
+            ApiJson(CabrilloExportPayload {
                 export_params: json!({ "LOCATION": "OH", "NAME": "Benchmark" }),
             }),
         )

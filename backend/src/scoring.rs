@@ -2293,6 +2293,51 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_warnings_do_not_change_scoring() {
+        let fields = vec![
+            ("CALL", json!("K1ABC")),
+            ("BAND", json!("20m")),
+            ("MODE", json!("SSB")),
+        ];
+        let mut warned = contact(fields.clone());
+        crate::db::set_contact_meta(
+            &mut warned,
+            "warnings",
+            json!([{"message": "serial is required"}]),
+        );
+
+        let mut warned_batch = vec![warned];
+        let warned_totals = score_contacts(
+            &test_rules(
+                mode_points(),
+                vec!["CALL", "BAND", "MODE"],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            Value::Null,
+            &mut warned_batch,
+        );
+        let mut plain_batch = vec![contact(fields)];
+        let plain_totals = score_contacts(
+            &test_rules(
+                mode_points(),
+                vec!["CALL", "BAND", "MODE"],
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            ),
+            Value::Null,
+            &mut plain_batch,
+        );
+
+        assert_eq!(warned_totals.qso_points, plain_totals.qso_points);
+        assert_eq!(warned_totals.qso_points, 1);
+    }
+
+    #[test]
     fn scores_without_multipliers_use_qso_points_directly() {
         let rules = test_rules(
             mode_points(),

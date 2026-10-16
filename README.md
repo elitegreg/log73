@@ -405,6 +405,8 @@ Operator callsign is contest/QSO metadata, not an authentication identity.
 ## Backend API
 
 All JSON API routes are under `/api`. The Cabrillo download endpoint also lives under `/api`.
+See [HTTP API contract](docs/api-contract.md) for success/error shapes, endpoint
+consumers, and the compatibility change from legacy `ok` envelopes to HTTP errors.
 
 ```text
 GET    /api/contest-rules

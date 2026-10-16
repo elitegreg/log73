@@ -419,11 +419,11 @@ mod tests {
                 )
                 .route(
                     "/api/radio-clients/{client_id}/heartbeat",
-                    post(|| async { StatusCode::OK }),
+                    post(|| async { StatusCode::NO_CONTENT }),
                 )
                 .route(
                     "/api/radio-clients/{client_id}/offline",
-                    post(|| async { StatusCode::OK }),
+                    post(|| async { StatusCode::NO_CONTENT }),
                 );
             let listener = match tokio::net::TcpListener::bind("127.0.0.1:0").await {
                 Ok(listener) => listener,
