@@ -522,4 +522,219 @@ mod tests {
         settings.wsjtx_enabled = true;
         assert!(validate_radio_settings(&settings).is_err());
     }
+
+    #[test]
+    fn rejects_radio_mode_mapping_outside_transmit_capabilities() {
+        let mut settings = tcp_radio();
+        settings.radio_kind = "elecraft-k2".to_string();
+        settings.data_mode = "WFM".to_string();
+
+        let error =
+            validate_radio_settings(&settings).expect_err("unsupported mapping should be rejected");
+        assert!(error.contains("not supported for transmit"));
+    }
+
+    #[test]
+    fn rejects_invalid_tuning_increment_values() {
+        let mut settings = tcp_radio();
+        settings.cw_tuning_increment_hz = 0;
+
+        let error =
+            validate_radio_settings(&settings).expect_err("CW tuning increment should be rejected");
+        assert!(error.contains("CW tuning increment"));
+
+        settings.cw_tuning_increment_hz = DEFAULT_CW_TUNING_INCREMENT_HZ;
+        settings.ssb_tuning_increment_hz = 0;
+
+        let error = validate_radio_settings(&settings)
+            .expect_err("SSB tuning increment should be rejected");
+        assert!(error.contains("SSB tuning increment"));
+    }
+
+    #[test]
+    fn rejects_unknown_radio_kind() {
+        let mut settings = tcp_radio();
+        settings.radio_kind = "not-a-radio".to_string();
+
+        let error = validate_radio_settings(&settings).expect_err("radio kind should be rejected");
+        assert!(error.contains("unsupported radio driver"));
+    }
+
+    #[test]
+    fn validates_dummy_radio_without_transport() {
+        let mut settings = tcp_radio();
+        settings.radio_kind = "dummy".to_string();
+        settings.transport_kind = "none".to_string();
+        settings.tcp_host = String::new();
+        settings.tcp_port = 0;
+
+        assert!(validate_radio_settings(&settings).is_ok());
+    }
+
+    #[test]
+    fn rejects_tcp_radio_without_host() {
+        let mut settings = tcp_radio();
+        settings.tcp_host = String::new();
+
+        let error = validate_radio_settings(&settings).expect_err("missing host should fail");
+        assert!(error.contains("TCP host"));
+    }
+
+    #[test]
+    fn validates_optional_voice_sound_device_ids() {
+        let mut settings = tcp_radio();
+        settings.voice_input_device_id = Some("alsa:hw:1,0".to_string());
+        settings.voice_output_device_id = Some("wasapi:{0.0.0.00000000}".to_string());
+
+        assert!(validate_radio_settings(&settings).is_ok());
+    }
+
+    #[test]
+    fn rejects_voice_sound_device_ids_with_control_characters_or_excessive_length() {
+        let mut settings = tcp_radio();
+        settings.voice_output_device_id = Some("alsa:bad\u{0007}".to_string());
+        let error = validate_radio_settings(&settings).expect_err("control character should fail");
+        assert!(error.contains("voice output sound device"));
+
+        settings.voice_output_device_id = Some("x".repeat(MAX_SOUND_DEVICE_ID_LEN + 1));
+        let error = validate_radio_settings(&settings).expect_err("long device id should fail");
+        assert!(error.contains("voice output sound device"));
+    }
+
+    #[test]
+    fn validates_cat_cw_keyer_type() {
+        let mut settings = tcp_radio();
+        settings.cw_keyer_type = "cat".to_string();
+
+        assert!(validate_radio_settings(&settings).is_ok());
+    }
+
+    #[test]
+    fn rejects_cat_cw_keyer_when_radio_does_not_support_cw_sending() {
+        let mut settings = tcp_radio();
+        settings.radio_kind = "yaesu-ftdx10".to_string();
+        settings.cw_keyer_type = "cat".to_string();
+
+        let error =
+            validate_radio_settings(&settings).expect_err("unsupported CAT CW keyer should fail");
+        assert!(error.contains("CAT CW keying is not supported"));
+    }
+
+    #[test]
+    fn winkeyer_requires_serial_port() {
+        let mut settings = tcp_radio();
+        settings.cw_keyer_type = "winkeyer".to_string();
+
+        let error =
+            validate_radio_settings(&settings).expect_err("winkeyer port should be required");
+        assert!(error.contains("Winkeyer serial port"));
+    }
+
+    #[test]
+    fn validates_serial_cw_keyer_type() {
+        let mut settings = tcp_radio();
+        settings.cw_keyer_type = "serial".to_string();
+        settings.cw_serial_port = "/dev/ttyUSB1".to_string();
+        settings.cw_serial_baud_rate = 9_600;
+        settings.cw_serial_line = "rts".to_string();
+
+        assert!(validate_radio_settings(&settings).is_ok());
+    }
+
+    #[test]
+    fn serial_cw_keyer_requires_serial_port() {
+        let mut settings = tcp_radio();
+        settings.cw_keyer_type = "serial".to_string();
+
+        let error =
+            validate_radio_settings(&settings).expect_err("CW serial port should be required");
+        assert!(error.contains("CW serial port"));
+    }
+
+    #[test]
+    fn serial_cw_keyer_rejects_unknown_line() {
+        let mut settings = tcp_radio();
+        settings.cw_keyer_type = "serial".to_string();
+        settings.cw_serial_port = "/dev/ttyUSB1".to_string();
+        settings.cw_serial_line = "both".to_string();
+
+        let error =
+            validate_radio_settings(&settings).expect_err("CW serial line should be rejected");
+        assert!(error.contains("CW serial line"));
+    }
+
+    #[test]
+    fn serial_cw_keyer_allows_shared_cat_port_with_matching_baud_rate() {
+        let mut settings = tcp_radio();
+        settings.transport_kind = "serial".to_string();
+        settings.tcp_host = String::new();
+        settings.tcp_port = 0;
+        settings.serial_port = "/dev/ttyUSB0".to_string();
+        settings.serial_baud_rate = 9_600;
+        settings.cw_keyer_type = "serial".to_string();
+        settings.cw_serial_port = "/dev/ttyUSB0".to_string();
+        settings.cw_serial_baud_rate = 9_600;
+
+        assert!(validate_radio_settings(&settings).is_ok());
+    }
+
+    #[test]
+    fn serial_cw_keyer_rejects_shared_cat_port_with_different_baud_rate() {
+        let mut settings = tcp_radio();
+        settings.transport_kind = "serial".to_string();
+        settings.tcp_host = String::new();
+        settings.tcp_port = 0;
+        settings.serial_port = "/dev/ttyUSB0".to_string();
+        settings.serial_baud_rate = 115_200;
+        settings.cw_keyer_type = "serial".to_string();
+        settings.cw_serial_port = "/dev/ttyUSB0".to_string();
+        settings.cw_serial_baud_rate = 9_600;
+
+        let error =
+            validate_radio_settings(&settings).expect_err("shared baud rate mismatch should fail");
+        assert!(error.contains("baud rate"));
+    }
+
+    #[test]
+    fn serial_cw_keyer_allows_different_cat_port_with_different_baud_rate() {
+        let mut settings = tcp_radio();
+        settings.transport_kind = "serial".to_string();
+        settings.tcp_host = String::new();
+        settings.tcp_port = 0;
+        settings.serial_port = "/dev/ttyUSB0".to_string();
+        settings.serial_baud_rate = 115_200;
+        settings.cw_keyer_type = "serial".to_string();
+        settings.cw_serial_port = "/dev/ttyUSB1".to_string();
+        settings.cw_serial_baud_rate = 9_600;
+
+        assert!(validate_radio_settings(&settings).is_ok());
+    }
+
+    #[test]
+    fn rejects_unknown_cw_keyer_type() {
+        let mut settings = tcp_radio();
+        settings.cw_keyer_type = "laser".to_string();
+
+        let error =
+            validate_radio_settings(&settings).expect_err("cw keyer type should be rejected");
+        assert!(error.contains("CW keyer type"));
+    }
+
+    #[test]
+    fn validates_wsjtx_network_settings() {
+        let mut settings = tcp_radio();
+        settings.digital_program = "wsjtx".to_string();
+        settings.wsjtx_enabled = true;
+        settings.wsjtx_multicast_group = "239.255.0.1".to_string();
+        assert!(validate_radio_settings(&settings).is_ok());
+
+        settings.wsjtx_port = 1023;
+        assert!(validate_radio_settings(&settings).is_err());
+        settings.wsjtx_port = DEFAULT_WSJTX_PORT;
+        settings.wsjtx_bind_address = "192.0.2.1".to_string();
+        assert!(validate_radio_settings(&settings).is_err());
+        settings.wsjtx_bind_address = "0.0.0.0".to_string();
+        settings.wsjtx_multicast_group = "192.0.2.1".to_string();
+        assert!(validate_radio_settings(&settings).is_err());
+    }
 }

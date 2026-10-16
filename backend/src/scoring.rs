@@ -326,22 +326,6 @@ impl ContestScorer {
     }
 
     #[allow(dead_code)]
-    pub fn remove_scored_qso(&mut self, contact: &Contact) -> ScoreTotals {
-        self.totals.qso_count = self.totals.qso_count.saturating_sub(1);
-        self.totals.qso_points -= scored_i64(contact, "pts");
-        self.raw_multiplier_count -= scored_i64(contact, "mult");
-        self.direct_bonus_points -= scored_i64(contact, "bonus");
-        if !is_dupe_contact(contact) && scored_i64(contact, "pts") > 0 {
-            for key in self.module.qso_count_bonus_keys_for(contact) {
-                decrement_count(&mut self.qso_count_bonus_counts, &key);
-            }
-        }
-        self.remove_dupe_key(contact);
-        self.recalculate_score();
-        self.totals.clone()
-    }
-
-    #[allow(dead_code)]
     pub fn totals(&self) -> ScoreTotals {
         self.totals.clone()
     }
@@ -382,22 +366,6 @@ impl ContestScorer {
         let is_dupe = *count > 0;
         *count += 1;
         is_dupe
-    }
-
-    #[allow(dead_code)]
-    fn remove_dupe_key(&mut self, contact: &Contact) {
-        let Some(key) = self.dupe_key(contact) else {
-            return;
-        };
-        let Some(count) = self.dupe_keys.get_mut(&key) else {
-            return;
-        };
-
-        if *count <= 1 {
-            self.dupe_keys.remove(&key);
-        } else {
-            *count -= 1;
-        }
     }
 
     fn qso_points(&self, contact: &Contact) -> i64 {
@@ -4279,6 +4247,85 @@ mod tests {
         assert_eq!(totals.qso_points, 2);
         assert_eq!(totals.multipliers, 2);
         assert_eq!(totals.score, 4);
+    }
+
+    #[test]
+    fn incremental_tracker_transfers_ownership_after_owner_edit_or_delete() {
+        for edit in [false, true] {
+            for duplicate in [false, true] {
+                let rules = test_rules(
+                    fixed_points(2),
+                    vec!["CALL", "BAND", "MODE"],
+                    vec![state_multiplier()],
+                    vec![bonus_station(350)],
+                    Vec::new(),
+                    Vec::new(),
+                );
+                let module = Arc::new(ContestScoringModule::new(rules.clone(), Value::Null));
+                let tracker = IncrementalScoreTracker::new();
+                let mut contacts = vec![
+                    contact(vec![
+                        ("id", json!(1)),
+                        ("CALL", json!("W4CAE")),
+                        ("BAND", json!("20m")),
+                        ("MODE", json!("CW")),
+                        ("STATE", json!("SC")),
+                    ]),
+                    contact(vec![
+                        ("id", json!(2)),
+                        ("CALL", json!("W4CAE")),
+                        ("BAND", json!("20m")),
+                        ("MODE", json!(if duplicate { "CW" } else { "SSB" })),
+                        ("STATE", json!("SC")),
+                    ]),
+                ];
+                tracker.on_log_loaded(1, Arc::clone(&module), &mut contacts);
+                assert_eq!(contact_meta_value(&contacts[0], "bonus"), Some(&json!(350)));
+                assert_eq!(contact_meta_value(&contacts[1], "bonus"), Some(&json!(0)));
+                assert_eq!(
+                    contact_meta_value(&contacts[1], "dupe"),
+                    Some(&json!(duplicate))
+                );
+
+                let changed = if edit {
+                    let previous = contacts[0].clone();
+                    crate::db::set_contact_adif(&mut contacts[0], "CALL", json!("K1ABC"));
+                    crate::db::set_contact_adif(&mut contacts[0], "STATE", json!("NC"));
+                    let committed = contacts[0].clone();
+                    tracker.on_contacts_upserted(
+                        1,
+                        module,
+                        &mut contacts,
+                        &[committed],
+                        &[Some(previous)],
+                    )
+                } else {
+                    let deleted = contacts.remove(0);
+                    tracker.on_contact_deleted(1, module, &mut contacts, &deleted)
+                };
+
+                assert_eq!(changed.len(), 1);
+                assert_eq!(contact_id_for(&changed[0]), Some(2));
+                let replacement = contact_by_id(&contacts, 2);
+                assert_eq!(
+                    contact_meta_value(&replacement, "dupe"),
+                    Some(&json!(false))
+                );
+                assert_eq!(contact_meta_value(&replacement, "pts"), Some(&json!(2)));
+                assert_eq!(contact_meta_value(&replacement, "mult"), Some(&json!(1)));
+                assert_eq!(contact_meta_value(&replacement, "bonus"), Some(&json!(350)));
+
+                let mut rescored = contacts.clone();
+                let expected = score_contacts(&rules, Value::Null, &mut rescored);
+                assert_eq!(contacts, rescored, "edit={edit}, duplicate={duplicate}");
+                let actual = tracker.totals(1).expect("totals should exist");
+                assert_eq!(actual.qso_count, expected.qso_count);
+                assert_eq!(actual.qso_points, expected.qso_points);
+                assert_eq!(actual.multipliers, expected.multipliers);
+                assert_eq!(actual.bonus_points, expected.bonus_points);
+                assert_eq!(actual.score, expected.score);
+            }
+        }
     }
 
     #[test]
